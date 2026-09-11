@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createKnowledgeContextRuntime } from "./context-runtime.js";
 import { createGitStatusObserver } from "./git-status-runtime.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
-import { createTerminalCommandProjector } from "./terminal-projection.js";
+import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } from "./terminal-projection.js";
 import type { TerminalCommandRecord } from "../terminal/session-api.js";
 
 const TEST_DIR = join(tmpdir(), "piarium-knowledge-context-runtime");
@@ -262,6 +262,63 @@ describe("knowledge context runtime", () => {
     expect(second.material.userCommands).toEqual([]);
     expect(second.eventCursor).toBe(first.eventCursor);
     expect(runtime.listBoundSessions("workspace-1")).toEqual(["session-a"]);
+    await runtime.dispose();
+  });
+
+  it("production adapter projects one command independently to every bound session", async () => {
+    const nudges: string[] = [];
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    runtime.bindSession("session-b", "workspace-1");
+    const projector = createTerminalCommandProjector({
+      resolveWorkspaceId: async () => "workspace-1",
+      observe: createTerminalCommandObserveAdapter(runtime),
+      drain: () => runtime.drain(),
+      listBoundSessions: (workspaceId) => runtime.listBoundSessions(workspaceId),
+      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
+    });
+    const record: TerminalCommandRecord = {
+      command: "echo fanout",
+      commandId: "term-fanout:0:1",
+      cwd: "/workspace",
+      endedAt: 10,
+      exitCode: 0,
+      integration: "osc-633",
+      owner: "user",
+      terminalId: "term-fanout",
+    };
+
+    await expect(projector.project(record)).resolves.toEqual({ "session-a": true, "session-b": true });
+    expect((await store.listEvents({ sessionId: "session-a" })).filter((event) => event.kind === "command")).toHaveLength(1);
+    expect((await store.listEvents({ sessionId: "session-b" })).filter((event) => event.kind === "command")).toHaveLength(1);
+    await expect(projector.project(record)).resolves.toEqual({ "session-a": false, "session-b": false });
+    expect(nudges).toEqual(["session-a", "session-b"]);
+    await runtime.dispose();
+  });
+
+  it("does not retain a commandId after a failed durable write", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    const putEvent = store.putEvent.bind(store);
+    let failuresRemaining = 1;
+    store.putEvent = async (input) => {
+      if (failuresRemaining > 0) {
+        failuresRemaining -= 1;
+        throw new Error("temporary store failure");
+      }
+      return putEvent(input);
+    };
+    const event = {
+      workspaceId: "workspace-1",
+      sessionId: "term-retry",
+      command: "echo retry",
+      commandId: "term-retry:0:1",
+      exitCode: 0,
+      source: "user" as const,
+    };
+    await expect(runtime.observeTerminalCommand(event)).rejects.toThrow("temporary store failure");
+    await expect(runtime.observeTerminalCommand(event)).resolves.toBe(true);
+    expect((await store.listEvents({ sessionId: "session-a" })).filter((item) => item.kind === "command")).toHaveLength(1);
     await runtime.dispose();
   });
 

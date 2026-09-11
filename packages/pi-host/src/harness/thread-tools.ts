@@ -59,6 +59,8 @@ const ThreadReadParams = Type.Object({
     Type.Literal("steps"),
   ])),
   since: Type.Optional(Type.Integer({ minimum: 0 })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-8 byte offset for report paging" })),
+  length: Type.Optional(Type.Integer({ minimum: 1, description: "UTF-8 byte length for report paging" })),
 });
 
 const ThreadMergeParams = Type.Object({
@@ -241,15 +243,25 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
     ],
     parameters: ThreadReadParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         const result = await bridge.request<"thread.read">("thread.read", {
           threadId: params.threadId,
           ...(params.what !== undefined ? { what: params.what } : {}),
           ...(params.since !== undefined ? { since: params.since } : {}),
-        });
+          ...(params.offset !== undefined ? { offset: params.offset } : {}),
+          ...(params.length !== undefined ? { length: params.length } : {}),
+        }, signal ? { signal } : undefined);
         const typed = result as ThreadReadResult;
-        return { content: [{ type: "text", text: typed.text }], details: { hasReport: typed.report !== null, transcriptRef: typed.transcriptRef } };
+        return {
+          content: [{ type: "text", text: typed.text }],
+          details: {
+            hasReport: typed.report !== null,
+            transcriptRef: typed.transcriptRef,
+            ...(typed.nextOffset === undefined ? {} : { nextOffset: typed.nextOffset }),
+            ...(typed.eof === undefined ? {} : { eof: typed.eof }),
+          },
+        };
       } catch (error) {
         return threadErrorResult("read_thread", error);
       }

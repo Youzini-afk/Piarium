@@ -203,6 +203,68 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ worktree: { path: "/workspace/thread", base: "base" } });
   });
 
+  it("treats retrieval worktrees as read-only input on settle and worker loss", async () => {
+    const inspect = vi.fn(async () => ({ patch: "", untracked: [], changedFiles: ["input.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }));
+    const snapshotWorktree = vi.fn(async (worktree: ThreadWorktree) => ({ ...worktree, resultCommit: "must-not-publish" }));
+    const retrievalRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      readBlocks: async () => [],
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: snapshotWorktree,
+        inspect,
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const input: CreateThreadInput = {
+      ...createInput(),
+      brief: "Find a fact",
+      role: "retrieval",
+      tools: ["read", "symbols", "submit_facts"],
+    };
+    try {
+      const settled = await registry.createThread(input);
+      const settledRun = await registry.startRun(WORKSPACE, settled.id);
+      await retrievalRuntime.spawn({ ...input, threadId: settled.id, runId: settledRun.id });
+      retrievalRuntime.processEvent({
+        kind: "host",
+        sessionId: "child-1",
+        envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_end", messages: [assistantMessage("facts submitted")], willRetry: false } } },
+      });
+      retrievalRuntime.processEvent({
+        kind: "host",
+        sessionId: "child-1",
+        envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+      });
+      await retrievalRuntime.drain();
+      expect(await registry.getThread(WORKSPACE, PARENT, settled.id)).toMatchObject({
+        lifecycle: "settled",
+        integration: "none",
+        report: { changedFiles: [] },
+      });
+      const settledRecord = await registry.getThread(WORKSPACE, PARENT, settled.id);
+      expect(settledRecord?.resultRevision).toBeUndefined();
+      expect(settledRecord?.verification).toBeUndefined();
+
+      const lost = await registry.createThread({ ...input, brief: "Lose while reading" });
+      const lostRun = await registry.startRun(WORKSPACE, lost.id);
+      await retrievalRuntime.spawn({ ...input, brief: lost.brief, threadId: lost.id, runId: lostRun.id });
+      retrievalRuntime.processEvent({ kind: "worker.exit", sessionId: "child-1", expected: true });
+      await retrievalRuntime.drain();
+      expect(await registry.getThread(WORKSPACE, PARENT, lost.id)).toMatchObject({
+        integration: "none",
+      });
+      expect((await registry.getThread(WORKSPACE, PARENT, lost.id))?.resultRevision).toBeUndefined();
+      expect(inspect).not.toHaveBeenCalled();
+      expect(snapshotWorktree).not.toHaveBeenCalled();
+    } finally {
+      await retrievalRuntime.dispose();
+    }
+  });
+
   it("spawns a queued Thread from its persistent draft baseline after the source surface snapshot is released", async () => {
     const workspace = join(dataDir, "draft-workspace");
     const recoveryRoot = join(dataDir, "draft-recovery");
@@ -654,9 +716,10 @@ describe("thread runtime", () => {
         resolveRuntimeWorkspaceId: async () => identity.workspaceId,
         sessions: sessionAdapter,
         worktrees: {
+          assertOwnership: async () => undefined,
           prepare: async () => ({
             cwd: persistScratch,
-            worktree: { path: persistScratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+            worktree: { path: persistScratch, managedRoot: dataDir, base: "zero-commit", viewMode: "virtual", materialized: false },
           }),
           snapshot: async (worktree) => worktree,
           inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),

@@ -51,6 +51,8 @@ export interface EventInput {
   text: string;
   refs?: EventRefs;
   data?: Record<string, unknown>;
+  /** Stable identity for an event that must be idempotent within its store. */
+  dedupeKey?: string;
   source: EventSource;
 }
 
@@ -288,6 +290,15 @@ export interface PutEventResult {
   inserted: boolean;
 }
 
+/**
+ * Terminal command observations are projected once per Pi session. JSON
+ * encoding keeps session/command boundaries unambiguous when either contains
+ * punctuation used by a human-readable key.
+ */
+export const terminalCommandDedupeKey = (sessionId: string, commandId: string): string => (
+  `terminal-command:${JSON.stringify([sessionId, commandId])}`
+);
+
 export interface KnowledgeStore {
   readonly dim: number;
   putEvent(e: EventInput): Promise<PutEventResult>;
@@ -411,6 +422,13 @@ const GRAPH_FLUSH_MAX_DEFER_MS = 30_000;
 const BLOCK_NAME_RE = /^[a-z][a-z0-9_-]{0,31}$/;
 const MAX_RETENTION_BATCH = 5000;
 
+const commandIdFromPayload = (payload: Record<string, unknown>): string | undefined => {
+  const data = payload["data"];
+  if (!data || typeof data !== "object") return undefined;
+  const commandId = (data as Record<string, unknown>)["commandId"];
+  return typeof commandId === "string" && commandId.length > 0 ? commandId : undefined;
+};
+
 function zeroVector(dim: number): Vector {
   return new Array(dim).fill(0);
 }
@@ -481,11 +499,36 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("scope");
   db.createIndex("path");
   db.createIndex("active");
+  db.createIndex("dedupeKey");
+  db.createIndex("kind");
+  // Command events written before durable dedupe keys existed have enough
+  // information to be backfilled. Scan the indexed command-event subset when
+  // opening a store so the normal command path can use the persistent index
+  // rather than scanning the workspace for every observation. If an old row
+  // lacks a commandId there is no honest identity to invent, so it remains a
+  // legacy non-deduped row.
+  let migratedCommandDedupeKeys = false;
+  for (const id of db.indexedLookup({ type: "event", kind: "command" }, Math.max(1, db.nodeCount()))) {
+    const payload = db.getPayload(id) as Record<string, unknown> | null;
+    if (
+      !payload
+      || payload["type"] !== "event"
+      || payload["kind"] !== "command"
+      || (typeof payload["dedupeKey"] === "string" && payload["dedupeKey"].length > 0)
+      || typeof payload["sessionId"] !== "string"
+    ) continue;
+    const commandId = commandIdFromPayload(payload);
+    if (!commandId) continue;
+    db.patchPayload(id, {
+      $set: { dedupeKey: terminalCommandDedupeKey(payload["sessionId"] as string, commandId) },
+    });
+    migratedCommandDedupeKeys = true;
+  }
+  if (migratedCommandDedupeKeys) db.flush();
   // Symbol graph: equality lookups that used to be JS-side maps rebuilt on
   // every open (D-134 / D-139), and substring search over lowercased names and
   // paths. `substringLookup` needs three characters, so exact matches on short
   // names go through the hash index on `nameLower` instead.
-  db.createIndex("kind");
   db.createIndex("value");
   db.createIndex("nameLower");
   db.createNgramIndex("nameLower");
@@ -775,16 +818,13 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
     async putEvent(e: EventInput): Promise<PutEventResult> {
       return enqueueWrite(() => {
-        const commandId = e.kind === "command" && e.data && typeof e.data === "object"
-          ? e.data["commandId"]
-          : undefined;
-        if (typeof commandId === "string" && commandId.length > 0) {
-          const existing = scanNodes((payload) => {
-            if (payload["type"] !== "event" || payload["kind"] !== "command") return false;
-            const data = payload["data"];
-            return Boolean(data && typeof data === "object" && (data as Record<string, unknown>)["commandId"] === commandId);
-          });
-          if (existing[0]) return { id: existing[0].id, inserted: false };
+        const commandId = e.kind === "command" ? commandIdFromPayload({ data: e.data }) : undefined;
+        const dedupeKey = e.kind === "command" && commandId
+          ? terminalCommandDedupeKey(e.sessionId, commandId)
+          : e.dedupeKey;
+        if (dedupeKey) {
+          const existingId = db.indexedLookup({ type: "event", kind: "command", dedupeKey }, 1)[0];
+          if (existingId !== undefined) return { id: existingId, inserted: false };
         }
         const payload = {
           type: "event",
@@ -795,6 +835,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           text: e.text,
           ...(e.refs ? { refs: e.refs } : {}),
           ...(e.data ? { data: e.data } : {}),
+          ...(dedupeKey ? { dedupeKey } : {}),
           source: e.source,
         };
         const id = db.insert(placeholderVec, payload);
@@ -820,6 +861,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         text: payload["text"] as string,
         ...(payload["refs"] && typeof payload["refs"] === "object" ? { refs: payload["refs"] as EventRefs } : {}),
         ...(payload["data"] && typeof payload["data"] === "object" ? { data: payload["data"] as Record<string, unknown> } : {}),
+        ...(typeof payload["dedupeKey"] === "string" ? { dedupeKey: payload["dedupeKey"] as string } : {}),
         source: payload["source"] as EventSource,
       })).sort((left, right) => left.id - right.id);
     },

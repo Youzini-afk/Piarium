@@ -1,7 +1,7 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { Zone2ContextUsage, Zone2Material } from "../harness/zone2.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
-import type { KnowledgeStore, RecallResult, StoredEvent } from "./store.js";
+import { terminalCommandDedupeKey, type KnowledgeStore, type RecallResult, type StoredEvent } from "./store.js";
 
 interface SessionBinding {
   gitFingerprint: string | null;
@@ -65,6 +65,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
   const bindSession = (sessionId: string, workspaceId: string): void => {
     const current = sessions.get(sessionId);
     if (current?.workspaceId === workspaceId) return;
+    const prefix = `terminal-command:[${JSON.stringify(sessionId)},`;
+    for (const key of seenCommandIds) {
+      if (key.startsWith(prefix)) seenCommandIds.delete(key);
+    }
     sessions.set(sessionId, {
       observers: null,
       gitFingerprint: null,
@@ -91,8 +95,12 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
   const forWorkspace = (
     workspaceId: string,
     visit: (observers: Observers, binding: SessionBinding) => Promise<void>,
+    targetSessionId?: string,
   ): Promise<void> => Promise.all([...sessions.values()]
-    .filter((binding) => binding.workspaceId === workspaceId)
+    .filter((binding) => (
+      binding.workspaceId === workspaceId
+      && (targetSessionId === undefined || binding.sessionId === targetSessionId)
+    ))
     .map((binding) => {
       const task = binding.tail.then(async () => {
         const observers = await observersFor(binding);
@@ -119,21 +127,28 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     }));
   };
 
-  const persistTerminalObservation = async (event: TerminalExitEvent): Promise<boolean> => {
+  const persistTerminalObservation = async (
+    event: TerminalExitEvent,
+    targetSessionId?: string,
+  ): Promise<boolean> => {
     if (disposed) return false;
-    if (event.commandId) {
-      const seenKey = `${event.workspaceId}:${event.commandId}`;
-      if (seenCommandIds.has(seenKey)) return false;
-      seenCommandIds.add(seenKey);
-    }
     let inserted = false;
     const task = forWorkspace(event.workspaceId, async (observers, binding) => {
+      const seenKey = event.commandId
+        ? terminalCommandDedupeKey(binding.sessionId, event.commandId)
+        : undefined;
+      // This check belongs inside the per-session FIFO. A failed putEvent must
+      // leave the key absent so a later delivery can retry the durable write.
+      if (seenKey && seenCommandIds.has(seenKey)) return;
       const wrote = await observers.onTerminalExit({
         ...event,
         turnIndex: binding.turnIndex,
       });
-      if (wrote) inserted = true;
-    });
+      if (wrote) {
+        if (seenKey) seenCommandIds.add(seenKey);
+        inserted = true;
+      }
+    }, targetSessionId);
     track(task);
     await task;
     return inserted;
@@ -141,7 +156,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const observeTerminalExit = (event: TerminalExitEvent): Promise<boolean> => persistTerminalObservation(event);
 
-  const observeTerminalCommand = (event: TerminalCommandEvent): Promise<boolean> => persistTerminalObservation(event);
+  const observeTerminalCommand = (
+    event: TerminalCommandEvent,
+    targetSessionId?: string,
+  ): Promise<boolean> => persistTerminalObservation(event, targetSessionId);
 
   const observeDiagnostics = (event: DiagnosticEvent): void => {
     if (disposed) return;
@@ -254,6 +272,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const dropSession = (sessionId: string): void => {
     sessions.delete(sessionId);
+    const prefix = `terminal-command:[${JSON.stringify(sessionId)},`;
+    for (const key of seenCommandIds) {
+      if (key.startsWith(prefix)) seenCommandIds.delete(key);
+    }
   };
 
   const resetSessionObservationBaselines = (sessionId: string): void => {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -17,6 +17,12 @@ import { createHarnessRouter } from "../../../web/application-host/lib/harness/r
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
+import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
+import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
+import { createWorkingBranchLookups } from "../../../web/application-host/lib/harness/working-state/working-branch-lookups.js";
+import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
+import { openRecoveryJournalCatalog } from "../../../web/application-host/lib/recovery/journal-catalog.js";
+import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/journal-files.js";
 import { projectZone2Threads } from "../../../web/application-host/lib/harness/zone2-threads.js";
 import { SessionHost } from "../../src/session-host.js";
 
@@ -44,6 +50,11 @@ describe("retrieval thread public slice", () => {
     ].join("\n");
     await writeFile(join(workspace, "src", "auth.ts"), authBody, "utf8");
     await writeFile(join(workspace, "outside.ts"), "export const secret = true;\n", "utf8");
+    execFileSync("git", ["init"], { cwd: workspace, stdio: "ignore" });
+    execFileSync("git", ["config", "user.name", "Retrieval Test"], { cwd: workspace });
+    execFileSync("git", ["config", "user.email", "retrieval@example.com"], { cwd: workspace });
+    execFileSync("git", ["add", "-A"], { cwd: workspace });
+    execFileSync("git", ["commit", "-m", "baseline"], { cwd: workspace, stdio: "ignore" });
 
     const documents = createDocumentAuthority({
       hostId: "retrieval-e2e-host",
@@ -52,6 +63,27 @@ describe("retrieval thread public slice", () => {
       isTrusted: async () => true,
     });
     const identity = await documents.resolveWorkspace({ path: workspace });
+    const recoveryRoot = join(root, "recovery");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("recovery catalog missing");
+    const workingContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: {
+        authorityId: "retrieval-e2e-authority",
+        canonicalRoot: workspace,
+        filesystemProfile: "test",
+        workspaceId: identity.workspaceId,
+      },
+      resourceOperationGate: { run: async <T>(_resources: readonly unknown[], operation: () => Promise<T>) => operation() },
+      root: recoveryRoot,
+    } as never;
+    const workingStore = await WorkingStateStore.open(workingContext);
+    const workingStates: WorkspaceWorkingStateAccess = {
+      withStore: async (_workspaceId, _purpose, operation) => operation(workingStore, workingContext),
+    };
+    const executionViews = new ThreadExecutionViewRegistry();
+    const branchLookups = createWorkingBranchLookups({ views: executionViews, workingStates });
     const paths = createHarnessPathAuthority({
       authorityId: "retrieval-e2e-authority",
       documents,
@@ -92,6 +124,7 @@ describe("retrieval thread public slice", () => {
     const childHosts = new Map<string, SessionHost>();
     const childSessionFiles = new Map<string, string>();
     const childRunIds = new Map<string, string>();
+    const executionContexts = new Map<string, { workspaceId: string; root: string }>();
     let spawningRunId: string | undefined;
     let childInitialPrompt = "";
     let childTranscript = "";
@@ -127,7 +160,7 @@ describe("retrieval thread public slice", () => {
         workerId: `child-worker-${sessionId}`,
         workerGeneration: 1,
         ...(runId ? { runId } : {}),
-        workspaceScope: ["src"],
+        workspaceScope: ["src", "only-in-parent.ts"],
       } as const;
     };
 
@@ -135,13 +168,14 @@ describe("retrieval thread public slice", () => {
       const actor = actorFor(sessionId);
       if (harnessServiceHost!.hasActor(actor)) return;
       const isParent = sessionId === parentHost?.sessionId;
+      const execution = executionContexts.get(sessionId);
       harnessServiceHost!.registerSession({
         actor,
         grantedCapabilities: isParent
           ? ["context.session", "control.thread", "read.output", "read.lsp"]
           : ["context.session", "control.thread", "read.document", "read.search", "read.output", "read.lsp"],
-        workspaceId: identity.workspaceId,
-        workspaceRoot: workspace,
+        workspaceId: execution?.workspaceId ?? identity.workspaceId,
+        workspaceRoot: execution?.root ?? workspace,
       });
     };
 
@@ -177,6 +211,7 @@ describe("retrieval thread public slice", () => {
       });
       child.setHarnessDocumentReadEnabled(true);
       child.setHarnessDocumentPathOverlayEnabled(true);
+      child.setHarnessLspNavigationEnabled(true);
       return child;
     };
 
@@ -188,6 +223,7 @@ describe("retrieval thread public slice", () => {
         const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
+        executionContexts.set(created.sessionId, { workspaceId: input.workspaceId, root: input.cwd });
         childTools = [...created.activeTools];
         childModelId = created.model?.id;
         if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
@@ -229,25 +265,48 @@ describe("retrieval thread public slice", () => {
       entries: async (sessionId, scope = "branch") => hostFor(sessionId).entries(sessionId, scope),
     };
 
+    const managedWorktreeRoot = join(root, "managed-scratch");
+    const worktrees = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => path.resolve(candidate) === path.resolve(managedWorktreeRoot),
+      createScratch: async (_sourceRoot, threadId) => ({
+        path: join(managedWorktreeRoot, threadId),
+        managedRoot: managedWorktreeRoot,
+      }),
+      createWorktree: async (_sourceRoot, input) => {
+        const target = join(managedWorktreeRoot, String(input.worktreeName));
+        await mkdir(target, { recursive: true });
+        return { path: target, managedRoot: managedWorktreeRoot };
+      },
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
     runtime = createThreadRuntime({
       registry,
       sessions,
       resolveWorkspaceRoot: async () => workspace,
-      resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+      resolveRuntimeWorkspaceId: async (directory) => (await documents.resolveWorkspace({ path: directory })).workspaceId,
       readBlocks: async () => [{ label: "plan", content: "parent-only block that must not copy the conversation" }],
-      worktrees: {
-        prepare: async () => ({ cwd: workspace, worktree: null }),
-        snapshot: async (worktree) => worktree,
-        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
-        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
-      },
+      workingStates,
+      executionViews,
+      worktrees,
     });
 
     harnessServiceHost = createHarnessServiceHost({
       search: (request, options) => search.searchContent(request, options),
       resolveWorkspaceRoot: async () => workspace,
       readExploreFile: createExploreFileReader(documents, paths),
+      branchCorpus: (sessionId) => branchLookups.searchCorpus(sessionId),
+      documentReadSource: async (sessionId, _context, resourceId) => (
+        await branchLookups.readSource(sessionId, resourceId) ?? { status: "disk" as const }
+      ),
+      workingBranchEnsureMaterialized: (sessionId, signal) => runtime!.materializeExecutionView(sessionId, signal),
+      lspNavigationServices: {
+        symbols: { handle: async () => ({ status: "ready", text: "parentOnly symbol", value: [] }) },
+        definition: { handle: async () => ({ status: "empty", text: "no definition" }) },
+        references: { handle: async () => ({ status: "empty", text: "no references" }) },
+        hover: { handle: async () => ({ status: "empty", text: "no hover" }) },
+      } as never,
       threadRegistry: registry,
+      threadPrepareIsolatedBranch: (input) => runtime!.prepareIsolatedBranch(input),
       threadSpawnSession: async (input) => {
         spawningRunId = input.runId;
         return runtime!.spawn(input);
@@ -310,16 +369,23 @@ describe("retrieval thread public slice", () => {
           return fauxAssistantMessage([fauxToolCall("explore", { question: "login helper", anchors: ["login"] })]);
         }
         if (childPhase === 2) {
-          return fauxAssistantMessage([fauxToolCall("read", { path: "src/auth.ts" })]);
+          return fauxAssistantMessage([fauxToolCall("read", { path: "only-in-parent.ts" })]);
         }
         if (childPhase === 3) {
-          return fauxAssistantMessage([fauxToolCall("related", { anchor: "src/auth.ts" })]);
+          return fauxAssistantMessage([fauxToolCall("symbols", { path: "only-in-parent.ts", query: "parentOnly" })]);
         }
         if (childPhase === 4) {
+          return fauxAssistantMessage([fauxToolCall("read", { path: "src/auth.ts" })]);
+        }
+        if (childPhase === 5) {
+          return fauxAssistantMessage([fauxToolCall("related", { anchor: "src/auth.ts" })]);
+        }
+        if (childPhase === 6) {
           return fauxAssistantMessage([fauxToolCall("submit_facts", {
             question: "Where is login implemented?",
             facts: [
               { claim: "login is exported from src/auth.ts", sources: [{ kind: "local", path: "src/auth.ts", startLine: 2, endLine: 4 }] },
+              { claim: "parent-only source is frozen", sources: [{ kind: "local", path: "only-in-parent.ts", startLine: 1, endLine: 1 }] },
               { claim: "secret outside scope", sources: [{ kind: "local", path: "outside.ts", startLine: 1, endLine: 1 }] },
               { claim: "invented range", sources: [{ kind: "local", path: "src/auth.ts", startLine: 80, endLine: 90 }] },
             ],
@@ -334,7 +400,7 @@ describe("retrieval thread public slice", () => {
         return fauxAssistantMessage([fauxToolCall("dispatch", {
           role: "retrieval",
           task: "Where is login implemented?",
-          scope: ["src"],
+          scope: ["src", "only-in-parent.ts"],
         })]);
       }
       return fauxAssistantMessage("dispatched retrieval");
@@ -343,6 +409,50 @@ describe("retrieval thread public slice", () => {
 
     try {
       const parent = await parentHost.create(workspace, "Parent");
+      const parentThread = await registry.createThread({
+        workspaceId: identity.workspaceId,
+        parent: { kind: "session", id: parent.sessionId },
+        brief: "Parent implementation view",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 1,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch", "wait", "read_thread"],
+        permissions: {},
+      });
+      const parentRun = await registry.startRun(identity.workspaceId, parentThread.id);
+      await registry.markRunRunning(identity.workspaceId, parentThread.id, parentRun.id, parent.sessionId);
+      const parentScratch = join(managedWorktreeRoot, parentThread.id);
+      await mkdir(parentScratch, { recursive: true });
+      await workingStates.withStore(identity.workspaceId, "parent-frozen-only-file", async (store) => {
+        const baseline = await store.captureDirectory(workspace);
+        const branchId = `thread-${parentThread.id}`;
+        await store.createBranch(identity.workspaceId, branchId, baseline, "parent-baseline");
+        const body = Buffer.from("export const parentOnly = 'frozen-parent-body';\n", "utf8");
+        const object = await store.putObject(body);
+        await store.commitVirtualWrite(branchId, 0, "only-in-parent.ts", {
+          kind: "regular-file",
+          objectHash: object.hash,
+          byteLength: object.byteLength,
+        });
+        await registry.setWorkingState(identity.workspaceId, parentThread.id, {
+          branchId,
+          worktree: {
+            path: parentScratch,
+            managedRoot: managedWorktreeRoot,
+            base: "parent-baseline",
+            viewMode: "virtual",
+            materialized: false,
+            preparationStage: "ready",
+          },
+        });
+      });
+      const beforeHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" });
+      const beforeStatus = execFileSync("git", ["status", "--porcelain=v1", "-z"], { cwd: workspace });
+      const beforeIndex = await readFile(join(workspace, ".git", "index"));
+      await assert.rejects(readFile(join(workspace, "only-in-parent.ts")), { code: "ENOENT" });
       const first = await parentHost.prompt(parent.sessionId, parentUserText);
       assert.equal(first.accepted, true);
       await parentHost.session.waitForIdle();
@@ -356,16 +466,16 @@ describe("retrieval thread public slice", () => {
             // Child may already be closing while the Run settles.
           }
         }
-        const threads = await registry.listThreads(identity.workspaceId, { kind: "session", id: parent.sessionId });
+        const threads = await registry.listThreads(identity.workspaceId, { kind: "thread", id: parentThread.id });
         const retrieval = threads.find((thread) => thread.role === "retrieval");
         return retrieval?.lifecycle === "settled";
       });
 
-      const threads = await registry.listThreads(identity.workspaceId, { kind: "session", id: parent.sessionId });
+      const threads = await registry.listThreads(identity.workspaceId, { kind: "thread", id: parentThread.id });
       const retrieval = threads.find((thread) => thread.role === "retrieval");
       assert.ok(retrieval);
       assert.equal(retrieval.manifest.carryBlocks, false);
-      assert.deepEqual(childScope, ["src"]);
+      assert.deepEqual(childScope, ["src", "only-in-parent.ts"]);
       assert.equal(childModelId, model.id);
       assert.ok(childTools.includes("submit_facts"));
       assert.ok(childTools.includes("explore"));
@@ -378,12 +488,26 @@ describe("retrieval thread public slice", () => {
       assert.ok(childTranscript.length > 0);
       assert.equal(childTranscript.includes(parentUserText), false);
 
-      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.status === "source-checked" && fact.claim.includes("login")), true);
+      assert.equal(
+        retrieval.report?.evidence?.facts.some((fact) => fact.status === "source-checked" && fact.claim.includes("login")),
+        true,
+        `${JSON.stringify(retrieval.report?.evidence)}\n${childTranscript}`,
+      );
+      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.status === "source-checked" && fact.claim.includes("parent-only")), true);
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim.includes("secret outside")), false);
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim === "invented range" && fact.status === "source-checked"), false);
       assert.equal(retrieval.report?.changedFiles.length, 0);
+      assert.equal(retrieval.resultRevision, undefined);
+      assert.equal(retrieval.integration, "none");
+      assert.equal(retrieval.verification, undefined);
+      assert.notEqual(path.resolve(retrieval.worktree!.path), path.resolve(workspace));
+      assert.ok(path.resolve(retrieval.worktree!.path).startsWith(path.resolve(managedWorktreeRoot)));
       assert.equal(JSON.stringify(retrieval.report).includes("priority"), false);
       assert.equal(await readFile(join(workspace, "src", "auth.ts"), "utf8"), authBody);
+      await assert.rejects(readFile(join(workspace, "only-in-parent.ts")), { code: "ENOENT" });
+      assert.equal(execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" }), beforeHead);
+      assert.deepEqual(execFileSync("git", ["status", "--porcelain=v1", "-z"], { cwd: workspace }), beforeStatus);
+      assert.deepEqual(await readFile(join(workspace, ".git", "index")), beforeIndex);
 
       const zone2 = await projectZone2Threads(
         { registry, cursors: harnessServiceHost.observationCursors },
@@ -405,6 +529,7 @@ describe("retrieval thread public slice", () => {
       await harnessServiceHost?.dispose();
       await registry.dispose();
       await documents.dispose();
+      database.close();
       faux.unregister();
       await rm(root, { recursive: true, force: true });
     }

@@ -2,7 +2,11 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { rmSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from "./store.js";
+import { createRequire } from "node:module";
+import { openWorkspaceKnowledge, terminalCommandDedupeKey, type BlockChange, type KnowledgeStore } from "./store.js";
+
+const require = createRequire(import.meta.url);
+const { TriviumDB } = require("triviumdb") as typeof import("triviumdb");
 
 // Scratch stores live in the OS temp dir; see harness/recall-tool.test.ts.
 const TEST_DIR = join(tmpdir(), "piarium-test-tdb");
@@ -99,7 +103,7 @@ describe("KnowledgeStore", () => {
       ]);
     });
 
-    it("deduplicates command events by workspace commandId", async () => {
+    it("deduplicates command events by target session and terminal commandId", async () => {
       const first = await store.putEvent({
         kind: "command",
         at: 1,
@@ -118,7 +122,63 @@ describe("KnowledgeStore", () => {
       });
       expect(first.inserted).toBe(true);
       expect(second).toEqual({ id: first.id, inserted: false });
-      await expect(store.listEvents({ sessionId: "s1" })).resolves.toHaveLength(1);
+      await expect(store.listEvents({ sessionId: "s1" })).resolves.toMatchObject([{
+        dedupeKey: terminalCommandDedupeKey("s1", "term-1:1:1"),
+      }]);
+
+      const otherSession = await store.putEvent({
+        kind: "command",
+        at: 3,
+        sessionId: "s2",
+        text: "exit 0 · echo hi",
+        data: { command: "echo hi", commandId: "term-1:1:1", exitCode: 0 },
+        source: "user",
+      });
+      expect(otherSession.inserted).toBe(true);
+      expect(otherSession.id).not.toBe(first.id);
+    });
+
+    it("backfills legacy command identities and keeps them idempotent after reopen", async () => {
+      const dir = join(TEST_DIR, "legacy-event-reopen");
+      const dbDir = join(dir, "knowledge", "test-host");
+      mkdirSync(dbDir, { recursive: true });
+      const db = new TriviumDB(join(dbDir, "ws-legacy.tdb"), { dim: 8, syncMode: "normal" });
+      db.insert(new Array(8).fill(0), {
+        type: "event",
+        kind: "command",
+        at: 1,
+        sessionId: "s1",
+        text: "exit 0 · echo legacy",
+        data: { command: "echo legacy", commandId: "term-legacy:0:1", exitCode: 0 },
+        source: "user",
+      });
+      db.flush();
+      db.close();
+
+      await store.close();
+      store = await openWorkspaceKnowledge({ dataDir: dir, hostId: "test-host", workspaceId: "ws-legacy", embedding: null });
+      await expect(store.listEvents({ sessionId: "s1" })).resolves.toMatchObject([{
+        dedupeKey: terminalCommandDedupeKey("s1", "term-legacy:0:1"),
+      }]);
+      await expect(store.putEvent({
+        kind: "command",
+        at: 2,
+        sessionId: "s1",
+        text: "exit 0 · echo legacy again",
+        data: { command: "echo legacy again", commandId: "term-legacy:0:1", exitCode: 0 },
+        source: "user",
+      })).resolves.toEqual({ id: 1, inserted: false });
+      await store.close();
+
+      store = await openWorkspaceKnowledge({ dataDir: dir, hostId: "test-host", workspaceId: "ws-legacy", embedding: null });
+      await expect(store.putEvent({
+        kind: "command",
+        at: 3,
+        sessionId: "s1",
+        text: "exit 0 · echo legacy after reopen",
+        data: { command: "echo legacy after reopen", commandId: "term-legacy:0:1", exitCode: 0 },
+        source: "user",
+      })).resolves.toEqual({ id: 1, inserted: false });
     });
   });
 

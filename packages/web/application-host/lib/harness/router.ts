@@ -180,14 +180,14 @@ const requestPaths = (
   if (method === "lsp.symbols") {
     if (typeof record.query !== "string") return "invalid";
     return typeof record.path === "string" && record.path.trim()
-      ? [{ allowMissing: false, path: record.path }]
+      ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
   if (method === "lsp.definition" || method === "lsp.references" || method === "lsp.hover") {
     if (!Number.isSafeInteger(record.line) || Number(record.line) < 1) return "invalid";
     if (record.character !== undefined && (!Number.isSafeInteger(record.character) || Number(record.character) < 1)) return "invalid";
     return typeof record.path === "string" && record.path.trim()
-      ? [{ allowMissing: false, path: record.path }]
+      ? [{ allowMissing: true, path: record.path }]
       : "invalid";
   }
   if (method === "lsp.diagnostics" || method === "lsp.diagnosticsSnapshot") {

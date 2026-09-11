@@ -210,7 +210,12 @@ describe("validateRetrievalEvidence", () => {
 
   it("accepts a short URL receipt and rejects rebinding it to another URL", async () => {
     const markdown = "short page";
-    const receipt = mintWebFetchReceipt("https://example.com/doc", markdown);
+    const receiptAuthority = { owningWorkspaceId: "ws", sessionId: actor.sessionId, threadId: "thread-1", runId: "run-1" };
+    const draft = mintWebFetchReceipt("https://example.com/doc", markdown, receiptAuthority);
+    const receipt: RetrievalUrlReceipt = {
+      ...draft,
+      artifact: { durability: "durable", hash: draft.contentHash, byteLength: Buffer.byteLength(markdown) },
+    };
     const receipts = new Map<string, RetrievalUrlReceipt>([[receipt.receiptId, receipt]]);
     const valid = await validateRetrievalEvidence({
       question: "docs",
@@ -221,6 +226,7 @@ describe("validateRetrievalEvidence", () => {
         sources: [{ kind: "url", url: "https://example.com/doc", receiptId: receipt.receiptId }],
       }],
       lookupReceipt: async (receiptId) => receipts.get(receiptId) ?? null,
+      receiptAuthority,
       actor,
       signal: new AbortController().signal,
       sessionId: actor.sessionId,
@@ -242,6 +248,7 @@ describe("validateRetrievalEvidence", () => {
         sources: [{ kind: "url", url: "https://evil.example/doc", receiptId: receipt.receiptId }],
       }],
       lookupReceipt: async (receiptId) => receipts.get(receiptId) ?? null,
+      receiptAuthority,
       actor,
       signal: new AbortController().signal,
       sessionId: actor.sessionId,

@@ -25,6 +25,7 @@ const createRepo = (): { root: string; repo: string; worktrees: string } => {
 };
 
 const runtimeFor = (worktrees: string) => createThreadWorktreeRuntime({
+  authorizeManagedRoot: (candidate) => candidate.endsWith("worktrees"),
   createWorktree: async (directory, input) => {
     const target = join(worktrees, String(input.worktreeName));
     if (input.mode === "existing") {
@@ -32,7 +33,7 @@ const runtimeFor = (worktrees: string) => createThreadWorktreeRuntime({
     } else {
       git(directory, ["worktree", "add", "-b", String(input.branchName), target, String(input.startRef)]);
     }
-    return { path: target };
+    return { path: target, managedRoot: worktrees };
   },
   getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
 });
@@ -132,7 +133,7 @@ describe("thread worktree runtime", () => {
       createWorktree: async (directory, input) => {
         childPath = join(fixture.worktrees, String(input.worktreeName));
         git(directory, ["worktree", "add", "-b", String(input.branchName), childPath, String(input.startRef)]);
-        return { path: childPath };
+        return { path: childPath, managedRoot: fixture.worktrees };
       },
       getWorktreeBootstrapStatus: async () => bootstrapReady
         ? { status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }
@@ -371,6 +372,7 @@ describe("thread worktree runtime", () => {
     mkdirSync(child, { recursive: true });
     writeFileSync(join(child, "result.txt"), "retained\n");
     const runtime = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => candidate === root,
       createWorktree: async () => ({ path: child }),
       getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
       runGit: async () => { throw new Error("git status unavailable"); },
@@ -398,12 +400,14 @@ describe("thread worktree runtime", () => {
     writeFileSync(join(sourceRoot, "file.txt"), "live parent\n");
     writeFileSync(join(`${child}.baseline`, "file.txt"), "old baseline\n");
     const runtime = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => candidate === root,
       createWorktree: async () => ({ path: child }),
       getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
     });
     try {
       await expect(runtime.materialize(sourceRoot, {
         path: child,
+        managedRoot: root,
         base: "zero-commit",
         resultCommit: "missing-fixed-result",
         materialized: false,
@@ -422,12 +426,14 @@ describe("thread worktree runtime", () => {
     mkdirSync(child, { recursive: true });
     writeFileSync(join(child, "stranger.txt"), "someone else\n");
     const runtime = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => candidate === root,
       createWorktree: async () => ({ path: child }),
       getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
     });
     try {
       await expect(runtime.materialize(sourceRoot, {
         path: child,
+        managedRoot: root,
         base: "zero-commit",
         resultCommit: "fixed",
         materialized: false,
@@ -679,7 +685,7 @@ describe("thread worktree runtime", () => {
     const createWorktree = async (_dir: string, input: Record<string, unknown>) => {
       const target = join(worktreeRoot, String(input.worktreeName));
       mkdirSync(target, { recursive: true });
-      return { path: target };
+      return { path: target, managedRoot: worktreeRoot };
     };
     const bootstrap = async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() } as const);
     try {
@@ -688,6 +694,7 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(prepared.cwd, "file.txt"), "first\n");
       const first = await runtime.snapshot(prepared.worktree!);
       const failedRuntime = createThreadWorktreeRuntime({
+        authorizeManagedRoot: (candidate) => candidate === worktreeRoot,
         createWorktree,
         getWorktreeBootstrapStatus: bootstrap,
         fsPromises: new Proxy(fs.promises, {
@@ -714,12 +721,17 @@ describe("thread worktree runtime", () => {
     try {
       mkdirSync(live, { recursive: true });
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
-      const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
+      const attached = await runtime.attachIsolatedGitContext(fixture.repo, {
+        path: live,
+        managedRoot: join(fixture.repo, ".piarium", "worktrees"),
+        base: parentHead,
+      });
       expect(attached.kind).toBe("init");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       expect(attached.executionBaseline).not.toBe(parentHead);
       const inspected = await runtime.inspect({
         path: live,
+        managedRoot: join(fixture.repo, ".piarium", "worktrees"),
         base: parentHead,
         executionBaseline: attached.executionBaseline!,
         viewMode: "materialized",
@@ -745,17 +757,49 @@ describe("thread worktree runtime", () => {
     }
   });
 
+  it("refuses destructive worktree operations when the persisted path escapes its managed root", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    try {
+      const beforeHead = git(fixture.repo, ["rev-parse", "HEAD"]);
+      const beforeStatus = git(fixture.repo, ["status", "--porcelain"]);
+      await expect(runtime.reclaim({
+        path: fixture.repo,
+        managedRoot: fixture.root,
+        base: beforeHead,
+        materialized: true,
+      }, { nativeVerified: true })).rejects.toThrow("managed ownership root is not registered");
+      const corrupt = {
+        path: fixture.repo,
+        managedRoot: fixture.root,
+        base: beforeHead,
+        materialized: true,
+      };
+      await expect(runtime.inspect(corrupt, "live")).rejects.toThrow("managed ownership root is not registered");
+      await expect(runtime.merge(fixture.repo, corrupt)).rejects.toThrow("managed ownership root is not registered");
+      expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
+      expect(git(fixture.repo, ["rev-parse", "HEAD"])).toBe(beforeHead);
+      expect(git(fixture.repo, ["status", "--porcelain"])).toBe(beforeStatus);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("uses a detached Git worktree when the live path is outside the parent worktree", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
-    const live = join(fixture.root, "external-live");
+    const live = join(fixture.worktrees, "external-live");
     const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
     const parentStatus = git(fixture.repo, ["status", "--porcelain"]);
     const parentBranches = git(fixture.repo, ["branch"]);
     try {
       mkdirSync(live, { recursive: true });
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
-      const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
+      const attached = await runtime.attachIsolatedGitContext(fixture.repo, {
+        path: live,
+        managedRoot: fixture.worktrees,
+        base: parentHead,
+      });
       expect(attached.kind).toBe("worktree");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();

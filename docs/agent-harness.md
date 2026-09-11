@@ -362,17 +362,20 @@ diagnostics (typescript): 1 new error
 diagnostics("foo.ts")`、`clean`。永不沉默。实现路径优先用 `tool_result` 钩子替换 `content`，这样恢复日志的
 覆盖与诊断附加互不耦合。
 
-根会话 `edit` / `write` / `apply_patch` 与本轮固定输入共用同一正文权威（D-225，身份与事务由 D-228 纠正）。虚拟线程仍先走 `document.branchWrite`。
+根会话 `edit` / `write` / `apply_patch` 与本轮固定输入共用同一正文权威（D-225，身份、WAL 与补偿由 D-228/D-232 纠正）。虚拟线程仍先走 `document.branchWrite`。
 其余路径进入共享 Host 计划 `document.surfaceWrite`：本轮 snapshot 拥有的路径按固定正文匹配，写回同一 Document Registry
 缓冲，并核对 owner / generation / registration / document instance / `localEditRevision` / `baseRevision`。
 UI publication 的 `bufferHash` 是规范化编辑器 buffer 身份；snapshot 正文是带原行尾的序列化文件正文，二者不得直接比较。
 写回 Registry 前转换成编辑器规范形式；写回后的 snapshot 仍按文件行尾呈现。
 用户在计划后继续编辑则明确 stale/conflict，不覆盖缓冲，也不回退写磁盘，且不隐式保存。普通磁盘路径保持既有 journaled
-disk 写入。多文件同时含 surface 与 disk 时，第一笔写入前把 intent 记入独立 `agent-mutation` 操作（不冒充 Integration）；
+disk 写入。多文件同时含 surface 与 disk 时，在同一 Documents resource gate 内先核对全部磁盘成员的原始字节身份，再允许任何
+surface dispatch；第一笔写入前把 intent 记入独立 `agent-mutation` 操作（不冒充 Integration）。WAL 区分明确 failed receipt 与
+已 dispatch 但无认证回执，并记录补偿 intent、观察结果和 target-after；
 apply 与 undo 共用同一个真实 `operationId`，一次 batch 只能整组撤销。取消 / I/O throw / 断连后走条件补偿或 needs-attention，
 补偿不复用已 aborted 的前向 signal。按路径返回 applied / conflict / compensated / needs-attention，不允许“前面已写、后面失败”
 却只报普通失败且无记录。`apply_patch` 仅当 `document.readSource` 明确返回 `source=disk` 时才读磁盘；unavailable/stale/传输错误必须停止，
-整文件替换携带所读 surface revision/hash。删除、二进制、symlink、mode 等 surface 无法表达的操作明确 unavailable/conflict。
+整文件替换携带所读 surface revision/hash。磁盘写成功到 target-after 捕获之间崩溃时不猜写入结果，恢复状态/UI 明确 needs-attention。
+删除、二进制、symlink、mode 等 surface 无法表达的操作明确 unavailable/conflict。
 成功写入后同一回合后续 read/edit 看到新缓冲正文，不退回旧 snapshot 或旧磁盘。参数保持同名先验。
 
 **编辑格式跟模型家族走。** Codex 系模型按 `apply_patch` 语法训练（`*** Begin Patch` / `*** Update File:` /
@@ -602,7 +605,7 @@ pi-host 执行模型请求，将搜索计划和选择交回同一次查询。公
 **来源与当前正文。** 用户发送消息时的窗口草稿，经 Document Registry → 鉴权 Documents 通道捕获到 Host 固定 snapshot；runtime
 只传不透明引用或 capture unavailable 与已知脏路径。每次读取记来源、revision、hash 与 span。这是请求内已读文件的版本集合，
 不是整个工作区的强一致快照。捕获失败的脏路径不取磁盘冒充；无 surface 的 headless 请求使用磁盘。磁盘写入按 D-088 终结该路径的
-旧草稿读取权威；根会话对仍由本轮 snapshot 拥有的路径经 `document.surfaceWrite` 改同一缓冲（D-225 / D-228），后续 read/edit 看到新正文。
+旧草稿读取权威；根会话对仍由本轮 snapshot 拥有的路径经 `document.surfaceWrite` 改同一缓冲（D-225 / D-228 / D-232），后续 read/edit 看到新正文。
 其余路径仍沿本轮输入来源。检索、read/grep/find/ls、语言导航与线程基线沿同一规则。
 
 语义块与图节点首先是带身份的定位线索。范围仍匹配当前正文时可采用；只发生平移时按块正文与父单元重新定位；对应内容实质改变
@@ -913,7 +916,9 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
   不生成命令。代际标识是来源绑定的 shell 观察，不是无法伪造的安全身份。`/bin/sh` 不按 Bash 注入 `--init-file`。
   默认注入不得破坏用户已有 PROMPT_COMMAND / DEBUG trap、zsh login/profile hooks 或 PowerShell Enter/prompt。
   命令与 cwd 进入 Zone 2 和 keeper 前要编码，使 `</user-terminal>` 与控制字符不能关闭标签或变成新指令块。
-  `workspaceId + commandId` 的幂等写入落在 knowledge `putEvent`：重复投递不二次入库、不二次 nudge。
+  每个目标 Pi session 的幂等写入落在 knowledge `putEvent`，键为 `targetPiSessionId + commandId`：同一终端命令会分别送达
+  工作区内各活动 Pi 会话，而对同一目标的重复投递不二次入库、不二次 nudge。PowerShell 只在 `$LASTEXITCODE` 相对命令开始基线
+  发生变化时把 native 非零码归给本命令；无法证明时记录 1，因此连续相同 native 非零码不声称精确。
   产品链没有 PTY 重播，因此不声称 Host 重启去重。Harness `bash` 不注入该脚本，也不进入 Zone 2 `<user-terminal>`。
   有意义的用户命令完成后，Host `memory.nudge` 唤醒现有 memory keeper，不另建轮询或第二个后台循环。
   `kind: edit` 的 event 最终引用恢复日志中已存在的 before/after 内容对象，不再复制一份 diff；恢复日志是唯一的逐路径编辑真相源。
@@ -1470,6 +1475,10 @@ Git blob 与工作目录转换后的字节不能无条件视为相同；当前�
 Documents、LSP、路径与 shell（D-216）。子会话注册、thread services、Zone 2、lost resume 和 knowledge/recall/suggestions
 从 Host session binding 读取 owning workspace；binding 是 catalog/run 的可重建索引，启动对账并在每次解析时核对
 owning/thread/run/session，owner 缺失或 stale 必须拒绝（D-222）。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
+每条受管目录记录持久化绝对 `managedRoot`。inspect、snapshot、materialize、setup、Git attach、reclaim/discard 在访问主路径及
+staging/backup/result 邻接路径前，先验证 canonical containment，再要求 Application Host 或 create-worktree backend 重新授权根；
+持久记录不能自证删除权。虚拟 scratch 默认在 Application Host 数据目录的 `thread-scratch/<workspace-hash>/<threadId>`，不借父工作区
+目录充当执行路径。旧记录缺 managedRoot 时停止自动动作并报告恢复需求（D-231）。
 Git 物化使用 `git worktree add --detach`（会写 `.git/worktrees`，不创建用户可见分支）或独立 `git init`，子 Git 命令不得发现或修改父仓库。
 `worktree.base` / 分支 `baseRef` 仍是父状态身份；inspect/snapshot/settle 使用执行仓库可解析的 `executionBaseline`（D-220）。
 reclaim 清除该执行 SHA；rematerialize 只从父仓库导出父仓库能解析的 commit。结算目录结果并入当前虚拟 delta，避免独立 init
@@ -1709,8 +1718,11 @@ T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；
 由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
 `dispatch`（D-215）。`retrieval` 通过冻结 allowlist 与 `thread.facts.set` 交付事实：Host 按冻结 scope 与
 Documents 读取核对路径/行范围，模型不能自行把不存在或越权来源标成 source-checked；Host 不能把来源存在写成 claim 为真。
-大材料与子会话 output 复制为耐久 artifact，URL 必须带 Host receipt。不复制父完整对话
-（`carryBlocks: false`），默认不改工作区；嵌套 retrieval 读父冻结有效状态（D-227 / D-230）。
+大材料与子会话 output 复制为耐久 artifact，URL 必须带 active retrieval Run 铸造、绑定 owning/session/thread/run、exact URL 与
+正文 hash 的 Host receipt；普通 webfetch 不生成该权威。临时 artifact/receipt 从创建起有 object reference，提交时转成 pending，
+封印后转成 sealed，真正删除 Thread 时一并释放。父 `read_thread` 按 UTF-8 字节从耐久对象分页，不先载入全文。不复制父完整对话
+（`carryBlocks: false`），默认不改工作区；嵌套 retrieval 在 dispatch 时建立 isolated 冻结分支，可为 LSP 物化只读输入，settle
+只封印 evidence、不发布目录变化（D-227 / D-230 / D-231 / D-234）。
 
 失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等

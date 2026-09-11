@@ -524,4 +524,91 @@ describe("applyAgentSurfaceMutation", () => {
     if (result.status === "disk") throw new Error("expected mixed results");
     expect(result.results.filter((row) => row.target === "surface").every((row) => row.status === "compensated")).toBe(true);
   });
+
+  it("compensates applied surface paths while retaining a definite rejection", async () => {
+    const inspectFor = (resourceId: string, content: string): SurfaceSnapshotInspectResult => ({
+      status: "ready",
+      bom: false,
+      content,
+      encoding: "utf-8",
+      localEditRevision: 2,
+      baseRevision: "disk-a",
+      revision: "surface-draft:fixed:2",
+      resource: { workspaceId: "ws", resourceId },
+      source: "surface-draft",
+    });
+    const publication: DirtyBufferPublication = {
+      generation: 1,
+      ownerId: "surface",
+      registrationId: "reg-1",
+      resources: ["a.ts", "b.ts"].map((resourceId) => ({
+        baseRevision: "disk-a",
+        localEditRevision: 2,
+        documentInstanceId: `doc-${resourceId}`,
+        bufferHash: hash(resourceId === "a.ts" ? "A" : "B"),
+        encoding: "utf-8" as const,
+        bom: false,
+        lineEnding: "lf" as const,
+        resource: { workspaceId: "ws", resourceId },
+      })),
+      updatedAt: new Date().toISOString(),
+      workspaceId: "ws",
+    };
+    const operations: Array<{ action: string; targets: string[] }> = [];
+    const { result } = await applyAgentSurfaceMutation({
+      inspectSnapshot: (_session, _context, resourceId) => (
+        resourceId === "a.ts" ? inspectFor("a.ts", "A") : inspectFor("b.ts", "B")
+      ),
+      surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
+      inspectDirtyBuffers: async () => [publication],
+      requestSurfaceOperation: async (request) => {
+        operations.push({ action: request.action, targets: request.targets.map((target) => target.resource.resourceId) });
+        if (request.action === "apply") {
+          return request.targets.map((target) => target.resource.resourceId === "a.ts"
+            ? {
+                resource: target.resource,
+                status: "applied" as const,
+                documentInstanceId: target.documentInstanceId,
+                beforeLocalEditRevision: 2,
+                beforeHash: target.bufferHash,
+                afterLocalEditRevision: 3,
+                afterHash: hash("C"),
+              }
+            : {
+                resource: target.resource,
+                status: "failed" as const,
+                message: "surface rejected this path",
+              });
+        }
+        return request.targets.map((target) => ({
+          resource: target.resource,
+          status: "undone" as const,
+          documentInstanceId: target.documentInstanceId,
+          content: "A",
+          afterLocalEditRevision: 4,
+          afterHash: hash("A"),
+        }));
+      },
+      inspectWorkspace: async () => ({ epoch: 1 }),
+      readDisk: async () => ({ status: "binary" as const, revision: "disk-binary" }),
+      writeDisk: async () => ({ status: "conflict" as const }),
+      deleteDisk: async () => ({ status: "conflict" as const }),
+    }, {
+      sessionId: "s1",
+      context: context("ws", ["a.ts", "b.ts"]),
+      changes: [
+        { resourceId: "a.ts", action: "edit", edits: [{ oldText: "A", newText: "C" }] },
+        { resourceId: "b.ts", action: "edit", edits: [{ oldText: "B", newText: "D" }] },
+      ],
+    });
+    expect(operations).toEqual([
+      { action: "apply", targets: ["a.ts", "b.ts"] },
+      { action: "undo", targets: ["a.ts"] },
+    ]);
+    if (result.status === "disk") throw new Error("expected surface results");
+    expect(result.results).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: "a.ts", status: "compensated" }),
+      expect.objectContaining({ path: "b.ts", status: "conflict" }),
+    ]));
+  });
 });

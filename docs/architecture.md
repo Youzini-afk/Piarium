@@ -263,9 +263,11 @@ User terminal tabs inject generation-tagged OSC 633 on bash / PowerShell / zsh; 
 with real command text and exit codes become workspace events and the next Zone 2
 `<user-terminal>` section. The parser only accepts this session integration's tagged frames.
 `/bin/sh` is not treated as Bash. Command/cwd text is encoded before Zone 2 and keeper material.
-`putEvent` is idempotent on `workspaceId + commandId` for duplicate delivery; the live PTY path
-does not replay after Host restart. Host `memory.nudge` wakes the existing keeper from new user
-events. Missing integration is `not-observed`, not a guessed command (D-226 / D-229).
+`putEvent` is idempotent on `targetPiSessionId + commandId`; one terminal command is projected once
+to each active Pi session in the workspace, and only a newly inserted target event nudges that session's
+keeper. PowerShell uses the command-start `LASTEXITCODE` baseline and reports `1` when it cannot prove
+that an unchanged native status belongs to the current command. The live PTY path does not replay after
+Host restart. Missing integration is `not-observed`, not a guessed command (D-226 / D-229 / D-233).
 
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role.
 D-227 makes that role a real Thread: `thread.dispatch(role: "retrieval")` freezes the retrieval model
@@ -274,8 +276,12 @@ tools, then `submit_facts`. The Host verifies local paths/ranges against Documen
 scope before marking a source source-checked, copies excerpts and output handles to durable
 artifacts, requires a Host URL receipt bound to the exact final URL, and projects the sealed
 evidence through `thread.read`, Zone 2, and the existing cancel/lost Thread lifecycle. Nested
-retrieval reads the parent thread's frozen effective state rather than the live root workspace
-(D-227 / D-230). The
+retrieval is dispatched onto a normal isolated WorkingState branch and, when a real path is needed,
+materializes only beneath a Host/backend-authorized persistent managed root. Its settle path seals
+evidence and discards the read-only input without publishing directory changes. Web receipts exist only
+for the authenticated active retrieval Run; durable temporary references bridge receipt/artifact creation
+to pending and sealed evidence, and `thread.read` pages large bodies by UTF-8 byte range
+(D-227 / D-230 / D-231 / D-234). The
 application host owns search, current document reads, local embedding instances, derived indexes, and
 the short-lived explore query context (fixed input-source reference, actor/scope, candidate producers,
 read snapshots, candidate views, shared cancellation/deadline). The pi-host session ModelRuntime uses
@@ -427,8 +433,11 @@ other paths keep each tool's established disk source. Root-session `edit` / `wri
 `document.surfaceWrite` for snapshot-owned paths and write the same Document Registry buffer after owner,
 generation, registration, document instance, revision, and editor-buffer hash checks. The UI `bufferHash` is
 the normalized editor identity; snapshot text keeps the file's original line endings and is not compared to
-that hash directly. Mixed surface/disk batches persist an `agent-mutation` recovery operation before the first
-write and compensate with the same undo `operationId`. A later user edit is a conflict and
+that hash directly. Mixed surface/disk batches first validate all disk byte identities under one Documents
+resource gate, then persist an `agent-mutation` recovery operation before the first write. The WAL distinguishes
+an explicit failed surface receipt from an uncertain dispatched request, records target-after state, and
+compensates unchanged paths with the same undo `operationId`; durable attention rows enter Recovery status/UI.
+A crash after a disk write but before target-after capture remains explicit `needs-attention`. A later user edit is a conflict and
 does not save or write disk. Ordinary disk paths keep the journaled Documents write. Explicit
 selection/diff attachments may still quote text in the prompt, and patch accept/reject uses
 expected-revision writes so an agent edit cannot silently overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never
@@ -723,6 +732,12 @@ Zone 2, lost resume, and knowledge/recall/suggestions read the Host session bind
 reconciliation; they do not treat `ctx.workspaceId` as the catalog key or skip a thread tool allowlist
 when the owner is missing. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
 independent `git init`; child Git commands must not discover or mutate the user repository.
+Every scratch/worktree record persists its absolute `managedRoot`. Before inspect, snapshot,
+materialization, setup, Git attach, reclaim, or discard, the runtime checks canonical containment for the
+main and adjacent staging/result paths and asks the Host/backend to re-authorize that root. A persisted
+record cannot authorize itself after restart. Application-host virtual scratch lives under
+`PIARIUM_DATA_DIR/thread-scratch/<workspace-hash>`; an old record without managedRoot is refused for
+automatic filesystem operations (D-231).
 `worktree.base` remains the parent-state identity. Inspect, snapshot, and settle use the execution
 repository's persisted `executionBaseline` after init, detach, crash recovery, or rematerialize
 (D-220). Reclaim drops that SHA with the deleted child objects. Working-branch reads re-fetch the

@@ -528,6 +528,34 @@ export class WorkingStateStore {
     }
   }
 
+  async getObjectSlice(
+    hash: string,
+    expectedByteLength: number,
+    offset: number,
+    length: number,
+  ): Promise<Buffer | null> {
+    const start = Math.max(0, Math.floor(offset));
+    const requested = Math.max(0, Math.floor(length));
+    let handle: fs.promises.FileHandle | null = null;
+    try {
+      const target = objectPath(this.context.root, hash);
+      handle = await this.fsPromises.open(target, "r");
+      const stat = await handle.stat();
+      if (stat.size !== expectedByteLength) {
+        throw new Error(`Working-state object length is corrupt: ${hash}`);
+      }
+      if (start >= stat.size || requested === 0) return Buffer.alloc(0);
+      const bytes = Buffer.alloc(Math.min(requested, stat.size - start));
+      const result = await handle.read(bytes, 0, bytes.byteLength, start);
+      return bytes.subarray(0, result.bytesRead);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+  }
+
   getBranch(branchId: string): WorkingBranch | null {
     const branch = this.document.branches[branchId];
     return branch ? clone(branch) : null;

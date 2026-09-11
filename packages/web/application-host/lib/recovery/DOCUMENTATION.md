@@ -45,6 +45,13 @@ For an agent-triggered merge, the final integration state and its safety-to-targ
 the active parent turn checkpoint in the same SQLite transaction. Normal conversation undo therefore uses
 the existing checkpoint path; a missing parent binding prevents any integration write.
 
+Root-session batches that mix Document Registry buffers and disk paths use a separate `agent-mutation`
+operation in this catalog. It validates every disk member under the Documents resource gate before any
+surface dispatch, records external dispatch/receipt/compensation stages, and restores only paths still equal
+to this operation's output. Durable `needs-attention` rows are included in recovery status and the Recovery
+panel. The current file store captures target-after following the disk write; a crash between those two
+steps remains needs-attention rather than being guessed or silently rolled back (D-232).
+
 ## Coverage boundary
 
 `write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation

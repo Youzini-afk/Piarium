@@ -298,8 +298,26 @@ describe("thread services", () => {
       };
       const first = await service.handle({ concurrency: 1, role: "check", task: "Run the suite" }, nestedCtx);
       const queued = await service.handle({ concurrency: 1, role: "check", task: "Second check" }, nestedCtx);
+      const queuedRetrieval = await service.handle({
+        concurrency: 1,
+        role: "retrieval",
+        task: "Read the parent-frozen fact",
+        model: { providerId: "test", modelId: "retrieval" },
+      }, nestedCtx);
       expect(first.queued).toBe(false);
       expect(queued.queued).toBe(true);
+      expect(queuedRetrieval.queued).toBe(true);
+      const retrieval = await registry.getThread(
+        "workspace-1",
+        { kind: "thread", id: parent.id },
+        queuedRetrieval.threadId,
+      );
+      expect(retrieval?.manifest.worktree).toBe("isolated");
+      expect(prepareIsolatedBranch).toHaveBeenCalledWith(expect.objectContaining({
+        workspaceId: "workspace-1",
+        parent: { kind: "thread", id: parent.id },
+        threadId: queuedRetrieval.threadId,
+      }));
       expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, first.threadId)).toMatchObject({
         parent: { kind: "thread", id: parent.id },
         role: "check",

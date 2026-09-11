@@ -270,4 +270,48 @@ ccc
     assert.equal(calls.includes("document.surfaceWrite"), false);
     assert.equal(calls.includes("document.branchWrite"), false);
   });
+
+  it("carries the disk patch source identity into surfaceWrite after a concurrent edit", async () => {
+    writeFileSync(join(tmpDir, "stale.txt"), "before\n");
+    let expectedHash = "";
+    const bridge = {
+      request: async (method: string, params: Record<string, unknown>) => {
+        if (method === "fs.lock") {
+          return params.action === "acquire"
+            ? { held: true, leaseIds: ["lease-1"] }
+            : { held: false, released: true };
+        }
+        if (method === "document.readSource") {
+          return { source: "disk" };
+        }
+        if (method === "document.branchWrite") {
+          // The patch is computed from `before`; a concurrent writer wins
+          // before the Host receives the conditional surface mutation.
+          writeFileSync(join(tmpDir, "stale.txt"), "before\r\n");
+          return { status: "disk" };
+        }
+        if (method === "document.surfaceWrite") {
+          const changes = params.changes as Array<{ expectedHash?: string }>;
+          expectedHash = changes[0]?.expectedHash ?? "";
+          return {
+            status: "conflict",
+            message: "disk source changed",
+            results: [{ path: "stale.txt", target: "disk", status: "conflict" }],
+          };
+        }
+        if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createApplyPatchTool(bridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const text = await executePatch(tool, `*** Begin Patch
+*** Update File: stale.txt
+@@
+-before
++updated
+*** End Patch`);
+    assert.match(text, /conflict/);
+    assert.match(expectedHash, /^sha256-[0-9a-f]{64}$/);
+    assert.equal(readFileSync(join(tmpDir, "stale.txt"), "utf8"), "before\r\n");
+  });
 });

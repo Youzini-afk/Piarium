@@ -1,8 +1,11 @@
 import {
+  DEFAULT_HARNESS_SETTINGS,
   formatRetrievalEvidenceText,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
+  mergeHarnessSettings,
   normalizeFrozenHarnessPermissions,
   sliceUtf8ByBytes,
+  type RetrievalArtifactRef,
   type RetrievalEvidence,
   type Thread,
   type ThreadParent,
@@ -244,7 +247,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         createdBy: "agent" as const,
         concurrency,
         autoRun: true,
-        worktree: captured.draftBaselineId ? "isolated" as const
+        worktree: captured.draftBaselineId || (role.id === "retrieval" && parent.kind === "thread") ? "isolated" as const
           : role.worktree === "none" ? "none" as const
             : role.worktree === "shared" ? "shared" as const
               : "isolated" as const,
@@ -370,37 +373,61 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
         throw new HarnessServiceError("invalid-params", "submit_facts requires a facts array");
       }
       const runId = binding.runId;
-      const evidence = await validateRetrievalEvidence({
-        question: params.question,
-        facts: params.facts,
-        ...(params.unknowns ? { unknowns: params.unknowns } : {}),
-        ...(params.attempted ? { attempted: params.attempted } : {}),
-        frozenScope: thread.manifest.scope,
-        ...(ctx.actor.workspaceScope ? { actorScope: ctx.actor.workspaceScope } : {}),
-        brief: thread.brief,
-        ...(host.readExploreFile ? { readFile: host.readExploreFile } : {}),
-        actor: ctx.actor,
-        signal: ctx.signal,
-        ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
-        outputStore: host.outputStore,
+      const receiptAuthority = {
+        owningWorkspaceId: binding.owningWorkspaceId,
         sessionId: ctx.sessionId,
-        ...(host.storeRetrievalArtifact
-          ? { storeArtifact: (bytes) => host.storeRetrievalArtifact!(binding.owningWorkspaceId, bytes) }
-          : {}),
-        ...(host.lookupWebFetchReceipt
-          ? { lookupReceipt: (receiptId) => host.lookupWebFetchReceipt!(binding.owningWorkspaceId, receiptId) }
-          : {}),
-      });
+        threadId: thread.id,
+        runId,
+      };
+      let catalogCommitted = false;
       try {
-        await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, runId, evidence);
-      } catch (error) {
-        throw new HarnessServiceError(
-          "denied",
-          error instanceof Error ? error.message : String(error),
-        );
+        const evidence = await validateRetrievalEvidence({
+          question: params.question,
+          facts: params.facts,
+          ...(params.unknowns ? { unknowns: params.unknowns } : {}),
+          ...(params.attempted ? { attempted: params.attempted } : {}),
+          frozenScope: thread.manifest.scope,
+          ...(ctx.actor.workspaceScope ? { actorScope: ctx.actor.workspaceScope } : {}),
+          brief: thread.brief,
+          ...(host.readExploreFile ? { readFile: host.readExploreFile } : {}),
+          actor: ctx.actor,
+          signal: ctx.signal,
+          ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
+          outputStore: host.outputStore,
+          sessionId: ctx.sessionId,
+          receiptAuthority,
+          ...(host.storeRetrievalArtifact
+            ? { storeArtifact: (bytes) => host.storeRetrievalArtifact!(binding.owningWorkspaceId, bytes, receiptAuthority) }
+            : {}),
+          ...(host.lookupWebFetchReceipt
+            ? { lookupReceipt: (receiptId, authority) => host.lookupWebFetchReceipt!(binding.owningWorkspaceId, authority, receiptId) }
+            : {}),
+        });
+        try {
+          await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, runId, evidence);
+          catalogCommitted = true;
+        } catch (error) {
+          throw new HarnessServiceError(
+            "denied",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        await host.protectRetrievalEvidence?.({
+          workspaceId: binding.owningWorkspaceId,
+          threadId: thread.id,
+          runId,
+          evidence,
+          receiptAuthority,
+        });
+        return { text: formatRetrievalEvidenceText(evidence), evidence };
+      } finally {
+        if (!catalogCommitted) {
+          await host.releaseRetrievalTemporaryArtifacts?.(
+            binding.owningWorkspaceId,
+            receiptAuthority,
+          ).catch(() => undefined);
+        }
       }
-      await host.protectRetrievalEvidence?.(binding.owningWorkspaceId, thread.id, evidence);
-      return { text: formatRetrievalEvidenceText(evidence), evidence };
     },
   };
 }
@@ -604,14 +631,40 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
             transcriptRef: null,
           };
         }
-        const evidence = thread.report.evidence
-          ? await hydrateRetrievalEvidence(host, workspaceId, thread.report.evidence)
-          : null;
-        const report = evidence ? { ...thread.report, evidence } : thread.report;
-        lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
+        const report = thread.report;
         if (report.evidence) {
-          lines.push(formatRetrievalEvidenceText(report.evidence));
+          let visibleBytes = DEFAULT_HARNESS_SETTINGS.output.visibleBytes;
+          try {
+            const settings = await host.harnessSettings?.(workspaceId);
+            const asRecord = (value: unknown): Record<string, unknown> => (
+              value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
+            );
+            if (settings) {
+              visibleBytes = mergeHarnessSettings(
+                asRecord(asRecord(settings.global).harness),
+                settings.projectTrusted ? asRecord(asRecord(settings.project).harness) : {},
+              ).output.visibleBytes;
+            }
+          } catch {
+            // The established default remains the display budget when settings are unavailable.
+          }
+          const page = await readRetrievalReportPage({
+            host,
+            workspaceId,
+            heading: `Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`,
+            evidence: report.evidence,
+            offset: params.offset ?? 0,
+            length: params.length ?? visibleBytes,
+          });
+          return {
+            text: page.text,
+            report,
+            transcriptRef: report.transcriptRef,
+            nextOffset: page.nextOffset,
+            eof: page.eof,
+          };
         } else {
+          lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
           lines.push(`Conclusion: ${report.conclusion}`);
           lines.push(`Changed files: ${report.changedFiles.join(", ") || "(none)"}`);
           lines.push(`Deviations from brief: ${report.deviations.join("; ") || "none"}`);
@@ -783,22 +836,110 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
   };
 }
 
-const hydrateRetrievalEvidence = async (
-  host: HarnessServiceHost,
-  workspaceId: string,
-  evidence: RetrievalEvidence,
-): Promise<RetrievalEvidence> => {
-  if (!host.readRetrievalArtifact) return evidence;
-  const facts = await Promise.all(evidence.facts.map(async (fact) => ({
-    ...fact,
-    sources: await Promise.all(fact.sources.map(async (source) => {
-      if (source.excerpt || !source.artifact) return source;
-      const bytes = await host.readRetrievalArtifact!(workspaceId, source.artifact.hash);
-      if (!bytes) return source;
-      return { ...source, excerpt: bytes.toString("utf8") };
-    })),
-  })));
-  return { ...evidence, facts };
+type RetrievalReportSegment =
+  | { kind: "text"; bytes: Buffer; byteLength: number }
+  | { kind: "artifact"; artifact: RetrievalArtifactRef; byteLength: number };
+
+const retrievalReportSegments = (heading: string, evidence: RetrievalEvidence): RetrievalReportSegment[] => {
+  const segments: RetrievalReportSegment[] = [];
+  const includedArtifacts = new Set<string>();
+  const text = (value: string): void => {
+    const bytes = Buffer.from(value, "utf8");
+    segments.push({ kind: "text", bytes, byteLength: bytes.byteLength });
+  };
+  const artifact = (ref: RetrievalArtifactRef): void => {
+    if (includedArtifacts.has(ref.hash)) {
+      text(`\n    [artifact ${ref.hash} already included]`);
+      return;
+    }
+    includedArtifacts.add(ref.hash);
+    text(`\n    <evidence-artifact hash="${ref.hash}" bytes="${ref.byteLength}">\n`);
+    segments.push({ kind: "artifact", artifact: ref, byteLength: ref.byteLength });
+    text("\n    </evidence-artifact>");
+  };
+
+  text(`${heading}\nQuestion: ${evidence.question}\nScope: ${evidence.scope.join(", ") || "(workspace)"}\nCompletion: ${evidence.completion}\nFacts (${evidence.facts.length}):`);
+  for (const fact of evidence.facts) {
+    text(`\n- [${fact.status}] ${fact.claim}`);
+    for (const source of fact.sources) {
+      if (source.kind === "local") {
+        const range = source.startLine !== undefined && source.endLine !== undefined
+          ? `:${source.startLine}-${source.endLine}`
+          : "";
+        const revision = source.revision ? ` @${source.revision}` : "";
+        const origin = source.origin ? ` (${source.origin})` : "";
+        const check = source.check ? ` ${source.check}` : "";
+        text(`\n  ${source.path ?? "?"}${range}${revision}${origin}${check}`);
+      } else if (source.kind === "url") {
+        text(`\n  ${source.url ?? "?"}${source.receiptId ? ` receipt ${source.receiptId}` : ""}`);
+      } else {
+        text(`\n  ${source.artifact ? `output artifact ${source.artifact.hash}` : `output ${source.outputRef?.handle ?? "?"}`}`);
+      }
+      if (source.excerpt !== undefined) {
+        text(`\n${source.excerpt.split("\n").map((line) => `    ${line}`).join("\n")}`);
+      } else if (source.artifact) {
+        artifact(source.artifact);
+      }
+    }
+  }
+  if (evidence.unknowns.length > 0) {
+    text(`\nUnknowns:${evidence.unknowns.map((item) => `\n- ${item}`).join("")}`);
+  }
+  if (evidence.attempted.length > 0) {
+    text(`\nAttempted:${evidence.attempted.map((item) => (
+      `\n- ${item.action}: ${item.outcome}${item.detail ? ` (${item.detail})` : ""}`
+    )).join("")}`);
+  }
+  return segments;
+};
+
+const readRetrievalReportPage = async (input: {
+  host: HarnessServiceHost;
+  workspaceId: string;
+  heading: string;
+  evidence: RetrievalEvidence;
+  offset: number;
+  length: number;
+}): Promise<{ text: string; nextOffset: number; eof: boolean }> => {
+  const segments = retrievalReportSegments(input.heading, input.evidence);
+  const total = segments.reduce((sum, segment) => sum + segment.byteLength, 0);
+  const requestedOffset = Math.min(Math.max(0, Math.floor(input.offset)), total);
+  const requestedLength = Number.isFinite(input.length)
+    ? Math.max(1, Math.floor(input.length))
+    : total;
+  const windowStart = Math.max(0, requestedOffset - 3);
+  const windowEnd = Math.min(total, requestedOffset + requestedLength + 3);
+  const chunks: Buffer[] = [];
+  let cursor = 0;
+  for (const segment of segments) {
+    const segmentStart = cursor;
+    const segmentEnd = cursor + segment.byteLength;
+    cursor = segmentEnd;
+    if (segmentEnd <= windowStart || segmentStart >= windowEnd) continue;
+    const start = Math.max(0, windowStart - segmentStart);
+    const end = Math.min(segment.byteLength, windowEnd - segmentStart);
+    if (segment.kind === "text") {
+      chunks.push(segment.bytes.subarray(start, end));
+      continue;
+    }
+    if (!input.host.readRetrievalArtifactSlice) {
+      throw new HarnessServiceError("unavailable", "Retrieval artifact paging is not configured");
+    }
+    const bytes = await input.host.readRetrievalArtifactSlice(
+      input.workspaceId,
+      segment.artifact,
+      start,
+      end - start,
+    );
+    if (!bytes || bytes.byteLength !== end - start) {
+      throw new HarnessServiceError("unavailable", `Retrieval evidence artifact is unavailable: ${segment.artifact.hash}`);
+    }
+    chunks.push(bytes);
+  }
+  const window = Buffer.concat(chunks);
+  const sliced = sliceUtf8ByBytes(window, requestedOffset - windowStart, requestedLength);
+  const nextOffset = windowStart + sliced.nextOffset;
+  return { text: sliced.text, nextOffset, eof: nextOffset >= total };
 };
 
 const compareThreadsStable = (

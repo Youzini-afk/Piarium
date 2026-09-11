@@ -71,9 +71,29 @@ else
 fi
 `;
 
+export const POWERSHELL_COMMAND_START_CAPTURE = `$global:__PiariumNativeExitBaseline = $global:LASTEXITCODE
+  $global:__PiariumNativeExitBaselineSet = $true`;
+
 export const POWERSHELL_EXIT_CAPTURE = `$__piarium_success = $?
   $__piarium_exit = $global:LASTEXITCODE
-  $code = if ($__piarium_success) { 0 } elseif ($__piarium_exit -is [int] -and $__piarium_exit -ne 0) { [int]$__piarium_exit } else { 1 }`;
+  $__piarium_native_status_observed = $false
+  if ($global:__PiariumNativeExitBaselineSet -eq $true) {
+    $__piarium_native_status_observed = if ($__piarium_exit -is [int]) {
+      if ($global:__PiariumNativeExitBaseline -is [int]) {
+        [int]$__piarium_exit -ne [int]$global:__PiariumNativeExitBaseline
+      } else {
+        $true
+      }
+    } else {
+      $false
+    }
+  }
+  # LASTEXITCODE has no generation counter. A changed native status proves
+  # that this command ran a native process; an unchanged value is explicitly
+  # treated as unknown and falls back to cmdlet success/failure semantics.
+  $code = if ($__piarium_success) { 0 } elseif ($__piarium_native_status_observed) { [int]$__piarium_exit } else { 1 }
+  $global:__PiariumNativeExitBaseline = $__piarium_exit
+  $global:__PiariumNativeExitBaselineSet = $true`;
 
 const POWERSHELL_SCRIPT = `if ($env:PIARIUM_SHELL_INTEGRATION) { return }
 $env:PIARIUM_SHELL_INTEGRATION = '1'
@@ -104,6 +124,7 @@ if (Get-Module -ListAvailable -Name PSReadLine) {
   Set-PSReadLineOption -AddToHistoryHandler {
     param($line)
     if ($line) {
+      ${POWERSHELL_COMMAND_START_CAPTURE}
       __PiariumEmit ("E;" + (__PiariumEscape $line))
       __PiariumEmit 'C'
       $global:__PiariumAwaitingFinish = $true
@@ -117,24 +138,30 @@ if (Get-Module -ListAvailable -Name PSReadLine) {
 `;
 
 const zshUserZdot = `"\${PIARIUM_USER_ZDOTDIR:-\$HOME}"`;
+const zshUserZdotSet = `"\${PIARIUM_USER_ZDOTDIR_SET:-0}"`;
 
 const ZSH_ENV_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+__piarium_user_zdotdir_set=${zshUserZdotSet}
 if [ -f "\$__piarium_user_zdotdir/.zshenv" ]; then
-  ZDOTDIR="\$__piarium_user_zdotdir"
-  . "\$ZDOTDIR/.zshenv"
+  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__piarium_user_zdotdir/.zshenv"
 fi
 ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
 const ZSH_PROFILE_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+__piarium_user_zdotdir_set=${zshUserZdotSet}
 if [ -f "\$__piarium_user_zdotdir/.zprofile" ]; then
+  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
   . "\$__piarium_user_zdotdir/.zprofile"
 fi
 ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
 `;
 
 const ZSH_LOGIN_SCRIPT = `__piarium_user_zdotdir=${zshUserZdot}
+__piarium_user_zdotdir_set=${zshUserZdotSet}
 if [ -f "\$__piarium_user_zdotdir/.zlogin" ]; then
+  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
   . "\$__piarium_user_zdotdir/.zlogin"
 fi
 ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
@@ -145,8 +172,13 @@ const ZSH_SCRIPT = `if [ -n "\${PIARIUM_SHELL_INTEGRATION:-}" ]; then
 fi
 export PIARIUM_SHELL_INTEGRATION=1
 __piarium_user_zdotdir=${zshUserZdot}
+__piarium_user_zdotdir_set=${zshUserZdotSet}
 [ -f /etc/zshrc ] && . /etc/zshrc
-[ -f "\$__piarium_user_zdotdir/.zshrc" ] && . "\$__piarium_user_zdotdir/.zshrc"
+if [ -f "\$__piarium_user_zdotdir/.zshrc" ]; then
+  if [ "\$__piarium_user_zdotdir_set" = 1 ]; then ZDOTDIR="\$__piarium_user_zdotdir"; else unset ZDOTDIR; fi
+  . "\$__piarium_user_zdotdir/.zshrc"
+  ZDOTDIR="\${PIARIUM_ZDOTDIR:-\$ZDOTDIR}"
+fi
 
 __piarium_escape() {
   printf '%s' "\$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/;/\\\\x3b/g'
@@ -245,7 +277,8 @@ export const shellIntegrationLaunch = (
         ...env,
         ZDOTDIR: zdotdir,
         PIARIUM_ZDOTDIR: zdotdir,
-        ...(userZdotDir ? { PIARIUM_USER_ZDOTDIR: userZdotDir } : {}),
+        PIARIUM_USER_ZDOTDIR_SET: userZdotDir === undefined ? "0" : "1",
+        ...(userZdotDir === undefined ? {} : { PIARIUM_USER_ZDOTDIR: userZdotDir }),
       },
     };
   }

@@ -101,7 +101,7 @@ export function createWebFetchTool(
         const result = await bridge.request("web.fetch", {
           url: params.url,
           ...(params.render !== undefined ? { render: params.render } : {}),
-        });
+        }, signal ? { signal } : undefined);
         if (hasPrompt && readPage && result.status === "ok") {
           try {
             const answer = await readPage({
@@ -111,7 +111,7 @@ export function createWebFetchTool(
               signal,
             });
             return {
-              content: [{ type: "text", text: `answer (from ${result.finalUrl}):\n${answer}` }],
+              content: [{ type: "text", text: `${formatOkFetchHeader(result)}\nanswer (from ${result.finalUrl}):\n${answer}` }],
               details: {
                 kind: "webfetch",
                 status: "ok",

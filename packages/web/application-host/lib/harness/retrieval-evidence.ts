@@ -7,6 +7,7 @@ import {
   type RetrievalFact,
   type RetrievalFactSource,
   type RetrievalOutputRef,
+  type RetrievalReceiptAuthority,
   type RetrievalSourceCheck,
   type RetrievalUrlReceipt,
   type ThreadFactsSetParams,
@@ -31,9 +32,10 @@ export interface RetrievalEvidenceValidationInput {
   inputContext?: Parameters<ExploreFileReader>[3];
   outputStore?: OutputStore;
   sessionId: string;
+  receiptAuthority?: RetrievalReceiptAuthority;
   visibleBytes?: number;
   storeArtifact?: (bytes: Buffer) => Promise<RetrievalArtifactRef>;
-  lookupReceipt?: (receiptId: string) => Promise<RetrievalUrlReceipt | null>;
+  lookupReceipt?: (receiptId: string, authority: RetrievalReceiptAuthority) => Promise<RetrievalUrlReceipt | null>;
 }
 
 const pathInScope = (path: string, scopes: readonly string[]): boolean => {
@@ -135,8 +137,8 @@ export async function validateRetrievalEvidence(
           continue;
         }
         const receiptId = source.receiptId?.trim() ?? "";
-        const receipt = receiptId && input.lookupReceipt
-          ? await input.lookupReceipt(receiptId)
+        const receipt = receiptId && input.lookupReceipt && input.receiptAuthority
+          ? await input.lookupReceipt(receiptId, input.receiptAuthority)
           : null;
         if (!receipt || receipt.receiptId !== receiptId || receipt.finalUrl !== url) {
           checks.push("unknown");
@@ -157,6 +159,7 @@ export async function validateRetrievalEvidence(
           receiptId: receipt.receiptId,
           contentHash: receipt.contentHash,
           revision: receipt.revision,
+          artifact: receipt.artifact,
         });
         continue;
       }

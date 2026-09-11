@@ -24,7 +24,10 @@ import {
   finalizeAgentMutationOperation,
   markAgentMutationPathApplied,
   markAgentMutationPathNeedsAttention,
+  markAgentMutationSurfaceCompensateIntent,
+  markAgentMutationSurfaceDispatched,
   markAgentMutationSurfaceCompensated,
+  markAgentMutationSurfaceNotApplied,
   type AgentMutationDiskIdentity,
   type AgentMutationSurfaceBinding,
   type PersistedAgentMutationData,
@@ -135,6 +138,8 @@ const contentHash = (content: string): string => (
 );
 
 const editorBufferHash = (content: string): string => contentHash(normalizeEditorLineEndings(content));
+
+const diskIdentityHash = (content: string): string => contentHash(content);
 
 const sameResource = (left: string, right: string): boolean => (
   process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right
@@ -477,6 +482,7 @@ export async function applyAgentSurfaceMutation(
     | { kind: "disk"; item: PlannedPath; before: NonNullable<PlannedPath["diskBefore"]> }
   > = [];
   let durable: PersistedAgentMutationData | null = null;
+  let surfaceDispatched = false;
 
   const persistIntent = async (): Promise<PersistedAgentMutationData | null> => {
     if (!deps.durable) return durable;
@@ -487,7 +493,7 @@ export async function applyAgentSurfaceMutation(
     const targets: Record<string, { expected: RecoveryState; target: RecoveryState }> = {};
     const safety: Record<string, RecoveryState> = {};
     const targetKinds: Record<string, "surface" | "disk"> = {};
-    for (const item of [...toApplySurface, ...toApplyDisk]) {
+    for (const item of [...toApplySurface, ...toApplyDisk.filter((entry) => entry.class === "disk")]) {
       targetKinds[item.change.resourceId] = item.class === "disk" ? "disk" : "surface";
     }
     for (const item of toApplySurface) {
@@ -509,9 +515,27 @@ export async function applyAgentSurfaceMutation(
       targets[item.change.resourceId] = { expected: placeholder, target: placeholder };
       safety[item.change.resourceId] = placeholder;
     }
-    for (const item of toApplyDisk) {
+    for (const item of toApplyDisk.filter((entry) => entry.class === "disk")) {
       const before = await captureDiskState(deps, item.change.resourceId);
       const current = await deps.readDisk(workspaceId, item.change.resourceId);
+      const expectedRevision = item.change.expectedRevision;
+      const expectedHash = item.change.expectedHash;
+      const actualHash = current.status === "ready" && typeof current.content === "string"
+        ? diskIdentityHash(current.content)
+        : undefined;
+      if ((expectedRevision !== undefined && expectedRevision !== (current.revision ?? null))
+        || (expectedHash !== undefined && expectedHash !== actualHash)) {
+        delete targetKinds[item.change.resourceId];
+        item.class = "conflict";
+        item.result = {
+          path: item.change.resourceId,
+          target: "disk",
+          status: "conflict",
+          ...(current.revision === undefined ? {} : { revision: current.revision }),
+          message: `${item.change.resourceId} changed after the patch source was read.`,
+        };
+        continue;
+      }
       const state = before ?? { kind: current.status === "missing" ? "missing" : "unsupported" as const };
       item.diskBefore = {
         content: current.status === "ready" ? current.content ?? "" : "",
@@ -536,6 +560,9 @@ export async function applyAgentSurfaceMutation(
       targets[item.change.resourceId] = { expected: state, target: state };
       safety[item.change.resourceId] = state;
     }
+    // A stale disk identity is a real conflict, so it must not be included in
+    // the durable operation that will be dispatched for the remaining paths.
+    if (Object.keys(targets).length === 0) return null;
     return beginAgentMutationOperation(deps.durable, {
       operationId,
       sessionId: input.sessionId,
@@ -569,6 +596,11 @@ export async function applyAgentSurfaceMutation(
         }
       } else {
         try {
+          if (deps.durable && durable) {
+            for (const entry of surfaceApplied) {
+              markAgentMutationSurfaceCompensateIntent(deps.durable, durable, entry.item.change.resourceId);
+            }
+          }
           const undone = await deps.requestSurfaceOperation({
             action: "undo",
             generation: owner.generation,
@@ -643,7 +675,7 @@ export async function applyAgentSurfaceMutation(
     for (const entry of [...applied].reverse()) {
       if (entry.kind !== "disk") continue;
       if (deps.durable && durable && entry.before.state) {
-        const outcome = await compensateAgentMutationDiskPath(deps.durable, durable, entry.item.change.resourceId);
+        const outcome = await compensateAgentMutationDiskPath(deps.durable, durable, entry.item.change.resourceId, { gateHeld: true });
         entry.item.result = outcome === "compensated"
           ? {
               path: entry.item.change.resourceId,
@@ -711,13 +743,26 @@ export async function applyAgentSurfaceMutation(
     applied.length = 0;
   };
 
+  const executeMutation = async (): Promise<{ result: DocumentSurfaceWriteResult; record: AgentMutationRecord | null }> => {
   let failed = false;
   try {
-    if (toApplySurface.length > 0 || toApplyDisk.length > 0) {
+    if (toApplySurface.length > 0 || toApplyDisk.some((entry) => entry.class === "disk")) {
       durable = await persistIntent();
     }
-    if (toApplySurface.length > 0 && owner && publication?.registrationId) {
+    if (toApplyDisk.some((entry) => entry.class !== "disk" && entry.result)) {
+      // A path that failed its source identity check is part of the same
+      // mutation. Compensate any surface paths already applied instead of
+      // reporting a durable operation as complete with a partial write.
+      failed = true;
+    }
+    if (!failed && toApplySurface.length > 0 && owner && publication?.registrationId) {
       input.signal?.throwIfAborted();
+      if (deps.durable && durable) {
+        for (const item of toApplySurface) {
+          markAgentMutationSurfaceDispatched(deps.durable, durable, item.change.resourceId);
+          surfaceDispatched = true;
+        }
+      }
       const receipts = await deps.requestSurfaceOperation({
         action: "apply",
         generation: owner.generation,
@@ -752,8 +797,8 @@ export async function applyAgentSurfaceMutation(
             revision: `surface-draft:${input.context.source === "surface" && input.context.snapshot.status === "ready"
               ? input.context.snapshot.ref
               : "applied"}:${receipt.afterLocalEditRevision}`,
-          };
-          applied.push({ kind: "surface", item, receipt });
+        };
+        applied.push({ kind: "surface", item, receipt });
           if (deps.durable && durable) {
             markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
               afterLocalEditRevision: receipt.afterLocalEditRevision,
@@ -771,7 +816,19 @@ export async function applyAgentSurfaceMutation(
             ?? `${item.change.resourceId} could not be written to the editor buffer.`,
         });
         failed = true;
-        break;
+        if (deps.durable && durable) {
+          if (receipt) {
+            markAgentMutationSurfaceNotApplied(deps.durable, durable, item.change.resourceId);
+          } else {
+            markAgentMutationPathNeedsAttention(
+              deps.durable,
+              durable,
+              item.change.resourceId,
+              `${item.change.resourceId} surface receipt was not returned`,
+            );
+            item.result = { ...item.result, status: "needs-attention" };
+          }
+        }
       }
     }
   } catch (error) {
@@ -790,19 +847,41 @@ export async function applyAgentSurfaceMutation(
             : message,
         });
       }
+      if (deps.durable && durable && surfaceDispatched && !item.result?.status?.startsWith("applied")) {
+        markAgentMutationPathNeedsAttention(deps.durable, durable, item.change.resourceId, message);
+        if (item.result) item.result = { ...item.result, status: "needs-attention" };
+      }
     }
   }
   if (failed) await compensate();
 
-  if (!failed && toApplyDisk.length > 0) {
+  if (!failed && toApplyDisk.some((entry) => entry.class === "disk")) {
     const workspaceId = owner?.workspaceId
       ?? (input.context.source === "surface" ? input.context.workspaceId : "");
     const token = await diskToken(deps, workspaceId);
-    for (const item of toApplyDisk) {
+        for (const item of toApplyDisk.filter((entry) => entry.class === "disk")) {
       try {
         input.signal?.throwIfAborted();
         if (item.change.action === "delete") {
           const current = await deps.readDisk(workspaceId, item.change.resourceId);
+          const expectedHash = item.change.expectedHash;
+          const actualHash = current.status === "ready" && typeof current.content === "string"
+            ? diskIdentityHash(current.content)
+            : undefined;
+          if ((item.change.expectedRevision !== undefined
+            && item.change.expectedRevision !== (current.revision ?? null))
+            || (expectedHash !== undefined && expectedHash !== actualHash)) {
+            item.result = {
+              path: item.change.resourceId,
+              target: "disk",
+              status: "conflict",
+              ...(current.revision === undefined ? {} : { revision: current.revision }),
+              message: `${item.change.resourceId} changed after the patch source was read.`,
+            };
+            failed = true;
+            await compensate();
+            break;
+          }
           if (current.status !== "ready" || !current.revision) {
             item.result = {
               path: item.change.resourceId,
@@ -843,15 +922,37 @@ export async function applyAgentSurfaceMutation(
             ))),
           };
           item.diskBefore = before;
+          const after = deps.durable
+            ? await captureDiskState(deps, item.change.resourceId)
+            : undefined;
           item.result = { path: item.change.resourceId, target: "disk", status: "applied" };
           applied.push({ kind: "disk", item, before });
           if (deps.durable && durable) {
-            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId);
+            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+              target: after ?? { kind: "missing" },
+            });
           }
           continue;
         }
         let nextText = item.change.content;
         const current = await deps.readDisk(workspaceId, item.change.resourceId);
+        const actualHash = current.status === "ready" && typeof current.content === "string"
+          ? diskIdentityHash(current.content)
+          : undefined;
+        if ((item.change.expectedRevision !== undefined
+          && item.change.expectedRevision !== (current.revision ?? null))
+          || (item.change.expectedHash !== undefined && item.change.expectedHash !== actualHash)) {
+          item.result = {
+            path: item.change.resourceId,
+            target: "disk",
+            status: "conflict",
+            ...(current.revision === undefined ? {} : { revision: current.revision }),
+            message: `${item.change.resourceId} changed after the patch source was read.`,
+          };
+          failed = true;
+          await compensate();
+          break;
+        }
         if (item.change.action === "edit") {
           if (current.status !== "ready" || typeof current.content !== "string") {
             item.result = {
@@ -943,12 +1044,6 @@ export async function applyAgentSurfaceMutation(
           break;
         }
         const after = await captureDiskState(deps, item.change.resourceId);
-        if (deps.durable && durable && after) {
-          durable.targets[item.change.resourceId] = {
-            expected: durable.safety[item.change.resourceId] ?? { kind: "missing" },
-            target: after,
-          };
-        }
         const before = item.diskBefore ?? {
           content: current.status === "ready" ? current.content ?? "" : "",
           revision: current.status === "ready" || current.status === "unsupported-encoding"
@@ -967,7 +1062,9 @@ export async function applyAgentSurfaceMutation(
         });
         applied.push({ kind: "disk", item, before });
         if (deps.durable && durable) {
-          markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId);
+          markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+            ...(after ? { target: after } : {}),
+          });
         }
       } catch (error) {
         failed = true;
@@ -1011,4 +1108,12 @@ export async function applyAgentSurfaceMutation(
     results: result.status === "disk" ? [] : result.results,
   };
   return { result, record };
+  };
+  if (deps.durable && toApplyDisk.some((entry) => entry.class === "disk")) {
+    return deps.durable.resourceOperationGate.run(
+      toApplyDisk.filter((entry) => entry.class === "disk").map((item) => ({ resourceId: item.change.resourceId, scope: "exact" as const })),
+      executeMutation,
+    );
+  }
+  return executeMutation();
 }

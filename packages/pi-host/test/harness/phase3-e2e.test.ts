@@ -53,13 +53,14 @@ const report = (conclusion = "all tests pass"): ThreadReport => ({
   blocksSnapshot: {},
 });
 
-async function setup(options: { transportTimeoutMs?: number } = {}) {
+async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buffer } = {}) {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "p3-e2e-"));
   const dataDir = mkdtempSync(join(tmpdir(), "p3-e2e-data-"));
   const threadRegistry = createThreadRegistry({ dataDir, hostId: "test-host" });
   let sessionCounter = 0;
   let mergeCalls = 0;
   const sent: Array<{ sessionId: string; message: string }> = [];
+  const artifactSliceReads: Array<{ offset: number; length: number }> = [];
   const harnessServiceHost = createHarnessServiceHost({
     search: async () => ({ status: "empty" as const, generation: undefined }),
     resolveWorkspaceRoot: async () => workspaceRoot,
@@ -76,6 +77,12 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
     threadTranscriptReader: {
       read: async (ref, since = 0) => `[entries ${since + 1}–2 of 2]\n${ref.sessionId}: durable transcript`,
     },
+    ...(options.artifactBody ? {
+      readRetrievalArtifactSlice: async (_workspaceId: string, _artifact: unknown, offset: number, length: number) => {
+        artifactSliceReads.push({ offset, length });
+        return options.artifactBody!.subarray(offset, offset + length);
+      },
+    } : {}),
     zone2Provider: async () => ({
       eventCursor: 0,
       material: {
@@ -115,7 +122,7 @@ async function setup(options: { transportTimeoutMs?: number } = {}) {
     try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
   };
-  return { bridge, threadRegistry, sent, emittedRequests, getMergeCalls: () => mergeCalls, dispose };
+  return { bridge, threadRegistry, sent, emittedRequests, artifactSliceReads, getMergeCalls: () => mergeCalls, dispose };
 }
 
 async function executeTool(tool: ToolDefinition, params: Record<string, unknown>) {
@@ -316,6 +323,55 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       const repeated = await executeTool(createMergeTool(harness.bridge, SESSION_ID), { threadId: thread.id });
       assert.match(repeated.text, /already merged/);
       assert.equal(harness.getMergeCalls(), 1);
+    } finally {
+      await harness.dispose();
+    }
+  });
+
+  it("pages a large retrieval artifact through the public read_thread tool", async () => {
+    const artifactBody = Buffer.from("公开分页🙂".repeat(20_000), "utf8");
+    const harness = await setup({ artifactBody });
+    try {
+      const thread = await harness.threadRegistry.createThread({
+        ...threadInput("large retrieval"),
+        role: "retrieval",
+        worktree: "none",
+      });
+      const run = await harness.threadRegistry.startRun(WORKSPACE_ID, thread.id);
+      await harness.threadRegistry.setPendingEvidence(WORKSPACE_ID, thread.id, run.id, {
+        question: "large retrieval",
+        scope: [],
+        facts: [{
+          claim: "large durable body",
+          status: "source-checked",
+          sources: [{
+            kind: "url",
+            url: "https://example.com/large",
+            check: "source-valid",
+            artifact: { durability: "durable", hash: "sha256-large", byteLength: artifactBody.byteLength },
+          }],
+        }],
+        unknowns: [],
+        attempted: [],
+        completion: "delivered",
+      });
+      await harness.threadRegistry.endRun(WORKSPACE_ID, thread.id, run.id, "success");
+      const page = await executeTool(createReadThreadTool(harness.bridge, SESSION_ID), {
+        threadId: thread.id,
+        what: "report",
+        offset: 0,
+        length: 251,
+      });
+      assert.ok(Buffer.byteLength(page.text, "utf8") <= 254);
+      assert.equal(page.text.includes(artifactBody.toString("utf8")), false);
+      assert.deepEqual(page.details, {
+        hasReport: true,
+        transcriptRef: { runtimeId: "pi", sessionId: "", fromEntryId: null, toEntryId: null },
+        nextOffset: Buffer.byteLength(page.text, "utf8"),
+        eof: false,
+      });
+      assert.ok(harness.artifactSliceReads.length <= 1);
+      assert.ok(harness.artifactSliceReads.every((read) => read.length <= 257));
     } finally {
       await harness.dispose();
     }

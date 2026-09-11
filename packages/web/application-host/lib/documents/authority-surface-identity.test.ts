@@ -12,6 +12,7 @@ import {
   beginAgentMutationOperation,
   inspectAgentMutationOperation,
   markAgentMutationPathApplied,
+  markAgentMutationSurfaceDispatched,
   reconcileInterruptedAgentMutations,
 } from './agent-mutation-operation.js';
 import { openRecoveryJournalCatalog } from '../recovery/journal-catalog.js';
@@ -40,7 +41,13 @@ const bindDurableCatalog = async (harness: DocumentAuthorityHarness) => {
         database,
         fileStore,
         identity,
-        resourceOperationGate: { run: async (_resources, next) => next() },
+        resourceOperationGate: {
+          run: (resources, next) => harness.authority.runResourceOperation(
+            harness.identity.workspaceId,
+            resources,
+            next,
+          ),
+        },
         root: recoveryRoot,
       });
     } finally {
@@ -463,6 +470,137 @@ describe('surface identity and durable compensation', () => {
       expect(inspectAgentMutationOperation(reopened, 'op-surface-interrupt')?.state).toBe('needs-attention');
     } finally {
       reopened.close();
+    }
+  });
+
+  it('keeps dispatched surface uncertainty while compensating another applied disk path', async () => {
+    harness = await createDocumentAuthorityHarness();
+    const activeHarness = harness;
+    const { recoveryRoot, identity, fileStore } = await bindDurableCatalog(activeHarness);
+    await fs.promises.writeFile(path.join(activeHarness.workspaceRoot, 'disk.txt'), 'before\n');
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error('expected recovery catalog');
+    try {
+      const safety = (await fileStore.captureState(identity, recoveryRoot, 'disk.txt', { store: true })).state;
+      await fs.promises.writeFile(path.join(activeHarness.workspaceRoot, 'disk.txt'), 'after\n');
+      const target = (await fileStore.captureState(identity, recoveryRoot, 'disk.txt', { store: true })).state;
+      await fs.promises.writeFile(path.join(activeHarness.workspaceRoot, 'disk.txt'), 'after\n');
+      const context: DurableFileOperationContext = {
+        database,
+        fileStore,
+        identity,
+        resourceOperationGate: {
+          run: (resources, next) => activeHarness.authority.runResourceOperation(
+            activeHarness.identity.workspaceId,
+            resources,
+            next,
+          ),
+        },
+        root: recoveryRoot,
+      };
+      const data = beginAgentMutationOperation(context, {
+        operationId: 'op-dispatched-surface',
+        sessionId: 'session-dispatched',
+        workspaceId: activeHarness.identity.workspaceId,
+        targetKinds: { 'draft.ts': 'surface', 'disk.txt': 'disk' },
+        surfaceBindings: {
+          'draft.ts': {
+            ownerId: 'surface-owner',
+            ownerGeneration: 1,
+            ownerRegistrationId: 'reg-1',
+            documentInstanceId: 'doc-1',
+            baseRevision: 'disk-a',
+            beforeLocalEditRevision: 2,
+            beforeHash: hashSurfaceText('before\n'),
+            encoding: 'utf-8',
+            bom: false,
+            lineEnding: 'lf',
+          },
+        },
+        targets: {
+          'draft.ts': { expected: { kind: 'missing' }, target: { kind: 'missing' } },
+          'disk.txt': { expected: safety, target },
+        },
+        safety: { 'draft.ts': { kind: 'missing' }, 'disk.txt': safety },
+      });
+      markAgentMutationSurfaceDispatched(context, data, 'draft.ts');
+      markAgentMutationPathApplied(context, data, 'disk.txt', { target });
+      const outcome = await reconcileInterruptedAgentMutations(context, {
+        surfaceOwnerAvailable: () => true,
+      });
+      expect(outcome.needsAttention).toContain('op-dispatched-surface');
+      expect(await fs.promises.readFile(path.join(activeHarness.workspaceRoot, 'disk.txt'), 'utf8')).toBe('before\n');
+      const persisted = inspectAgentMutationOperation(database, 'op-dispatched-surface');
+      expect(persisted?.state).toBe('needs-attention');
+      expect(persisted?.data.needsAttentionPaths).toContain('draft.ts');
+      expect(persisted?.data.compensatedPaths).toContain('disk.txt');
+    } finally {
+      database.close();
+    }
+  });
+
+  it('rejects a stale disk source before dispatching any surface path', async () => {
+    harness = await createDocumentAuthorityHarness();
+    const activeHarness = harness;
+    await bindDurableCatalog(activeHarness);
+    const live = new Map<string, LiveSurfaceBuffer>();
+    const surface = attachLiveSurfaceCompleter(activeHarness.authority, {
+      generation: 1,
+      live,
+      ownerId: 'surface-owner',
+      workspaceId: activeHarness.identity.workspaceId,
+    });
+    try {
+      await fs.promises.writeFile(path.join(activeHarness.workspaceRoot, 'draft.ts'), 'disk\n');
+      await fs.promises.writeFile(path.join(activeHarness.workspaceRoot, 'other.ts'), 'disk\n');
+      const disk = await activeHarness.authority.read(activeHarness.resource('draft.ts'));
+      if (disk.status !== 'ready') throw new Error('Expected disk fixture');
+      const binding = {
+        baseRevision: disk.revision,
+        localEditRevision: 2,
+        documentInstanceId: 'document-instance',
+        bufferHash: hashSurfaceText('draft\n'),
+        encoding: 'utf-8' as const,
+        bom: false,
+        lineEnding: 'lf' as const,
+        resource: activeHarness.resource('draft.ts'),
+      };
+      live.set('draft.ts', { ...binding, content: 'draft\n' });
+      await activeHarness.authority.publishDirtyBuffers({
+        generation: 1,
+        ownerId: 'surface-owner',
+        resources: [binding],
+        workspaceId: activeHarness.identity.workspaceId,
+      });
+      const context = await activeHarness.authority.captureAgentInputSnapshot({
+        generation: 1,
+        ownerId: 'surface-owner',
+        sessionId: 'session-stale-source',
+        workspaceId: activeHarness.identity.workspaceId,
+        resources: [{ ...binding, content: 'draft\n' }],
+      });
+      activeHarness.authority.commitAgentInputSnapshot('session-stale-source', context);
+      const result = await activeHarness.authority.applyAgentSurfaceWrite('session-stale-source', context, [
+        { resourceId: 'draft.ts', action: 'edit', edits: [{ oldText: 'draft\n', newText: 'changed\n' }] },
+        {
+          resourceId: 'other.ts',
+          action: 'write',
+          content: 'new\n',
+          expectedHash: hashSurfaceText('source-before\n'),
+        },
+      ]);
+      expect(result.status).toBe('conflict');
+      expect(live.get('draft.ts')?.content).toBe('draft\n');
+      if (result.status === 'disk' || !result.operationId) throw new Error('Expected durable stale operation');
+      const recoveryRoot = path.join(activeHarness.dataDir, 'agent-mutation-catalog');
+      const database = await reopenCatalog(recoveryRoot);
+      try {
+        expect(inspectAgentMutationOperation(database, result.operationId)?.state).toBe('aborted');
+      } finally {
+        database.close();
+      }
+    } finally {
+      surface.close();
     }
   });
 });

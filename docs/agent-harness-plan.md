@@ -101,16 +101,20 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    并补写前日志与启动对账。D-222 已补 directory reconcile 的 execution Documents gate、dequeue 冻结 overlay、
    session-bindings 对账与知识 owning 解析。D-223 已补级联生命周期 serialization 与 scope 只拒绝完整 `..` 段。
    D-224 已补剩余状态契约：materialized 父条件撤销、cascade admission、binding 当前 owner、默认 native result 失效与
-   scoped explore pin。3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
+   scoped explore pin。D-231 又把 retrieval 输入改为 dispatch 时的正常 isolated 分支，scratch 与邻接 staging/result 路径必须落在
+   Host/backend 重新授权的持久 `managedRoot` 内；retrieval 可按需物化，但 settle 不发布输入目录变化。3.4 / 3.4a / 3.6 仍保持
+   Partial：旧记录缺 managedRoot 会拒绝自动处理，真实付费嵌套 Pi 与完整桌面重启未测。
    D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威；
    D-228 纠正了 CRLF/CR 身份、整组 undo、耐久 `agent-mutation` 补偿、磁盘 encoding/BOM 恢复，以及
-   `apply_patch` 在 `readSource` 非 disk 时不得回退磁盘。完整桌面 Registry 与 Host 进程重启仅未实测。
+   `apply_patch` 在 `readSource` 非 disk 时不得回退磁盘；D-232 再补写前全磁盘预检、外部回执阶段、逐路径条件补偿和 Recovery UI。
+   写入到 target-after 捕获之间崩溃会明确 needs-attention，完整桌面 Registry 与 Host 进程重启仍未实测。
    D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
    D-229 纠正了 PowerShell 退出码捕获、`/restart` 代际重置、`sh` 不当作 Bash、用户 shell
-   保留、带代际标识的 OSC 观察、Zone 2/keeper 结构编码，以及 `commandId` 持久幂等写入。
+   保留、带代际标识的 OSC 观察和 Zone 2/keeper 结构编码；D-233 把终端事实按目标 Pi session 分别持久化并用
+   `targetPiSessionId + commandId` 幂等，补正 PowerShell 旧状态归属与 zsh `ZDOTDIR`。
    zsh/macOS/Linux 真机用户终端与完整桌面重启仅未实测。
-   D-227 / D-230 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
-   Host 校验 `submit_facts`，报告经 wait / read_thread / Zone 2 可见。
+   D-227 / D-230 / D-234 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
+   Host 校验 `submit_facts`，Run-bound receipt 与 artifact 持久保护正文，报告经 wait / 支持字节分页的 read_thread / Zone 2 可见。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -173,13 +177,14 @@ websearch provider 当前变更需重启 Host，后续新会话使用新的能�
 
 沿 zone2.assemble 和隐藏 piarium-context 消息追加用户编辑/命令/诊断/Git/知识/计划/线程状态，不重复 agent 已见材料。
 保留 event cursor 和送达后游标提交；无材料不造消息。沿现有 zone2.budgetTokens 汇总/折叠，估算明示；不新增固定文件数配额。
-User terminal 段只投影 `source !== agent` 且带 command+exitCode 的事件；cwd 有则写入。无 integration 不造伪命令。
+User terminal 段只投影 `source !== agent` 且带 command+exitCode 的事件；cwd 有则写入。每个目标 Pi session 单独写 event 并推进自己的游标，
+幂等键包含目标 session 与终端 commandId。无 integration 不造伪命令。
 
 ### 2.3 Host 观察者
 
 Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐命令终端信息用真实 OSC 133/633 shell integration，
 不把 PTY 退出当成命令完成、不按终端文本或提示符正则猜命令。只对 user 会话注入；Harness spawn 不注入、不解析。
-观察失败不反噬已经成功的写入/HTTP/终端，具体来源不可用要可见。`commandId` 去重，不重放 history、不倒退 Zone 2 游标。
+观察失败不反噬已经成功的写入/HTTP/终端，具体来源不可用要可见。`targetPiSessionId + commandId` 去重，不重放 history、不倒退 Zone 2 游标。
 
 ### 2.4 记忆 agent：默认维护
 
@@ -304,6 +309,8 @@ tombstone 隐藏路径，父 drift 不能补读，scope 仍由 Host 拒绝。D-2
 做 writeRevision CAS，不碰父磁盘；首次 bash/LSP 冻结修订、等在飞写入、staging 物化后原子切换。失败或取消后重读
 execution view，仍虚拟则继续写分支；崩溃按 `materializationSwitch` 恢复到一个权威视图。修订标签等于实际读取的
 `writeRevision`。嵌套改父虚拟分支走同一写 gate。
+所有物化/scratch 记录持久化 `managedRoot`，读取或改变目录前同时验证 canonical containment 与 Host/backend 根授权；旧记录不能靠
+自己写下的路径取得删除权。Application Host 的虚拟 scratch 位于自身数据目录，不占用父或根工作区路径（D-231）。
 D-220：独立 init / detach 后 inspect/settle 使用执行仓库可解析的 `executionBaseline`，`worktree.base` 仍是父状态身份；
 reclaim 后 rematerialize 不得引用已删子仓库对象。WorkingBranch 读取在 store lease 后重取当前 view；explore 查询开始时
 在同一 shared lease 内复制 immutable snapshot。默认新文件 mode 按 umask 计算，不探测用户树。fingerprint 含 dirty 内容身份。
@@ -371,7 +378,9 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 `models.retrievalAgent` 时角色不出现且 Host 拒绝无 model 的 retrieval dispatch。工具 allowlist 不含写/bash；
 web 工具仅在 Host 已装配时可用。交付物由 `submit_facts` → `thread.facts.set` 写入，settle 时 Host 封印
 `report.evidence`。Host 标 source-checked 而不是 verified，delivery 不用假 completeness，pending 绑定 runId，
-证据走耐久 artifact，嵌套 retrieval 读父冻结状态（D-227 / D-230）。取消/失联复用既有 Thread 生命周期。
+证据走耐久 artifact；receipt 只由 active retrieval Run 铸造并绑定 owning/session/thread/run 与 exact URL，普通 webfetch 不铸权威。
+嵌套 retrieval 在 dispatch 时沿 isolated 分支固定父状态，可按需物化只读输入，settle 不发布目录变化（D-227 / D-230 / D-231 / D-234）。
+取消/失联复用既有 Thread 生命周期，真正删除 Thread 同时释放 pending/sealed/temporary artifact 与 receipt 引用。
 
 ### 3.7 自动 review
 

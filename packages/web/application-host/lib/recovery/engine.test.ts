@@ -21,6 +21,11 @@ import {
 } from './engine.js';
 import type { SqliteDatabase } from './journal-catalog.js';
 import type { RecoveryFileStore } from './journal-files.js';
+import {
+  beginAgentMutationOperation,
+  markAgentMutationSurfaceDispatched,
+  reconcileInterruptedAgentMutations,
+} from '../documents/agent-mutation-operation.js';
 
 const harnesses = new Set<DocumentAuthorityHarness>();
 
@@ -1365,5 +1370,44 @@ describe('affected-file workspace recovery journal', () => {
     });
     // The file must not have been changed.
     expect(await fs.promises.readFile(notePath, 'utf8')).toBe('after');
+  });
+
+  it('surfaces a durable agent mutation attention row through status after reconciliation', async () => {
+    const { engine, harness } = await createHarness();
+    const operationId = 'agent-status-attention';
+    await engine.withWorkspaceStorage(
+      harness.identity.workspaceId,
+      { mode: 'exclusive', purpose: 'agent-status-test' },
+      async (context) => {
+        const data = beginAgentMutationOperation(context, {
+          operationId,
+          sessionId: 'agent-status-session',
+          workspaceId: harness.identity.workspaceId,
+          targetKinds: { 'surface.txt': 'surface' },
+          surfaceBindings: {
+            'surface.txt': {
+              ownerId: 'surface-owner',
+              ownerGeneration: 1,
+              ownerRegistrationId: 'registration-1',
+              documentInstanceId: 'document-1',
+              baseRevision: null,
+              beforeLocalEditRevision: 1,
+              beforeHash: 'sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+              encoding: 'utf-8',
+              bom: false,
+              lineEnding: 'lf',
+            },
+          },
+          targets: { 'surface.txt': { expected: { kind: 'missing' }, target: { kind: 'missing' } } },
+          safety: { 'surface.txt': { kind: 'missing' } },
+        });
+        markAgentMutationSurfaceDispatched(context, data, 'surface.txt');
+        await reconcileInterruptedAgentMutations(context);
+      },
+    );
+    const status = ready(await engine.status(harness.identity.workspaceId));
+    expect(status.failures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'needs-attention', operationId }),
+    ]));
   });
 });

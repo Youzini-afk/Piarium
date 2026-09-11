@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadFactsSetService, createThreadReadService } from "./thread-services.js";
 import type { HarnessActorContext } from "@piarium/protocol";
@@ -206,6 +206,8 @@ describe("thread.facts.set run binding", () => {
       releaseRead = resolve;
     });
     let started = false;
+    let temporaryProtected = false;
+    const releaseTemporary = vi.fn(async () => { temporaryProtected = false; });
     const facts = createThreadFactsSetService({
       threadRegistry: registry,
       readExploreFile: async () => {
@@ -218,6 +220,11 @@ describe("thread.facts.set run binding", () => {
           source: "disk" as const,
         };
       },
+      storeRetrievalArtifact: async (_workspaceId: string, bytes: Buffer) => {
+        temporaryProtected = true;
+        return { durability: "durable" as const, hash: `sha256-${bytes.toString("hex")}`, byteLength: bytes.byteLength };
+      },
+      releaseRetrievalTemporaryArtifacts: releaseTemporary,
     } as never);
     try {
       const dispatched = await dispatch.handle({
@@ -235,6 +242,8 @@ describe("thread.facts.set run binding", () => {
       await registry.endRun("workspace-1", dispatched.threadId, run!.id, "success");
       releaseRead(null);
       await expect(submit).rejects.toThrow(/not active/);
+      expect(releaseTemporary).toHaveBeenCalledOnce();
+      expect(temporaryProtected).toBe(false);
       const settled = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
       expect(settled?.pendingEvidence).toBeUndefined();
       expect(settled?.report?.evidence?.facts ?? []).toEqual([]);
@@ -289,6 +298,95 @@ describe("thread.facts.set run binding", () => {
       const resumed = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
       expect(resumed?.pendingEvidence).toBeUndefined();
       expect(resumed?.activeRunId).not.toBe(run!.id);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+});
+
+describe("thread.read retrieval pagination", () => {
+  it("reads only requested UTF-8 artifact slices and preserves the page across registry reopen", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-read-page-"));
+    const body = Buffer.from("正文🙂".repeat(30_000), "utf8");
+    const artifact = { durability: "durable" as const, hash: "sha256-large-evidence", byteLength: body.byteLength };
+    let registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const thread = await registry.createThread({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "parent-1" },
+      brief: "large evidence",
+      role: "retrieval",
+      kind: "implementation",
+      createdBy: "agent",
+      concurrency: 1,
+      autoRun: true,
+      worktree: "none",
+      tools: ["read", "submit_facts"],
+      permissions: {},
+    });
+    const run = await registry.startRun("workspace-1", thread.id);
+    await registry.setPendingEvidence("workspace-1", thread.id, run.id, {
+      question: "large evidence",
+      scope: [],
+      facts: [{
+        claim: "large body",
+        status: "source-checked",
+        sources: [{ kind: "url", url: "https://example.com/large", check: "source-valid", artifact }],
+      }],
+      unknowns: [],
+      attempted: [],
+      completion: "delivered",
+    });
+    await registry.endRun("workspace-1", thread.id, run.id, "success");
+    const reads: Array<{ offset: number; length: number }> = [];
+    const hostFor = (activeRegistry: typeof registry) => ({
+      threadRegistry: activeRegistry,
+      readRetrievalArtifactSlice: async (_workspaceId: string, _artifact: typeof artifact, offset: number, length: number) => {
+        reads.push({ offset, length });
+        return body.subarray(offset, offset + length);
+      },
+    } as never);
+    try {
+      const first = await createThreadReadService(hostFor(registry)).handle({
+        threadId: thread.id,
+        what: "report",
+        length: 257,
+      }, parentCtx);
+      expect(Buffer.byteLength(first.text, "utf8")).toBeLessThanOrEqual(260);
+      expect(first.eof).toBe(false);
+      expect(first.report?.evidence?.facts[0]?.sources[0]?.excerpt).toBeUndefined();
+      expect(JSON.stringify(first.report)).not.toContain("正文🙂正文🙂");
+      expect(reads.length).toBeLessThanOrEqual(1);
+
+      await registry.dispose();
+      registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+      const reopened = await createThreadReadService(hostFor(registry)).handle({
+        threadId: thread.id,
+        what: "report",
+        length: 257,
+      }, parentCtx);
+      expect(reopened.text).toBe(first.text);
+      expect(reopened.nextOffset).toBe(first.nextOffset);
+
+      let offset = 0;
+      let previous = 0;
+      let pages = 0;
+      do {
+        const page = await createThreadReadService(hostFor(registry)).handle({
+          threadId: thread.id,
+          what: "report",
+          offset,
+          length: 4097,
+        }, parentCtx);
+        expect(page.nextOffset).toBeGreaterThan(previous);
+        expect(page.text).not.toContain("�");
+        previous = page.nextOffset!;
+        offset = page.nextOffset!;
+        pages += 1;
+        if (page.eof) break;
+      } while (pages < 100);
+      expect(pages).toBeGreaterThan(1);
+      expect(pages).toBeLessThan(100);
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

@@ -4,6 +4,7 @@ import path from "node:path";
 import type { ThreadWorktree } from "@piarium/protocol";
 
 export type MaterializationSwitchJournal = NonNullable<ThreadWorktree["materializationSwitch"]>;
+export type WorktreeOwnershipAssertion = (operation: string, candidates?: readonly string[]) => Promise<void>;
 
 const exists = async (target: string): Promise<boolean> => {
   try {
@@ -14,9 +15,14 @@ const exists = async (target: string): Promise<boolean> => {
   }
 };
 
-const replaceWith = async (source: string, destination: string): Promise<void> => {
+const replaceWith = async (
+  source: string,
+  destination: string,
+  assertOwnership: WorktreeOwnershipAssertion,
+): Promise<void> => {
   if (await exists(destination)) {
     const discarded = `${destination}.switch-discard-${randomUUID()}`;
+    await assertOwnership("replace materialized worktree", [source, destination, discarded]);
     await fs.promises.rename(destination, discarded);
     try {
       await fs.promises.rename(source, destination);
@@ -31,9 +37,15 @@ const replaceWith = async (source: string, destination: string): Promise<void> =
 };
 
 export async function removeOrphanMaterializationDirs(
-  livePath: string,
+  worktree: ThreadWorktree,
+  assertOwnership: WorktreeOwnershipAssertion,
   keep?: { stagingPath?: string; backupPath?: string },
 ): Promise<void> {
+  const livePath = worktree.path;
+  await assertOwnership("remove orphan materialization directories", [
+    ...(keep?.stagingPath ? [keep.stagingPath] : []),
+    ...(keep?.backupPath ? [keep.backupPath] : []),
+  ]);
   const directory = path.dirname(livePath);
   const base = path.basename(livePath);
   let names: string[];
@@ -47,14 +59,18 @@ export async function removeOrphanMaterializationDirs(
     if (!name.startsWith(`${base}.materializing-`) && !name.startsWith(`${base}.virtual-backup-`)) return;
     const full = path.join(directory, name);
     if (full === keep?.stagingPath || full === keep?.backupPath) return;
+    await assertOwnership("remove orphan materialization directory", [full]);
     await fs.promises.rm(full, { recursive: true, force: true });
   }));
 }
 
 export async function rollbackMaterializationSwitch(
-  livePath: string,
+  worktree: ThreadWorktree,
   journal: MaterializationSwitchJournal,
+  assertOwnership: WorktreeOwnershipAssertion,
 ): Promise<void> {
+  const livePath = worktree.path;
+  await assertOwnership("rollback materialization switch", [journal.stagingPath, journal.backupPath]);
   const liveExists = await exists(livePath);
   const backupExists = await exists(journal.backupPath);
   if (journal.stage === "staging-ready") {
@@ -64,7 +80,7 @@ export async function rollbackMaterializationSwitch(
     return;
   }
   if (backupExists) {
-    await replaceWith(journal.backupPath, livePath);
+    await replaceWith(journal.backupPath, livePath, assertOwnership);
   }
   await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
 }
@@ -83,14 +99,17 @@ export const inferredPromoted = async (
 );
 
 export async function recoverMaterializationSwitch(
-  livePath: string,
+  worktree: ThreadWorktree,
   journal: MaterializationSwitchJournal,
   intent: "abort" | "restart",
+  assertOwnership: WorktreeOwnershipAssertion,
 ): Promise<"virtual" | "materialized"> {
+  const livePath = worktree.path;
+  await assertOwnership("recover materialization switch", [journal.stagingPath, journal.backupPath]);
   if (intent === "restart" && await inferredPromoted(livePath, journal)) {
     return "materialized";
   }
-  await rollbackMaterializationSwitch(livePath, journal);
-  await removeOrphanMaterializationDirs(livePath);
+  await rollbackMaterializationSwitch(worktree, journal, assertOwnership);
+  await removeOrphanMaterializationDirs(worktree, assertOwnership);
   return "virtual";
 }

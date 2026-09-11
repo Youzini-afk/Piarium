@@ -1867,6 +1867,50 @@ export const createWorkspaceRecoveryEngine = (
     }
   };
 
+  // Agent surface mutations share this catalog but intentionally have a
+  // different execution contract from conversation recovery. Expose their
+  // durable attention rows through the existing recovery status channel so a
+  // refresh after restart does not depend on the Host diagnostic cache.
+  const agentMutationFailuresInternal = async (workspaceId: string): Promise<WorkspaceRecoveryFailure[]> => {
+    const { identity } = await inspectStorageIdentity(workspaceId);
+    const storage = await storageFor(identity, false);
+    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    if (!database) return [];
+    try {
+      const rows = database.prepare(`
+        SELECT id, data_json FROM operations
+        WHERE workspace_id = ? AND kind = 'agent-mutation' AND state = 'needs-attention'
+        ORDER BY updated_at DESC
+      `).all(workspaceId) as Array<{ id: string; data_json: string }>;
+      return rows.map((row) => {
+        let paths: string[] = [];
+        try {
+          const data = JSON.parse(row.data_json) as { needsAttentionPaths?: unknown };
+          if (Array.isArray(data.needsAttentionPaths)) {
+            paths = data.needsAttentionPaths.filter((value): value is string => typeof value === 'string');
+          }
+        } catch {
+          // The catalog parser will report a malformed row through the normal
+          // recovery path; keep status useful for this row as well.
+        }
+        return recoveryFailure(
+          new RecoveryPrimitiveError(
+            'needs-attention',
+            `Agent surface mutation ${row.id} requires attention`,
+            {
+              details: { operationId: row.id, paths },
+              operationId: row.id,
+              origin: 'storage',
+            },
+          ),
+          'needs-attention',
+        );
+      });
+    } finally {
+      database.close();
+    }
+  };
+
   const storageStatusInternal = async (workspaceId?: string): Promise<RecoveryStorageStatus> => {
     const locationDocument = await locations.read();
     if (!workspaceId) {
@@ -2588,7 +2632,22 @@ export const createWorkspaceRecoveryEngine = (
         };
         await reconcileInterruptedIntegrationOperations(integrationContext);
         const { reconcileInterruptedAgentMutations } = await import('../documents/agent-mutation-operation.js');
-        await reconcileInterruptedAgentMutations(integrationContext);
+        const agentMutations = await reconcileInterruptedAgentMutations(integrationContext);
+        if (agentMutations.needsAttention.length > 0) {
+          rememberFailure(
+            workspaceId,
+            new RecoveryPrimitiveError(
+              'needs-attention',
+              `Agent surface mutation recovery requires attention (${agentMutations.needsAttention.join(', ')})`,
+              {
+                details: { operationIds: agentMutations.needsAttention },
+                operationId: agentMutations.needsAttention[0],
+                origin: 'storage',
+              },
+            ),
+            'needs-attention',
+          );
+        }
         const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
         const workingState = await WorkingStateStore.open(integrationContext);
         await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
@@ -2735,10 +2794,15 @@ export const createWorkspaceRecoveryEngine = (
       status: 'ready',
     }), { mode: 'exclusive', purpose: 'recovery-storage-move' })),
     status: (workspaceId: string) => safe(async () => {
-      const [storage, retention] = await Promise.all([
+      const [storage, retention, agentFailures] = await Promise.all([
         storageStatusInternal(workspaceId),
         retentionStatusInternal(workspaceId),
+        agentMutationFailuresInternal(workspaceId),
       ]);
+      const startup = startupFailures.get(workspaceId) ?? [];
+      const failures = [...new Map(
+        [...startup, ...agentFailures].map((failure) => [failure.operationId ?? failure.message, failure]),
+      ).values()];
       return {
         capabilities: {
           bindings: true,
@@ -2753,7 +2817,7 @@ export const createWorkspaceRecoveryEngine = (
           storageManagement: true,
           workspaceLease: true,
         },
-        failures: startupFailures.get(workspaceId) ?? [],
+        failures,
         identity: await inspectIdentity(workspaceId),
         retention,
         status: 'ready',

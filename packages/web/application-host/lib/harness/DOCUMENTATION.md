@@ -157,10 +157,15 @@ copy parent blocks. The child delivers facts only through `submit_facts` →
 Documents and the frozen scope, then marks sources source-checked. It does not
 prove a claim is true and does not infer completeness from empty unknowns.
 Oversized excerpts and child output handles are copied to durable artifacts.
-URL sources require a Host receipt bound to the exact final URL. Pending
-evidence is bound to the active `runId`. Nested retrieval reads the parent
-thread's frozen effective state. Sealed `report.evidence` is visible through
-wait / `read_thread` / Zone 2. Lost keeps pending evidence until the existing
+URL sources require a Host receipt bound to the exact final URL and authenticated
+owning workspace/session/thread/Run; ordinary webfetch does not mint one. Temporary
+artifact and receipt references exist before catalog promotion and are transferred
+or released transactionally. Pending evidence is bound to the active `runId`.
+Nested retrieval dispatches onto a normal isolated branch, whose scratch path and
+adjacent staging/result paths must stay below a persistent Host/backend-authorized
+`managedRoot`. It may materialize read-only input for LSP, but settle never publishes
+directory changes. Sealed `report.evidence` is visible through wait / UTF-8 byte-paged
+`read_thread` / Zone 2. Lost keeps pending evidence until the existing
 resume path starts a new Run. The report has no recommendation or priority
 fields. Unconfigured `models.retrievalAgent` omits the role and Host rejects a
 retrieval dispatch that has no model.
@@ -236,9 +241,15 @@ returns the disk sentinel. Snapshot-owned paths write the Document Registry
 buffer through `requestSurfaceOperation` and never create a disk checkpoint.
 Unowned paths return `{ status: "disk" }` so the existing mutation journal
 writes the file. Mixed `apply_patch` batches classify each path, persist
-`targetKinds`, apply surface first, then disk, and compensate with CAS receipts
-(`applied` / `conflict` / `compensated` / `needs-attention`). Delete, NUL
-bytes, and other states a text buffer cannot express are `unavailable`.
+`targetKinds`, and within one Documents resource gate validate every disk byte
+identity before dispatching any surface write. The WAL records external dispatch,
+compensation intent, observed receipts, and target-after state; it then applies
+surface and disk and compensates with CAS receipts (`applied` / `conflict` /
+`compensated` / `needs-attention`). An explicit failed surface receipt proves that
+path was not applied; a dispatched request without a valid receipt is uncertain.
+A crash after a disk write but before target-after capture remains visible through
+Recovery status/UI. Delete, NUL bytes, and other states a text buffer cannot express
+are `unavailable`.
 
 ### Native find/ls path overlay (`document.pathOverlay`)
 
@@ -296,8 +307,11 @@ existing SCM refresh boundary and does not add a second Git poller.
 User-terminal command finish events come from Terminal Runtime OSC 633
 through `subscribeCommands` and `observeTerminalCommand`. Frames must
 carry this session's integration generation tag; untagged OSC is ignored.
-`putEvent` treats `workspaceId + commandId` as an idempotent write: a
-duplicate delivery does not insert a second event or nudge again. The
+`putEvent` stores one event per target Pi session and treats
+`targetPiSessionId + commandId` as the idempotent key: all active Pi sessions in
+the workspace receive their own event, while a duplicate for one target neither
+inserts nor nudges again. PowerShell uses the command-start `LASTEXITCODE` baseline;
+when an unchanged nonzero status cannot be attributed to this command it records 1. The
 live PTY path does not replay finished commands after Host restart, so
 this is duplicate-delivery protection, not a restart replay log.
 Harness/agent shells stay `source: agent` and never enter

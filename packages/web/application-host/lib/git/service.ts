@@ -4145,6 +4145,7 @@ export async function previewWorktreeCreate(directory: string, input: InputRecor
     name: candidate.name,
     branch: mode === 'new' ? candidate.branch : preferredBranchName,
     path: candidate.directory,
+    managedRoot: context.worktreeRoot,
   };
 }
 
@@ -4265,6 +4266,7 @@ async function attachGitWorktreeToCandidate(
     name: candidate.name,
     branch: localBranch,
     path: candidate.directory,
+    managedRoot: context.worktreeRoot,
     directoryCreated: true,
     bootstrapStatus,
   };
@@ -4338,6 +4340,7 @@ export async function createWorktree(
         name: candidate.name,
         branch: localBranch,
         path: candidate.directory,
+        managedRoot: context.worktreeRoot,
         directoryCreated: true,
         bootstrapStatus,
       };

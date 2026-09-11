@@ -195,6 +195,15 @@ export const PiRecoveryPanel: React.FC = () => {
                 </p>
               </div>
             </div>
+            {status.failures.length > 0 ? (
+              <div className="mt-3 space-y-1 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-2">
+                {status.failures.map((failure) => (
+                  <p key={`${failure.operationId ?? failure.code}:${failure.message}`} className="typography-micro text-[var(--status-error)]">
+                    {failure.operationId ? `${failure.operationId}: ` : ''}{failure.message}
+                  </p>
+                ))}
+              </div>
+            ) : null}
           </section>
         ) : null}
 

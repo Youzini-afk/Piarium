@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  POWERSHELL_COMMAND_START_CAPTURE,
   POWERSHELL_EXIT_CAPTURE,
   shellIntegrationFamily,
   shellIntegrationLaunch,
@@ -12,6 +13,8 @@ import {
 const powershellPath = process.env.SystemRoot
   ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
   : "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
+const zshCandidate = process.env.PIARIUM_TEST_ZSH ?? "zsh";
+const hasZsh = !spawnSync(zshCandidate, ["--version"], { encoding: "utf8" }).error;
 
 describe("shell integration launch", () => {
   it("injects an init file for bash and a script file for PowerShell", () => {
@@ -63,9 +66,37 @@ describe("shell integration launch", () => {
     expect(readFileSync(join(directory, ".zprofile"), "utf8")).not.toContain('source "${ZDOTDIR:-$HOME}/.zshrc"');
   });
 
+  it.skipIf(!hasZsh)("lets each user zsh file observe the original ZDOTDIR", () => {
+    const candidate = zshCandidate;
+    const userDir = mkdtempSync(join(tmpdir(), "piarium-zsh-user-"));
+    const observed = join(userDir, "observed");
+    const shellQuote = (value: string): string => `'${value.replace(/'/gu, "'\\''")}'`;
+    const previousZdotdir = process.env.ZDOTDIR;
+    try {
+      for (const file of [".zshenv", ".zprofile", ".zshrc", ".zlogin"]) {
+        writeFileSync(join(userDir, file), `print -r -- '${file}:$ZDOTDIR' >> ${shellQuote(observed)}\n`);
+      }
+      process.env.ZDOTDIR = userDir;
+      const launch = shellIntegrationLaunch(candidate, ["-l"], true, "term-zsh:raw-zdotdir");
+      const result = spawnSync(candidate, [...(launch?.args ?? []), "-i", "-c", "exit"], {
+        env: { ...process.env, ...launch?.env },
+        encoding: "utf8",
+      });
+      expect(result.status).toBe(0);
+      expect(readFileSync(observed, "utf8").trim().split(/\r?\n/u)).toEqual([
+        ".zshenv", ".zprofile", ".zshrc", ".zlogin",
+      ].map((file) => `${file}:${userDir}`));
+    } finally {
+      if (previousZdotdir === undefined) delete process.env.ZDOTDIR;
+      else process.env.ZDOTDIR = previousZdotdir;
+      rmSync(userDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not replace the PowerShell Enter key handler and captures $? before other prompt work", () => {
     const pwsh = shellIntegrationLaunch("powershell.exe", [], false, "term-ps:2");
     const script = readFileSync(String(pwsh?.args[4]), "utf8");
+    expect(script).toContain(POWERSHELL_COMMAND_START_CAPTURE);
     expect(script).toContain(POWERSHELL_EXIT_CAPTURE);
     expect(script).toContain("Set-PSReadLineOption -AddToHistoryHandler");
     expect(script).toContain("$__PiariumPreviousHistoryHandler");
@@ -73,7 +104,7 @@ describe("shell integration launch", () => {
     expect(script.indexOf("$__piarium_success = $?")).toBeLessThan(script.indexOf("if ($global:__PiariumAwaitingFinish)"));
   });
 
-  it("records cmdlet failure, native exit 7, and success from the PowerShell prompt formula", () => {
+  it("does not reuse native exit 7 for a later failed cmdlet", () => {
     if (process.platform !== "win32" || !existsSync(powershellPath)) return;
     const probe = join(tmpdir(), `piarium-missing-${Date.now()}`);
     const result = spawnSync(powershellPath, [
@@ -81,19 +112,44 @@ describe("shell integration launch", () => {
       "-NonInteractive",
       "-Command",
       `
-        Get-Item -LiteralPath '${probe.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Out-Null
-        ${POWERSHELL_EXIT_CAPTURE}
-        $cmdlet = $code
+        ${POWERSHELL_COMMAND_START_CAPTURE}
         cmd.exe /c exit 7
         ${POWERSHELL_EXIT_CAPTURE}
         $native = $code
+        Get-Item -LiteralPath '${probe.replace(/'/g, "''")}' -ErrorAction SilentlyContinue | Out-Null
+        ${POWERSHELL_EXIT_CAPTURE}
+        $cmdlet = $code
         Write-Output 'ok' | Out-Null
         ${POWERSHELL_EXIT_CAPTURE}
-        Write-Output "$cmdlet,$native,$code"
+        Write-Output "$native,$cmdlet,$code"
       `,
     ], { encoding: "utf8" });
     expect(result.status).toBe(0);
-    expect(result.stdout.trim().split(/\r?\n/).at(-1)).toBe("1,7,0");
+    expect(result.stdout.trim().split(/\r?\n/).at(-1)).toBe("7,1,0");
+  });
+
+  it("reports 1 for a consecutive identical native status when precision is unknowable", () => {
+    if (process.platform !== "win32" || !existsSync(powershellPath)) return;
+    const result = spawnSync(powershellPath, [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      `
+        ${POWERSHELL_COMMAND_START_CAPTURE}
+        cmd.exe /c exit 7
+        ${POWERSHELL_EXIT_CAPTURE}
+        $first = $code
+        cmd.exe /c exit 7
+        ${POWERSHELL_EXIT_CAPTURE}
+        $second = $code
+        Write-Output "$first,$second"
+      `,
+    ], { encoding: "utf8" });
+    expect(result.status).toBe(0);
+    // PowerShell exposes only the current LASTEXITCODE, without a generation
+    // counter. The second identical 7 is therefore unknown and conservatively
+    // maps to 1 instead of pretending the old status belongs to this command.
+    expect(result.stdout.trim().split(/\r?\n/).at(-1)).toBe("7,1");
   });
 
   it("keeps a custom Bash PROMPT_COMMAND array and DEBUG trap after sourcing the init file", () => {

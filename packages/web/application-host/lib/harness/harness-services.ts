@@ -792,9 +792,27 @@ export function registerHarnessServices(
         if (!ctx.workspaceId) {
           return { status: "failed", url: params.url, reason: "no workspace" };
         }
+        const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
+        const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+        const owner = binding
+          ? await host.threadRegistry?.getThreadById(binding.owningWorkspaceId, binding.threadId)
+          : null;
+        const issueReceipt = Boolean(
+          binding
+          && owner?.role === "retrieval"
+          && owner.activeRunId === binding.runId
+          && owner.lifecycle === "active",
+        );
         return host.webFetchService!.fetch(params.url, {
-          workspaceId: ctx.workspaceId,
+          workspaceId,
+          authority: {
+            owningWorkspaceId: workspaceId,
+            sessionId: ctx.sessionId,
+            ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
+          },
           ...(params.render !== undefined ? { render: params.render } : {}),
+          signal: ctx.signal,
+          ...(issueReceipt ? { issueReceipt: true } : {}),
         });
       },
     });

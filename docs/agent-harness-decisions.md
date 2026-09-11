@@ -4896,3 +4896,102 @@ ModelRuntime 纵切继续通过。
 | --- | --- | --- | --- |
 | D-227 | superseded in part（事实名称、delivery、run 绑定 pending、耐久证据、URL receipt 与嵌套只读基线由 D-230 纠正；retrieval 为可等待 Thread 的产品方向保留） | D-230 | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |
 | D-230 | implementation（纠正 retrieval 来源核验、Run 绑定与耐久证据） | — | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |
+
+### D-231 · 2026-09-12 · 3.4 / 3.4a / 3.6（受管 retrieval 输入与嵌套基线）
+
+类型：问题与解法
+
+背景：D-230 要求嵌套 retrieval 读取父线程的冻结有效状态，但验收发现当时的实现把虚拟只读 worktree 的 `path` 指向父或根工作目录。任何沿普通 worktree 生命周期进入的 inspect、Git 初始化、snapshot、reclaim 或失败清理都可能读取、重命名、提交或删除用户目录。持久 worktree 记录本身也可以声明任意路径，重启后缺少独立的 Host/backend 归属证明。
+
+决定：
+
+1. 嵌套 retrieval 在 dispatch 返回或入队前就固定 `worktree: isolated`，沿普通 `threadPrepareIsolatedBranch` 从父 WorkingBranch 有效状态或父物化目录建立 revision 0；不再用一条特殊的 live-path 虚拟绑定模拟冻结基线。
+2. 虚拟执行目录由 Application Host 分配到 `{PIARIUM_DATA_DIR}/thread-scratch/<workspace-hash>/<threadId>`。`ThreadWorktree` 持久化绝对 `managedRoot`；create-worktree backend 也必须返回自己的受管根。运行时先验证目标及所有 staging/backup/result 邻接路径都规范包含在该根内，再要求 Host/backend 重新授权该根。当前进程刚创建过的根可直接使用；重启后的持久记录不能自证归属。
+3. inspect、snapshot、materialize、setup、Git attach、reclaim、discard 等会读取或改变物化状态的入口都执行同一归属检查。旧记录缺 `managedRoot` 或根无法重新授权时拒绝动作并留给显式恢复，不猜路径属于 Piarium。
+4. retrieval 分支是冻结的只读输入。LSP 需要真实路径时可以物化，并在独立目录里初始化 Git；settle、partial publish、result snapshot、Integration 与 automatic review 均不发布 retrieval 的目录变化，结束时只封印 evidence 并回收输入目录。
+5. 物化父线程的捕获通过父执行目录解析出的 Documents workspace 取得 dirty barrier、正文与 writer 状态；owning workspace 仍只保存 catalog、WorkingState 与证据对象。
+
+原因：隔离必须由实际路径和 backend authority 保证，不能靠角色提示或 `readOnly` 字段保证没有写入。让 retrieval 复用正常分支准备可同时固定 queued 基线、父虚拟新文件和父物化内容，而专门的 settle 分支确保这些输入不会成为可合并结果。
+
+考虑过的替代：(1) 继续把 `path` 指向父目录但约定工具只读——无法约束 Git、LSP、扩展和生命周期清理。(2) 只检查路径字符串含 `.piarium/worktrees`——持久记录可伪造，符号链接和同名目录也会误授权。(3) retrieval 永不物化——会无故移除 LSP 等需要真实路径的只读能力。
+
+影响：protocol `ThreadWorktree.managedRoot/readOnlyInput`；Host `thread-runtime` / `thread-worktree` / `worktree-ownership` / materialization switch / git backend；pi-host retrieval session；设计 9.2.5b/9.3.5、plan/status 3.4/3.4a/3.6、architecture 4.4。D-230 的嵌套基线实现由本条纠正，不改写旧正文。
+
+状态：生产路径已接入并有定向/公开 faux SessionHost 证据；旧记录无受管根时会拒绝自动操作。完整桌面 Host 重启和真实付费 retrieval 仍未实测，3.4 / 3.4a / 3.6 保持 Partial。
+
+### D-232 · 2026-09-12 · 3.2（agent-mutation WAL 与恢复可见性）
+
+类型：问题与解法
+
+背景：D-228 已引入 `agent-mutation`，但验收发现混合 surface/disk batch 仍可能先向编辑器发写入，再发现磁盘 expected identity 已漂移；磁盘写后到 after-state 入库之间崩溃没有可区分阶段；失败回执与无回执被一律当作不确定；补偿遇到一个冲突后会跳过其他可安全恢复路径；needs-attention 只留在数据库，恢复状态与 UI 不可见。另有一个只供测试读取、最多 32 项的非权威内存缓存。
+
+决定：
+
+1. 混合 batch 在同一 Documents resource gate 内先核对所有磁盘成员的实际字节 revision/hash；任何已知冲突都在 surface dispatch 前终止。expected hash 对磁盘原始字节计算，不把 CRLF/LF 规范化后冒充同一身份。
+2. WAL 显式记录 external-dispatched、external-compensate-intent、external-safety-observed 与每路径 target-after。编辑器明确返回失败表示未应用，可安全关闭该路径；请求已发出但没有可认证回执才是不确定并进入 needs-attention。
+3. 补偿逐路径继续执行：仍等于本操作产物的成员恢复 before；用户后来改过的成员保留并标 needs-attention。状态只能向更确定的终态单调推进，迟到回执不得把 needs-attention 降回 complete/aborted。
+4. 启动 fence 与运行时恢复状态从持久 operations 读取 `agent-mutation` 的 needs-attention，并通过现有 Recovery UI 展示 operation/path/message。内存 Map 和无依据的 32 项限制删除；持久 WAL 是唯一跨调用/重启权威。
+5. 当前 RecoveryFileStore 只能在磁盘写成功后捕获 target-after。若进程恰在写入与捕获之间崩溃，启动对账不得猜测写入内容，明确留下 needs-attention；这是现有实现的可见失败窗口。
+
+原因：一批跨编辑器缓冲和磁盘的写入无法获得单一文件系统事务，但可以在同一资源序列化边界内消除已知竞态，并用写前 intent、认证回执和条件补偿把未知状态显式化。
+
+考虑过的替代：(1) 先写 surface 再检查磁盘——会制造本可避免的部分应用。(2) 把明确失败也当 needs-attention——让可证明未写入的路径占用人工恢复。(3) 为诊断缓存保留固定条数——它不是权威且没有产品消费者。
+
+影响：Documents `surface-mutation` / `authority` / `agent-mutation-operation`；recovery catalog/engine；Recovery UI；pi-host `apply_patch`；设计 5.4/6.1、plan/status 3.2、Documents/recovery DOCUMENTATION。D-228 的事务与恢复部分由本条纠正。
+
+状态：定向恢复与 Registry 反例已接；完整桌面 Host 进程重启仍未实测。写入到 after-state 捕获窗口按本条保持 needs-attention，3.2 不标 Proven。
+
+### D-233 · 2026-09-12 · 2.2 / 2.3 / 2.4（用户终端多会话投影与退出事实）
+
+类型：问题与解法
+
+背景：D-229 把终端命令事件按 workspace 写一次，再 fan-out 给多个 Pi 会话。第一个会话写入后会让其余会话被 `workspaceId + commandId` 去重，从而只有一个会话得到自己的 event/Zone 2；生产 adapter 还丢失了 projector 传入的目标 session。PowerShell 沿用旧 `$LASTEXITCODE` 时会把前一条 native 失败码误归给当前 cmdlet，zsh 注入也没有完整保留原 `ZDOTDIR` 是否存在的语义。
+
+决定：
+
+1. projector 固定本次 workspace 的唯一目标 Pi session 列表，对每个目标分别调用 `observeTerminalCommand(event, targetSessionId)`；Application Host adapter 必须原样传递目标身份。只有该目标成功插入时才向它发送一次 `memory.nudge`。
+2. knowledge event 持久 `dedupeKey = terminal-command:[targetPiSessionId, commandId]` 并在单写队列内用持久属性索引查重；旧 terminal event 在打开 store 时按同一规则补 key。RAM seen 只能在持久写成功后前移。这个键防重复投递/重开 store，不表示 PTY 能在 Host 重启后重播命令。
+3. PowerShell 在命令开始记录 `$LASTEXITCODE` 基线。命令结束时，成功为 0；发生变化的 native 非零码使用真实值；cmdlet 失败或无法证明本命令产生了 native 状态时为 1。PowerShell 没有 `$LASTEXITCODE` 代际计数器，所以连续两条产生完全相同非零码的 native 命令会保守记录 1，不能声称总能保留精确码。
+4. zsh 记录用户启动前是否显式设置 `ZDOTDIR`，在 source 用户 `.zshenv/.zprofile/.zshrc/.zlogin` 时恢复其原语义，再切回 Piarium 的注入目录。Windows 本轮无 zsh，可执行脚本测试跳过时不得写成 live 通过。
+
+原因：终端事实的接收者是具体 Pi 会话；workspace 只是知识存储范围，不能替代每个会话自己的事件游标和 keeper 输入。退出码只能报告 shell 能证明属于本命令的事实。
+
+考虑过的替代：(1) workspace 只存一条并让多会话共享游标——现有 Zone 2/event 模型按会话送达，会丢接收者状态。(2) 只在内存 fan-out——store 重开会重复。(3) 无条件使用非零 `$LASTEXITCODE`——会把旧 native 状态归给 cmdlet。
+
+影响：knowledge store/observers/context-runtime/terminal-projection；Application Host 装配；terminal shell scripts；设计 7.3、plan/status 2.2–2.4、architecture 4.4、Harness/terminal DOCUMENTATION。D-229 的幂等键与 PowerShell 结论由本条纠正。
+
+状态：多会话、store 重开、PowerShell 本机与脚本反例已接；zsh/macOS/Linux 真机仍未实测，不声称 Host 重启重播。
+
+### D-234 · 2026-09-12 · 3.6（retrieval receipt、artifact 所有权与公开分页）
+
+类型：问题与解法
+
+背景：D-230 要求耐久证据与 URL receipt，但验收发现 receipt 可在普通 webfetch 上产生、ID 可由正文推导且没有 owning/session/thread/run authority；正文与 receipt 只在内存，Host 重开后无法核验。output artifact 在 catalog 接受前没有引用保护，提交/关闭竞态可被清理；Thread 删除也没有释放未提交 artifact/receipt。`read_thread` 协议虽声明分页，pi-host 工具未公开 offset/length，且读取会先整体载入大 artifact。
+
+决定：
+
+1. 只有当前已认证的 active retrieval Run 才能请求 receipt。receipt 使用随机 ID，绑定 owning workspace、session、thread、run、exact final URL、正文 hash/revision；正文和 receipt metadata 均进入 WorkingState 对象库并由临时 object references 保护。普通 webfetch 仍返回正文与来源信息，不铸 source-check 权威。
+2. 本地/output 摘录一写入对象库就获得同 Run 的 temporary reference。`thread.facts.set` 先核验来源，再在同一 catalog mutation 绑定 pending evidence；promotion 事务建立 pending refs并释放对应 receipt/temporary refs。失败且 catalog 未提交时释放临时引用；startup/thread sync 只按 catalog 中 pending/sealed evidence 重建权威引用并清理过期临时对象。
+3. 真正删除 Thread 时释放其 pending、sealed、temporary artifact 和 web receipt 引用；archive 继续保留已封印证据。receipt lookup 总是用当前 actor 派生的完整 authority，单独的 receiptId 不授权。
+4. `read_thread` 在 pi-host 公开 `offset` / `length`，按 UTF-8 字节直接从耐久对象切片；默认页使用现有 `harness.output.visibleBytes`，不新增专用硬上限。结构化 report 保留引用/短摘录，大正文不先整体载入再裁切。
+5. web fetch 的 caller cancel/截止信号贯穿 fetch、body reader、renderer 与 PDF 页读取；取消停止等待并不缓存为普通失败。网络库无法硬中断的迟到结果被丢弃。
+
+原因：来源权威必须绑定实际 Run 与可重读正文，临时对象从创建到 catalog 接管之间也必须有所有者。分页应减少实际读取量，而不只是缩短最终字符串。
+
+考虑过的替代：(1) 让所有 webfetch 都铸 receipt——扩大不必要的持久数据和授权面。(2) 只在 evidence 接受后引用 artifact——提交竞态会先清理正文。(3) 保留 session-local OutputRef——线程/Host 生命周期后不可读。
+
+影响：protocol retrieval/receipt/thread.read；Host retrieval artifacts/evidence/webfetch/thread services/runtime；pi-host webfetch/thread tools；设计 5.1/9.3.5、plan/status 3.6、architecture 4.4、Harness DOCUMENTATION。D-230 的 receipt、耐久引用与分页实现由本条纠正。
+
+状态：公开 faux SessionHost、持久对象重开、删除清理与取消反例已接；真实外部 web、完整桌面 Host 重启和付费 retrieval 质量仍未实测，3.6 保持 Partial。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-228 | superseded in part（写前全量磁盘预检、外部回执阶段、逐路径补偿、恢复可见性与 WAL 单一权威由 D-232 纠正） | D-232 | 设计 5.4/6.1；plan/status 3.2；Documents / recovery / Recovery UI |
+| D-229 | superseded in part（per-target Pi session 投影/幂等、PowerShell 状态归属与 zsh ZDOTDIR 由 D-233 纠正） | D-233 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
+| D-230 | superseded in part（受管 retrieval 输入由 D-231；receipt/artifact 所有权与公开分页由 D-234 纠正） | D-231 / D-234 | 设计 9.2.5b/9.3.5；plan/status 3.4/3.4a/3.6；architecture 4.4 |
+| D-231 | implementation（受管 retrieval scratch、Host/backend 归属与只读 settle） | — | 设计 9.2.5b/9.3.5；plan/status 3.4/3.4a/3.6 |
+| D-232 | implementation（agent-mutation WAL、条件补偿与恢复 UI） | — | 设计 5.4/6.1；plan/status 3.2；Documents/recovery |
+| D-233 | implementation（终端 per-session 投影、持久幂等与退出事实） | — | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
+| D-234 | implementation（Run-bound receipt、artifact 引用与字节分页） | — | 设计 5.1/9.3.5；plan/status 3.6；architecture 4.4 |

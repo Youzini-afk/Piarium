@@ -1,13 +1,20 @@
-import { createHash } from "node:crypto";
-import type { RetrievalUrlReceipt } from "@piarium/protocol";
+import { createHash, randomUUID } from "node:crypto";
+import type { RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
 
-export const mintWebFetchReceipt = (finalUrl: string, markdown: string): RetrievalUrlReceipt => {
+export type WebFetchReceiptDraft = Omit<RetrievalUrlReceipt, "artifact">;
+
+export const mintWebFetchReceipt = (
+  finalUrl: string,
+  markdown: string,
+  authority: RetrievalReceiptAuthority,
+): WebFetchReceiptDraft => {
   const contentHash = `sha256-${createHash("sha256").update(markdown, "utf8").digest("hex")}`;
-  const receiptId = `web-${createHash("sha256").update(`${finalUrl}\n${contentHash}`).digest("hex")}`;
+  const receiptId = `web-${randomUUID()}`;
   return {
     receiptId,
     finalUrl,
     contentHash,
     revision: contentHash,
+    authority: { ...authority },
   };
 };

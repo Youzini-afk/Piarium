@@ -127,7 +127,7 @@ describe("createObservers", () => {
     let captured: Record<string, unknown> | null = null;
     const origPutEvent = store.putEvent.bind(store);
     store.putEvent = async (e) => {
-      captured = { text: e.text, data: e.data ?? null };
+      captured = { text: e.text, data: e.data ?? null, dedupeKey: e.dedupeKey ?? null };
       return origPutEvent(e);
     };
     const observers = createObservers({ store, sessionId: "s1" });
@@ -149,6 +149,7 @@ describe("createObservers", () => {
         cwd: "/workspace",
         origin: "user",
       },
+      dedupeKey: 'terminal-command:["s1","term-1:1:1"]',
     });
   });
 

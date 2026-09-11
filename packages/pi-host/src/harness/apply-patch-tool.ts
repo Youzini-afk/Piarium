@@ -12,6 +12,10 @@ const editorBufferHash = (text: string): string => (
   `sha256-${createHash("sha256").update(text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), "utf8").digest("hex")}`
 );
 
+const diskContentHash = (text: string): string => (
+  `sha256-${createHash("sha256").update(text, "utf8").digest("hex")}`
+);
+
 const ApplyPatchParams = Type.Object({
   patch: Type.String({
     description: "Codex-format patch: *** Begin Patch / *** Update File: path / *** Add File: path / *** Delete File: path / @@ context / *** End Patch",
@@ -256,7 +260,15 @@ export function createApplyPatchTool(
             };
           }
           if (source.source === "disk") {
-            if (existsSync(filePath)) return { content: readFileSync(filePath, "utf8") };
+            if (existsSync(filePath)) {
+              const rawContent = readFileSync(filePath, "utf8");
+              const content = rawContent.startsWith("\uFEFF") ? rawContent.slice(1) : rawContent;
+              // Carry the exact source identity into the Host mutation plan.
+              // The file can change between this read and the Documents
+              // surfaceWrite dispatch, so a write-only replacement must still
+              // be conditional on the body used to compute the patch.
+              return { content, hash: diskContentHash(content) };
+            }
             return { content: null };
           }
           const draft = decodeDraft(source);

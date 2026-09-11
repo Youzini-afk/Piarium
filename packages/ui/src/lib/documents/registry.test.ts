@@ -1064,4 +1064,71 @@ describe('DocumentRegistry', () => {
     reportedErrors.mockRestore();
     registry.dispose();
   });
+
+  test('applies and undoes two Host surface paths as one operation group', async () => {
+    const memory = createMemoryDocuments();
+    const first = resource('surface-group-a.txt');
+    const second = resource('surface-group-b.txt');
+    await memory.api.write({ token: mutationToken(), resource: first, content: 'disk-a\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: 'seed-group-a' });
+    await memory.api.write({ token: mutationToken(), resource: second, content: 'disk-b\n', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: 'seed-group-b' });
+    const registry = new DocumentRegistry({ documents: memory.api, getGeneration: () => 1, recoverySessionId: 'session' });
+    await registry.open(first);
+    await registry.open(second);
+    registry.applyTransaction(first, 'draft-a\n', { origin: 'editor' });
+    registry.applyTransaction(second, 'draft-b\n', { origin: 'editor' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const operationId = 'surface-group-operation';
+    const makeTarget = async (identity: PiariumResourceReference, nextText?: string) => {
+      const record = registry.get(identity)!;
+      return {
+        resource: identity,
+        documentInstanceId: record.documentInstanceId,
+        baseRevision: record.baseRevision,
+        localEditRevision: record.localEditRevision,
+        bufferHash: await hashText(record.buffer),
+        encoding: record.encoding,
+        bom: record.bom,
+        lineEnding: record.lineEnding,
+        ...(nextText === undefined ? {} : { newText: nextText }),
+      };
+    };
+    const applyTargets = [
+      await makeTarget(first, 'applied-a\n'),
+      await makeTarget(second, 'applied-b\n'),
+    ];
+    const dispatch = async (
+      action: 'apply' | 'undo',
+      targets: PiariumDocumentSurfaceOperationPayload['targets'],
+    ) => {
+      const previous = memory.surfaceCompletions.length;
+      memory.setSurfaceOperation({ action, operationId, requestId: `${action}-group`, workspaceId: first.workspaceId, targets });
+      memory.emit({ kind: 'surface-operation', action, operationId, requestId: `${action}-group`, workspaceId: first.workspaceId });
+      for (let attempt = 0; attempt < 20 && memory.surfaceCompletions.length === previous; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+      expect(memory.surfaceCompletions.length).toBeGreaterThan(previous);
+      return memory.surfaceCompletions.at(-1)!;
+    };
+
+    const applied = await dispatch('apply', applyTargets);
+    expect(applied.resources).toHaveLength(2);
+    expect(applied.resources.every((entry) => entry.status === 'applied')).toBe(true);
+    expect(registry.get(first)?.buffer).toBe('applied-a\n');
+    expect(registry.get(second)?.buffer).toBe('applied-b\n');
+    const undoTargets = await Promise.all([first, second].map(async (identity) => {
+      const record = registry.get(identity)!;
+      return {
+        ...(await makeTarget(identity)),
+        expectedAppliedRevision: record.localEditRevision,
+        expectedAppliedHash: await hashText(record.buffer),
+      };
+    }));
+    const undone = await dispatch('undo', undoTargets);
+    expect(undone.resources).toHaveLength(2);
+    expect(undone.resources.every((entry) => entry.status === 'undone')).toBe(true);
+    expect(registry.get(first)?.buffer).toBe('draft-a\n');
+    expect(registry.get(second)?.buffer).toBe('draft-b\n');
+    registry.dispose();
+  });
 });

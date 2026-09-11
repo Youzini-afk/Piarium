@@ -9,6 +9,7 @@ import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
+import { assertManagedWorktreeOwnership } from "./worktree-ownership.js";
 import {
   isNotGitRepositoryError,
   isUnbornHeadError,
@@ -26,6 +27,7 @@ const executionGitRef = (worktree: ThreadWorktree): string => (
 
 export interface ThreadWorktreeCreateResult {
   path: string;
+  managedRoot?: string;
 }
 
 export interface ThreadWorktreeRuntimeOptions {
@@ -33,6 +35,7 @@ export interface ThreadWorktreeRuntimeOptions {
     directory: string,
     input: Record<string, unknown>,
   ): Promise<ThreadWorktreeCreateResult>;
+  createScratch?(sourceRoot: string, threadId: string): Promise<ThreadWorktreeCreateResult>;
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
@@ -40,6 +43,8 @@ export interface ThreadWorktreeRuntimeOptions {
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
   interpreter?: ShellInterpreter | undefined;
+  /** Host/backend authority used to revalidate persisted roots after restart. */
+  authorizeManagedRoot?: (managedRoot: string) => boolean | Promise<boolean>;
 }
 
 export interface PrepareThreadWorktreeInput {
@@ -184,6 +189,24 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const fsPromises = options.fsPromises ?? fs.promises;
   const pathModule = options.pathModule ?? path;
   const runGit = options.runGit ?? defaultRunGit(options.gitBinary ?? "git", options.env ?? process.env);
+  const preparedManagedRoots = new Set<string>();
+  const managedRootKey = (value: string): string => normalizeComparePath(value);
+  const authorizeManagedRoot = async (managedRoot: string): Promise<boolean> => (
+    preparedManagedRoots.has(managedRootKey(managedRoot))
+    || Boolean(await options.authorizeManagedRoot?.(managedRoot))
+  );
+  const registerManagedRoot = (managedRoot: string): void => {
+    preparedManagedRoots.add(managedRootKey(managedRoot));
+  };
+  const assertOwnership = (
+    worktree: ThreadWorktree,
+    operation: string,
+    candidates: readonly string[] = [],
+  ): Promise<void> => assertManagedWorktreeOwnership(worktree, operation, candidates, {
+    fsPromises,
+    pathModule,
+    authorizeManagedRoot,
+  });
   const fixedCopyResultPath = (worktree: ThreadWorktree): string | undefined => (
     worktree.resultPath ?? (worktree.resultCommit ? `${worktree.path}.snapshot` : undefined)
   );
@@ -406,8 +429,18 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     signal: AbortSignal | undefined,
     onWorktreeState: PrepareThreadWorktreeInput["onWorktreeState"],
   ): Promise<PreparedThreadWorktree> => {
-    const targetDir = pathModule.resolve(sourceRoot, ".piarium", "worktrees", threadId);
+    const allocated = options.createScratch
+      ? await options.createScratch(sourceRoot, threadId)
+      : {
+          managedRoot: pathModule.resolve(sourceRoot, ".piarium", "worktrees"),
+          path: pathModule.resolve(sourceRoot, ".piarium", "worktrees", threadId),
+        };
+    if (!allocated.managedRoot) throw new Error("Scratch backend did not return its managed ownership root");
+    const managedRoot = allocated.managedRoot;
+    const targetDir = allocated.path;
+    await fsPromises.mkdir(managedRoot, { recursive: true });
     await fsPromises.mkdir(targetDir, { recursive: true });
+    registerManagedRoot(managedRoot);
     let base = "zero-commit";
     try {
       const head = (await runGit(sourceRoot, ["rev-parse", "HEAD"])).stdout.trim();
@@ -417,6 +450,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
     const worktree: ThreadWorktree = {
       path: targetDir,
+      managedRoot,
       base,
       branch: `piarium/${threadId}`,
       materialized: false,
@@ -453,6 +487,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (!isGit || !parentHead) {
       // Non-git or zero-commit workspace: fallback to directory copy backend
       let targetDir: string;
+      let managedRoot: string;
       try {
         const res = await options.createWorktree(sourceRoot, {
           mode: "new",
@@ -460,13 +495,20 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           branchName: `piarium/${threadId}`,
         });
         targetDir = res.path;
+        if (!res.managedRoot) throw new Error("Worktree backend did not return its managed ownership root");
+        managedRoot = res.managedRoot;
+        registerManagedRoot(managedRoot);
       } catch {
-        targetDir = pathModule.resolve(sourceRoot, ".piarium", "worktrees", threadId);
+        managedRoot = pathModule.resolve(sourceRoot, ".piarium", "worktrees");
+        targetDir = pathModule.resolve(managedRoot, threadId);
+        await fsPromises.mkdir(managedRoot, { recursive: true });
         await fsPromises.mkdir(targetDir, { recursive: true });
+        registerManagedRoot(managedRoot);
       }
 
       const worktree: ThreadWorktree = {
         path: targetDir,
+        managedRoot,
         base: "zero-commit",
         branch: `piarium/${threadId}`,
         materialized: await pathExists(targetDir),
@@ -492,8 +534,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       branchName: `piarium/${threadId}`,
       startRef: parentHead,
     });
+    if (!created.managedRoot) throw new Error("Worktree backend did not return its managed ownership root");
+    registerManagedRoot(created.managedRoot);
     const worktree: ThreadWorktree = {
       path: created.path,
+      managedRoot: created.managedRoot,
       base: parentHead,
       branch: `piarium/${threadId}`,
       materialized: await pathExists(created.path),
@@ -501,6 +546,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       viewMode: "materialized",
     };
     await onWorktreeState?.(worktree);
+    await assertOwnership(worktree, "prepare worktree");
     try {
       await waitUntilReady(created.path, signal);
     } catch (error) {
@@ -538,6 +584,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     worktree: ThreadWorktree,
     mode: ThreadWorktreeInspectMode = "fixed",
   ): Promise<Pick<MergeThreadWorktreeResult, "changedFiles" | "diffStats"> & { patch: string; untracked: string[] }> => {
+    await assertOwnership(worktree, `inspect ${mode} worktree`, [
+      `${worktree.path}.baseline`,
+      ...(fixedCopyResultPath(worktree) ? [fixedCopyResultPath(worktree)!] : []),
+    ]);
     const fixed = mode === "fixed";
     if (worktree.base === "zero-commit") {
       const baselineDir = `${worktree.path}.baseline`;
@@ -702,6 +752,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   };
 
   const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
+    const ownedPaths = [
+      `${worktree.path}.results`,
+      ...(fixedCopyResultPath(worktree) ? [fixedCopyResultPath(worktree)!] : []),
+    ];
+    await assertOwnership(worktree, "snapshot worktree", ownedPaths);
     if (worktree.base === "zero-commit") {
       const resultsRoot = `${worktree.path}.results`;
       const staging = pathModule.join(resultsRoot, `.staging-${randomUUID()}`);
@@ -1091,6 +1146,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         }
       }
     }
+    await assertOwnership(worktree, "reclaim worktree");
     try {
       const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
       await rmFn(worktree.path, { recursive: true, force: true });
@@ -1222,6 +1278,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     worktree: ThreadWorktree,
     signal?: AbortSignal,
   ): Promise<ThreadWorktree> => {
+    await assertOwnership(worktree, "materialize worktree", [
+      `${worktree.path}.baseline`,
+      ...(fixedCopyResultPath(worktree) ? [fixedCopyResultPath(worktree)!] : []),
+    ]);
     if (worktree.materialized !== false && worktree.preparationStage !== "materializing") {
       try {
         await fsPromises.stat(worktree.path);
@@ -1294,6 +1354,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     settings?: HarnessWorktreeSettings,
     signal?: AbortSignal,
   ): Promise<void> => {
+    await assertOwnership(worktree, "prepare worktree inputs");
     for (const rel of settings?.copyIgnored ?? []) {
       if (signal?.aborted) throw abortError();
       const src = pathModule.resolve(sourceRoot, rel);
@@ -1322,6 +1383,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     setupSignal?: AbortSignal,
   ): Promise<{ output: string }> => {
     if (!settings?.setup) return { output: "" };
+    await assertOwnership(worktree, "run worktree setup");
 
     const timeoutMs = settings?.setupTimeoutMs;
     const command = settings.setup;
@@ -1406,18 +1468,21 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
 
   const attachIsolatedGitContext = async (
     sourceRoot: string,
-    livePath: string,
-    baseRef: string,
+    worktree: ThreadWorktree,
     signal?: AbortSignal,
   ): Promise<{ kind: "worktree" | "init" | "none"; executionBaseline?: string }> => {
     if (signal?.aborted) throw abortError();
+    const livePath = worktree.path;
+    const baseRef = worktree.base;
+    const overlay = `${livePath}.git-overlay-${randomUUID()}`;
+    await assertOwnership(worktree, "attach isolated Git context", [overlay]);
     const source = await inspectSourceGit(sourceRoot);
     const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, livePath) : false;
     const liveInheritsOther = await inheritsOtherGit(livePath);
-    const canDetach = Boolean(source.isGit && source.head && !liveInsideSource && !liveInheritsOther);
+    const resolvedBase = await resolveSourceCommit(sourceRoot, baseRef);
+    const canDetach = Boolean(!worktree.readOnlyInput && source.isGit && resolvedBase && !liveInsideSource && !liveInheritsOther);
     if (canDetach) {
-      const ref = baseRef && baseRef !== "zero-commit" ? baseRef : source.head!;
-      const overlay = `${livePath}.git-overlay-${randomUUID()}`;
+      const ref = resolvedBase!;
       await fsPromises.rename(livePath, overlay);
       try {
         if (signal?.aborted) throw abortError();
@@ -1437,6 +1502,26 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return { kind: "none" };
   };
 
+  const discardInput = async (worktree: ThreadWorktree): Promise<void> => {
+    const extras = [
+      ...(worktree.materializationSwitch
+        ? [worktree.materializationSwitch.stagingPath, worktree.materializationSwitch.backupPath]
+        : []),
+    ];
+    await assertOwnership(worktree, "discard retrieval input", extras);
+    const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
+    await rmFn(worktree.path, { recursive: true, force: true });
+    for (const extra of extras) await rmFn(extra, { recursive: true, force: true });
+    worktree.materialized = false;
+    worktree.viewMode = "virtual";
+    worktree.preparationStage = "ready";
+    delete worktree.materializationSwitch;
+    delete worktree.materializationFingerprint;
+    delete worktree.executionBaseline;
+    delete worktree.resultCommit;
+    delete worktree.resultPath;
+  };
+
   return {
     prepare,
     estimatePrepare,
@@ -1452,6 +1537,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     runSetup,
     measureDiskUsage,
     attachIsolatedGitContext,
+    discardInput,
+    assertOwnership,
   };
 }
 

@@ -141,7 +141,10 @@ import {
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
-import { createTerminalCommandProjector } from './lib/knowledge/terminal-projection.js';
+import {
+  createTerminalCommandObserveAdapter,
+  createTerminalCommandProjector,
+} from './lib/knowledge/terminal-projection.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { mintOutsideFileGrant } from './lib/fs/routes.js';
@@ -1153,7 +1156,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   // Web fetch service — SSRF-guarded, domain policy from workspace config
   const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
-  let persistWebFetchReceipt: ((workspaceId: string, receipt: import('@piarium/protocol').RetrievalUrlReceipt, markdown: string) => Promise<void>) | undefined;
+  const retrievalEvidenceAccess: {
+    persistReceipt?: (
+      workspaceId: string,
+      receipt: import('./lib/harness/web-fetch-receipt.js').WebFetchReceiptDraft,
+      markdown: string,
+    ) => Promise<import('@piarium/protocol').RetrievalUrlReceipt>;
+    releaseThread?: (workspaceId: string, threadId: string) => Promise<void>;
+    syncThread?: (workspaceId: string, thread: import('@piarium/protocol').Thread) => Promise<void>;
+  } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
     domainPolicy: (_workspaceId: string): DomainPolicy => {
@@ -1161,7 +1172,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return { allow: [], block: [] };
     },
     persistReceipt: async (workspaceId, receipt, markdown) => {
-      await persistWebFetchReceipt?.(workspaceId, receipt, markdown);
+      if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
+      return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
     },
     // Renderer is wired by desktop host (1b.4); web/cloud host has no renderer
   });
@@ -1194,19 +1206,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
-  let releaseRetrievalEvidence: ((workspaceId: string, threadId: string) => Promise<void>) | undefined;
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
-    onThreadRemoved: (workspaceId, threadId) => releaseRetrievalEvidence?.(workspaceId, threadId),
+    onThreadRemoved: (workspaceId, threadId) => retrievalEvidenceAccess.releaseThread?.(workspaceId, threadId),
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-thread-changed',
         properties: { workspaceId, parent, thread, activeRun },
       });
+      if (retrievalEvidenceAccess.syncThread) {
+        void threadRegistry.getThreadById(workspaceId, thread.id).then((current) => (
+          current ? retrievalEvidenceAccess.syncThread?.(workspaceId, current) : undefined
+        )).catch((error) => {
+          console.error('[HarnessThreads] Evidence ownership reconciliation failed:', errorMessage(error));
+        });
+      }
     },
     onThreadDone: (workspaceId, parent, threadId, report) => {
       broadcastGlobalUiEvent?.({
@@ -1231,6 +1249,40 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
   const threadWorktreeRuntime = createThreadWorktreeRuntime({
+    authorizeManagedRoot: async (candidate) => {
+      const normalize = (value: string) => {
+        const resolved = path.resolve(value).replace(/\\/g, '/');
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      };
+      const canonical = async (value: string) => normalize(await fs.promises.realpath(value).catch(() => path.resolve(value)));
+      const observed = await canonical(candidate);
+      for (const rootName of ['worktrees', 'thread-scratch']) {
+        const applicationRoot = await canonical(path.join(PIARIUM_DATA_DIR, rootName));
+        const applicationRelative = path.relative(applicationRoot, observed);
+        if (applicationRelative
+          && !applicationRelative.startsWith('..')
+          && !path.isAbsolute(applicationRelative)
+          && applicationRelative.split(/[\\/]/).filter(Boolean).length === 1) {
+          return true;
+        }
+      }
+      if (path.basename(observed).toLowerCase() !== 'worktrees'
+        || path.basename(path.dirname(observed)).toLowerCase() !== '.piarium') return false;
+      const workspaceRoot = path.dirname(path.dirname(observed));
+      try {
+        const identity = await documentsAuthority.resolveWorkspace({ path: workspaceRoot });
+        const inspected = await documentsAuthority.inspectWorkspace(identity.workspaceId);
+        return await canonical(inspected.root) === await canonical(workspaceRoot);
+      } catch {
+        return false;
+      }
+    },
+    createScratch: async (sourceRoot, threadId) => {
+      const workspaceKey = crypto.createHash('sha256').update(path.resolve(sourceRoot)).digest('hex');
+      const managedRoot = path.join(PIARIUM_DATA_DIR, 'thread-scratch', workspaceKey);
+      await fs.promises.mkdir(managedRoot, { recursive: true });
+      return { path: path.join(managedRoot, threadId), managedRoot };
+    },
     createWorktree: async (directory, input) => {
       const git = await import('./lib/git/service.js');
       return git.createWorktree(directory, input, {
@@ -1266,8 +1318,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
-  persistWebFetchReceipt = retrievalArtifacts.persistReceipt;
-  releaseRetrievalEvidence = retrievalArtifacts.releaseEvidence;
+  retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
+  retrievalEvidenceAccess.releaseThread = retrievalArtifacts.releaseThreadEvidence;
+  retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
+  for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
+    await retrievalArtifacts.reconcileWorkspaceEvidence(
+      workspaceId,
+      await threadRegistry.listWorkspaceThreads(workspaceId),
+    );
+  }
   const threadExecutionViews = new ThreadExecutionViewRegistry();
   const virtualWriteGate = new VirtualWriteGate();
   const workingBranchLookups = createWorkingBranchLookups({
@@ -1988,7 +2047,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const terminalCommandProjector = createTerminalCommandProjector({
     resolveWorkspaceId: (cwd) => documentsAuthority.resolveScopeId(cwd),
-    observe: (event) => knowledgeContextRuntime.observeTerminalCommand(event),
+    observe: createTerminalCommandObserveAdapter(knowledgeContextRuntime),
     drain: () => knowledgeContextRuntime.drain(),
     listBoundSessions: (workspaceId) => knowledgeContextRuntime.listBoundSessions(workspaceId),
     inspectCwd: (terminalId) => terminalRuntime?.inspectSession(terminalId)?.cwd,
@@ -2070,10 +2129,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     storeRetrievalArtifact: retrievalArtifacts.storeArtifact,
     readRetrievalArtifact: retrievalArtifacts.readArtifact,
-    protectRetrievalEvidence: retrievalArtifacts.protectEvidence,
-    lookupWebFetchReceipt: async (workspaceId, receiptId) => (
-      webFetchService.lookupReceipt(receiptId) ?? await retrievalArtifacts.lookupReceipt(workspaceId, receiptId)
-    ),
+    readRetrievalArtifactSlice: retrievalArtifacts.readArtifactSlice,
+    protectRetrievalEvidence: async (input) => {
+      const current = await threadRegistry.getThreadById(input.workspaceId, input.threadId);
+      if (!current || current.activeRunId !== input.runId || current.pendingEvidence === undefined) {
+        if (current) await retrievalArtifacts.syncThreadEvidence(input.workspaceId, current);
+        throw new Error(`Retrieval evidence run is no longer active: ${input.runId}`);
+      }
+      await retrievalArtifacts.promotePendingEvidence(input);
+      const latest = await threadRegistry.getThreadById(input.workspaceId, input.threadId);
+      if (latest) await retrievalArtifacts.syncThreadEvidence(input.workspaceId, latest);
+    },
+    lookupWebFetchReceipt: retrievalArtifacts.lookupReceipt,
+    releaseRetrievalTemporaryArtifacts: retrievalArtifacts.releaseTemporaryArtifacts,
+    releaseWebFetchReceipts: async (sessionId, fallbackWorkspaceId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const workspaceId = binding?.owningWorkspaceId ?? fallbackWorkspaceId;
+      if (!workspaceId) return;
+      await retrievalArtifacts.releaseReceiptAuthority(workspaceId, {
+        owningWorkspaceId: workspaceId,
+        sessionId,
+        ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
+      });
+    },
     branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
     pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),

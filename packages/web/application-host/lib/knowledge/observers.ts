@@ -12,7 +12,7 @@
  * - Terminal exit from user terminal tab → 'user'
  */
 
-import type { KnowledgeStore, EventInput, EventSource } from "./store.js";
+import { terminalCommandDedupeKey, type KnowledgeStore, type EventInput, type EventSource } from "./store.js";
 
 // ── Observer interfaces ────────────────────────────────────────────
 
@@ -117,6 +117,7 @@ export function createObservers(deps: ObserverDeps) {
         ...(event.startedAt === undefined ? {} : { startedAt: event.startedAt }),
         ...(event.endedAt === undefined ? {} : { endedAt: event.endedAt }),
       },
+      ...(event.commandId === undefined ? {} : { dedupeKey: terminalCommandDedupeKey(sessionId, event.commandId) }),
       source,
     };
     const result = await store.putEvent(input);

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -9,7 +10,6 @@ import {
 } from '@piarium/protocol';
 import {
   applyAgentSurfaceMutation,
-  type AgentMutationRecord,
   type AgentSurfaceWriteChange,
 } from './surface-mutation.js';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending.js';
@@ -426,6 +426,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     pathModule,
   });
   const queues = createSerialQueues();
+  // A recovery operation holds the same resource queue while it captures a
+  // safety image and performs the conditional Documents write. Documents'
+  // public write/delete methods enter this helper too, so remember the held
+  // exact keys and let those nested calls execute inside the existing queue.
+  const activeResourceKeys = new AsyncLocalStorage<ReadonlySet<string>>();
   const watchers = new Map<string, WatcherRecord>();
   const captureWatches = new Map<string, CaptureWatch>();
   const platform = typeof processLike?.platform === 'string' ? processLike.platform : process.platform;
@@ -433,7 +438,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dirtySurfaces = new Map<string, DirtySurfaceRecord>();
   const dirtyBarriers = new Map<string, DirtyBarrier>();
   const pendingSurfaceOperations = new Map<string, PendingDocumentSurfaceOperation>();
-  const agentMutations = new Map<string, AgentMutationRecord>();
   let durableMutationStorage: DurableMutationStorageFn | null = null;
   const surfaceSnapshots = createSurfaceSnapshotStore({ caseSensitive: platform !== 'win32' });
   let dirtyPublicationRevision = 0;
@@ -549,7 +553,13 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       key: resourceKey(requests[index]!.resource.workspaceId, canonicalPaths[index]!, pathModule, platform),
       scope: requests[index]!.scope,
     }));
-    return queues.runResources(queueResources, () => operation(resolved));
+    const held = activeResourceKeys.getStore();
+    const nested = held && queueResources.every((resource) => held.has(resource.key));
+    if (nested) return operation(resolved);
+    return queues.runResources(queueResources, () => activeResourceKeys.run(
+      new Set(queueResources.map((resource) => resource.key)),
+      () => operation(resolved),
+    ));
   };
 
   const runResourceOperation = <Result>(
@@ -1769,7 +1779,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   ): Promise<DocumentSurfaceWriteResult> => {
     const workspaceId = context.source === 'surface' ? context.workspaceId : '';
     const run = async (durable?: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
-      const { result, record } = await applyAgentSurfaceMutation({
+      const { result } = await applyAgentSurfaceMutation({
         inspectSnapshot: surfaceSnapshots.inspect,
         surfaceOwner: surfaceSnapshots.owner,
         inspectDirtyBuffers,
@@ -1827,7 +1837,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         },
         ...(durable ? { durable } : {}),
       }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
-      if (record) agentMutations.set(record.operationId, record);
       return result;
     };
     if (durableMutationStorage && workspaceId) {
@@ -1972,7 +1981,6 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     bindDurableMutationStorage: (fn: DurableMutationStorageFn | null) => {
       durableMutationStorage = fn;
     },
-    inspectAgentMutation: (operationId: string) => agentMutations.get(operationId) ?? null,
     inspectAgentWriteTarget,
     observeAgentWrite,
     dropAgentInputSnapshots: surfaceSnapshots.dropSession,

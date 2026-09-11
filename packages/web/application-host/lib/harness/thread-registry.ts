@@ -526,6 +526,7 @@ const isReport = (value: unknown): value is ThreadReport | null => (
     && isTranscriptRef(value.transcriptRef)
     && (value.resultCommit === undefined || isString(value.resultCommit))
     && (value.resultRevision === undefined || (Number.isSafeInteger(value.resultRevision) && Number(value.resultRevision) > 0))
+    && (value.evidenceRunId === undefined || isString(value.evidenceRunId))
     && isRecord(value.blocksSnapshot) && Object.values(value.blocksSnapshot).every(isString)
     && (value.evidence === undefined || isEvidence(value.evidence)))
 );
@@ -557,6 +558,8 @@ const isThread = (value: unknown): value is Thread => {
     && (value.kind === "discussion" || value.kind === "implementation")
     && (value.worktree === null || (isRecord(value.worktree)
       && isString(value.worktree.path)
+      && (value.worktree.managedRoot === undefined || isString(value.worktree.managedRoot))
+      && (value.worktree.readOnlyInput === undefined || typeof value.worktree.readOnlyInput === "boolean")
       && isString(value.worktree.base)
       && (value.worktree.executionBaseline === undefined || isString(value.worktree.executionBaseline))
       && (value.worktree.branch === undefined || isString(value.worktree.branch))
@@ -1622,6 +1625,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(catalog.threads);
   };
 
+  const listWorkspaceIds = async (): Promise<string[]> => {
+    await loadHostCatalogs();
+    return [...cache.keys()].sort();
+  };
+
   const listThreads = async (workspaceId: string, parent: ThreadParent, includeHidden = false): Promise<Thread[]> => {
     const catalog = await catalogForScope(workspaceId, parent);
     return structuredClone(catalog.threads.filter((thread) => (
@@ -1816,6 +1824,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
               deviations: [],
               unresolved: [...new Set([...report.unresolved, ...evidence.unknowns])],
               evidence,
+              evidenceRunId: run.id,
             }
           : {
               conclusion: summarizeRetrievalEvidence(evidence),
@@ -1831,6 +1840,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
               },
               blocksSnapshot: {},
               evidence,
+              evidenceRunId: run.id,
             };
         thread.report = sealed;
         report = sealed;
@@ -2487,6 +2497,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     getThreadById,
     listThreads,
     listWorkspaceThreads,
+    listWorkspaceIds,
     listThreadSnapshots,
     getActiveRun,
     listRuns,

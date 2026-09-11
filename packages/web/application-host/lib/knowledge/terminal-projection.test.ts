@@ -25,13 +25,22 @@ describe("terminal command projector", () => {
       listBoundSessions: () => ["session-a", "session-b"],
       nudgeMemory: async (sessionId, input) => { nudged.push({ sessionId, input }); },
     });
-    await projector.project(userCommand());
-    expect(observed).toEqual([expect.objectContaining({
-      command: "echo hi",
-      commandId: "term-1:1:1",
-      source: "user",
-      workspaceId: "ws-1",
-    })]);
+    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true, "session-b": true });
+    expect(observed).toHaveLength(2);
+    expect(observed).toEqual([
+      expect.objectContaining({
+        command: "echo hi",
+        commandId: "term-1:1:1",
+        source: "user",
+        workspaceId: "ws-1",
+      }),
+      expect.objectContaining({
+        command: "echo hi",
+        commandId: "term-1:1:1",
+        source: "user",
+        workspaceId: "ws-1",
+      }),
+    ]);
     expect(nudged).toHaveLength(2);
     expect(nudged[0]).toMatchObject({ sessionId: "session-a", input: { reason: "user-command" } });
   });
@@ -59,7 +68,7 @@ describe("terminal command projector", () => {
       nudgeMemory: async () => { throw new Error("worker gone"); },
       onError: () => undefined,
     });
-    await expect(projector.project(userCommand())).resolves.toBeUndefined();
+    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true });
   });
 
   it("does not nudge memory when the persistent write is a duplicate commandId", async () => {
@@ -70,6 +79,6 @@ describe("terminal command projector", () => {
       listBoundSessions: () => ["session-a"],
       nudgeMemory: async () => { throw new Error("should not nudge"); },
     });
-    await expect(projector.project(userCommand())).resolves.toBeUndefined();
+    await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": false });
   });
 });

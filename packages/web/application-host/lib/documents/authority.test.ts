@@ -811,9 +811,6 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
       content: 'C\n',
       source: 'surface-draft',
     });
-    const record = first.operationId ? harness.authority.inspectAgentMutation(first.operationId) : null;
-    expect(record?.targetKinds['draft.ts']).toBe('surface');
-
     const second = await harness.authority.applyAgentSurfaceWrite('session-1', context, [{
       resourceId: 'draft.ts',
       action: 'edit',

@@ -270,6 +270,7 @@ interface OperationTargets {
 }
 
 interface UpdateOperationFilePhaseOptions {
+  targetJson?: string | undefined;
   safetyJson?: string | undefined;
   observedFingerprint?: string | null | undefined;
 }
@@ -1161,7 +1162,19 @@ export const updateOperationFilePhase = (database: SqliteDatabase, operationId: 
     throw new TypeError(`Invalid operation file phase: ${phase}`);
   }
   const now = new Date().toISOString();
-  if (options.safetyJson !== undefined) {
+  if (options.targetJson !== undefined && options.safetyJson !== undefined) {
+    database.prepare(`
+      UPDATE operation_files
+      SET phase = ?, target_json = ?, safety_json = ?, observed_fingerprint = ?, updated_at = ?
+      WHERE operation_id = ? AND path = ?
+    `).run(phase, options.targetJson, options.safetyJson, options.observedFingerprint ?? null, now, operationId, path);
+  } else if (options.targetJson !== undefined) {
+    database.prepare(`
+      UPDATE operation_files
+      SET phase = ?, target_json = ?, observed_fingerprint = ?, updated_at = ?
+      WHERE operation_id = ? AND path = ?
+    `).run(phase, options.targetJson, options.observedFingerprint ?? null, now, operationId, path);
+  } else if (options.safetyJson !== undefined) {
     database.prepare(`
       UPDATE operation_files
       SET phase = ?, safety_json = ?, observed_fingerprint = ?, updated_at = ?

@@ -1,6 +1,6 @@
-import type { FetchResult, RetrievalUrlReceipt } from "@piarium/protocol";
+import type { FetchResult, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
 import { isSameHost } from "./ssrf-policy.js";
-import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
+import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
 export interface SsrfPolicy {
   check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" }>;
@@ -15,10 +15,10 @@ export interface DomainPolicy {
 export interface WebFetchDeps {
   ssrf: SsrfPolicy;
   domainPolicy: (workspaceId: string) => DomainPolicy;
-  renderer?: (url: string) => Promise<string>;
+  renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
   cacheTtlMs?: number;
   maxBytes?: number;
-  persistReceipt?: (workspaceId: string, receipt: RetrievalUrlReceipt, markdown: string) => Promise<void>;
+  persistReceipt?: (workspaceId: string, receipt: WebFetchReceiptDraft, markdown: string) => Promise<RetrievalUrlReceipt>;
 }
 
 interface CacheEntry {
@@ -35,22 +35,22 @@ export function createWebFetch(deps: WebFetchDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
   const cache = new Map<string, CacheEntry>();
-  const receipts = new Map<string, RetrievalUrlReceipt>();
-
   const withReceipt = async (
     result: Extract<FetchResult, { status: "ok" }>,
     workspaceId: string,
+    authority: RetrievalReceiptAuthority,
+    issueReceipt: boolean,
   ): Promise<Extract<FetchResult, { status: "ok" }>> => {
-    const receipt = result.receipt ?? mintWebFetchReceipt(result.finalUrl, result.markdown);
-    receipts.set(receipt.receiptId, receipt);
-    if (deps.persistReceipt) {
-      try {
-        await deps.persistReceipt(workspaceId, receipt, result.markdown);
-      } catch {
-        // In-memory receipt still binds this process; reopen lookup uses persisted refs.
-      }
+    if (!issueReceipt || !deps.persistReceipt) return result;
+    const draft = mintWebFetchReceipt(result.finalUrl, result.markdown, authority);
+    try {
+      const receipt = await deps.persistReceipt(workspaceId, draft, result.markdown);
+      return { ...result, receipt };
+    } catch {
+      // Fetching content succeeded, but an unpersisted token must never become
+      // source-check authority.
+      return result;
     }
-    return { ...result, receipt };
   };
 
   const checkDomainPolicy = (url: string, workspaceId: string): { blocked: boolean; reason?: "domain-blocked" } => {
@@ -123,15 +123,30 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
   };
 
-  const extractPdfText = async (data: ArrayBuffer): Promise<string> => {
+  const awaitAbortable = async <T>(promise: Promise<T>, signal: AbortSignal): Promise<T> => {
+    signal.throwIfAborted();
+    return new Promise<T>((resolve, reject) => {
+      const abort = (): void => reject(signal.reason ?? new DOMException("Web fetch aborted", "AbortError"));
+      signal.addEventListener("abort", abort, { once: true });
+      promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  };
+
+  const extractPdfText = async (data: ArrayBuffer, signal?: AbortSignal): Promise<string> => {
     try {
+      signal?.throwIfAborted();
       // pdfjs-dist is loaded dynamically to avoid bundling it on non-PDF paths
       const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-      const doc = await pdfjs.getDocument({ data }).promise;
+      const loading = pdfjs.getDocument({ data });
+      const doc = signal ? await awaitAbortable(loading.promise, signal) : await loading.promise;
       const pages: string[] = [];
       for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i);
-        const content = await page.getTextContent();
+        signal?.throwIfAborted();
+        const pagePromise = doc.getPage(i);
+        const page = signal ? await awaitAbortable(pagePromise, signal) : await pagePromise;
+        signal?.throwIfAborted();
+        const contentPromise = page.getTextContent();
+        const content = signal ? await awaitAbortable(contentPromise, signal) : await contentPromise;
         const text = content.items
           .map((item) => item.str ?? "")
           .join(" ");
@@ -139,6 +154,9 @@ export function createWebFetch(deps: WebFetchDeps) {
       }
       return pages.join("\n\n");
     } catch {
+      if (signal?.aborted) {
+        throw signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
+      }
       return "[PDF text extraction failed]";
     }
   };
@@ -150,18 +168,13 @@ export function createWebFetch(deps: WebFetchDeps) {
     return html.includes("<script") && markdown.trim().length < EMPTY_SHELL_THRESHOLD;
   };
 
-  const fetchUrl = async (url: string, ctx: { workspaceId: string; render?: boolean }): Promise<FetchResult> => {
-    // Check cache
-    const cacheKey = `${url}:${ctx.render ?? false}`;
-    const cached = cache.get(cacheKey);
-    if (cached && cached.expiresAt > Date.now()) {
-      // Mark as from cache
-      if (cached.result.status === "ok") {
-        return withReceipt({ ...cached.result, fromCache: true }, ctx.workspaceId);
-      }
-      return cached.result;
-    }
-
+  const fetchUrl = async (url: string, ctx: {
+    workspaceId: string;
+    authority: RetrievalReceiptAuthority;
+    render?: boolean;
+    signal?: AbortSignal;
+    issueReceipt?: boolean;
+  }): Promise<FetchResult> => {
     // Check domain policy
     const domainCheck = checkDomainPolicy(url, ctx.workspaceId);
     if (domainCheck.blocked) {
@@ -174,6 +187,18 @@ export function createWebFetch(deps: WebFetchDeps) {
       return { status: "blocked", url, reason: ssrfCheck.reason ?? "private-network" };
     }
 
+    // Cached bytes are reusable only after this workspace and request have
+    // independently passed their current authorization policies.
+    const cacheKey = `${url}:${ctx.render ?? false}`;
+    const cached = cache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.result.status === "ok") {
+        const { receipt: _oldReceipt, ...content } = cached.result;
+        return withReceipt({ ...content, fromCache: true }, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+      }
+      return cached.result;
+    }
+
     // If render requested but no renderer available
     if (ctx.render && !deps.renderer) {
       return { status: "renderer-unavailable", url };
@@ -184,35 +209,55 @@ export function createWebFetch(deps: WebFetchDeps) {
     let redirectCount = 0;
 
     while (redirectCount < MAX_REDIRECTS) {
+      const redirectDomainCheck = checkDomainPolicy(currentUrl, ctx.workspaceId);
+      if (redirectDomainCheck.blocked) return { status: "blocked", url: currentUrl, reason: "domain-blocked" };
+      const redirectSsrfCheck = await deps.ssrf.check(currentUrl);
+      if (redirectSsrfCheck.blocked) {
+        return { status: "blocked", url: currentUrl, reason: redirectSsrfCheck.reason ?? "private-network" };
+      }
       let response: Response;
+      const controller = new AbortController();
+      const abortFromCaller = (): void => controller.abort(ctx.signal?.reason);
+      if (ctx.signal?.aborted) controller.abort(ctx.signal.reason);
+      else ctx.signal?.addEventListener("abort", abortFromCaller, { once: true });
+      const timeout = setTimeout(() => controller.abort(), 20_000);
+      const finishRequest = (): void => {
+        clearTimeout(timeout);
+        ctx.signal?.removeEventListener("abort", abortFromCaller);
+      };
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 20_000);
         response = await fetch(currentUrl, {
           signal: controller.signal,
           redirect: "manual", // Handle redirects manually for cross-host detection
           headers: { "User-Agent": "Piarium-Agent/1.0" },
         });
-        clearTimeout(timeout);
       } catch (error) {
+        if (ctx.signal?.aborted) {
+          finishRequest();
+          throw ctx.signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
+        }
         const result: FetchResult = {
           status: "failed",
           url,
           reason: error instanceof Error ? error.message : "fetch failed",
         };
-        cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+        if (!ctx.signal?.aborted) cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+        finishRequest();
         return result;
       }
 
+      try {
       // Handle redirects
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get("location");
         if (!location) {
+          finishRequest();
           return { status: "failed", url, reason: "redirect without location" };
         }
         const redirectUrl = new URL(location, currentUrl).href;
         if (!isSameHost(currentUrl, redirectUrl)) {
           // Cross-host redirect — don't follow, return metadata
+          finishRequest();
           return {
             status: "redirect-cross-host",
             url,
@@ -223,6 +268,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         // Same-host redirect — follow
         currentUrl = redirectUrl;
         redirectCount++;
+        finishRequest();
         continue;
       }
 
@@ -233,6 +279,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           reason: `HTTP ${response.status}`,
         };
         cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
+        finishRequest();
         return result;
       }
 
@@ -243,9 +290,10 @@ export function createWebFetch(deps: WebFetchDeps) {
       // If render requested, use renderer
       if (ctx.render && deps.renderer) {
         try {
-          const html = await deps.renderer(currentUrl);
+          const html = await awaitAbortable(deps.renderer(currentUrl, controller.signal), controller.signal);
+          controller.signal.throwIfAborted();
           const { markdown, title } = await extractContent(html, "text/html");
-          const result = await withReceipt({
+          const content: Extract<FetchResult, { status: "ok" }> = {
             status: "ok",
             url,
             finalUrl: currentUrl,
@@ -255,10 +303,15 @@ export function createWebFetch(deps: WebFetchDeps) {
             fromCache: false,
             rendered: true,
             ...(title ? { title } : {}),
-          }, ctx.workspaceId);
-          cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
-          return result;
+          };
+          cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
+          finishRequest();
+          return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
         } catch (error) {
+          finishRequest();
+          if (ctx.signal?.aborted) {
+            throw ctx.signal.reason ?? new DOMException("Web fetch aborted", "AbortError");
+          }
           return {
             status: "failed",
             url,
@@ -269,16 +322,18 @@ export function createWebFetch(deps: WebFetchDeps) {
 
       // Check content type for PDF
       if (contentType.includes("application/pdf")) {
-        const arrayBuffer = await response.arrayBuffer();
+        const arrayBuffer = await awaitAbortable(response.arrayBuffer(), controller.signal);
         if (arrayBuffer.byteLength > maxBytes) {
+          finishRequest();
           return {
             status: "failed",
             url,
             reason: `PDF exceeds max size (${arrayBuffer.byteLength} > ${maxBytes})`,
           };
         }
-        const text = await extractPdfText(arrayBuffer);
-        const result = await withReceipt({
+        const text = await extractPdfText(arrayBuffer, controller.signal);
+        controller.signal.throwIfAborted();
+        const content: Extract<FetchResult, { status: "ok" }> = {
           status: "ok",
           url,
           finalUrl: currentUrl,
@@ -287,9 +342,10 @@ export function createWebFetch(deps: WebFetchDeps) {
           bytes: text.length,
           fromCache: false,
           rendered: false,
-        }, ctx.workspaceId);
-        cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
-        return result;
+        };
+        cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
+        finishRequest();
+        return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
       }
 
       // Read body with size limit
@@ -298,12 +354,14 @@ export function createWebFetch(deps: WebFetchDeps) {
         // Read only up to maxBytes
         const reader = response.body?.getReader();
         if (!reader) {
+          finishRequest();
           return { status: "failed", url, reason: "no response body" };
         }
         const chunks: Uint8Array[] = [];
         let totalSize = 0;
         while (totalSize < maxBytes) {
-          const { done, value } = await reader.read();
+          controller.signal.throwIfAborted();
+          const { done, value } = await awaitAbortable(reader.read(), controller.signal);
           if (done) break;
           if (value) {
             chunks.push(value);
@@ -314,7 +372,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         const buffer = Buffer.concat(chunks.map((c) => Buffer.from(c)));
         text = buffer.toString("utf-8");
       } else {
-        text = await response.text();
+        text = await awaitAbortable(response.text(), controller.signal);
         if (text.length > maxBytes) {
           text = text.slice(0, maxBytes);
         }
@@ -322,9 +380,11 @@ export function createWebFetch(deps: WebFetchDeps) {
 
       // Extract content
       const { markdown, title } = await extractContent(text, contentType);
+      controller.signal.throwIfAborted();
 
       // Check for empty shell
       if (detectEmptyShell(text, markdown, ctx.render ?? false)) {
+        finishRequest();
         return {
           status: "empty-shell",
           url,
@@ -332,7 +392,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         };
       }
 
-      const result = await withReceipt({
+      const content: Extract<FetchResult, { status: "ok" }> = {
         status: "ok",
         url,
         finalUrl: currentUrl,
@@ -342,9 +402,13 @@ export function createWebFetch(deps: WebFetchDeps) {
         fromCache: false,
         rendered: false,
         ...(title ? { title } : {}),
-      }, ctx.workspaceId);
-      cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
-      return result;
+      };
+      cache.set(cacheKey, { result: content, expiresAt: Date.now() + cacheTtlMs });
+      finishRequest();
+      return withReceipt(content, ctx.workspaceId, ctx.authority, ctx.issueReceipt === true);
+      } finally {
+        finishRequest();
+      }
     }
 
     // Too many redirects
@@ -354,6 +418,5 @@ export function createWebFetch(deps: WebFetchDeps) {
   return {
     fetch: fetchUrl,
     cache,
-    lookupReceipt: (receiptId: string): RetrievalUrlReceipt | null => receipts.get(receiptId) ?? null,
   };
 }

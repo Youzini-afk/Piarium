@@ -53,11 +53,22 @@ export interface RetrievalArtifactRef {
   byteLength: number;
 }
 
+export interface RetrievalReceiptAuthority {
+  owningWorkspaceId: string;
+  sessionId: string;
+  threadId?: string;
+  runId?: string;
+}
+
 export interface RetrievalUrlReceipt {
   receiptId: string;
   finalUrl: string;
   contentHash: string;
   revision: string;
+  /** Durable bytes fetched for this exact receipt. */
+  artifact: RetrievalArtifactRef;
+  /** The actor that may promote this temporary receipt into retrieval evidence. */
+  authority: RetrievalReceiptAuthority;
 }
 
 export interface RetrievalFactSource {
@@ -115,6 +126,8 @@ export interface ThreadReport {
   resultRevision?: number;
   /** Present for retrieval threads; Host-sealed fact material. */
   evidence?: RetrievalEvidence;
+  /** Run that sealed `evidence`; stable across later Run attempts. */
+  evidenceRunId?: string;
 }
 
 export const emptyRetrievalEvidence = (
@@ -249,6 +262,14 @@ export interface ThreadWaitingFor {
 
 export interface ThreadWorktree {
   path: string;
+  /**
+   * Piarium-managed directory that owns `path` and every switch/snapshot
+   * sibling. Destructive and Git-mutating operations reject records without
+   * this persistent ownership root or whose canonical path escapes it.
+   */
+  managedRoot?: string;
+  /** Retrieval input view; may be materialized for LSP but is never publishable. */
+  readOnlyInput?: boolean;
   /**
    * Parent-state identity (parent HEAD or `thread-<id>@<writeRevision>`).
    * Inspect/snapshot/settle must not treat this as a commit that the

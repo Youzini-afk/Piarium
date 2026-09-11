@@ -13,6 +13,8 @@ const exampleReceipt = {
   finalUrl: "https://example.com/",
   contentHash: "sha256-short",
   revision: "sha256-short",
+  artifact: { durability: "durable" as const, hash: "sha256-short", byteLength: 12 },
+  authority: { owningWorkspaceId: "workspace-1", sessionId: "test" },
 };
 
 function createTestBridge(sessionId: string) {
@@ -116,6 +118,7 @@ describe("webfetch tool", () => {
 
     const result = await resultPromise as { content: Array<{ type: string; text: string }> };
     const text = result.content[0]?.text ?? "";
+    assert.ok(text.includes("receipt web-short"));
     assert.ok(text.includes("answer (from https://example.com/)"));
     assert.ok(text.includes("The page says hello world."));
     assert.deepEqual(readerInput, {
