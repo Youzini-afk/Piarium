@@ -63,6 +63,44 @@ const readAgentInputContext = (params: Record<string, unknown>): AgentInputConte
   return context;
 };
 
+const readMemoryNudgeCommands = (value: unknown): Array<{
+  command: string;
+  commandId: string;
+  cwd?: string;
+  exitCode: number;
+}> => {
+  if (!Array.isArray(value)) {
+    throw new HostError("invalid_params", "commands must be an array");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new HostError("invalid_params", `commands[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const command = record.command;
+    const commandId = record.commandId;
+    const exitCode = record.exitCode;
+    if (typeof command !== "string" || command.length === 0) {
+      throw new HostError("invalid_params", `commands[${index}].command must be a non-empty string`);
+    }
+    if (typeof commandId !== "string" || commandId.length === 0) {
+      throw new HostError("invalid_params", `commands[${index}].commandId must be a non-empty string`);
+    }
+    if (!Number.isInteger(exitCode)) {
+      throw new HostError("invalid_params", `commands[${index}].exitCode must be an integer`);
+    }
+    if (record.cwd !== undefined && typeof record.cwd !== "string") {
+      throw new HostError("invalid_params", `commands[${index}].cwd must be a string`);
+    }
+    return {
+      command,
+      commandId,
+      exitCode: exitCode as number,
+      ...(typeof record.cwd === "string" ? { cwd: record.cwd } : {}),
+    };
+  });
+};
+
 const HOST_CAPABILITIES: HostCapabilities = {
   agentProviders: true,
   extensionUi: true,
@@ -84,6 +122,7 @@ const OUT_OF_BAND_METHODS = new Set([
   "extension.ui.respond",
   "harness.respond",
   "harness.inference.cancel",
+  "memory.nudge",
   "provider.auth.respond",
   "project.trust.respond",
   "workspace.mutation.respond",
@@ -846,6 +885,18 @@ export class HostController {
             readAgentInputContext(params),
           ),
         };
+      case "memory.nudge": {
+        const reason = readString(params, "reason");
+        if (reason !== "user-command") {
+          throw new HostError("invalid_params", "reason must be user-command");
+        }
+        const rawCommands = params.commands;
+        const commands = rawCommands === undefined ? undefined : readMemoryNudgeCommands(rawCommands);
+        return this.#sessionHost.nudgeMemory(readString(params, "sessionId"), {
+          reason: "user-command",
+          ...(commands === undefined ? {} : { commands }),
+        });
+      }
       case "agent.abort":
         return { aborted: await this.#sessionHost.abort(readString(params, "sessionId")) };
       case "agent.queue.clear":

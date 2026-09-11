@@ -5,7 +5,9 @@ const shouldStripCsi = (body: string, finalByte: string | undefined): boolean =>
   || (finalByte === 'c' && /^[>0-9;?]*$/.test(body))
   || ((finalByte === 'p' || finalByte === 'y') && /^\?2031(?:;[0-9]+)?\$$/.test(body))
   || ((finalByte === 'h' || finalByte === 'l') && body === '?2031');
-const shouldStripOsc = (content: string): boolean => /^(10|11|12);(?:\?|rgb:)/.test(content);
+const shouldStripOsc = (content: string): boolean => (
+  /^(10|11|12);(?:\?|rgb:)/.test(content) || /^(133|633);/.test(content)
+);
 const stripTerminator = (value: string): string => {
   if (value.endsWith('\u001b\\')) return value.slice(0, -2);
   return value.endsWith('\u0007') || value.endsWith('\u009c') ? value.slice(0, -1) : value;

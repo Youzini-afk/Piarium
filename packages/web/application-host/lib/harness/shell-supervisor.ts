@@ -173,6 +173,9 @@ export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider
           dataHandlers.add(handler);
           return { dispose: () => { dataHandlers.delete(handler); } };
         },
+        onCommand() {
+          return { dispose: () => undefined };
+        },
         onExit(handler) {
           if (status === "exited") {
             let active = true;
@@ -212,10 +215,14 @@ export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider
       return {
         id: handle.id,
         cwd: handle.cwd,
+        integration: "not-observed" as const,
         owner: "harness" as const,
         retainWhenDetached: true,
         status: handle.status,
       };
+    },
+    subscribeCommands() {
+      return { dispose: () => undefined };
     },
   };
 }
@@ -313,6 +320,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         return null;
       },
       inspectSession: () => null,
+      subscribeCommands: () => ({ dispose: () => undefined }),
     }
     : deps.ptyProvider
       ? createTerminalSessionApiFromPtyProvider(deps.ptyProvider)

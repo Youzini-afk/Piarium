@@ -259,6 +259,10 @@ process-wide `sh_N` identities and rejects owner/creation-identity reuse; the pe
 owns command framing and output presentation but does not own a second process table. Background
 completion comes from the PTY exit event, and process-writer ownership remains live until exit and
 release actually complete. Reading output is observation, never the completion trigger (D-209).
+User terminal tabs inject OSC 633 on bash / PowerShell / zsh; finished commands with real command
+text and exit codes become workspace events and the next Zone 2 `<user-terminal>` section. Host
+`memory.nudge` wakes the existing keeper from those user events. Missing integration is
+`not-observed`, not a guessed command (D-226).
 
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role. The
 application host owns search, current document reads, local embedding instances, derived indexes, and

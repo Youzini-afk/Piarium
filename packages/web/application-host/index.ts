@@ -140,6 +140,7 @@ import {
 import { registerTtsRoutes } from './lib/tts/routes.js';
 import { detectSayTtsCapability } from './lib/tts/capability-runtime.js';
 import { createTerminalRuntime } from './lib/terminal/runtime.js';
+import { createTerminalCommandProjector } from './lib/knowledge/terminal-projection.js';
 import { createDictationRuntime } from './lib/dictation/runtime.js';
 import { createFsSearchRuntime as createFsSearchRuntimeFactory } from './lib/fs/search.js';
 import { mintOutsideFileGrant } from './lib/fs/routes.js';
@@ -1968,6 +1969,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   };
   bindThreadKnowledgeSession = bindKnowledgeSession;
 
+  const terminalCommandProjector = createTerminalCommandProjector({
+    resolveWorkspaceId: (cwd) => documentsAuthority.resolveScopeId(cwd),
+    observe: (event) => knowledgeContextRuntime.observeTerminalCommand(event),
+    drain: () => knowledgeContextRuntime.drain(),
+    listBoundSessions: (workspaceId) => knowledgeContextRuntime.listBoundSessions(workspaceId),
+    inspectCwd: (terminalId) => terminalRuntime?.inspectSession(terminalId)?.cwd,
+    nudgeMemory: async (sessionId, input) => {
+      const broker = getReadyPiRuntimeBroker();
+      if (!broker) return;
+      await broker.requestForSession(sessionId, 'memory.nudge', {
+        sessionId,
+        reason: input.reason,
+        commands: input.commands,
+      });
+    },
+    onError: (error) => {
+      console.error('[HarnessKnowledge] Terminal command projection failed:', errorMessage(error));
+    },
+  });
+
   // Zone 2 provider — assembles material from the knowledge store
   async function zone2Provider(request: Parameters<typeof knowledgeContextRuntime.zone2Material>[0]) {
     return knowledgeContextRuntime.zone2Material(request);
@@ -2720,6 +2741,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority,
   });
   terminalRuntime = startupResult.terminalRuntime;
+  const terminalCommandSubscription = terminalRuntime.subscribeCommands((record) => {
+    void terminalCommandProjector.project(record);
+  });
   dictationRuntime = startupResult.dictationRuntime;
   await scheduledTasksRuntime.start().catch((error) => {
     console.warn('[ScheduledTasks] Failed to start runtime:', error?.message || error);
@@ -2752,6 +2776,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterTasksCapability();
       unregisterDebugCapability();
       unregisterTestCapability();
+      terminalCommandSubscription.dispose();
       for (const subscription of knowledgeLanguageSubscriptions.values()) subscription.close();
       knowledgeLanguageSubscriptions.clear();
       await languageSupervisor.dispose();

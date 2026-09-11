@@ -177,6 +177,19 @@ export interface HostMethodMap {
     params: { force?: boolean };
     result: { accepted: boolean };
   };
+  "memory.nudge": {
+    params: {
+      commands?: Array<{
+        command: string;
+        commandId: string;
+        cwd?: string;
+        exitCode: number;
+      }>;
+      reason: "user-command";
+      sessionId: string;
+    };
+    result: { accepted: boolean; reason: string };
+  };
   "model.list": {
     params: Record<string, never>;
     result: ModelDescriptor[];

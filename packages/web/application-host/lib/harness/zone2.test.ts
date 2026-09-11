@@ -65,6 +65,17 @@ describe("assembleZone2Content", () => {
     expect(content).toContain("3 min ago");
   });
 
+  it("includes cwd when the command observation recorded one", () => {
+    const now = Date.now();
+    const content = assembleZone2Content({
+      ...emptyMaterial,
+      userCommands: [
+        { command: "echo hi", exitCode: 0, at: now, cwd: "/workspace" },
+      ],
+    }, { now });
+    expect(content).toContain("exit 0 · echo hi  (/workspace)");
+  });
+
   it("limits user-terminal to last 5", () => {
     const now = Date.now();
     const commands = Array.from({ length: 8 }, (_, i) => ({

@@ -11,6 +11,7 @@ describe('startup pipeline runtime', () => {
         attachTerminalSession: () => null,
         createTerminalSession: async () => { throw new Error('not used'); },
         inspectSession: () => null,
+        subscribeCommands: () => ({ dispose: () => undefined }),
         shutdown: async () => {},
       }),
       createDictationRuntime: () => ({ stop: () => {} }),

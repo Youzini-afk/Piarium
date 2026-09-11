@@ -16,6 +16,8 @@ import {
 import { sanitizeTerminalHistoryChunk } from './history.js';
 import { consumeTerminalThemeQueries, terminalThemeModeReport } from './theme-response.js';
 import { createTerminalShellResolver, getTerminalShellLoginArgs, normalizeTerminalShell } from './shells.js';
+import { createShellIntegrationParser } from './shell-integration.js';
+import { shellIntegrationLaunch } from './shell-integration-scripts.js';
 import { createWorkspaceConfig, ensureWorkspaceRoot } from '../workspace/workspace-config.js';
 import { assertAbsolutePathInWorkspace, resolveWorkspacePath } from '../workspace/path-safety.js';
 import { resolveLinuxPtyLaunch, stripAppImageArgv0Leak } from '../platform/inherited-env.js';
@@ -23,6 +25,7 @@ import type { DocumentAuthority } from '../documents/authority.js';
 import type { TerminalShellPreference } from './shells.js';
 import type {
   CreateTerminalSessionInput,
+  TerminalCommandRecord,
   TerminalHandle,
   TerminalSessionApi,
   TerminalSessionInfo,
@@ -68,8 +71,11 @@ interface TerminalSession {
   closing: boolean;
   cols: number;
   cwd: string;
+  commandListeners: Set<(event: TerminalCommandRecord) => void>;
   dataListeners: Set<(data: string) => void>;
   draining: boolean;
+  integrationGeneration: number;
+  integrationParser: ReturnType<typeof createShellIntegrationParser>;
   eventQueue: TerminalEvent[];
   exitCode: number | null;
   exitListeners: Set<(event: { exitCode: number; signal: number }) => void>;
@@ -146,6 +152,7 @@ type SessionCreationIdentity = {
 interface StartSessionInput {
   cols: number;
   cwd: string;
+  injectIntegration?: boolean;
   loginShell: boolean;
   rows: number;
   shell: TerminalShellPreference;
@@ -239,6 +246,7 @@ export function createTerminalRuntime({
   }>();
   const pendingSessionRestarts = new Map<string, Promise<void>>();
   const connections = new Set<TerminalConnection>();
+  const commandObservers = new Set<(event: TerminalCommandRecord) => void>();
   const pendingTerminations = new Set<Promise<void>>();
   const runtime = 'Bun' in globalThis ? 'bun' : 'node';
   let ptyProviderPromise: Promise<PtyProvider> | null = null;
@@ -314,7 +322,9 @@ export function createTerminalRuntime({
         env.NODE_CHANNEL_FD = '';
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         stripAppImageArgv0Leak(env);
-        const launch = resolveLinuxPtyLaunch(executable, args);
+        const integration = input.injectIntegration ? shellIntegrationLaunch(executable, args, loginShell) : null;
+        if (integration) Object.assign(env, integration.env);
+        const launch = resolveLinuxPtyLaunch(executable, integration?.args ?? args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
         return { process: provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
       } catch (error) { lastError = error; }
@@ -420,6 +430,13 @@ export function createTerminalRuntime({
           session.lastActivity = Date.now();
           publish(session, { t: 'output', d: event.data, ...(sanitized.visible !== event.data ? { r: sanitized.visible } : {}) });
           for (const listener of session.dataListeners) listener(event.data);
+          if (session.owner === 'user') {
+            for (const observation of session.integrationParser.consume(event.data)) {
+              const record: TerminalCommandRecord = { ...observation, owner: session.owner };
+              for (const listener of session.commandListeners) listener(record);
+              for (const listener of commandObservers) listener(record);
+            }
+          }
         } else {
           session.status = 'exited';
           session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
@@ -498,7 +515,11 @@ export function createTerminalRuntime({
           generation,
         });
       }
-      spawned = await spawnPty({ cwd, cols, rows, themeMode, shell, loginShell, ...(session.spawn ? { spawn: session.spawn } : {}) });
+      spawned = await spawnPty({
+        cwd, cols, rows, themeMode, shell, loginShell,
+        injectIntegration: session.owner === 'user' && !session.spawn,
+        ...(session.spawn ? { spawn: session.spawn } : {}),
+      });
       return { ...spawned, writerState, generation };
     } catch (error) {
       await releaseWriterState(writerState, Boolean(spawned));
@@ -535,6 +556,8 @@ export function createTerminalRuntime({
     session.terminalBackground = typeof terminalBackground === 'string' ? terminalBackground : session.terminalBackground;
     session.terminalForeground = typeof terminalForeground === 'string' ? terminalForeground : session.terminalForeground;
     session.lastActivity = Date.now(); session.eventQueue.length = 0;
+    session.integrationGeneration += 1;
+    session.integrationParser.reset(session.integrationGeneration);
     wire(session, spawned.process, spawned.writerState);
   };
 
@@ -613,7 +636,10 @@ export function createTerminalRuntime({
         id,
         cols,
         cwd: resolvedCwd,
+        commandListeners: new Set(),
         dataListeners: new Set(),
+        integrationGeneration: 0,
+        integrationParser: createShellIntegrationParser({ terminalId: id }),
         sequence: 0,
         history: '',
         pendingHistoryControlSequence: '',
@@ -724,6 +750,10 @@ export function createTerminalRuntime({
       session.dataListeners.add(handler);
       return { dispose: () => { session.dataListeners.delete(handler); } };
     },
+    onCommand(handler) {
+      session.commandListeners.add(handler);
+      return { dispose: () => { session.commandListeners.delete(handler); } };
+    },
     onExit(handler) {
       if (session.status === 'exited') {
         let active = true;
@@ -825,6 +855,7 @@ export function createTerminalRuntime({
     return {
       id: session.id,
       cwd: session.cwd,
+      integration: session.owner === 'user' ? session.integrationParser.status() : 'not-observed',
       owner: session.owner,
       retainWhenDetached: session.retainWhenDetached,
       status: session.status,
@@ -1001,10 +1032,16 @@ export function createTerminalRuntime({
     ]);
     wsServer = null;
   };
+  const subscribeCommands = (handler: (event: TerminalCommandRecord) => void): { dispose(): void } => {
+    commandObservers.add(handler);
+    return { dispose: () => { commandObservers.delete(handler); } };
+  };
+
   const api: TerminalSessionApi = {
     createTerminalSession,
     attachTerminalSession,
     inspectSession,
+    subscribeCommands,
   };
   return { shutdown, ...api };
 }

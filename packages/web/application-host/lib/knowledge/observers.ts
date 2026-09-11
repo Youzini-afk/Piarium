@@ -29,11 +29,20 @@ export interface TerminalExitEvent {
   workspaceId: string;
   sessionId: string;
   command: string;
+  commandId?: string;
+  cwd?: string;
+  endedAt?: number;
   exitCode: number;
+  integration?: "osc-633";
   /** Whether this came from a harness shell (agent) or user terminal (user) */
   source: "harness" | "user";
+  startedAt?: number;
   turnIndex?: number;
 }
+
+export type TerminalCommandEvent = TerminalExitEvent & {
+  commandId: string;
+};
 
 export interface DiagnosticEvent {
   workspaceId: string;
@@ -89,14 +98,25 @@ export function createObservers(deps: ObserverDeps) {
 
   async function onTerminalExit(event: TerminalExitEvent): Promise<void> {
     const source = determineTerminalSource(event.source);
+    const at = event.endedAt ?? Date.now();
+    const cwdSuffix = event.cwd ? `  (${event.cwd})` : "";
     const input: EventInput = {
       kind: "command",
-      at: Date.now(),
+      at,
       sessionId,
       ...(event.turnIndex === undefined ? {} : { turnIndex: event.turnIndex }),
-      text: `exit ${event.exitCode} · ${event.command}`,
+      text: `exit ${event.exitCode} · ${event.command}${cwdSuffix}`,
       ...(event.sessionId ? { refs: { handle: event.sessionId } } : {}),
-      data: { command: event.command, exitCode: event.exitCode },
+      data: {
+        command: event.command,
+        exitCode: event.exitCode,
+        origin: event.source,
+        ...(event.commandId === undefined ? {} : { commandId: event.commandId }),
+        ...(event.cwd === undefined ? {} : { cwd: event.cwd }),
+        ...(event.integration === undefined ? {} : { integration: event.integration }),
+        ...(event.startedAt === undefined ? {} : { startedAt: event.startedAt }),
+        ...(event.endedAt === undefined ? {} : { endedAt: event.endedAt }),
+      },
       source,
     };
     await store.putEvent(input);

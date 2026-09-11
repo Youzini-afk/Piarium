@@ -103,6 +103,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    D-224 已补剩余状态契约：materialized 父条件撤销、cascade admission、binding 当前 owner、默认 native result 失效与
    scoped explore pin。3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
    D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威。
+   D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -165,11 +166,13 @@ websearch provider 当前变更需重启 Host，后续新会话使用新的能�
 
 沿 zone2.assemble 和隐藏 piarium-context 消息追加用户编辑/命令/诊断/Git/知识/计划/线程状态，不重复 agent 已见材料。
 保留 event cursor 和送达后游标提交；无材料不造消息。沿现有 zone2.budgetTokens 汇总/折叠，估算明示；不新增固定文件数配额。
+User terminal 段只投影 `source !== agent` 且带 command+exitCode 的事件；cwd 有则写入。无 integration 不造伪命令。
 
 ### 2.3 Host 观察者
 
-Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐命令终端信息用真实 shell integration，不把 PTY 退出
-当成命令完成、不按键盘换行猜命令。观察失败不反噬已经成功的写入/HTTP，具体来源不可用要可见。
+Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐命令终端信息用真实 OSC 133/633 shell integration，
+不把 PTY 退出当成命令完成、不按终端文本或提示符正则猜命令。只对 user 会话注入；Harness spawn 不注入、不解析。
+观察失败不反噬已经成功的写入/HTTP/终端，具体来源不可用要可见。`commandId` 去重，不重放 history、不倒退 Zone 2 游标。
 
 ### 2.4 记忆 agent：默认维护
 
@@ -183,8 +186,8 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 
 SessionSnapshot 与 Context 已显示配置/有效模式、session override 和最近 keeper/compaction 失败；Host 拒绝原因进入失败信息，
 Settings 可修复坏配置。不新增辅助费用或 Token 看板，普通会话已有费用/Token 展示保留（D-080）。
-不承诺相同模型就命中缓存。事件加速接 steering、计划编辑、子返回、真实命令完成；沿已有 token 增长/单个在飞/去抖调度，
-有积压才工作，用户“记住这个”不被普通去抖忽略。
+不承诺相同模型就命中缓存。事件加速已接真实用户命令完成（Host `memory.nudge` → 现有 keeper）；沿已有 token 增长/单个在飞/
+cooldown 去抖调度，有积压才工作。steering、计划编辑、子返回仍可按同一 keeper 入口后补，不另建循环。用户“记住这个”不被普通去抖忽略。
 
 版本/分支/CAS、partial apply、主历史无 memory_edit、默认/关闭/assist、实时模式与失败投影已由 protocol、Host 和真 Pi
 faux-provider 测试覆盖。剩余触发优化随实际事件入口推进，不做付费协议/缓存对照，不等测试者批准。

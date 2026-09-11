@@ -16,4 +16,9 @@ describe('terminal replay history', () => {
   it('preserves ordinary OSC titles and split UTF-16 text', () => {
     expect(sanitizeTerminalHistoryChunk('', '\u001b]0;title\u0007ok')).toEqual({ visible: '\u001b]0;title\u0007ok', pending: '' });
   });
+
+  it('removes shell-integration OSC 633/133 from replay history', () => {
+    const input = 'before\u001b]633;E;echo hi\u0007after\u001b]133;D;0\u0007end';
+    expect(sanitizeTerminalHistoryChunk('', input)).toEqual({ visible: 'beforeafterend', pending: '' });
+  });
 });

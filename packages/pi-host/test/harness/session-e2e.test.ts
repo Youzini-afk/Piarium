@@ -331,6 +331,95 @@ describe("session e2e — zone2 extension", () => {
     });
   });
 
+  it("carries a user terminal command through the Host store into the next real Pi turn", async () => {
+    await withTempRoot("piarium-s-zone2-terminal-", async (root) => {
+      const dataDir = join(root, "data");
+      const documents = createDocumentAuthority({
+        hostId: "zone2-term-host",
+        dataDir,
+        isAllowedRoot: async () => true,
+        isTrusted: async () => true,
+      });
+      const identity = await documents.resolveWorkspace({ path: root });
+      const store = await openWorkspaceKnowledge({
+        dataDir,
+        hostId: "zone2-term-host",
+        workspaceId: identity.workspaceId,
+        embedding: null,
+      });
+      const knowledge = createKnowledgeContextRuntime({ getStore: async () => store });
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(context); return fauxAssistantMessage("first done"); },
+        (context) => { contexts.push(context); return fauxAssistantMessage("second done"); },
+        (context) => { contexts.push(context); return fauxAssistantMessage("third done"); },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: { zone2Provider: (request) => knowledge.zone2Material(request) },
+      });
+
+      try {
+        const snapshot = await session.host.create(root);
+        knowledge.bindSession(snapshot.sessionId, identity.workspaceId);
+        await session.host.prompt(snapshot.sessionId, "first turn");
+        await session.host.session.waitForIdle();
+
+        knowledge.observeTerminalCommand({
+          workspaceId: identity.workspaceId,
+          sessionId: "term-user",
+          command: "echo piarium-user-terminal",
+          commandId: "term-user:1:1",
+          cwd: root,
+          exitCode: 0,
+          source: "user",
+          integration: "osc-633",
+          endedAt: Date.now(),
+        });
+        knowledge.observeTerminalCommand({
+          workspaceId: identity.workspaceId,
+          sessionId: "term-user",
+          command: "echo piarium-user-terminal",
+          commandId: "term-user:1:1",
+          exitCode: 0,
+          source: "user",
+          integration: "osc-633",
+        });
+        knowledge.observeTerminalExit({
+          workspaceId: identity.workspaceId,
+          sessionId: "sh_1",
+          command: "agent-build",
+          commandId: "sh_1:1:1",
+          exitCode: 0,
+          source: "harness",
+        });
+        await knowledge.drain();
+
+        await session.host.prompt(snapshot.sessionId, "second turn");
+        await session.host.session.waitForIdle();
+        const second = JSON.stringify(contexts[1]!.messages);
+        assert.match(second, /<user-terminal>/);
+        assert.match(second, /echo piarium-user-terminal/);
+        assert.doesNotMatch(second, /agent-build/);
+        await session.host.prompt(snapshot.sessionId, "third turn");
+        await session.host.session.waitForIdle();
+        assert.equal(
+          JSON.stringify(contexts[2]!.messages).match(/echo piarium-user-terminal/g)?.length,
+          1,
+          "the delivered command must remain in history without being appended a second time",
+        );
+      } finally {
+        await session.dispose();
+        await knowledge.dispose();
+        await store.close();
+        await documents.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
   it("injects assembled <piarium-context> into the first request and leaves Zone 0 alone", async () => {
     await withTempRoot("piarium-s-zone2-", async (root) => {
       const faux = registerFauxProvider();

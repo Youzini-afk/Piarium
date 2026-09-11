@@ -214,4 +214,52 @@ describe("knowledge context runtime", () => {
     expect(result.material.git).toEqual({ branch: "feature/git-observation", changed: 2, note: "1 ahead" });
     await runtime.dispose();
   });
+
+  it("projects a user terminal command into Zone 2 once and keeps harness commands out", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    runtime.observeTerminalCommand({
+      workspaceId: "workspace-1",
+      sessionId: "term-1",
+      command: "echo hi",
+      commandId: "term-1:1:1",
+      cwd: "/workspace",
+      exitCode: 0,
+      source: "user",
+      integration: "osc-633",
+      endedAt: Date.now(),
+    });
+    runtime.observeTerminalCommand({
+      workspaceId: "workspace-1",
+      sessionId: "term-1",
+      command: "echo hi",
+      commandId: "term-1:1:1",
+      exitCode: 0,
+      source: "user",
+      integration: "osc-633",
+    });
+    runtime.observeTerminalExit({
+      workspaceId: "workspace-1",
+      sessionId: "sh_1",
+      command: "agent-build",
+      commandId: "sh_1:1:1",
+      exitCode: 0,
+      source: "harness",
+    });
+    await runtime.drain();
+    const first = await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, contextUsage: null });
+    expect(first.material.userCommands).toEqual([
+      expect.objectContaining({ command: "echo hi", exitCode: 0, cwd: "/workspace" }),
+    ]);
+    const second = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      afterEventId: first.eventCursor,
+      contextUsage: null,
+    });
+    expect(second.material.userCommands).toEqual([]);
+    expect(second.eventCursor).toBe(first.eventCursor);
+    expect(runtime.listBoundSessions("workspace-1")).toEqual(["session-a"]);
+    await runtime.dispose();
+  });
 });

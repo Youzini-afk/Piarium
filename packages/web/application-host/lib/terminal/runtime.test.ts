@@ -363,16 +363,19 @@ describe('terminal runtime', () => {
         expect(requiredProcess(harness.processes, 0).shell).toBe('/bin/zsh');
         expect(requiredProcess(harness.processes, 0).args).toEqual(['-l']);
       }
+      expect(requiredProcess(harness.processes, 0).options.env.ZDOTDIR).toEqual(expect.stringContaining('zsh-'));
 
       const restarted = createResponse();
       await requiredRoute(harness.routes.post, '/api/terminal/:sessionId/restart')({ params: { sessionId: 'term-shell' }, body: { shell: 'bash', loginShell: true } }, restarted);
       expect(restarted.statusCode).toBe(200);
       if (process.platform === 'linux') {
         expect(requiredProcess(harness.processes, 1).shell).toMatch(/\/env$/);
-        expect(requiredProcess(harness.processes, 1).args).toEqual(['-u', 'ARGV0', '/bin/bash', '-l']);
+        expect(requiredProcess(harness.processes, 1).args).toEqual([
+          '-u', 'ARGV0', '/bin/bash', '-l', '--init-file', expect.stringContaining('bash-'),
+        ]);
       } else {
         expect(requiredProcess(harness.processes, 1).shell).toBe('/bin/bash');
-        expect(requiredProcess(harness.processes, 1).args).toEqual(['-l']);
+        expect(requiredProcess(harness.processes, 1).args).toEqual(['-l', '--init-file', expect.stringContaining('bash-')]);
       }
     } finally { await harness.runtime.shutdown(); }
   });
@@ -953,6 +956,51 @@ describe('terminal runtime', () => {
         body: { sessionId: 'user-overflow', cwd: '/repo' },
       }, overflow);
       expect(overflow.statusCode).toBe(429);
+    } finally { await harness.runtime.shutdown(); }
+  });
+
+  it('injects shell integration only for user sessions and emits OSC command facts', async () => {
+    const harness = createHarness({
+      searchPathFor: (name: string) => String(name).includes('bash') ? '/bin/bash' : '/bin/sh',
+      isExecutable: () => true,
+    });
+    try {
+      const user = await harness.runtime.createTerminalSession({
+        sessionId: 'user-bash',
+        cwd: '/repo',
+        owner: 'user',
+        shell: 'bash',
+      });
+      expect(requiredProcess(harness.processes, 0).args).toContain('--init-file');
+      expect(harness.runtime.inspectSession('user-bash')).toMatchObject({
+        integration: 'not-observed',
+        owner: 'user',
+      });
+
+      const commands: Array<{ command: string; commandId: string; owner: string }> = [];
+      const subscription = harness.runtime.subscribeCommands((event) => { commands.push(event); });
+      user.onCommand((event) => { commands.push(event); });
+      requiredProcess(harness.processes, 0).emitData('\u001b]633;E;echo hi\u0007\u001b]633;D;0\u0007');
+      expect(commands).toHaveLength(2);
+      expect(commands[0]).toMatchObject({ command: 'echo hi', exitCode: 0, owner: 'user', terminalId: 'user-bash' });
+      expect(harness.runtime.inspectSession('user-bash')?.integration).toBe('ready');
+
+      requiredProcess(harness.processes, 0).emitExit(0, 0);
+      expect(commands).toHaveLength(2);
+      subscription.dispose();
+
+      const harnessShell = await harness.runtime.createTerminalSession({
+        sessionId: 'sh_osc',
+        cwd: '/repo',
+        owner: 'harness',
+        spawn: { executable: '/usr/bin/harness-bash', args: ['-l'] },
+      });
+      const harnessCommands: unknown[] = [];
+      harnessShell.onCommand((event) => { harnessCommands.push(event); });
+      expect(requiredProcess(harness.processes, 1).args).toEqual(['-l']);
+      requiredProcess(harness.processes, 1).emitData('\u001b]633;E;agent-cmd\u0007\u001b]633;D;0\u0007');
+      expect(harnessCommands).toEqual([]);
+      expect(harness.runtime.inspectSession('sh_osc')?.integration).toBe('not-observed');
     } finally { await harness.runtime.shutdown(); }
   });
 });

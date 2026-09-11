@@ -184,4 +184,78 @@ describe("memory agent extension", () => {
     await waitFor(() => successes === 1);
     assert.deepEqual(failures, ["conflict"]);
   });
+
+  it("merges rapid user-command nudges into existing keeper work", async () => {
+    const handlers = new Map<string, (event: never, ctx: never) => unknown>();
+    let modelCalls = 0;
+    let finishFirst!: () => void;
+    const firstModel = new Promise<null>((resolve) => {
+      finishFirst = () => resolve(null);
+    });
+    const extension = createMemoryAgentExtension({
+      bridge: {
+        request: async (method: string) => method === "memory.blocks.get"
+          ? { blocks: [] }
+          : { applied: 0, rejected: 0, errors: [], changedBlocks: false },
+      } as never,
+      getMode: () => "assist",
+      settings: { interval: 1, blockBudgetTokens: 2_000, totalBudgetTokens: 12_000, minContextTokens: 0, cooldownMs: 0, maxInterval: 20_000 },
+      callModel: async () => {
+        modelCalls += 1;
+        if (modelCalls === 1) return firstModel;
+        return null;
+      },
+    });
+    extension({ on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler) } as never);
+    handlers.get("context")?.({ messages: [{ role: "user", content: "work", timestamp: 1 }] } as never, {} as never);
+    handlers.get("turn_end")?.({
+      turnIndex: 1,
+      message: { role: "assistant", content: [] },
+      toolResults: [],
+    } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    await waitFor(() => modelCalls === 1);
+
+    const first = await extension.nudge({
+      reason: "user-command",
+      commands: [{ command: "one", commandId: "t:1:1", exitCode: 0 }],
+    });
+    const second = await extension.nudge({
+      reason: "user-command",
+      commands: [{ command: "two", commandId: "t:1:2", exitCode: 0 }],
+    });
+    const third = await extension.nudge({
+      reason: "user-command",
+      commands: [{ command: "three", commandId: "t:1:3", exitCode: 0 }],
+    });
+    assert.equal(first.reason, "in-flight");
+    assert.equal(second.reason, "in-flight");
+    assert.equal(third.reason, "in-flight");
+    assert.equal(modelCalls, 1);
+    finishFirst();
+    await waitFor(() => modelCalls === 2);
+    assert.equal(modelCalls, 2);
+  });
+
+  it("does not call the model when memory is off or no turn has run", async () => {
+    let calls = 0;
+    const off = createMemoryAgentExtension({
+      bridge: {} as never,
+      getMode: () => "off",
+      callModel: async () => { calls += 1; return null; },
+    });
+    off({ on: () => undefined } as never);
+    assert.deepEqual(await off.nudge({ reason: "user-command" }), { accepted: false, reason: "off" });
+
+    const assist = createMemoryAgentExtension({
+      bridge: {} as never,
+      getMode: () => "assist",
+      callModel: async () => { calls += 1; return null; },
+    });
+    assist({ on: () => undefined } as never);
+    assert.deepEqual(await assist.nudge({ reason: "user-command" }), { accepted: false, reason: "no-session-context" });
+    assert.equal(calls, 0);
+  });
 });

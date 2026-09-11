@@ -1,6 +1,6 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { Zone2ContextUsage, Zone2Material } from "../harness/zone2.js";
-import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalExitEvent } from "./observers.js";
+import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
 import type { KnowledgeStore, RecallResult, StoredEvent } from "./store.js";
 
 interface SessionBinding {
@@ -54,6 +54,7 @@ const dataOf = (event: StoredEvent): Record<string, unknown> => event.data ?? {}
 export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOptions) {
   const sessions = new Map<string, SessionBinding>();
   const pending = new Set<Promise<void>>();
+  const seenCommandIds = new Set<string>();
   let disposed = false;
 
   const track = (task: Promise<void>): void => {
@@ -120,10 +121,19 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
 
   const observeTerminalExit = (event: TerminalExitEvent): void => {
     if (disposed) return;
+    if (event.commandId) {
+      const seenKey = `${event.workspaceId}:${event.commandId}`;
+      if (seenCommandIds.has(seenKey)) return;
+      seenCommandIds.add(seenKey);
+    }
     track(forWorkspace(event.workspaceId, (observers, binding) => observers.onTerminalExit({
       ...event,
       turnIndex: binding.turnIndex,
     })));
+  };
+
+  const observeTerminalCommand = (event: TerminalCommandEvent): void => {
+    observeTerminalExit(event);
   };
 
   const observeDiagnostics = (event: DiagnosticEvent): void => {
@@ -189,7 +199,12 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         const command = data.command;
         const exitCode = data.exitCode;
         if (typeof command === "string" && typeof exitCode === "number") {
-          material.userCommands.push({ command, exitCode, at: event.at });
+          material.userCommands.push({
+            command,
+            exitCode,
+            at: event.at,
+            ...(typeof data.cwd === "string" ? { cwd: data.cwd } : {}),
+          });
         }
       } else if (event.kind === "diagnostic" && event.source !== "agent") {
         const path = data.path ?? event.refs?.path;
@@ -256,7 +271,11 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     dropSession,
     observeDiagnostics,
     observeDocumentMutation,
+    listBoundSessions: (workspaceId: string): string[] => (
+      [...sessions.values()].filter((binding) => binding.workspaceId === workspaceId).map((binding) => binding.sessionId)
+    ),
     observeGitStatus,
+    observeTerminalCommand,
     observeTerminalExit,
     resetSessionObservationBaselines,
     zone2Material,

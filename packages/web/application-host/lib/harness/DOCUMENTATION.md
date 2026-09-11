@@ -278,6 +278,13 @@ also embedded in the durable hidden Pi message so a worker reload can resume.
 Successful Git status reads from both workbench APIs pass through Documents
 workspace resolution and a per-session deduplicating observer; this reuses the
 existing SCM refresh boundary and does not add a second Git poller.
+User-terminal command finish events come from Terminal Runtime OSC 633
+through `subscribeCommands` and `observeTerminalCommand`. They are stored
+only for bound sessions, keyed by `commandId` so reconnect and Host
+restart cannot replay the same observation. Harness/agent shells stay
+`source: agent` and never enter `<user-terminal>`. After the event is
+stored, Host `memory.nudge` wakes the existing keeper; worker-unavailable
+and keeper failure do not fail the terminal.
 The same Documents post-commit boundary drives an event-based symbol graph:
 known languages bind the file's disk text in the Host language view and replace
 one file's real `file -> defines -> symbol` graph together with the document

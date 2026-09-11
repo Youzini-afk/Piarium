@@ -123,6 +123,35 @@ describe("createObservers", () => {
     expect(captured!.text).toContain("bun test");
   });
 
+  it("records commandId and cwd on user terminal observations", async () => {
+    let captured: Record<string, unknown> | null = null;
+    const origPutEvent = store.putEvent.bind(store);
+    store.putEvent = async (e) => {
+      captured = { text: e.text, data: e.data ?? null };
+      return origPutEvent(e);
+    };
+    const observers = createObservers({ store, sessionId: "s1" });
+    await observers.onTerminalExit({
+      workspaceId: "ws",
+      sessionId: "term-1",
+      command: "echo hi",
+      commandId: "term-1:1:1",
+      cwd: "/workspace",
+      exitCode: 0,
+      source: "user",
+      integration: "osc-633",
+    });
+    expect(captured).toMatchObject({
+      text: expect.stringContaining("(/workspace)"),
+      data: {
+        command: "echo hi",
+        commandId: "term-1:1:1",
+        cwd: "/workspace",
+        origin: "user",
+      },
+    });
+  });
+
   it("onTerminalExit marks harness as agent", async () => {
     let captured: { source: string } | null = null;
     const origPutEvent = store.putEvent.bind(store);

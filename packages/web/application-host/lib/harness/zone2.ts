@@ -41,6 +41,7 @@ export interface Zone2UserEdit {
 
 export interface Zone2UserCommand {
   command: string;
+  cwd?: string;
   exitCode: number;
   at: number; // epoch ms
 }
@@ -262,9 +263,10 @@ export function assembleZone2Content(
     if (userCommands.length > MAX_USER_COMMANDS) {
       userCommands = userCommands.slice(-MAX_USER_COMMANDS);
     }
-    const lines = userCommands.map((c) =>
-      `exit ${c.exitCode} · ${c.command}  (${formatTimeAgo(c.at, now)})`,
-    );
+    const lines = userCommands.map((c) => {
+      const cwd = c.cwd ? `  (${c.cwd})` : "";
+      return `exit ${c.exitCode} · ${c.command}${cwd}  (${formatTimeAgo(c.at, now)})`;
+    });
     sections.push(`<user-terminal>\n${lines.join("\n")}\n</user-terminal>`);
   }
 

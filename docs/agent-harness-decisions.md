@@ -4509,7 +4509,7 @@ ModelRuntime 纵切继续通过。
 | D-020 | superseded（0.8.6 全零向量 `searchHybrid` 返回命中；`recall` 的 JS 扫描保留，换 BM25 是产品行为变更另议） | D-141 | agent-harness.md 7.5 |
 | D-021 | reverted | — | status（3b.3 真实状态） |
 | D-022 | experiment-result | — | agent-harness.md 12.2 |
-| D-023 | active-design | — | architecture.md §5.1（已有）、`lib/harness/DOCUMENTATION.md`— 待回写 |
+| D-023 | superseded in part（user terminal 与命令完成加速由 D-226 接通；steering/计划/子返回加速仍开） | D-226 | 设计 7.3；plan/status 2.2–2.4 |
 | D-024 | superseded in part | D-032（对象模型与存储布局） | agent-harness.md 9.3.1 |
 | D-025 | superseded in part | D-035（ask 走 UI、三层模型） | agent-harness.md 9.1.2 |
 | D-026 | superseded in part | D-032（对象模型）、D-033（wait 默认超时）、D-034（`traceHandle`） | agent-harness.md 9.3 |
@@ -4750,3 +4750,30 @@ ModelRuntime 纵切继续通过。
 | D-223 | superseded in part（registry 级 cascade admission、dispatch cleanup 与 binding current-owner 由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a/3.6 |
 | D-224 | implementation | — | agent-harness 9.2.5b/9.3；plan/status 3.4/3.4a/3.6；architecture 6.1 |
 | D-225 | implementation（根会话 edit/write/apply_patch 写回固定 surface 缓冲） | — | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；protocol document.surfaceWrite / Documents / Harness / pi-host |
+
+### D-226 · 2026-09-11 · 2.2 / 2.3 / 2.4（用户终端事件与 memory 加速）
+
+类型：问题与解法
+
+背景：D-023 要求 Zone 2 呈现用户终端命令事实，并用有意义的材料事件加速 memory keeper。Harness bash 已与 terminal runtime 共用进程，但 runtime 没有 OSC 解析，`observeTerminalExit` 未接线，PTY 进程退出不能冒充单条命令完成。keeper 只在 `turn_end` 走 token/cooldown gate。
+
+决定：
+
+1. 只对 `owner: user` 且非显式 `spawn` 的会话注入 Piarium 自有 OSC 633 脚本（bash `--init-file`、PowerShell `-File`、zsh `ZDOTDIR`）。命令正文来自 `E`，退出码来自 `D`，cwd 来自 `P;Cwd=`。没有命令正文不 emit。不解析终端文本、不按提示符正则、不用 PTY exit 编造命令。Harness spawn 不注入、不解析；若程序自己打出 OSC，按 owner 也不会进入 `<user-terminal>`。
+2. Runtime `subscribeCommands` 是 Host 观察入口。Documents `resolveScopeId(cwd)` 失败则跳过，不发明 workspace。`observeTerminalCommand` 按 `workspaceId:commandId` 去重后写入 knowledge event；Zone 2 只投影 `source !== agent` 且带 command+exitCode 的增量。送达后游标沿现有 hidden `piarium-context`。WS 重连不重解析 history（633/133 已从 `r` 剥离）。
+3. 用户命令入库存后，Host `memory.nudge`（Host→worker，非公开 Runtime 方法）唤醒现有 keeper。off 为零调用；尚无回合为 `no-session-context`（事件仍进 Zone 2）；in-flight/cooldown 合并到一次后续工作。命令只进入 keeper instruction 的 `<material>`，不写入主对话。nudge/keeper 失败只记 Host 错误，不反噬终端或主回合。不新增轮询循环。
+
+原因：用户屏幕上的终端命令是 Zone 2「agent 不在场时发生的事」；PTY 退出是会话生命周期，不是命令生命周期。keeper 已有 event gate，缺的是真实材料入口，不是第二套记忆循环。
+
+考虑过的替代：(1) 用提示符正则从 PTY 文本猜命令——Windows/PowerShell/自定义 prompt 会误报，且违反「不能靠终端文本」。(2) 把 PTY exit 当命令完成——多命令会话会说谎。(3) 给 harness bash 也注入 integration——会破坏 ShellSupervisor 组帧，且 D-054 禁止重复进 Zone 2。
+
+影响：terminal runtime/scripts/parser；knowledge observers/context-runtime/terminal-projection；protocol `memory.nudge`；pi-host memory extension + SessionHost + host-controller；`index.ts` 生产接线；设计 7.3、plan 2.2–2.4、status 2.2/2.3/2.4、architecture 4.4。
+
+状态：已实施；验证见 status 2.2/2.3/2.4。zsh/macOS/Linux 用户终端与完整桌面 Host 重启仅协议接入或未测。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-023 | superseded in part（user terminal 与命令完成加速由 D-226 接通；steering/计划/子返回加速仍开） | D-226 | 设计 7.3；plan/status 2.2–2.4 |
+| D-226 | implementation（OSC 633 用户命令 → Zone 2；memory.nudge 合并加速现有 keeper） | — | 设计 7.3；plan 2.2–2.4；status 2.2/2.3/2.4；architecture 4.4 |

@@ -74,6 +74,10 @@ content-free `inputContext`. UI surfaces capture dirty document bodies through
 the authenticated Documents API first; the runtime method carries only the
 opaque Host reference or an unavailable dirty-path set. Omission means disk.
 
+`memory.nudge` is a Host→worker method, not a public Runtime API. It wakes the
+existing memory keeper after a material user-terminal command. It does not
+write the command into the main conversation.
+
 ### Thread Events
 
 Two host events, both carrying state only — never message bodies.

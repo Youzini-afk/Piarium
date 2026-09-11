@@ -153,7 +153,7 @@ import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
-import { createMemoryAgentExtension } from "./harness/memory-agent-extension.js";
+import { createMemoryAgentExtension, type MemoryAgentExtension, type MemoryNudgeInput } from "./harness/memory-agent-extension.js";
 import { createKnowledgeSuggestionExtension } from "./harness/knowledge-suggestion-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -643,6 +643,7 @@ export class SessionHost {
   #sessionModelSelection: ModelSelection | undefined;
   #frozenPermissionOverlay: PermissionPolicy | undefined;
   #memoryModeReader: (() => Omit<HarnessMemoryRuntimeState, "lastFailure">) | undefined;
+  #memoryNudge: MemoryAgentExtension["nudge"] | undefined;
   #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
@@ -1393,6 +1394,15 @@ export class SessionHost {
       });
     }
     return wasBusy;
+  }
+
+  async nudgeMemory(
+    sessionId: string,
+    input: MemoryNudgeInput,
+  ): Promise<{ accepted: boolean; reason: string }> {
+    this.assertSession(sessionId);
+    if (!this.#memoryNudge) return { accepted: false, reason: "unavailable" };
+    return this.#memoryNudge(input);
   }
 
   clearQueue(sessionId: string): { cleared: boolean; followUp: string[]; steering: string[] } {
@@ -3074,31 +3084,35 @@ export class SessionHost {
               name: "piarium-compaction",
             },
             {
-              factory: createMemoryAgentExtension({
-                bridge: hostServicesBridge,
-                getMode: () => memoryModeReader().effectiveMode,
-                callModel: callMemoryModel,
-                getBranchEntryIds: () => sessionManager.getBranch().map((e) => e.id),
-                getContextEntryIds: () => sessionManager.buildContextEntries().flatMap((entry) => (
-                  sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
-                )),
-                onError: (error) => {
-                  this.#emit("host.log", {
-                    level: "warn",
-                    message: `Memory keeper update failed: ${error instanceof Error ? error.message : String(error)}`,
-                  });
-                },
-                onFailure: (message) => {
-                  if (this.#memoryModeReader === memoryModeReader) {
-                    this.#setMemoryFailure("keeper", message);
-                  }
-                },
-                onSuccess: () => {
-                  if (this.#memoryModeReader === memoryModeReader) {
-                    this.#clearMemoryFailure("keeper");
-                  }
-                },
-              }),
+              factory: (() => {
+                const memoryExtension = createMemoryAgentExtension({
+                  bridge: hostServicesBridge,
+                  getMode: () => memoryModeReader().effectiveMode,
+                  callModel: callMemoryModel,
+                  getBranchEntryIds: () => sessionManager.getBranch().map((e) => e.id),
+                  getContextEntryIds: () => sessionManager.buildContextEntries().flatMap((entry) => (
+                    sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
+                  )),
+                  onError: (error) => {
+                    this.#emit("host.log", {
+                      level: "warn",
+                      message: `Memory keeper update failed: ${error instanceof Error ? error.message : String(error)}`,
+                    });
+                  },
+                  onFailure: (message) => {
+                    if (this.#memoryModeReader === memoryModeReader) {
+                      this.#setMemoryFailure("keeper", message);
+                    }
+                  },
+                  onSuccess: () => {
+                    if (this.#memoryModeReader === memoryModeReader) {
+                      this.#clearMemoryFailure("keeper");
+                    }
+                  },
+                });
+                this.#memoryNudge = (input) => memoryExtension.nudge(input);
+                return memoryExtension;
+              })(),
               hidden: true,
               name: "piarium-memory-keeper",
             },
@@ -3531,6 +3545,7 @@ export class SessionHost {
     this.#harnessCounters?.reset();
     this.#harnessCounters = undefined;
     this.#memoryModeReader = undefined;
+    this.#memoryNudge = undefined;
     this.#inputContext = { source: "disk" };
     const runtime = this.#runtime;
     this.#runtime = undefined;

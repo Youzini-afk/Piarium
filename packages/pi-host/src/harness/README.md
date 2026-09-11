@@ -68,6 +68,10 @@ const customTools = selectHarnessTools(settings, {
   never enter the main conversation. The effective `off | assist | takeover`
   mode is read at every hook boundary; `off` also excludes stored blocks from
   Zone 2, while only `takeover` asks the Host for a compaction replacement.
+  Host `memory.nudge` (`reason: "user-command"`) accelerates the same keeper
+  after a material user-terminal event: off is zero calls, no prior turn is
+  `no-session-context`, in-flight/cooldown merge into one follow-up run, and
+  command facts appear only in the keeper instruction `<material>` block.
 - `createCompactionExtension` — derives Pi's actual removed context entries and
   accepts a Host replacement only in `takeover` mode. Missing coverage, branch
   drift, block-revision drift, or Host unavailability leaves that compaction to
