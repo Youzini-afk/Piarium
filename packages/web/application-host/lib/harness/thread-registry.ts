@@ -956,8 +956,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const draining = new Set<string>();
   const retiredParents = new Set<string>();
   const dequeueing = new Set<string>();
+  // Lifecycle cascade admission is owned by the registry so dispatch/create
+  // cannot race a runtime-local kill/archive snapshot.
+  const cascadingThreads = new Set<string>();
   let persistCounter = 0;
   const sessionBindings = new Map<string, ThreadSessionBinding>();
+  // Session bindings are the active-owner index.  Keep the historical set in
+  // memory as a tombstone index so an old child session cannot fall through to
+  // the root-session path after restart.
+  const historicalSessionIds = new Set<string>();
+  const staleBindingIds = new Set<string>();
   let sessionBindingsLoaded = false;
   let sessionBindingsLoad: Promise<void> | null = null;
   let sessionBindingTail = Promise.resolve();
@@ -1029,14 +1037,35 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const ensureSessionBindings = async (): Promise<void> => {
     if (sessionBindingsLoaded) return;
     if (!sessionBindingsLoad) {
-      const path = threadSessionBindingsPath(dataDir, hostId);
       sessionBindingsLoad = (async () => {
-        const raw = await readText(path);
-        if (raw !== null) {
-          for (const binding of parseSessionBindings(raw, path)) {
-            sessionBindings.set(binding.sessionId, binding);
+        const path = threadSessionBindingsPath(dataDir, hostId);
+        let persistedBindings: ThreadSessionBinding[] = [];
+        // Catalogs are authoritative.  A corrupt/missing derived index is
+        // rebuilt from the healthy catalogs and atomically overwritten.
+        try {
+          const raw = await readText(path);
+          if (raw !== null) {
+            persistedBindings = parseSessionBindings(raw, path);
+          }
+        } catch {
+          sessionBindings.clear();
+        }
+        await loadHostCatalogs();
+        historicalSessionIds.clear();
+        for (const catalog of cache.values()) {
+          for (const run of catalog.runs) {
+            if (run.sessionId) historicalSessionIds.add(run.sessionId);
           }
         }
+        const derived = derivedBindingsFromCatalogs();
+        sessionBindings.clear();
+        for (const [sessionId, binding] of derived) sessionBindings.set(sessionId, structuredClone(binding));
+        staleBindingIds.clear();
+        for (const binding of persistedBindings) {
+          const current = derived.get(binding.sessionId);
+          if (!current || !sameBinding(current, binding)) staleBindingIds.add(binding.sessionId);
+        }
+        await persistSessionBindings();
         sessionBindingsLoaded = true;
       })();
     }
@@ -1078,8 +1107,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       for (const [sessionId, existing] of sessionBindings) {
         if (existing.threadId === binding.threadId || sessionId === binding.sessionId) {
           sessionBindings.delete(sessionId);
+          if (sessionId !== binding.sessionId) historicalSessionIds.add(sessionId);
         }
       }
+      historicalSessionIds.delete(binding.sessionId);
+      staleBindingIds.delete(binding.sessionId);
       sessionBindings.set(binding.sessionId, structuredClone(binding));
     });
     return structuredClone(binding);
@@ -1088,6 +1120,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const unbindRunSession = async (sessionId: string): Promise<void> => {
     await mutateSessionBindings(() => {
       sessionBindings.delete(sessionId);
+      historicalSessionIds.add(sessionId);
     });
   };
 
@@ -1108,7 +1141,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const bindingFromRun = (catalog: ThreadCatalogDocument, run: ThreadRun): ThreadSessionBinding | null => {
     if (!run.sessionId) return null;
     const thread = catalog.threads.find((entry) => entry.id === run.threadId) ?? null;
-    if (!thread) return null;
+    if (!thread || thread.activeRunId !== run.id || thread.lifecycle === "archived"
+      || (run.outcome !== null && run.outcome !== "lost")
+      || (run.workerState !== "starting" && run.workerState !== "running" && run.workerState !== "lost")) return null;
     return {
       sessionId: run.sessionId,
       owningWorkspaceId: catalog.workspaceId,
@@ -1124,6 +1159,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const run = catalog.runs.find((entry) => entry.id === binding.runId && entry.threadId === binding.threadId);
     return !!thread
       && !!run
+      && thread.activeRunId === run.id
+      && (run.outcome === null || run.outcome === "lost")
+      && (run.workerState === "starting" || run.workerState === "running" || run.workerState === "lost")
       && run.sessionId === binding.sessionId
       && parentEquals(thread.parent, binding.parent);
   };
@@ -1148,44 +1186,43 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     for (const entry of entries) {
       if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
       const path = join(directory, entry.name);
-      const raw = await readText(path);
-      if (raw === null) continue;
-      const parsed = parseJson(raw, path);
-      if (Array.isArray(parsed)) continue;
-      const catalog = parseCatalog(raw, path);
-      if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) {
-        throw new ThreadRegistryError("corrupt", `Thread registry filename does not match its workspace identity: ${path}`, path);
-      }
-      if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
-    }
-  };
-
-  const catalogBindingForSession = (sessionId: string): ThreadSessionBinding | null => {
-    let chosen: { binding: ThreadSessionBinding; rank: number } | null = null;
-    for (const catalog of cache.values()) {
-      for (const run of catalog.runs) {
-        if (run.sessionId !== sessionId) continue;
-        const derived = bindingFromRun(catalog, run);
-        if (!derived) continue;
-        const rank = bindingRank(run);
-        if (!chosen || rank > chosen.rank) chosen = { binding: derived, rank };
+      try {
+        const raw = await readText(path);
+        if (raw === null) continue;
+        const parsed = parseJson(raw, path);
+        if (Array.isArray(parsed)) continue;
+        const catalog = parseCatalog(raw, path);
+        if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) continue;
+        if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
+      } catch {
+        // One malformed workspace catalog must not hide healthy workspace
+        // roots or prevent rebuilding the derived session index.
       }
     }
-    return chosen ? structuredClone(chosen.binding) : null;
   };
 
   const derivedBindingsFromCatalogs = (): Map<string, ThreadSessionBinding> => {
-    const next = new Map<string, { binding: ThreadSessionBinding; rank: number }>();
+    const candidates: Array<{ binding: ThreadSessionBinding; rank: number; startedAt: string }> = [];
     for (const catalog of cache.values()) {
       for (const run of catalog.runs) {
         const derived = bindingFromRun(catalog, run);
         if (!derived) continue;
         const rank = bindingRank(run);
-        const existing = next.get(derived.sessionId);
-        if (!existing || rank > existing.rank) next.set(derived.sessionId, { binding: derived, rank });
+        candidates.push({ binding: derived, rank, startedAt: run.startedAt });
       }
     }
-    return new Map([...next].map(([sessionId, entry]) => [sessionId, entry.binding]));
+    candidates.sort((left, right) => right.rank - left.rank
+      || right.startedAt.localeCompare(left.startedAt)
+      || left.binding.sessionId.localeCompare(right.binding.sessionId)
+      || left.binding.threadId.localeCompare(right.binding.threadId));
+    const next = new Map<string, ThreadSessionBinding>();
+    const threads = new Set<string>();
+    for (const candidate of candidates) {
+      if (next.has(candidate.binding.sessionId) || threads.has(candidate.binding.threadId)) continue;
+      next.set(candidate.binding.sessionId, candidate.binding);
+      threads.add(candidate.binding.threadId);
+    }
+    return next;
   };
 
   const rebuildSessionBindingsFromCatalogs = async (): Promise<void> => {
@@ -1215,15 +1252,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const catalog = await readExistingCatalog(existing.owningWorkspaceId);
       if (catalog && bindingMatchesCatalog(existing, catalog)) return structuredClone(existing);
     }
-    await loadHostCatalogs();
-    const derived = catalogBindingForSession(sessionId);
-    if (derived) {
-      if (!existing || !sameBinding(existing, derived)) {
-        await mutateSessionBindings(() => {
-          sessionBindings.set(derived.sessionId, structuredClone(derived));
-        });
-      }
-      return structuredClone(derived);
+    if (staleBindingIds.has(sessionId)) {
+      await mutateSessionBindings(() => {
+        staleBindingIds.delete(sessionId);
+      });
+      throw new ThreadRegistryError(
+        "stale-binding",
+        `Thread session binding does not match the catalog: ${sessionId}`,
+        threadSessionBindingsPath(dataDir, hostId),
+      );
     }
     if (existing) {
       await mutateSessionBindings(() => {
@@ -1232,6 +1269,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       throw new ThreadRegistryError(
         "stale-binding",
         `Thread session binding does not match the catalog: ${sessionId}`,
+        threadSessionBindingsPath(dataDir, hostId),
+      );
+    }
+    if (historicalSessionIds.has(sessionId)) {
+      throw new ThreadRegistryError(
+        "stale-binding",
+        `Thread session binding is no longer the current owner: ${sessionId}`,
         threadSessionBindingsPath(dataDir, hostId),
       );
     }
@@ -1369,6 +1413,41 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return thread && parentEquals(thread.parent, parent) ? thread : null;
   };
 
+  const cascadeBlocksParent = (workspaceId: string, catalog: ThreadCatalogDocument, parent: ThreadParent): boolean => {
+    let current: ThreadParent | null = parent;
+    while (current?.kind === "thread") {
+      if (cascadingThreads.has(scopeKey(workspaceId, current))) return true;
+      const ancestor = findThread(catalog, current.id);
+      if (!ancestor) return false;
+      if (ancestor.lifecycle === "archived") return true;
+      current = ancestor.parent;
+    }
+    return false;
+  };
+
+  const cascadeBlocksThread = (workspaceId: string, catalog: ThreadCatalogDocument, thread: Thread): boolean => (
+    cascadingThreads.has(scopeKey(workspaceId, { kind: "thread", id: thread.id }))
+      || cascadeBlocksParent(workspaceId, catalog, thread.parent)
+  );
+
+  const beginCascade = async (workspaceId: string, threadId: string): Promise<() => void> => {
+    const key = scopeKey(workspaceId, { kind: "thread", id: threadId });
+    // Enter the fence through the workspace mutation tail.  Any create/start
+    // queued after this operation observes the fence synchronously inside its
+    // own catalog mutation.
+    await mutateWorkspace(workspaceId, (catalog) => {
+      if (!findThread(catalog, threadId)) throw new Error(`Unknown thread: ${threadId}`);
+      cascadingThreads.add(key);
+      return { value: undefined, changed: [], write: false };
+    });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      cascadingThreads.delete(key);
+    };
+  };
+
   const touchThread = (catalog: ThreadCatalogDocument, thread: Thread): void => {
     thread.updatedAt = nowISO();
     thread.eventSeq = nextEventSeq(catalog);
@@ -1384,8 +1463,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
     await ensureLegacyParent(input.workspaceId, input.parent);
     return mutateWorkspace(input.workspaceId, (catalog) => {
-      if (draining.has(key) || retiredParents.has(key)) {
-        throw new Error("Cannot create a thread after its parent entered deletion");
+      if (draining.has(key) || retiredParents.has(key) || cascadeBlocksParent(input.workspaceId, catalog, input.parent)) {
+        throw new Error("Cannot create a thread while its parent is archived or being cascaded");
       }
       const timestamp = nowISO();
       const thread: Thread = {
@@ -1424,6 +1503,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       };
       catalog.threads.push(thread);
       return { value: thread, changed: [thread] };
+    });
+  };
+
+  const assertDispatchAllowed = async (workspaceId: string, threadId: string): Promise<void> => {
+    await mutateWorkspace(workspaceId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      if (!thread) throw new Error(`Unknown thread: ${threadId}`);
+      if (thread.lifecycle === "archived" || thread.lifecycle === "settled" || cascadeBlocksThread(workspaceId, catalog, thread)) {
+        throw new Error(`Cannot dispatch while the thread or an ancestor is settled, archived, or being cascaded: ${threadId}`);
+      }
+      return { value: undefined, changed: [], write: false };
     });
   };
 
@@ -1473,10 +1563,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const getThreadForSession = async (workspaceId: string, sessionId: string): Promise<Thread | null> => {
     const catalog = await loadWorkspace(workspaceId);
-    for (let index = catalog.runs.length - 1; index >= 0; index -= 1) {
-      const run = catalog.runs[index]!;
-      if (run.sessionId !== sessionId) continue;
-      return structuredClone(findThread(catalog, run.threadId));
+    for (const thread of catalog.threads) {
+      const run = activeRunFor(catalog, thread);
+      if (!run || run.sessionId !== sessionId || !bindingFromRun(catalog, run)) continue;
+      return structuredClone(thread);
     }
     return null;
   };
@@ -1503,8 +1593,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const thread = findThread(catalog, threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
       const parentKey = scopeKey(workspaceId, thread.parent);
-      if (draining.has(parentKey) || retiredParents.has(parentKey)) {
-        throw new Error("Cannot start a thread while its parent is being deleted");
+      if (draining.has(parentKey) || retiredParents.has(parentKey) || cascadeBlocksThread(workspaceId, catalog, thread)) {
+        throw new Error("Cannot start a thread while its parent is archived or being cascaded");
       }
       const current = activeRunFor(catalog, thread);
       if (current?.workerState === "starting" || current?.workerState === "running") {
@@ -1513,6 +1603,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if ((thread.lifecycle === "settled" && !options.allowSettled) || thread.lifecycle === "archived") {
         throw new Error(`Cannot start a run for ${thread.lifecycle} thread: ${threadId}`);
       }
+      const inputRevision = thread.resultRevision;
       const attempt = catalog.runs
         .filter((run) => run.threadId === threadId)
         .reduce((maximum, run) => Math.max(maximum, run.attempt), 0) + 1;
@@ -1523,7 +1614,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         attempt,
         runtimeId,
         sessionId: null,
-        ...(thread.resultRevision ? { inputRevision: thread.resultRevision } : {}),
+        ...(inputRevision ? { inputRevision } : {}),
         workerState: "starting",
         outcome: null,
         exitReason: null,
@@ -1538,6 +1629,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       catalog.runs.push(run);
       thread.activeRunId = run.id;
       thread.lifecycle = "active";
+      // A result is the output of one completed Run, not a standing alias for
+      // the Thread. Keep immutable historical revisions in WorkingState, while
+      // removing the default pointer before this new attempt can fail outside
+      // the normal settlement path.
+      delete thread.resultRevision;
+      delete thread.integrationBinding;
+      if (thread.verification) {
+        delete thread.verification.currentResultRevision;
+        thread.verification.childChecks = null;
+        thread.verification.review = null;
+      }
       touchThread(catalog, thread);
       return { value: run, changed: [thread] };
     })
@@ -1777,7 +1879,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     threadId: string,
     input: {
       branchId: string;
-      resultRevision?: number;
+      resultRevision?: number | null;
       worktree?: ThreadWorktree;
       diffStats?: ThreadDiffStats;
     },
@@ -1787,15 +1889,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     thread.workBranchId = input.branchId;
     if (input.resultRevision !== undefined) {
       const previous = thread.resultRevision;
-      thread.resultRevision = input.resultRevision;
+      if (input.resultRevision === null) delete thread.resultRevision;
+      else thread.resultRevision = input.resultRevision;
       if (previous !== input.resultRevision && thread.verification) {
-        if (thread.verification.childChecks?.resultRevision !== input.resultRevision) {
+        if (input.resultRevision === null || thread.verification.childChecks?.resultRevision !== input.resultRevision) {
           thread.verification.childChecks = null;
         }
-        if (thread.verification.review?.resultRevision !== input.resultRevision) {
+        if (input.resultRevision === null || thread.verification.review?.resultRevision !== input.resultRevision) {
           thread.verification.review = null;
         }
-        thread.verification.currentResultRevision = input.resultRevision;
+        if (input.resultRevision === null) delete thread.verification.currentResultRevision;
+        else thread.verification.currentResultRevision = input.resultRevision;
       }
     }
     if (input.worktree) thread.worktree = normalizeThreadWorktree(input.worktree);
@@ -1866,6 +1970,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
       if (thread.lifecycle !== "archived") return { value: thread, changed: [], write: false };
+      if (cascadeBlocksThread(workspaceId, catalog, thread)) {
+        throw new Error(`Cannot restore thread while its ancestor is archived or being cascaded: ${threadId}`);
+      }
       const run = activeRunFor(catalog, thread);
       thread.lifecycle = run && run.outcome === null ? "active" : "settled";
       touchThread(catalog, thread);
@@ -2051,6 +2158,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     mutateWorkspace(workspaceId, (catalog) => {
       const index = catalog.threads.findIndex((thread) => thread.id === threadId && parentEquals(thread.parent, parent));
       if (index < 0) return { value: false, changed: [], write: false };
+      const thread = catalog.threads[index]!;
+      // This entry point is used to discard a dispatch that never acquired a
+      // Run. Once a lifecycle cascade owns the thread, or another path has
+      // advanced it, leave the durable record for that owner to settle/archive.
+      if (cascadeBlocksThread(workspaceId, catalog, thread)
+        || thread.lifecycle === "archived"
+        || thread.lifecycle === "settled"
+        || thread.activeRunId !== null) {
+        return { value: false, changed: [], write: false };
+      }
       catalog.threads.splice(index, 1);
       catalog.runs = catalog.runs.filter((run) => run.threadId !== threadId);
       for (const key of cursors.keys()) if (key.endsWith(`\0${threadId}`)) cursors.delete(key);
@@ -2205,12 +2322,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     cache.clear();
     retiredParents.clear();
     sessionBindings.clear();
+    historicalSessionIds.clear();
+    staleBindingIds.clear();
     sessionBindingsLoaded = false;
     sessionBindingsLoad = null;
   };
 
   return {
     createThread,
+    assertDispatchAllowed,
     getThread,
     getThreadById,
     listThreads,
@@ -2242,6 +2362,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     archiveThreadsForDeletedSession,
     archiveThreadsForDeletedSessionAcrossWorkspaces,
     convertThread,
+    beginCascade,
     mergeThread,
     cancelAllForParent,
     deleteThread,

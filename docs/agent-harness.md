@@ -2,7 +2,7 @@
 
 Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-10
+Last updated: 2026-09-11
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -1866,3 +1866,24 @@ P0、T1/T2/T3 核心和 D-076 已交付；当前直接实施工作状态/集成�
   不持有 host 凭据。
 - [extension-compatibility.md](extension-compatibility.md)：第三方 Pi 扩展不受本契约约束，也不由 harness 管理；
   `pi-web-access` 启用时 harness 的 web 工具让位，其适配器不变。
+
+### D-224 补充：集成、级联与查询身份
+
+集成撤销以当前父 authority 为准：virtual parent 在 `VirtualWriteGate` 内做 branch CAS；materialized parent
+解析 execution directory 后经该 workspace 的 Documents resource gate，以 after→before 条件恢复。纯 disk、virtual
+branch 与 branch→materialized 的撤销都先持久化 `undoing`，再执行条件变更并观察 before；branch→materialized 只有磁盘与
+WorkingState branch cache 都同步到 before 后才写 `undone`，启动对账能区分仍是 after、已经 before 与未知状态。父 gate
+返回后重新读取 authority；物化目录已回收时，WorkingBranch 重新成为读写真相。
+
+级联准入由 ThreadRegistry 持有。cascade 进入 registry mutation tail 后，目标 Thread 子树的新 create/dispatch/start/restore
+按父与祖先的 archived/cascading 状态拒绝；dispatch 准备期间若准入失效，会清理 surface draft。尚未进入 lifecycle 的失败
+Thread 可删除，已经被 cascade 接管的 Thread 由该生命周期归档，准备失败路径不得同时删除。session
+bindings 是一次启动重建的派生索引，按当前 `thread.activeRunId` 的 Run/session 建立，并按 sessionId 与 threadId 去重；坏
+索引可覆盖重建，坏 workspace catalog 不遮蔽健康 catalog，历史 session 不回落为 root owner。
+
+带 `workBranchId` 的默认 merge 只消费当前 settled Run 成功发布的 native resultRevision；遗留 `resultCommit` 只用于没有
+WorkingBranch 的导入。新 Run 把上一 revision 记为 `inputRevision` 后立即撤下默认指针；目录 inspect 或 native publish
+失败也都会在独立 Git snapshot 前清除默认 revision 并保留
+needs-attention/conflict；snapshot 失败也不能让旧 revision 复活。Git baseline 捕获前后重列冻结
+`captureScopes` 并比较路径和内容身份；explore pin 接收 effective authorized roots 与同一 signal/deadline，只固定授权范围。
+默认新文件 mode 的合法 0 保持不变。上述实现与证据记录在 D-224；3.4、3.4a、3.6 仍按真实桌面重启和付费嵌套 Pi 的未测范围保持 Partial。

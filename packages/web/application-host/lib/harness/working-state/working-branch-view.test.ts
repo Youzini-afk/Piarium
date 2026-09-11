@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
@@ -154,7 +154,7 @@ async function fixture() {
       | { ok: false; error: { code: string; message: string } };
   };
 
-  return { actor, request, scopedActor, store, views, workspace, worktree, workspaceId };
+  return { actor, lookups, request, scopedActor, store, views, workspace, worktree, workspaceId };
 }
 
 describe("WorkingState Host branch view production chain", () => {
@@ -326,5 +326,25 @@ describe("WorkingState Host branch view production chain", () => {
     if (refused.ok) throw new Error("expected scope refusal");
     expect(refused.error.code).toBe("forbidden");
     expect(JSON.stringify(refused)).not.toContain("fixed kept");
+  });
+
+  it("pins only authorized query roots without cloning the full branch and honors cancellation", async () => {
+    const f = await fixture();
+    const fullClone = vi.spyOn(f.store, "effectiveState");
+    const controller = new AbortController();
+    const scoped = await f.lookups.pinQuery(f.actor.sessionId, {
+      roots: ["src"],
+      signal: controller.signal,
+      deadlineAt: Date.now() + 10_000,
+    });
+    expect(scoped?.files.map((file) => file.path)).toEqual(["src/nested.ts"]);
+    expect(scoped).not.toHaveProperty("states");
+    expect(fullClone).not.toHaveBeenCalled();
+    controller.abort();
+    await expect(f.lookups.pinQuery(f.actor.sessionId, {
+      roots: [""],
+      signal: controller.signal,
+      deadlineAt: Date.now() + 10_000,
+    })).rejects.toMatchObject({ name: "AbortError" });
   });
 });

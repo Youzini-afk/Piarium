@@ -289,6 +289,15 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           );
         }
       }
+      try {
+        if (typeof registry.assertDispatchAllowed === "function") {
+          await registry.assertDispatchAllowed(workspaceId, thread.id);
+        }
+      } catch (error) {
+        await captured.cleanup().catch(() => undefined);
+        await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+        throw error;
+      }
       if (isQueued) {
         return {
           text: `queued as ${thread.id} (${params.role}) — concurrency is full`,
@@ -296,7 +305,14 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           queued: true,
         };
       }
-      const run = await registry.startRun(workspaceId, thread.id);
+      let run: ThreadRun;
+      try {
+        run = await registry.startRun(workspaceId, thread.id);
+      } catch (error) {
+        await captured.cleanup().catch(() => undefined);
+        await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+        throw error;
+      }
       void host.threadSpawnSession({ ...input, threadId: thread.id, runId: run.id }).catch(async (error) => {
         await registry.endRun(
           workspaceId,
@@ -556,9 +572,12 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
         };
       }
       const run = await registry.getActiveRun(workspaceId, thread.id);
-      const hasPublishedResult = Boolean(
-        (thread.workBranchId && selectedRevision !== undefined) || thread.worktree?.resultCommit,
-      );
+      // A native WorkingBranch owns the default merge source.  A legacy Git
+      // resultCommit is only importable before that branch exists; it must not
+      // mask a failed native publish or an old Run's revision.
+      const hasPublishedResult = thread.workBranchId
+        ? selectedRevision !== undefined
+        : Boolean(thread.worktree?.resultCommit);
       if (thread.lifecycle !== "settled" || !run?.outcome) {
         return { text: `thread ${thread.id} is not complete (state: ${thread.lifecycle}/${run?.outcome ?? "none"})`, merged: 0, conflicts: [] };
       }
@@ -702,12 +721,19 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? false;
-      if (host.threadKillSession) {
-        await host.threadKillSession(thread.id, keepWorktree, workspaceId);
-      } else {
-        await cascadeStopDescendants(host, workspaceId, thread.id, keepWorktree, "killed by parent");
+      const releaseCascade = !host.threadKillSession && typeof registry.beginCascade === "function"
+        ? await registry.beginCascade(workspaceId, thread.id)
+        : () => undefined;
+      try {
+        if (host.threadKillSession) {
+          await host.threadKillSession(thread.id, keepWorktree, workspaceId);
+        } else {
+          await cascadeStopDescendants(host, workspaceId, thread.id, keepWorktree, "killed by parent");
+        }
+        await registry.cancelThread(workspaceId, thread.id, "killed by parent");
+      } finally {
+        releaseCascade();
       }
-      await registry.cancelThread(workspaceId, thread.id, "killed by parent");
       return { text: `killed ${thread.id}${keepWorktree ? " (worktree kept)" : ""}` };
     },
   };

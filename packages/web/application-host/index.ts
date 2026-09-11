@@ -2031,7 +2031,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       (sessionId, resourceId) => workingBranchLookups.exploreFile(sessionId, resourceId),
     ),
     branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
-    pinWorkingBranchQuery: (sessionId) => workingBranchLookups.pinQuery(sessionId),
+    pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: async (sessionId, context, resourceId) => {
       const branch = await workingBranchLookups.readSource(sessionId, resourceId);
@@ -2122,7 +2122,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const threadDocuments = pinnedDocuments
         ? pinnedDocuments
         : execution?.mode === 'virtual' && sessionId
-        ? (await workingBranchLookups.pinQuery(sessionId))?.files.map((file) => ({
+        ? (await workingBranchLookups.pinQuery(sessionId, {
+          ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
+          ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
+        }))?.files.map((file) => ({
           path: file.path,
           content: file.text,
           revision: file.revision,

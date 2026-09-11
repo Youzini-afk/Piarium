@@ -784,6 +784,102 @@ describe("thread runtime", () => {
     }
   });
 
+  it("rejects ignored capture scope additions and edits during Git baseline capture", async () => {
+    const workspace = join(dataDir, "baseline-ignored-scope-workspace");
+    const recoveryRoot = join(dataDir, "baseline-ignored-scope-recovery");
+    await fs.promises.mkdir(join(workspace, "ignored"), { recursive: true });
+    const git = (args: string[]) => execFileSync("git", args, { cwd: workspace, encoding: "utf8" }).trim();
+    await fs.promises.writeFile(join(workspace, ".gitignore"), "ignored/\n");
+    await fs.promises.writeFile(join(workspace, "clean.txt"), "clean\n");
+    await fs.promises.writeFile(join(workspace, "ignored", "old.txt"), "old-before\n");
+    git(["init"]);
+    git(["config", "user.name", "Test"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["add", ".gitignore", "clean.txt"]);
+    git(["commit", "-m", "base"]);
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("working-state database missing");
+    const storageContext: WorkspaceRecoveryStorageContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: WORKSPACE },
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      root: recoveryRoot,
+    };
+    const workingStates = {
+      withStore: async <T>(_workspaceId: string, purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => {
+        const store = await DurableWorkingStateStore.open(storageContext);
+        if (purpose === "thread-baseline-capture") {
+          const capture = store.captureDirectory.bind(store);
+          let changed = false;
+          store.captureDirectory = async (directory, relativePaths, options) => capture(directory, relativePaths, {
+            ...options,
+            onProgress: (done, total) => {
+              if (!changed && done === 1) {
+                changed = true;
+                fs.writeFileSync(join(workspace, "ignored", "old.txt"), "old-during\n");
+                fs.writeFileSync(join(workspace, "ignored", "new.txt"), "new-during\n");
+              }
+              options?.onProgress?.(done, total);
+            },
+          });
+        }
+        return operation(store, storageContext);
+      },
+    };
+    const documents = createDocumentAuthority({
+      hostId: "host-1",
+      dataDir: join(dataDir, "baseline-ignored-scope-documents"),
+      isAllowedRoot: async () => true,
+      isTrusted: async () => true,
+    });
+    const identity = await documents.resolveWorkspace({ path: workspace });
+    storageContext.identity.workspaceId = identity.workspaceId;
+    const worktrees = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: join(dataDir, "baseline-ignored-scope-worktree") }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+    const scratch = join(dataDir, "baseline-ignored-scope-scratch");
+    await fs.promises.mkdir(scratch, { recursive: true });
+    const ignoredRuntime = createThreadRuntime({
+      registry,
+      workingStates,
+      worktreeSettings: { copyIgnored: ["ignored"] },
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: async () => ({
+          cwd: scratch,
+          worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+        }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        inspectGitBaselineInventory: worktrees.inspectGitBaselineInventory,
+      },
+    });
+    try {
+      const thread = await registry.createThread({ ...createInput(), workspaceId: identity.workspaceId, brief: "Ignored scope drift" });
+      await expect(ignoredRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: thread.id,
+      })).rejects.toMatchObject({
+        name: "ThreadRuntimeError",
+        retryable: true,
+        message: expect.stringContaining("baseline-changed"),
+      });
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-ignored-drift", async (store) => {
+        expect(store.getBranch(`thread-${thread.id}`)).toBeNull();
+      });
+    } finally {
+      await ignoredRuntime.dispose();
+      await documents.dispose();
+      database.close();
+    }
+  });
+
   it("keeps missing parent block storage explicit without blocking the child", async () => {
     blocksBySession.set("parent-1", null);
     await start();
@@ -1300,6 +1396,98 @@ describe("thread runtime", () => {
     }
   });
 
+  it("invalidates the default native result when publication fails after a successful snapshot", async () => {
+    const publishDirectoryResult = vi.fn(async () => { throw new Error("native publish failed"); });
+    const nativeStore = {
+      getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+      publishDirectoryResult,
+    } as unknown as WorkingStateStore;
+    const nativeFailureRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation(nativeStore, {} as WorkspaceRecoveryStorageContext),
+      },
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "legacy-result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }),
+        merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/thread", base: "base", materialized: true, viewMode: "materialized", preparationStage: "ready",
+    });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: `thread-${thread.id}`, resultRevision: 1 });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await nativeFailureRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    nativeFailureRuntime.processEvent({
+      kind: "host", sessionId: "child-1", envelope: {
+        kind: "event", event: "agent.event",
+        data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\nDone")], willRetry: false } },
+      },
+    });
+    nativeFailureRuntime.processEvent({
+      kind: "host", sessionId: "child-1", envelope: {
+        kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } },
+      },
+    });
+    await nativeFailureRuntime.drain();
+    const settled = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(publishDirectoryResult).toHaveBeenCalled();
+    expect(settled).toMatchObject({ integration: "conflict", workBranchId: `thread-${thread.id}` });
+    expect(settled?.resultRevision).toBeUndefined();
+    await expect(nativeFailureRuntime.merge(WORKSPACE, PARENT, thread.id)).rejects.toThrow("native result is unavailable");
+    await nativeFailureRuntime.dispose();
+  });
+
+  it("invalidates the default native result when inspect and Git snapshot both fail", async () => {
+    const nativeFailureRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => WORKSPACE,
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      workingStates: {
+        withStore: async (_workspaceId, _purpose, operation) => operation({} as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
+      },
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async () => { throw new Error("Git snapshot failed"); },
+        inspect: async () => { throw new Error("directory inspect failed"); },
+        merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }),
+      },
+    });
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/thread", base: "base", materialized: true, viewMode: "materialized", preparationStage: "ready",
+    });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: `thread-${thread.id}`, resultRevision: 3 });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await nativeFailureRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    nativeFailureRuntime.processEvent({
+      kind: "host", sessionId: "child-1", envelope: {
+        kind: "event", event: "agent.event",
+        data: { event: { type: "agent_end", messages: [assistantMessage("Conclusion\nDone")], willRetry: false } },
+      },
+    });
+    nativeFailureRuntime.processEvent({
+      kind: "host", sessionId: "child-1", envelope: {
+        kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } },
+      },
+    });
+    await nativeFailureRuntime.drain();
+    const settled = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(settled?.resultRevision).toBeUndefined();
+    expect(settled?.integration).toBe("conflict");
+    await expect(nativeFailureRuntime.merge(WORKSPACE, PARENT, thread.id)).rejects.toThrow("native result is unavailable");
+    await nativeFailureRuntime.dispose();
+  });
+
   it("publishes a partial immutable result before recording a lost Run", async () => {
     const publishDirectoryResult = vi.fn(async () => ({
       resultRevision: 1,
@@ -1470,7 +1658,6 @@ describe("thread runtime", () => {
     const input = { ...createInput(), autoRun: false };
     const thread = await registry.createThread(input);
     await registry.setWorktree(WORKSPACE, thread.id, { path: child, base: "base", resultCommit: "fixed", materialized: true });
-    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "direct-branch", resultRevision: 1 });
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
       conclusion: "done",
@@ -1481,6 +1668,7 @@ describe("thread runtime", () => {
       transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
       blocksSnapshot: {},
     });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "direct-branch", resultRevision: 1 });
     const reclaimed = await directRuntime.reclaimUser(WORKSPACE, PARENT, thread.id);
     expect(reclaimed.reclaimed).toBe(true);
     expect(order).toEqual(["delete", "release"]);
@@ -2256,7 +2444,6 @@ describe("thread runtime", () => {
     const input = createInput();
     const thread = await registry.createThread(input);
     await registry.setWorktree(WORKSPACE, thread.id, { path: childPath, base: "native", materialized: false });
-    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "native-branch", resultRevision: 1 });
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
       conclusion: "done",
@@ -2267,6 +2454,7 @@ describe("thread runtime", () => {
       transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
       blocksSnapshot: {},
     });
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "native-branch", resultRevision: 1 });
     await registry.archiveThread(WORKSPACE, thread.id);
     const restored = await nativeRuntime.restoreUser(WORKSPACE, PARENT, thread.id);
     expect(restored.restoreStatus).toBe("restored");
@@ -2896,6 +3084,13 @@ describe("thread runtime", () => {
     });
     const parentInput = createInput();
     const parent = await registry.createThread(parentInput);
+    await registry.setWorktree(WORKSPACE, parent.id, {
+      path: "/workspace/parent-thread",
+      base: "parent-base",
+      materialized: true,
+      viewMode: "materialized",
+      preparationStage: "ready",
+    });
     const parentRun = await registry.startRun(WORKSPACE, parent.id);
     await mergeRuntime.spawn({ ...parentInput, threadId: parent.id, runId: parentRun.id });
     const childInput = { ...createInput(), parent: { kind: "thread" as const, id: parent.id }, brief: "merge child" };

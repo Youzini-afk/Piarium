@@ -170,7 +170,10 @@ export interface HarnessServiceHost {
       threadDocuments?: Array<{ path: string; content: string; revision: string }>;
     },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
-  pinWorkingBranchQuery?: (sessionId: string) => Promise<import("./working-state/working-branch-lookups.js").WorkingBranchQuerySnapshot | null>;
+  pinWorkingBranchQuery?: (
+    sessionId: string,
+    options?: import("./working-state/working-branch-lookups.js").WorkingBranchPinOptions,
+  ) => Promise<import("./working-state/working-branch-lookups.js").WorkingBranchQuerySnapshot | null>;
   harnessSettings?: (
     workspaceId: string,
   ) => import("@piarium/protocol").PiSettingsSnapshot | null | Promise<import("@piarium/protocol").PiSettingsSnapshot | null>;

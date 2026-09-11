@@ -131,7 +131,56 @@ describe("thread registry", () => {
       name: "ThreadRegistryError",
       code: "stale-binding",
     });
-    expect(JSON.parse(readFileSync(bindingsPath, "utf8")).bindings).toEqual([]);
+    expect(JSON.parse(readFileSync(bindingsPath, "utf8")).bindings).toEqual([expect.objectContaining({
+      sessionId: "child-session-1",
+      threadId: thread.id,
+      runId: run.id,
+    })]);
+  });
+
+  it("rebuilds only the active Run owner and rejects a superseded session after restart", async () => {
+    const thread = await registry.createThread(createInput());
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "session-1");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "success", null, report());
+    const second = await registry.startRun(WORKSPACE, thread.id, "pi", { allowSettled: true });
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "session-2");
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    await expect(registry.getSessionBinding("session-1")).rejects.toMatchObject({ code: "stale-binding" });
+    expect(await registry.getThreadForSession(WORKSPACE, "session-1")).toBeNull();
+    expect(await registry.getSessionBinding("session-2")).toMatchObject({
+      sessionId: "session-2",
+      threadId: thread.id,
+      runId: second.id,
+    });
+    expect(await registry.getThreadForSession(WORKSPACE, "session-2")).toMatchObject({ id: thread.id });
+  });
+
+  it("fences descendant creation and dispatch while a cascade is active", async () => {
+    const parent = await registry.createThread(createInput({ brief: "parent", autoRun: false }));
+    const existing = await registry.createThread(createInput({ parent: { kind: "thread", id: parent.id }, autoRun: true }));
+    const release = await registry.beginCascade(WORKSPACE, parent.id);
+    try {
+      await expect(registry.createThread(createInput({ parent: { kind: "thread", id: parent.id } }))).rejects.toThrow(/cascaded/);
+      await expect(registry.startRun(WORKSPACE, existing.id)).rejects.toThrow(/cascaded/);
+    } finally {
+      release();
+    }
+    await expect(registry.startRun(WORKSPACE, existing.id)).resolves.toMatchObject({ workerState: "starting" });
+  });
+
+  it("does not discard a prepared dispatch after its lifecycle cascade takes ownership", async () => {
+    const parent = await registry.createThread(createInput({ brief: "parent", autoRun: false }));
+    const childParent = { kind: "thread" as const, id: parent.id };
+    const child = await registry.createThread(createInput({ parent: childParent }));
+    const release = await registry.beginCascade(WORKSPACE, parent.id);
+    try {
+      expect(await registry.deleteThread(WORKSPACE, childParent, child.id)).toBe(false);
+      expect(await registry.getThread(WORKSPACE, childParent, child.id)).toMatchObject({ id: child.id });
+    } finally {
+      release();
+    }
   });
 
   it("persists the retained branch and result commit", async () => {
@@ -168,6 +217,22 @@ describe("thread registry", () => {
       mergedResultRevision: 1,
       integration: "merged",
     });
+  });
+
+  it("retires the prior default result when a new Run starts", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.setWorkingState(WORKSPACE, thread.id, {
+      branchId: "thread-native",
+      resultRevision: 2,
+      diffStats: { files: 1, insertions: 1, deletions: 0 },
+    });
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    expect(run.inputRevision).toBe(2);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      workBranchId: "thread-native",
+      activeRunId: run.id,
+    });
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.resultRevision).toBeUndefined();
   });
 
   it("records a lost attempt and starts attempt two without erasing history or attention", async () => {

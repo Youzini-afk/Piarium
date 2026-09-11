@@ -657,3 +657,19 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 
 完成报告写结果、具体代码、实际检查和剩余问题。已有证据足够就交付，新失败/真实风险才扩大检查。
 真实使用反馈进入修复和优化，不单设“等外部测试者后才启用”的阶段。
+
+### D-224 追加：剩余状态契约修复
+
+本轮补齐集成撤销的当前 authority 与耐久状态机：纯 disk、virtual branch、branch→materialized 均先写
+`undoing`，条件 CAS/apply 后观察 before，启动对账区分 after、before 与未知；materialized branch 使用 execution
+Documents gate，并同步非权威 branch cache；两者完成前 operation 保持 `undoing`。gate 返回后重读父 authority，已回收目录继续以
+WorkingBranch 为真相。ThreadRegistry 现在是 cascade admission fence 的权威，create/dispatch/start/restore 检查父与祖先；
+拒绝的 surface draft 清理，已被 cascade 接管的 Thread 不由准备失败路径删除。session-bindings 启动一次按健康 catalog 重建，只索引
+`activeRunId` 当前 owner，历史 session 不再回落 root。
+
+带 WorkingBranch 的默认 merge 只使用当前 settled Run 成功发布的 native resultRevision；新 Run 先把旧 revision 记录成
+`inputRevision` 再撤下默认指针，目录 inspect 或 native publish 失败也都在 Git snapshot 前清除默认 revision，snapshot 自身
+失败不能恢复旧值。
+Git baseline 对冻结 `captureScopes` 前后重列并比较完整状态身份，explore pin 传入 authorized roots 与查询 signal/deadline，
+不克隆未使用的 states。默认 mode 计算保留合法 0。新增反例与验证见 status 的 D-224 记录；3.4 / 3.4a / 3.6 继续 Partial，
+真实付费嵌套 Pi、完整桌面重启和外部 provider 仍未测。

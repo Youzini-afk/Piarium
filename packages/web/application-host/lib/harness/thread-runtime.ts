@@ -41,7 +41,7 @@ import {
 } from "./working-state/thread-space.js";
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
-import type { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
+import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
 import type { RecoveryState } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
@@ -54,6 +54,7 @@ import {
   type MaterializationSwitchJournal,
 } from "./working-state/materialization-switch.js";
 import { encodeDocumentText } from "../documents/inspect.js";
+import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
 import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
@@ -591,12 +592,24 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const cascadingLifecycle = new Set<string>();
   const lifecycleKey = (workspaceId: string, threadId: string): string => `${workspaceId}\0${threadId}`;
 
-  const beginCascade = (workspaceId: string, threadId: string): (() => void) => {
+  const beginCascade = async (workspaceId: string, threadId: string): Promise<() => void> => {
     const key = lifecycleKey(workspaceId, threadId);
     cascadingLifecycle.add(key);
-    return () => {
+    try {
+      const releaseRegistry = typeof options.registry.beginCascade === "function"
+        ? await options.registry.beginCascade(workspaceId, threadId)
+        : () => undefined;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        cascadingLifecycle.delete(key);
+        releaseRegistry();
+      };
+    } catch (error) {
       cascadingLifecycle.delete(key);
-    };
+      throw error;
+    }
   };
 
   const compareThreadsStable = (left: Thread, right: Thread): number => {
@@ -693,6 +706,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const isVirtualWorktree = (worktree: Thread["worktree"] | undefined): boolean => (
     worktree?.viewMode === "virtual"
+  );
+
+  const usesWorkingBranchAuthority = (thread: Thread | null | undefined): boolean => Boolean(
+    thread?.workBranchId
+    && (isVirtualWorktree(thread.worktree) || thread.worktree?.materialized === false),
   );
 
   const bindExecutionView = async (input: {
@@ -1314,9 +1332,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (input.parent.kind === "thread") {
       const owner = await options.registry.getThreadById(input.workspaceId, input.parent.id);
       if (!owner) throw new ThreadRuntimeError("not-found", `Parent thread not found: ${input.parent.id}`);
-      if (owner.workBranchId && isVirtualWorktree(owner.worktree)) {
-        parentVirtualBranchId = owner.workBranchId;
-      } else if (owner.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+      if (usesWorkingBranchAuthority(owner)) {
+        parentVirtualBranchId = owner.workBranchId!;
+      } else if (owner.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
         sourceRoot = owner.worktree.path;
       }
     }
@@ -1475,16 +1493,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         let baseRef = worktree!.base;
         let gitWindow: string | null = null;
         let directoryBefore: string | null = null;
+        let frozenCaptureScopePaths: string[] = [];
+        const canListCaptureScopes = typeof store.listCaptureScopePaths === "function";
         if (beforeInventory?.kind === "git") {
           rejectGitlinks(beforeInventory.gitlinks);
-          const scopePaths = captureScopes.length > 0
+          const scopePaths = captureScopes.length > 0 && canListCaptureScopes
             ? await store.listCaptureScopePaths(sourceRoot, captureScopes)
             : [];
+          frozenCaptureScopePaths = [...new Set(scopePaths)].sort();
           relativePaths = withAncestorDirectories([...beforeInventory.paths, ...scopePaths]);
           baseRef = beforeInventory.baseRef;
           worktree!.base = beforeInventory.baseRef;
           gitWindow = gitBaselineFingerprint(beforeInventory);
         } else {
+          if (captureScopes.length > 0 && canListCaptureScopes) {
+            frozenCaptureScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
+          }
           directoryBefore = await directoryWindow(store);
         }
         const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
@@ -1504,6 +1528,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           if (directoryBefore !== null && directoryAfter !== null && directoryBefore !== directoryAfter) {
             throw baselineChanged("directory paths");
           }
+        }
+        if (canListCaptureScopes && (frozenCaptureScopePaths.length > 0 || captureScopes.length > 0)) {
+          const afterScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
+          if (afterScopePaths.length !== frozenCaptureScopePaths.length
+            || afterScopePaths.some((file, index) => file !== frozenCaptureScopePaths[index])) {
+            throw baselineChanged("captureScopes paths");
+          }
+          const afterScopeStates = await store.captureDirectory(sourceRoot, afterScopePaths, {
+            signal: preparationSignal,
+            store: false,
+          });
+          const changedScopePaths = afterScopePaths.filter((file) => !sameState(
+            baseline[file] ?? { kind: "missing" },
+            afterScopeStates[file] ?? { kind: "missing" },
+          ));
+          if (changedScopePaths.length > 0) throw baselineChanged("captureScopes content or metadata");
         }
         await assertNoActiveBaselineWriters();
         if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
@@ -2189,6 +2229,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     let currentWorktree = thread.worktree;
     let publishedResultRevision: number | undefined;
+    let nativeResultUnavailable = Boolean(thread.workBranchId && (!options.workingStates || !currentWorktree));
     if (currentWorktree) {
       let inspected: Awaited<ReturnType<ThreadWorktreeRuntime["inspect"]>> | null = null;
       const inspectVirtualWithoutBranch = isVirtualWorktree(currentWorktree)
@@ -2200,6 +2241,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats = inspected.diffStats;
         } catch (error) {
           unresolved.push(`Unable to inspect worktree: ${error instanceof Error ? error.message : String(error)}`);
+          if (thread.workBranchId) nativeResultUnavailable = true;
         }
       }
       if (options.workingStates && thread.workBranchId && (isVirtualWorktree(currentWorktree) || inspected)) {
@@ -2268,15 +2310,29 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             }
           }
         } catch (error) {
+          nativeResultUnavailable = true;
           unresolved.push(`Unable to publish native thread result: ${error instanceof Error ? error.message : String(error)}`);
         }
+      }
+      if (nativeResultUnavailable && thread.workBranchId) {
+        // The branch pointer is the default merge authority. Clear its current
+        // result before attempting the independent Git snapshot, otherwise an
+        // inspect/publish failure can make the next merge consume an older Run.
+        await options.registry.setWorkingState(binding.workspaceId, binding.threadId, {
+          branchId: thread.workBranchId,
+          resultRevision: null,
+          worktree: currentWorktree,
+          ...(diffStats ? { diffStats } : {}),
+        });
       }
       try {
         currentWorktree = await options.worktrees.snapshot(currentWorktree);
         if (thread.workBranchId) {
           await options.registry.setWorkingState(binding.workspaceId, binding.threadId, {
             branchId: thread.workBranchId,
-            ...(publishedResultRevision ? { resultRevision: publishedResultRevision } : {}),
+            ...(nativeResultUnavailable
+              ? { resultRevision: null }
+              : publishedResultRevision ? { resultRevision: publishedResultRevision } : {}),
             worktree: currentWorktree,
             ...(diffStats ? { diffStats } : {}),
           });
@@ -2286,7 +2342,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       } catch (error) {
         unresolved.push(`Unable to snapshot thread result: ${error instanceof Error ? error.message : String(error)}`);
       }
-      if (publishedResultRevision === undefined && inspected) {
+      if (nativeResultUnavailable) {
+        await options.registry.setIntegration(
+          binding.workspaceId,
+          binding.threadId,
+          "conflict",
+          diffStats,
+        ).catch(reportError);
+      } else if (publishedResultRevision === undefined && inspected) {
         await options.registry.setIntegration(
           binding.workspaceId,
           binding.threadId,
@@ -2302,6 +2365,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           unresolved.push(`Unable to measure worktree disk usage: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
+    }
+    if (!currentWorktree && nativeResultUnavailable && thread.workBranchId) {
+      await options.registry.setWorkingState(binding.workspaceId, binding.threadId, {
+        branchId: thread.workBranchId,
+        resultRevision: null,
+        ...(diffStats ? { diffStats } : {}),
+      });
+      await options.registry.setIntegration(binding.workspaceId, binding.threadId, "conflict", diffStats).catch(reportError);
     }
     if (stats) {
       await options.registry.updateRunProgress(binding.workspaceId, binding.threadId, {
@@ -2809,7 +2880,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await killOne(threadId, keepWorktree);
       return;
     }
-    const releaseCascade = beginCascade(owningWorkspaceId, threadId);
+    const releaseCascade = await beginCascade(owningWorkspaceId, threadId);
     try {
       const descendants = await collectDescendantsPostOrder(owningWorkspaceId, threadId);
       for (const child of descendants) {
@@ -2842,9 +2913,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let releaseParentWrite = (): void => undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      if (!owner) throw new Error(`Parent thread not found: ${parent.id}`);
       const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
       const parentSessionId = parentRun?.sessionId;
-      if (owner?.workBranchId && parentSessionId && options.virtualWriteGate && options.executionViews) {
+      if (owner.workBranchId && parentSessionId && options.virtualWriteGate && options.executionViews) {
         const ticket = await acquireVirtualWriteTicket(
           options.virtualWriteGate,
           parentSessionId,
@@ -2854,49 +2926,63 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           },
           extras?.signal,
         );
-        if (ticket !== "disk") {
-          releaseParentWrite = () => ticket.finish();
+        if (ticket !== "disk") releaseParentWrite = () => ticket.finish();
+        try {
           const latest = await options.registry.getThreadById(workspaceId, parent.id);
-          parentAuthority = {
-            kind: "branch",
-            branchId: latest?.workBranchId ?? owner.workBranchId,
-            sessionId: parentSessionId,
-          };
-        } else {
-          const latest = await options.registry.getThreadById(workspaceId, parent.id);
-          if (latest?.worktree?.path && !isVirtualWorktree(latest.worktree)) {
-            parentRoot = latest.worktree.path;
-            parentAuthority = {
-              kind: "directory",
-              directory: latest.worktree.path,
-              workspaceId: await options.resolveRuntimeWorkspaceId(latest.worktree.path),
-            };
-          } else if (latest?.workBranchId && isVirtualWorktree(latest.worktree)) {
+          if (ticket !== "disk") {
             parentAuthority = {
               kind: "branch",
-              branchId: latest.workBranchId,
+              branchId: latest?.workBranchId ?? owner.workBranchId,
               sessionId: parentSessionId,
             };
+          } else {
+            if (latest?.worktree?.path && latest.worktree.materialized !== false && !isVirtualWorktree(latest.worktree)) {
+              parentRoot = latest.worktree.path;
+              parentAuthority = {
+                kind: "directory",
+                directory: latest.worktree.path,
+                workspaceId: await options.resolveRuntimeWorkspaceId(latest.worktree.path),
+              };
+            } else if (usesWorkingBranchAuthority(latest)) {
+              parentAuthority = {
+                kind: "branch",
+                branchId: latest!.workBranchId!,
+                sessionId: parentSessionId,
+              };
+            } else {
+              throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
+            }
           }
+        } catch (error) {
+          releaseParentWrite();
+          throw error;
         }
-      } else if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
+      } else if (usesWorkingBranchAuthority(owner)) {
         parentAuthority = {
           kind: "branch",
-          branchId: owner.workBranchId,
+          branchId: owner.workBranchId!,
           ...(parentSessionId ? { sessionId: parentSessionId } : {}),
         };
-      } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+      } else if (owner.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
         parentRoot = owner.worktree.path;
         parentAuthority = {
           kind: "directory",
           directory: owner.worktree.path,
           workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
         };
+      } else {
+        throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
       }
     }
-    const coordinator = options.resolveIntegrationCoordinator
-      ? await options.resolveIntegrationCoordinator(workspaceId)
-      : null;
+    let coordinator: Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null;
+    try {
+      coordinator = options.resolveIntegrationCoordinator
+        ? await options.resolveIntegrationCoordinator(workspaceId)
+        : null;
+    } catch (error) {
+      releaseParentWrite();
+      throw error;
+    }
     const operation = async () => {
       let branchId = thread.workBranchId;
       let resultRevision = requestedRevision ?? thread.resultRevision;
@@ -3001,6 +3087,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         };
       }
       if (requestedRevision !== undefined) throw new Error(`Native thread result revision is unavailable: ${requestedRevision}`);
+      if (thread.workBranchId) {
+        throw new Error("Thread native result is unavailable; publish a successful result before merging");
+      }
       if (!thread.worktree?.resultCommit) throw new Error("Thread has no fixed published result to merge");
       return options.worktrees.merge(parentRoot, thread.worktree);
     };
@@ -3038,19 +3127,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      if (!owner) throw new Error(`Parent thread not found: ${parent.id}`);
       const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
-      if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
+      if (usesWorkingBranchAuthority(owner)) {
         parentAuthority = {
           kind: "branch",
-          branchId: owner.workBranchId,
+          branchId: owner.workBranchId!,
           ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
         };
-      } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+      } else if (owner?.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
         parentAuthority = {
           kind: "directory",
           directory: owner.worktree.path,
           workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
         };
+      } else {
+        throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
       }
     }
     const preview = await coordinator.previewResult({
@@ -3492,7 +3584,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // Archive cancels descendant and target preparation before taking any
     // thread lock, then archives each descendant on its own lifecycle turn.
     preparations.get(threadId)?.controller.abort();
-    const releaseCascade = beginCascade(workspaceId, threadId);
+    const releaseCascade = await beginCascade(workspaceId, threadId);
     try {
       const descendants = await collectDescendantsPostOrder(workspaceId, threadId);
       for (const child of descendants) {
@@ -3823,30 +3915,89 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string,
     input: { operationId: string; sourceOwner?: { ownerId: string; generation: number }; signal?: AbortSignal },
   ) => {
-    const thread = await options.registry.getThread(workspaceId, parent, threadId);
-    if (!thread) throw new Error(`Thread not found: ${threadId}`);
-    const coordinator = options.resolveIntegrationCoordinator
-      ? await options.resolveIntegrationCoordinator(workspaceId)
-      : null;
-    if (!coordinator) throw new Error("Thread integration coordinator is unavailable");
-    const result = await coordinator.undoIntegration({
-      workspaceId,
-      threadId,
-      operationId: input.operationId,
-      ...(input.sourceOwner ? { sourceOwner: input.sourceOwner } : {}),
-      ...(input.signal ? { signal: input.signal } : {}),
-    });
-    const failed = result.status === "needs-attention";
-    await options.registry.setIntegration(
-      workspaceId,
-      threadId,
-      failed ? "conflict" : "dirty",
-      thread.diffStats,
-      undefined,
-      failed ? undefined : null,
-    );
-    if (!failed) await options.registry.setIntegrationBinding(workspaceId, threadId, null);
-    return result;
+    let parentAuthority: IntegrationPlanInput["parentAuthority"];
+    let parentWriteHeld = false;
+    let releaseParentWrite = (): void => undefined;
+    try {
+      if (parent.kind === "thread") {
+        const owner = await options.registry.getThreadById(workspaceId, parent.id);
+        if (!owner) throw new Error(`Parent thread not found: ${parent.id}`);
+        const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
+        const parentSessionId = parentRun?.sessionId;
+        if (owner.workBranchId && parentSessionId && options.virtualWriteGate && options.executionViews) {
+          const ticket = await acquireVirtualWriteTicket(
+            options.virtualWriteGate,
+            parentSessionId,
+            () => {
+              const view = options.executionViews?.get(parentSessionId);
+              return !!view && view.mode === "virtual";
+            },
+            input.signal,
+          );
+          parentWriteHeld = true;
+          if (ticket !== "disk") releaseParentWrite = () => ticket.finish();
+          const latest = await options.registry.getThreadById(workspaceId, parent.id);
+          if (ticket !== "disk" && usesWorkingBranchAuthority(latest)) {
+            parentAuthority = { kind: "branch", branchId: latest!.workBranchId!, sessionId: parentSessionId };
+          } else if (latest?.worktree?.path && latest.worktree.materialized !== false && !isVirtualWorktree(latest.worktree)) {
+            parentAuthority = {
+              kind: "directory",
+              directory: latest.worktree.path,
+              workspaceId: await options.resolveRuntimeWorkspaceId(latest.worktree.path),
+            };
+          } else if (usesWorkingBranchAuthority(latest)) {
+            parentAuthority = { kind: "branch", branchId: latest!.workBranchId!, sessionId: parentSessionId };
+          } else {
+            throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
+          }
+        } else if (usesWorkingBranchAuthority(owner)) {
+          parentAuthority = {
+            kind: "branch",
+            branchId: owner.workBranchId!,
+            ...(parentSessionId ? { sessionId: parentSessionId } : {}),
+          };
+        } else if (owner?.worktree?.path && owner.worktree.materialized !== false && !isVirtualWorktree(owner.worktree)) {
+          parentAuthority = {
+            kind: "directory",
+            directory: owner.worktree.path,
+            workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
+          };
+        } else {
+          throw new Error(`Parent thread write authority is unavailable: ${parent.id}`);
+        }
+      }
+      return await withThreadLifecycle(workspaceId, threadId, async () => {
+        const thread = await options.registry.getThread(workspaceId, parent, threadId);
+        if (!thread) throw new Error(`Thread not found: ${threadId}`);
+        if (thread.lifecycle === "archived") throw new Error("Cannot undo integration for an archived thread");
+        const coordinator = options.resolveIntegrationCoordinator
+          ? await options.resolveIntegrationCoordinator(workspaceId)
+          : null;
+        if (!coordinator) throw new Error("Thread integration coordinator is unavailable");
+        const result = await coordinator.undoIntegration({
+          workspaceId,
+          threadId,
+          operationId: input.operationId,
+          ...(input.sourceOwner ? { sourceOwner: input.sourceOwner } : {}),
+          ...(input.signal ? { signal: input.signal } : {}),
+          ...(parentAuthority ? { parentAuthority } : {}),
+          ...(parentWriteHeld ? { parentWriteHeld: true } : {}),
+        });
+        const failed = result.status === "needs-attention";
+        await options.registry.setIntegration(
+          workspaceId,
+          threadId,
+          failed ? "conflict" : "dirty",
+          thread.diffStats,
+          undefined,
+          failed ? undefined : null,
+        );
+        if (!failed) await options.registry.setIntegrationBinding(workspaceId, threadId, null);
+        return result;
+      });
+    } finally {
+      releaseParentWrite();
+    }
   };
 
   const invalidateIntegrationPreviews = async (
@@ -4153,6 +4304,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     getSessionBinding,
     resolveSessionBinding,
     materializeExecutionView,
+    beginCascade,
     dispose,
   };
 }

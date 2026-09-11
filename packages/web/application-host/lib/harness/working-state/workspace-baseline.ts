@@ -24,7 +24,7 @@ export type WorkdirIdentityIo = {
 };
 
 /** Default mode for a newly created regular file. Never creates a probe file in the user tree. */
-export const defaultNewFileMode = (): number => (0o666 & ~process.umask()) || 0o644;
+export const defaultNewFileMode = (): number => 0o666 & ~process.umask();
 
 export const withAncestorDirectories = (paths: readonly string[]): string[] => {
   const result = new Set<string>();

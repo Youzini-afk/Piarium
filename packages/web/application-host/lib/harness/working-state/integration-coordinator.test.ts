@@ -1193,6 +1193,13 @@ describe("IntegrationCoordinator", () => {
       expect(undone.status).toBe("compensated");
       expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("disk base\n");
       expect(surfaceText).toBe("surface draft\n");
+      const repeated = await coordinator.undoIntegration({
+        workspaceId: "ws", threadId: "thread-mixed-undo", operationId: merged.operationId,
+        sourceOwner: { ownerId: "editor-a", generation: 1 },
+      });
+      expect(repeated.status).toBe("compensated");
+      expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("disk base\n");
+      expect(surfaceText).toBe("surface draft\n");
     } finally {
       await h.engine.dispose();
     }
@@ -1688,6 +1695,160 @@ describe("IntegrationCoordinator", () => {
         const live = store.effectiveState("thread-parent")!;
         expect(live["child.txt"] ?? { kind: "missing" }).toEqual({ kind: "missing" });
       }, "shared");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("undoes a branch integration through the materialized parent directory and syncs the branch cache", async () => {
+    const h = await createHarness();
+    const parentDir = path.join(h.root, "materialized-parent");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      h.directoryWorkspaces.set(path.resolve(parentDir), "parent-exec");
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "before\n");
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "before\n");
+      const published = await h.workingStates.withStore("ws", "materialized-undo-setup", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-parent-materialized", base, "base");
+        await store.createBranch("ws", "thread-child-materialized", base, "base");
+        const object = await store.putObject(Buffer.from("after\n"));
+        await store.commitVirtualWrites("thread-child-materialized", 0, {
+          "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength },
+        });
+        return store.publishHeadResult("thread-child-materialized");
+      });
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-child-materialized",
+        branchId: "thread-child-materialized",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent-materialized" },
+      });
+      await h.workingStates.withStore("ws", "materialize-parent-for-undo", async (store) => {
+        const parentResult = await store.publishHeadResult("thread-parent-materialized");
+        await store.materializeResult("thread-parent-materialized", parentResult.resultRevision, parentDir);
+      });
+      const undone = await h.coordinator.undoIntegration({
+        workspaceId: "ws",
+        threadId: "thread-child-materialized",
+        operationId: merged.operationId,
+        parentAuthority: { kind: "directory", directory: parentDir, workspaceId: "parent-exec" },
+      });
+      expect(undone.status).toBe("compensated");
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
+      await h.workingStates.withStore("ws", "assert-materialized-undo-branch", (store) => {
+        expect(store.effectiveState("thread-parent-materialized")?.["a.txt"]).toMatchObject({ kind: "regular-file" });
+        return undefined;
+      }, "shared");
+      const parentState = await h.workingStates.withStore("ws", "read-materialized-undo-branch", async (store) => {
+        const state = store.effectiveState("thread-parent-materialized")?.["a.txt"];
+        return state?.kind === "regular-file" ? store.getObject(state.objectHash) : null;
+      }, "shared");
+      expect(parentState).toEqual(Buffer.from("before\n"));
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("leaves a later materialized parent edit untouched and reports attention", async () => {
+    const h = await createHarness();
+    const parentDir = path.join(h.root, "materialized-parent-drift");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      h.directoryWorkspaces.set(path.resolve(parentDir), "parent-exec");
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "before\n");
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "before\n");
+      const published = await h.workingStates.withStore("ws", "materialized-drift-setup", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-parent-drift", base, "base");
+        await store.createBranch("ws", "thread-child-drift", base, "base");
+        const object = await store.putObject(Buffer.from("after\n"));
+        await store.commitVirtualWrites("thread-child-drift", 0, {
+          "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength },
+        });
+        return store.publishHeadResult("thread-child-drift");
+      });
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-child-drift", branchId: "thread-child-drift",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent-drift" },
+      });
+      await h.workingStates.withStore("ws", "materialize-parent-for-drift", async (store) => {
+        const parentResult = await store.publishHeadResult("thread-parent-drift");
+        await store.materializeResult("thread-parent-drift", parentResult.resultRevision, parentDir);
+      });
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "user edit\n");
+      const undone = await h.coordinator.undoIntegration({
+        workspaceId: "ws", threadId: "thread-child-drift", operationId: merged.operationId,
+        parentAuthority: { kind: "directory", directory: parentDir, workspaceId: "parent-exec" },
+      });
+      expect(undone.status).toBe("needs-attention");
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("user edit\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("reconciles a crash after materialized branch undo apply", async () => {
+    let crashAfterApply = false;
+    const native = createRecoveryFileStore();
+    const crashingStore = {
+      ...native,
+      applyState: async (...args: Parameters<typeof native.applyState>) => {
+        await native.applyState(...args);
+        if (crashAfterApply) throw new Error("injected crash after materialized undo apply");
+      },
+    };
+    const h = await createHarness(crashingStore);
+    const parentDir = path.join(h.root, "materialized-parent-crash");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      h.directoryWorkspaces.set(path.resolve(parentDir), "parent-exec");
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "before\n");
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "before\n");
+      const published = await h.workingStates.withStore("ws", "materialized-crash-setup", async (store) => {
+        const base = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-parent-crash", base, "base");
+        await store.createBranch("ws", "thread-child-crash", base, "base");
+        const object = await store.putObject(Buffer.from("after\n"));
+        await store.commitVirtualWrites("thread-child-crash", 0, {
+          "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength },
+        });
+        return store.publishHeadResult("thread-child-crash");
+      });
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws", threadId: "thread-child-crash", branchId: "thread-child-crash",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent-crash" },
+      });
+      await h.workingStates.withStore("ws", "materialize-parent-for-crash", async (store) => {
+        const parentResult = await store.publishHeadResult("thread-parent-crash");
+        await store.materializeResult("thread-parent-crash", parentResult.resultRevision, parentDir);
+      });
+      crashAfterApply = true;
+      await expect(h.coordinator.undoIntegration({
+        workspaceId: "ws", threadId: "thread-child-crash", operationId: merged.operationId,
+        parentAuthority: { kind: "directory", directory: parentDir, workspaceId: "parent-exec" },
+      })).rejects.toThrow("injected crash");
+      crashAfterApply = false;
+      await h.engine.dispose();
+      const restarted = createWorkspaceRecoveryEngine({
+        authorityId: "test", dataDir: h.dataDir, documents: h.documents,
+        sessionNavigation: h.navigation, resolveDirectoryApplyContext: h.resolveDirectoryApplyContext,
+      });
+      await restarted.fenceUnfinishedOperations();
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
+      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
+      const branchBytes = await restartedStates.withStore("ws", "inspect-materialized-undo-branch", async (store) => {
+        const state = store.effectiveState("thread-parent-crash")?.["a.txt"];
+        return state?.kind === "regular-file" ? store.getObject(state.objectHash) : null;
+      }, "shared");
+      expect(branchBytes).toEqual(Buffer.from("before\n"));
+      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-materialized-undo", create: false }, ({ database }) => {
+        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(merged.operationId)).toEqual({ state: "undone" });
+      });
+      await restarted.dispose();
     } finally {
       await h.engine.dispose();
     }

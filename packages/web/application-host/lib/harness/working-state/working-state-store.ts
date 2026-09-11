@@ -646,6 +646,59 @@ export class WorkingStateStore {
     return { ...clone(branch.baseState), ...clone(branch.deltas) };
   }
 
+  branchWriteRevision(branchId: string): number | null {
+    const branch = this.document.branches[branchId];
+    return branch ? branch.writeRevision ?? 0 : null;
+  }
+
+  /**
+   * Copy only the part of a live/result tree needed by a scoped read. The
+   * catalog is already memory-resident, so this still walks flat metadata, but
+   * it avoids cloning unrelated states and can stop promptly on cancellation.
+   */
+  effectiveStateSlice(
+    branchId: string,
+    prefixes: readonly string[],
+    revision?: number,
+    options?: { signal?: AbortSignal; deadlineAt?: number },
+  ): Record<string, RecoveryState> | null {
+    const branch = this.document.branches[branchId];
+    if (!branch) return null;
+    const result = revision !== undefined && revision > 0
+      ? this.document.results[`${branchId}@${revision}`]
+      : undefined;
+    if (revision !== undefined && revision > 0 && !result) return null;
+    const roots = (prefixes.length > 0 ? prefixes : [""]).map((value) => {
+      const raw = value.replace(/\\/g, "/").replace(/^\.\//, "");
+      if (!raw || raw === ".") return "";
+      const segments = raw.split("/").filter((segment) => segment && segment !== ".");
+      if (raw.includes("\0") || raw.startsWith("/") || /^[A-Za-z]:/.test(raw) || segments.includes("..")) {
+        throw new Error(`Invalid working-state scope: ${value}`);
+      }
+      return segments.join("/");
+    });
+    const relevant = (file: string): boolean => roots.some((root) => (
+      !root || file === root || file.startsWith(`${root}/`) || root.startsWith(`${file}/`)
+    ));
+    const check = (): void => {
+      options?.signal?.throwIfAborted();
+      if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+        throw new DOMException("Explore query deadline exceeded", "AbortError");
+      }
+    };
+    const states: Record<string, RecoveryState> = {};
+    const copyRelevant = (source: Record<string, RecoveryState>): void => {
+      for (const [file, state] of Object.entries(source)) {
+        check();
+        if (relevant(file)) states[file] = clone(state);
+      }
+    };
+    copyRelevant(branch.baseState);
+    copyRelevant(result?.pathStates ?? branch.deltas);
+    check();
+    return states;
+  }
+
   pathOrigin(branchId: string, file: string): "base" | "delta" | "draft-base" | null {
     const branch = this.document.branches[branchId];
     if (!branch) return null;
@@ -982,7 +1035,7 @@ export class WorkingStateStore {
   async captureDirectory(
     directory: string,
     relativePaths?: string[],
-    options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void },
+    options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean },
   ): Promise<Record<string, RecoveryState>> {
     const result: Record<string, RecoveryState> = {};
     const files = relativePaths?.map(normalizeRelative) ?? await this.scanDirectoryRelative(directory);
@@ -992,7 +1045,7 @@ export class WorkingStateStore {
       if (options?.signal?.aborted) {
         throw new DOMException("Workspace baseline capture aborted", "AbortError");
       }
-      const captured = await this.context.fileStore.captureState(identity, this.context.root, file, { store: true });
+      const captured = await this.context.fileStore.captureState(identity, this.context.root, file, { store: options?.store ?? true });
       result[file] = captured.state;
       done += 1;
       options?.onProgress?.(done, files.length);

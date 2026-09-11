@@ -258,6 +258,12 @@ describe("nested thread production chain", () => {
         permissions: {},
       });
       await runtime.prepareIsolatedBranch({ workspaceId: "ws", parent: PARENT, threadId: parent.id });
+      const preparedParent = await registry.getThread("ws", PARENT, parent.id);
+      await registry.setWorktree("ws", parent.id, {
+        ...preparedParent!.worktree!,
+        viewMode: "materialized",
+        materialized: false,
+      });
       copyIgnored = ["later.env"];
       const child = await registry.createThread({
         workspaceId: "ws",
@@ -280,6 +286,7 @@ describe("nested thread production chain", () => {
       await workingStates.withStore("ws", "assert-inherited-scopes", async (store) => {
         expect(store.getBranch(`thread-${parent.id}`)?.captureScopes).toEqual(["secret.env"]);
         expect(store.getBranch(`thread-${child.id}`)?.captureScopes).toEqual(["secret.env"]);
+        expect(store.getBranch(`thread-${child.id}`)?.baseRef).toMatch(new RegExp(`^thread-${parent.id}@`));
       }, "shared");
     } finally {
       await runtime.dispose();

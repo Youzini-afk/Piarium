@@ -1027,3 +1027,28 @@ This is a direct migration, not a permanent compatibility stack:
 The exact source and non-regression contract are recorded in
 [openchamber-pi-migration.md](openchamber-pi-migration.md). Copied MIT material retains its license
 notice and will be rebranded before public release.
+
+### Agent harness D-224 state refinements
+
+Integration undo resolves the parent’s current authority before writing. A virtual parent uses its
+branch CAS under the virtual write gate; a materialized parent uses the execution workspace
+Documents gate and conditionally restores after→before. The undo intent is durable before either
+branch or directory mutation, and startup reconciliation distinguishes after, before, and unknown
+states. A materialized undo remains `undoing` until both the directory and the non-authoritative
+WorkingState branch cache match the before state. Authority is reread after the virtual write gate;
+a reclaimed directory returns authority to its WorkingBranch. Registry-owned cascade admission
+fences create/dispatch/start/restore for a Thread subtree. Dispatch cleans up its surface draft when
+admission closes, while a Thread already owned by the cascade remains for that lifecycle to archive.
+
+The session binding file is rebuilt once at startup from healthy catalogs and only indexes the
+current `activeRunId` owner, deduplicating by session and Thread. Historical sessions remain
+explicitly stale and cannot fall through to a root session. A new Run records the previous native
+revision as its input and immediately removes that default merge pointer. A WorkingBranch merge
+therefore defaults only to the current settled Run’s successfully published native revision; a
+failed directory inspection or native publish also clears the default before the independent Git
+snapshot. Git baseline capture re-lists frozen `captureScopes` and compares complete state identity,
+while explore pin receives effective authorized roots and the query’s signal/deadline. The current
+flat path catalog still walks metadata, but it does not clone or read file bodies outside the scope;
+an O(scope) lookup remains a future Merkle/index property. These
+refinements are recorded as D-224; 3.4 / 3.4a / 3.6 remain Partial pending real paid nested Pi and
+full desktop restart validation.

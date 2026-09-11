@@ -322,9 +322,11 @@ export function createExploreQueryStartService(
         }
         const effectivePaths = params.paths?.length
           ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
-          : ctx.actor.workspaceScope?.length
-            ? [...ctx.actor.workspaceScope]
-            : undefined;
+            : ctx.actor.workspaceScope?.length
+              ? [...ctx.actor.workspaceScope]
+              : ctx.authorizedPaths.length > 0
+                ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
+                : undefined;
         let rerankConfigured = false;
         if (ctx.workspaceId) {
           try {
@@ -350,7 +352,13 @@ export function createExploreQueryStartService(
             inputContext,
             queryController.signal,
             effectivePaths,
-            host.pinWorkingBranchQuery ? await host.pinWorkingBranchQuery(ctx.sessionId) : null,
+            host.pinWorkingBranchQuery
+              ? await host.pinWorkingBranchQuery(ctx.sessionId, {
+                ...(effectivePaths ? { roots: effectivePaths } : {}),
+                signal: queryController.signal,
+                deadlineAt,
+              })
+              : null,
           ),
           deadlineAt,
           reserveForJudgeMs: params.reserveForJudge || rerankConfigured ? DEFAULT_JUDGE_RESERVE_MS : 0,

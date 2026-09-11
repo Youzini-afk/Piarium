@@ -205,20 +205,24 @@ export async function readBranchFile(
 }
 
 export async function listBranchTextFiles(
-  store: Pick<WorkingStateStore, "effectiveState" | "pathOrigin" | "getBranch" | "getObject">,
+  store: Pick<WorkingStateStore, "effectiveStateSlice" | "pathOrigin" | "branchWriteRevision" | "getObject">,
   branchId: string,
   prefixes: readonly string[],
   revision?: number,
+  options?: { signal?: AbortSignal; deadlineAt?: number },
 ): Promise<Array<BranchViewFile & { text: string }>> {
-  const branch = store.getBranch(branchId);
-  if (!branch) return [];
-  const live = liveViewRevision(branch);
+  const live = store.branchWriteRevision(branchId);
+  if (live === null) return [];
   const requested = revision ?? live;
-  const states = liveStates(store, branchId, revision, live);
-  if (!states) return [];
   const roots = prefixes.length > 0 ? prefixes.map(normalizeRelative) : [""];
+  const states = store.effectiveStateSlice(branchId, roots, revision, options);
+  if (!states) return [];
   const files: Array<BranchViewFile & { text: string }> = [];
   for (const [file, state] of Object.entries(states)) {
+    options?.signal?.throwIfAborted();
+    if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+      throw new DOMException("Explore query deadline exceeded", "AbortError");
+    }
     if (state.kind !== "regular-file" || hiddenByTombstone(states, file)) continue;
     if (!roots.some((root) => descendantOf(file, root))) continue;
     const bytes = await store.getObject(state.objectHash);

@@ -4,7 +4,6 @@ import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";
 import { listBranchView, listBranchTextFiles, readBranchFile } from "./branch-view.js";
 import type { ThreadExecutionViewRegistry } from "./execution-view.js";
-import type { RecoveryState } from "./types.js";
 import type { WorkspaceWorkingStateAccess } from "./working-state-store.js";
 
 export interface WorkingBranchLookups {
@@ -12,7 +11,13 @@ export interface WorkingBranchLookups {
   pathOverlay(sessionId: string, resourceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
   searchCorpus(sessionId: string): Promise<Array<{ path: string; text: string }> | null>;
   exploreFile(sessionId: string, resourceId: string): Promise<ExploreFileSnapshot | null>;
-  pinQuery(sessionId: string): Promise<WorkingBranchQuerySnapshot | null>;
+  pinQuery(sessionId: string, options?: WorkingBranchPinOptions): Promise<WorkingBranchQuerySnapshot | null>;
+}
+
+export interface WorkingBranchPinOptions {
+  roots?: readonly string[];
+  signal?: AbortSignal;
+  deadlineAt?: number;
 }
 
 export interface WorkingBranchQuerySnapshot {
@@ -21,7 +26,6 @@ export interface WorkingBranchQuerySnapshot {
   branchId: string;
   writeRevision: number;
   files: Array<{ path: string; text: string; revision: string }>;
-  states: Record<string, RecoveryState>;
 }
 
 const provenanceFor = (
@@ -32,10 +36,6 @@ const provenanceFor = (
   revision: view.writeRevision,
   origin,
 });
-
-const cloneStates = (states: Record<string, RecoveryState>): Record<string, RecoveryState> => (
-  structuredClone(states)
-);
 
 export function createWorkingBranchLookups(options: {
   views: ThreadExecutionViewRegistry;
@@ -137,18 +137,32 @@ export function createWorkingBranchLookups(options: {
       });
     },
 
-    async pinQuery(sessionId) {
+    async pinQuery(sessionId, options) {
       return withView(sessionId, async (view, store) => {
-        const states = store.effectiveState(view.branchId);
-        if (!states) return null;
-        const files = await listBranchTextFiles(store, view.branchId, [""]);
+        options?.signal?.throwIfAborted();
+        if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
+          throw new DOMException("Explore query deadline exceeded", "AbortError");
+        }
+        const writeRevision = store.branchWriteRevision(view.branchId);
+        if (writeRevision === null) return null;
+        const roots = options?.roots?.length ? [...options.roots] : [""];
+        const files = await listBranchTextFiles(
+          store,
+          view.branchId,
+          roots,
+          undefined,
+          {
+            ...(options?.signal ? { signal: options.signal } : {}),
+            ...(options?.deadlineAt === undefined ? {} : { deadlineAt: options.deadlineAt }),
+          },
+        );
+        options?.signal?.throwIfAborted();
         return {
           sessionId,
           workspaceId: view.workspaceId,
           branchId: view.branchId,
-          writeRevision: view.writeRevision,
+          writeRevision,
           files: files.map((file) => ({ path: file.path, text: file.text, revision: file.revision })),
-          states: cloneStates(states),
         };
       });
     },

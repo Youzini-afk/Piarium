@@ -4709,3 +4709,29 @@ ModelRuntime 纵切继续通过。
 | D-221 | implementation（先 gate 后 store；删除固定两次重试；branch Integration WAL 与独立对账；undo 仅 after→before CAS） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-222 | implementation（directory reconcile 走 execution Documents gate；dequeue 传冻结 overlay；session-bindings 可重建索引；知识/recall/Zone 2 解析 owning workspace） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-223 | implementation（父 kill/archive 按稳定后序进入每个后代自己的 lifecycle serialization；祖先归档/级联中拒绝 restore；scope 只拒绝完整 `..` 段） | — | 设计 9.1.2 / 9.2.5b / 9.3.4；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+
+### D-224 · 2026-09-11 · 3.4 / 3.4a / 3.6（集成撤销权威、级联准入与结果身份）
+
+类型：问题与解法
+
+背景：D-221 的 branch Integration undo 在父 session 已物化后仍可能忽略 `holdParentVirtualWrite` 返回的 disk，继续改隐藏 branch 并报告成功；纯 disk undo 也只有 file phase 而没有 row-level undo intent。D-223 的级联标记只存在 runtime 内存，registry 的 create/start 不会观察。session-bindings miss 会重新扫描所有 catalog，且旧 Run/session 可能在重启后落入 root-session 路径。native publish 失败会留下旧默认 resultRevision，Git captureScopes 只比较普通 status/inventory，explore pin 会复制整仓 states。
+
+决定：
+
+1. 集成撤销先解析当前父 authority。virtual 父在 gate 内做 branch CAS；materialized 父必须解析 execution directory、经 Documents resource gate 以 after→before 条件应用，并同步非权威 branch cache。gate 返回后重读父状态；目录已回收（`materialized: false`）时 WorkingBranch 重新成为 authority。任何 authority 缺失、漂移、竞争或观察失败都返回 needs-attention。纯 disk、virtual branch、branch→materialized 三条路径统一写 `undoing` intent，再执行条件 apply/CAS、观察 before；branch→materialized 只有磁盘与 branch cache 都到达 before 后才写 `undone`，启动对账区分仍为 after、已为 before 与两者都不是。
+2. registry 持有 cascade admission fence；cascade 开始经 registry mutation tail 原子进入，create/start/restore 检查目标 Thread、父与祖先的 archived/cascading。dispatch 在准备后再次检查并清理 surface draft；尚未进入 lifecycle 的失败 Thread 可删除，已被 cascade 接管的 Thread 保留给该生命周期完成归档，不能与准备失败路径互删。
+3. session-bindings 启动只扫描一次健康 catalog 并重建派生索引；坏索引覆盖重建，坏 workspace catalog 跳过且不遮蔽健康 catalog。binding 只指向 thread.activeRunId 的当前 Run，并按 sessionId 与 threadId 去重；历史 session 保留拒绝 tombstone，不得回到 root-session owner。
+4. 有 workBranchId 的默认 merge 只消费本次 settled Run 成功发布的 native resultRevision；`resultCommit` 仅作无 branch 的遗留导入。每个新 Run 在创建时把上一默认 revision 记为 `inputRevision` 后撤下默认指针，因此会话创建失败等未进入 settle 的路径也不能复用旧结果。目录 inspect 或 native publish 失败时，在独立 Git snapshot 之前清理默认 revision 并投影 needs-attention/conflict；即使 Git snapshot 也失败，旧 revision 仍不可复活，显式 revision 仍可选择历史结果。Git baseline 捕获前后重列冻结 captureScopes，比较路径、类型、mode、symlink target 与 object/content identity；scope 漂移返回 retryable baseline-changed 并清理 branch。explore pin 接收 authorized roots、同一 signal/deadline，只固定 scope 内文本且可及时取消；不复制未消费的全量 states。当前 catalog 仍是平面 path map，所以会遍历元数据；Merkle 未实现前不把它宣称为 O(scope)。合法默认 mode 0 保持为 0。
+
+影响：Host `durable-file-operation.ts`、IntegrationCoordinator、ThreadRuntime/Registry/Services、WorkingBranch lookups、explore query、workspace baseline 与 WorkingState store；设计/plan/status/architecture 的 3.4、3.4a、3.6 补充 D-224。D-220、D-221、D-223 的相关「已实施」索引状态改为 superseded in part。
+
+状态：已实施；新增 integration materialized undo、drift、crash-reconcile、native result 失效、active Run owner、cascade fence、回收父分支基线与 scoped pin 定向测试。完整桌面重启、真实付费嵌套 Pi 与外部 provider 未测，3.4 / 3.4a / 3.6 继续 Partial；实际验证记录见 status。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-220 | superseded in part（captureScopes 的冻结 ignored scope 前后身份比较、默认 mode=0 语义由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4a |
+| D-221 | superseded in part（branch/materialized/pure-disk undo 统一 WAL 与启动三态对账由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a |
+| D-223 | superseded in part（registry 级 cascade admission、dispatch cleanup 与 binding current-owner 由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a/3.6 |
+| D-224 | implementation | — | agent-harness 9.2.5b/9.3；plan/status 3.4/3.4a/3.6；architecture 6.1 |
