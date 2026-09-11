@@ -23,6 +23,8 @@ import type {
   ThreadKillResult,
   ThreadDispatchParams,
   ThreadDispatchResult,
+  ThreadFactsSetParams,
+  ThreadFactsSetResult,
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
 import type { HarnessMemoryMode } from "./harness-settings.js";
@@ -1029,6 +1031,7 @@ export interface HarnessServiceMap {
   "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[]; branchEntryIds: string[]; coveredEntryIds: string[] }; result: MemoryApplyResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
+  "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
   "thread.list": { params: ThreadListParams; result: ThreadListResult };
   "thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult };
   "thread.send": { params: ThreadSendParams; result: ThreadSendResult };
@@ -1129,6 +1132,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "memory.blocks.get": "context.session",
   "memory.blocks.apply": "context.session",
   "thread.dispatch": "control.thread",
+  "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
   "thread.wait": "control.thread",
   "thread.send": "control.thread",
@@ -1199,6 +1203,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "memory.blocks.get",
   "memory.blocks.apply",
   "thread.dispatch",
+  "thread.facts.set",
   "thread.list",
   "thread.wait",
   "thread.send",

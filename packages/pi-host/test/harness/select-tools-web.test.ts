@@ -154,3 +154,21 @@ describe("selectHarnessTools document path overlay gating", () => {
     assert.equal(tools.some((tool) => tool.name === "ls"), false);
   });
 });
+
+describe("selectHarnessTools submit_facts gating", () => {
+  it("registers submit_facts only on a frozen retrieval allowlist", () => {
+    const root = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      threadRuntimeAvailable: true,
+    }).map((tool) => tool.name);
+    assert.equal(root.includes("submit_facts"), false);
+
+    const child = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, {
+      ...baseDeps,
+      threadRuntimeAvailable: false,
+      sessionToolAllowlist: ["read", "explore", "related", "submit_facts"],
+    }).map((tool) => tool.name);
+    assert.equal(child.includes("submit_facts"), true);
+    assert.equal(child.includes("dispatch"), false);
+  });
+});

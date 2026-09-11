@@ -3362,6 +3362,7 @@ export class SessionHost {
         webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         resolvedRoles,
+        ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
       const created = await createAgentSessionFromServices({
         ...(configured?.model === undefined ? {} : { model: configured.model }),

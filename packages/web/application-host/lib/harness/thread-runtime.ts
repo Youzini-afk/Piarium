@@ -360,18 +360,31 @@ const entryText = (entry: PiSessionMessageEntry): string => {
 const initialPrompt = (
   input: SpawnThreadRunInput,
   parentBlocks?: Array<{ label: string; content: string }> | null,
-): string => [
-  `You are working as the ${input.role ?? "teammate"} thread for a parent Piarium session.`,
-  input.systemPromptFragment?.trim() || null,
-  "Work only on the task below. Keep the existing workspace state intact outside that task.",
-  input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
-  parentBlocksText(parentBlocks),
-  "When finished, use the headings `Conclusion`, `Deviations from brief`, and `Unresolved issues`; use `- none` when a section is empty.",
-  "If a memory decisions block is available, record each deviation as `Deviation: ...`.",
-  "",
-  "Task:",
-  input.promptText ?? input.brief,
-].filter((line): line is string => line !== null).join("\n");
+): string => input.role === "retrieval"
+  ? [
+      "You are working as the retrieval thread for a parent Piarium session.",
+      input.systemPromptFragment?.trim() || null,
+      "Work only on the assigned fact-finding task. Do not modify the workspace.",
+      input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
+      parentBlocksText(parentBlocks),
+      "Deliver facts only through submit_facts. Do not recommend product changes, priorities, or architecture.",
+      "The Host verifies local paths, line ranges, and stored URLs. Unverified material stays unknown.",
+      "",
+      "Task:",
+      input.promptText ?? input.brief,
+    ].filter((line): line is string => line !== null).join("\n")
+  : [
+      `You are working as the ${input.role ?? "teammate"} thread for a parent Piarium session.`,
+      input.systemPromptFragment?.trim() || null,
+      "Work only on the task below. Keep the existing workspace state intact outside that task.",
+      input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
+      parentBlocksText(parentBlocks),
+      "When finished, use the headings `Conclusion`, `Deviations from brief`, and `Unresolved issues`; use `- none` when a section is empty.",
+      "If a memory decisions block is available, record each deviation as `Deviation: ...`.",
+      "",
+      "Task:",
+      input.promptText ?? input.brief,
+    ].filter((line): line is string => line !== null).join("\n");
 
 const discussionPrompt = (
   input: SpawnThreadRunInput,

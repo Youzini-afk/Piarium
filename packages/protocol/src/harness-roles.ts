@@ -97,12 +97,37 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "retrieval": {
     id: "retrieval",
     slot: "retrievalAgent",
-    tools: ["read", "grep", "glob", "explore", "related", "recall", "symbols", "definition", "references", "hover"],
+    tools: [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "explore",
+      "related",
+      "recall",
+      "symbols",
+      "definition",
+      "references",
+      "hover",
+      "webfetch",
+      "websearch",
+      "submit_facts",
+    ],
     worktree: "none",
     systemPromptFragment:
-      "You are a retrieval agent. Perform multi-step code search to answer open questions.",
-    teamDescription: "cheap model; multi-step code search",
-    resultSchema: { conclusion: "string", snippets: "string[]" },
+      "You are a retrieval agent. Gather verified facts for an open question. "
+      + "Deliver the report only through submit_facts. Do not recommend product changes, priorities, or architecture. "
+      + "Do not edit, write, or run shell commands. Cite local paths with compact line ranges or stored URLs. "
+      + "Record material you tried and could not obtain as unknown.",
+    teamDescription: "cheap model; multi-step fact retrieval",
+    resultSchema: {
+      question: "string",
+      scope: "string[]",
+      facts: "{ claim, status, sources }[]",
+      unknowns: "string[]",
+      attempted: "{ action, outcome, detail? }[]",
+      completion: "complete | partial | incomplete | cancelled | unavailable",
+    },
   },
 };
 

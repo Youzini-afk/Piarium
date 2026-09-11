@@ -28,6 +28,7 @@ import {
   createMergeTool,
   createKillTool,
 } from "./thread-tools.js";
+import { createSubmitFactsTool } from "./submit-facts-tool.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
@@ -58,6 +59,8 @@ export interface SelectHarnessToolsDeps {
   threadRuntimeAvailable?: boolean;
   /** Roles whose model slot resolves — dispatch lists and accepts only these. */
   resolvedRoles?: readonly ResolvedRole[];
+  /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
+  sessionToolAllowlist?: readonly string[];
 }
 
 /**
@@ -94,6 +97,7 @@ export function selectHarnessTools(
     webSearchAvailable,
     threadRuntimeAvailable,
     resolvedRoles,
+    sessionToolAllowlist,
   } = deps;
   const result: ToolDefinition[] = [];
 
@@ -187,6 +191,12 @@ export function selectHarnessTools(
     if (tools.kill !== false) {
       result.push(createKillTool(bridge, sessionId));
     }
+  }
+  if (
+    tools.submit_facts !== false
+    && sessionToolAllowlist?.includes("submit_facts")
+  ) {
+    result.push(createSubmitFactsTool(bridge));
   }
 
   return result;

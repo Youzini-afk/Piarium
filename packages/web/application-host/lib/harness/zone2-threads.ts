@@ -3,6 +3,7 @@ import type {
   ThreadParent,
   ThreadRun,
 } from "@piarium/protocol";
+import { summarizeRetrievalEvidence } from "@piarium/protocol";
 import type { ObservationCursorEntry, ObservationCursorStore, PendingObservation } from "./observation-cursors.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import type { Zone2Thread, Zone2Threads } from "./zone2.js";
@@ -39,6 +40,11 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
   lastToolCall: activeRun?.lastToolCall?.name ?? null,
   diffStats: thread.diffStats,
   conclusion: thread.report?.conclusion ?? null,
+  evidenceSummary: thread.report?.evidence
+    ? summarizeRetrievalEvidence(thread.report.evidence)
+    : thread.pendingEvidence
+      ? summarizeRetrievalEvidence(thread.pendingEvidence)
+      : null,
   deviations: [...(thread.report?.deviations ?? [])],
   mergeReady: thread.integrationBinding?.valid === false ? false : thread.integrationBinding?.mergeReady ?? null,
   ...(thread.verification ? { verification: thread.verification } : {}),

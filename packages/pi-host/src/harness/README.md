@@ -25,6 +25,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.query.*` (algorithm-only `explore.search` is the same engine) |
 | `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
+| `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 
 ## Registration
 
@@ -123,7 +124,9 @@ The Application Host advertises `harnessThreads` in the private Host
 handshake. Thread tools are absent when that capability is missing. A real
 child launch supplies its resolved role model and tool allowlist to
 `session.create/open` before Pi constructs the AgentSession; read-only roles do
-not merely rely on a prompt asking them not to write. `session.create/open`
+not merely rely on a prompt asking them not to write. `submit_facts` registers
+only when that frozen allowlist includes it, so the root session cannot submit
+retrieval facts. `session.create/open`
 receives the Documents workspace id for the current scratch or materialized
 cwd (execution identity). Thread catalog, WorkingState, and parent/child
 lifecycle stay on the original owning workspace; Host session bindings carry

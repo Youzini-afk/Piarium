@@ -9,9 +9,18 @@
 import fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
-import { normalizeFrozenHarnessPermissions, ROLE_DEFINITIONS } from "@piarium/protocol";
+import {
+  normalizeFrozenHarnessPermissions,
+  ROLE_DEFINITIONS,
+  sealRetrievalEvidence,
+  summarizeRetrievalEvidence,
+} from "@piarium/protocol";
 import { normalizeThreadScopePath } from "./thread-nesting.js";
 import type {
+  RetrievalAttempt,
+  RetrievalEvidence,
+  RetrievalFact,
+  RetrievalFactSource,
   Thread,
   ThreadAttention,
   ThreadCreatedBy,
@@ -391,6 +400,56 @@ const isTranscriptRef = (value: unknown): value is ThreadReport["transcriptRef"]
   && (value.branchLeafId === undefined || isString(value.branchLeafId))
 );
 
+const FACT_STATUSES = new Set(["verified", "unknown", "unavailable"]);
+const EVIDENCE_COMPLETIONS = new Set(["complete", "partial", "incomplete", "cancelled", "unavailable"]);
+const ATTEMPT_OUTCOMES = new Set(["rejected", "unavailable", "empty", "failed"]);
+const SOURCE_KINDS = new Set(["local", "url", "output"]);
+const SOURCE_ORIGINS = new Set(["disk", "surface-draft", "working-branch"]);
+
+const isOutputRef = (value: unknown): value is RetrievalFactSource["outputRef"] => (
+  isRecord(value)
+  && value.durability === "ephemeral"
+  && isString(value.generation)
+  && isString(value.handle)
+);
+
+const isFactSource = (value: unknown): value is RetrievalFactSource => (
+  isRecord(value)
+  && SOURCE_KINDS.has(value.kind as string)
+  && (value.path === undefined || isString(value.path))
+  && (value.startLine === undefined || Number.isSafeInteger(value.startLine))
+  && (value.endLine === undefined || Number.isSafeInteger(value.endLine))
+  && (value.revision === undefined || isString(value.revision))
+  && (value.origin === undefined || SOURCE_ORIGINS.has(value.origin as string))
+  && (value.url === undefined || isString(value.url))
+  && (value.outputRef === undefined || isOutputRef(value.outputRef))
+);
+
+const isFact = (value: unknown): value is RetrievalFact => (
+  isRecord(value)
+  && isString(value.claim)
+  && FACT_STATUSES.has(value.status as string)
+  && Array.isArray(value.sources)
+  && value.sources.every(isFactSource)
+);
+
+const isAttempt = (value: unknown): value is RetrievalAttempt => (
+  isRecord(value)
+  && isString(value.action)
+  && ATTEMPT_OUTCOMES.has(value.outcome as string)
+  && (value.detail === undefined || isString(value.detail))
+);
+
+const isEvidence = (value: unknown): value is RetrievalEvidence => (
+  isRecord(value)
+  && isString(value.question)
+  && Array.isArray(value.scope) && value.scope.every(isString)
+  && Array.isArray(value.facts) && value.facts.every(isFact)
+  && Array.isArray(value.unknowns) && value.unknowns.every(isString)
+  && Array.isArray(value.attempted) && value.attempted.every(isAttempt)
+  && EVIDENCE_COMPLETIONS.has(value.completion as string)
+);
+
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
   && typeof value.carryBlocks === "boolean"
@@ -433,7 +492,8 @@ const isReport = (value: unknown): value is ThreadReport | null => (
     && isTranscriptRef(value.transcriptRef)
     && (value.resultCommit === undefined || isString(value.resultCommit))
     && (value.resultRevision === undefined || (Number.isSafeInteger(value.resultRevision) && Number(value.resultRevision) > 0))
-    && isRecord(value.blocksSnapshot) && Object.values(value.blocksSnapshot).every(isString))
+    && isRecord(value.blocksSnapshot) && Object.values(value.blocksSnapshot).every(isString)
+    && (value.evidence === undefined || isEvidence(value.evidence)))
 );
 
 const isLegacyReport = (value: unknown): value is LegacyThreadReport | null => (
@@ -483,6 +543,7 @@ const isThread = (value: unknown): value is Thread => {
     && INTEGRATIONS.has(value.integration as ThreadIntegration)
     && isDiffStats(value.diffStats)
     && isReport(value.report)
+    && (value.pendingEvidence === undefined || isEvidence(value.pendingEvidence))
     && (value.mergedCommit === undefined || isString(value.mergedCommit))
     && (value.mergedResultRevision === undefined || (Number.isSafeInteger(value.mergedResultRevision) && Number(value.mergedResultRevision) > 0))
     && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
@@ -1634,6 +1695,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // removing the default pointer before this new attempt can fail outside
       // the normal settlement path.
       delete thread.resultRevision;
+      delete thread.pendingEvidence;
       delete thread.integrationBinding;
       if (thread.verification) {
         delete thread.verification.currentResultRevision;
@@ -1702,7 +1764,43 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       run.endedAt = nowISO();
       run.lastActivityAt = run.endedAt;
       thread.lifecycle = outcome === "lost" ? "active" : "settled";
-      if (report) {
+      // Lost is not settlement. Keep pendingEvidence for Zone 2 until the
+      // existing resume path starts a new Run, which clears it.
+      if (thread.role === "retrieval" && outcome !== "lost") {
+        const evidence = sealRetrievalEvidence(thread.pendingEvidence, {
+          brief: thread.brief,
+          scope: thread.manifest.scope,
+          outcome,
+          exitReason,
+        });
+        delete thread.pendingEvidence;
+        const sealed: ThreadReport = report
+          ? {
+              ...report,
+              conclusion: summarizeRetrievalEvidence(evidence),
+              changedFiles: [],
+              deviations: [],
+              unresolved: [...new Set([...report.unresolved, ...evidence.unknowns])],
+              evidence,
+            }
+          : {
+              conclusion: summarizeRetrievalEvidence(evidence),
+              changedFiles: [],
+              unresolved: [...evidence.unknowns],
+              deviations: [],
+              confidence: 0,
+              transcriptRef: {
+                runtimeId: run.runtimeId,
+                sessionId: run.sessionId ?? "",
+                fromEntryId: null,
+                toEntryId: null,
+              },
+              blocksSnapshot: {},
+              evidence,
+            };
+        thread.report = sealed;
+        report = sealed;
+      } else if (report) {
         thread.report = report;
         if (thread.integration === "none" && report.changedFiles.length > 0) thread.integration = "dirty";
       }
@@ -1909,6 +2007,19 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         thread.integration = input.diffStats.files > 0 ? "dirty" : "none";
       }
     }
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
+
+  const setPendingEvidence = async (
+    workspaceId: string,
+    threadId: string,
+    evidence: RetrievalEvidence,
+  ): Promise<Thread> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) throw new Error(`Unknown thread: ${threadId}`);
+    if (thread.role !== "retrieval") throw new Error(`Thread is not a retrieval role: ${threadId}`);
+    thread.pendingEvidence = structuredClone(evidence);
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });
@@ -2346,6 +2457,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     startRun,
     markRunRunning,
     endRun,
+    setPendingEvidence,
     updateRunProgress,
     setAttention,
     setIntegration,

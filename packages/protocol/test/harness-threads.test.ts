@@ -27,6 +27,9 @@ import {
   type ThreadKillResult,
   type ThreadDispatchParams,
   type ThreadDispatchResult,
+  type ThreadFactsSetParams,
+  type ThreadFactsSetResult,
+  sealRetrievalEvidence,
   type HarnessServiceMap,
   type HostEventData,
 } from "../src/index.js";
@@ -35,6 +38,7 @@ describe("thread protocol types (§9.3)", () => {
   it("all thread methods are recognized by isHarnessMethod", () => {
     const threadMethods = [
       "thread.dispatch",
+      "thread.facts.set",
       "thread.list",
       "thread.wait",
       "thread.send",
@@ -213,6 +217,7 @@ describe("thread protocol types (§9.3)", () => {
     // Type-level check: if this compiles, the thread method keys exist on HarnessServiceMap
     const _check: Partial<HarnessServiceMap> = {
       "thread.dispatch": { params: {} as ThreadDispatchParams, result: {} as ThreadDispatchResult },
+      "thread.facts.set": { params: {} as ThreadFactsSetParams, result: {} as ThreadFactsSetResult },
       "thread.list": { params: {} as ThreadListParams, result: {} as ThreadListResult },
       "thread.wait": { params: {} as ThreadWaitParams, result: {} as ThreadWaitResult },
       "thread.send": { params: {} as ThreadSendParams, result: {} as ThreadSendResult },
@@ -221,8 +226,29 @@ describe("thread protocol types (§9.3)", () => {
       "thread.kill": { params: {} as ThreadKillParams, result: {} as ThreadKillResult },
     };
     assert.ok("thread.dispatch" in _check);
+    assert.ok("thread.facts.set" in _check);
     assert.ok("thread.wait" in _check);
     assert.ok("thread.kill" in _check);
     void _check;
+  });
+
+  it("seals retrieval evidence without inventing verified facts", () => {
+    const cancelled = sealRetrievalEvidence(undefined, {
+      brief: "Where is login?",
+      scope: ["src"],
+      outcome: "cancelled",
+      exitReason: "killed by parent",
+    });
+    assert.equal(cancelled.completion, "cancelled");
+    assert.equal(cancelled.facts.length, 0);
+
+    const incomplete = sealRetrievalEvidence(undefined, {
+      brief: "Where is login?",
+      scope: ["src"],
+      outcome: "success",
+      exitReason: null,
+    });
+    assert.equal(incomplete.completion, "incomplete");
+    assert.ok(incomplete.unknowns.length > 0);
   });
 });

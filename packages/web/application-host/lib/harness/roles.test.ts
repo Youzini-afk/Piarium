@@ -33,6 +33,12 @@ describe("resolveRoles", () => {
     ]));
     expect(ROLE_DEFINITIONS.review.tools).not.toContain("dispatch");
     expect(ROLE_DEFINITIONS.retrieval.tools).not.toContain("dispatch");
+    expect(ROLE_DEFINITIONS.retrieval.tools).not.toEqual(expect.arrayContaining([
+      "bash", "edit", "write", "apply_patch",
+    ]));
+    expect(ROLE_DEFINITIONS.retrieval.tools).toEqual(expect.arrayContaining([
+      "read", "grep", "find", "ls", "explore", "related", "recall", "submit_facts",
+    ]));
   });
 
   it("hardImplement defaults to main when unset", () => {

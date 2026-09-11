@@ -264,7 +264,12 @@ text and exit codes become workspace events and the next Zone 2 `<user-terminal>
 `memory.nudge` wakes the existing keeper from those user events. Missing integration is
 `not-observed`, not a guessed command (D-226).
 
-Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role. The
+Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role.
+D-227 makes that role a real Thread: `thread.dispatch(role: "retrieval")` freezes the retrieval model
+slot, read-only tools, and scope; the child may call explore/read/related/recall and authorized web
+tools, then `submit_facts`. The Host verifies local paths/ranges against Documents and the frozen
+scope before marking a fact verified, stores large excerpts as OutputRef, and projects the sealed
+evidence through `thread.read`, Zone 2, and the existing cancel/lost Thread lifecycle. The
 application host owns search, current document reads, local embedding instances, derived indexes, and
 the short-lived explore query context (fixed input-source reference, actor/scope, candidate producers,
 read snapshots, candidate views, shared cancellation/deadline). The pi-host session ModelRuntime uses

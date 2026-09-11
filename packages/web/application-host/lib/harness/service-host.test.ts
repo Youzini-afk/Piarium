@@ -82,6 +82,8 @@ describe("harness service host authorization", () => {
     ]);
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: false })).not.toContain("control.thread");
     expect(deriveHarnessCapabilities(["dispatch"], { threadRuntime: true })).toContain("control.thread");
+    expect(deriveHarnessCapabilities(["submit_facts"], { threadRuntime: true })).toContain("control.thread");
+    expect(deriveHarnessCapabilities(["submit_facts"], { threadRuntime: false })).not.toContain("control.thread");
     expect(deriveHarnessCapabilities(["edit"], { threadRuntime: false })).toContain("write.document");
     expect(deriveHarnessCapabilities(["explore"], { threadRuntime: false })).toContain("read.search");
     expect(deriveHarnessCapabilities(["read"], { documentRead: true, threadRuntime: false })).toContain("read.document");

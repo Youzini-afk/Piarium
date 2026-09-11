@@ -124,7 +124,12 @@ describe("thread services", () => {
       snapshot: { status: "ready", ref: "snapshot-ref" },
     };
     try {
-      const result = await service.handle({ role, task: "Use the draft" }, serviceContext(inputContext));
+      const result = await service.handle(
+        role === "retrieval"
+          ? { role, task: "Use the draft", model: { providerId: "anthropic", modelId: "haiku" } }
+          : { role, task: "Use the draft" },
+        serviceContext(inputContext),
+      );
       const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
       expect(thread?.manifest).toMatchObject({ draftBaselineId: "draft-fixed", worktree: "isolated" });
       expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ draftBaselineId: "draft-fixed", worktree: "isolated" }));
@@ -198,19 +203,45 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      const result = await service.handle({ role: "retrieval", task: "Inspect state" }, serviceContext({
+      const result = await service.handle({
+        role: "retrieval",
+        task: "Inspect state",
+        model: { providerId: "anthropic", modelId: "haiku" },
+      }, serviceContext({
         source: "surface",
         workspaceId: "workspace-1",
         dirtyPaths: [],
         snapshot: { status: "ready", ref: "empty-snapshot" },
       }));
       const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
-      expect(thread?.manifest).toMatchObject({ draftBaselineId: null, worktree: "none" });
+      expect(thread?.manifest).toMatchObject({
+        draftBaselineId: null,
+        worktree: "none",
+        carryBlocks: false,
+        tools: expect.arrayContaining(["submit_facts", "explore", "read"]),
+      });
+      expect(thread?.manifest.tools).not.toEqual(expect.arrayContaining(["bash", "edit", "write"]));
+      expect(thread?.model).toEqual({ providerId: "anthropic", modelId: "haiku" });
       expect(capture).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });
     }
+  });
+
+  it("refuses retrieval dispatch when the role slot is not configured", async () => {
+    const service = createThreadDispatchService({
+      threadRegistry: {
+        maxConcurrency: 12,
+        countActive: vi.fn(async () => 0),
+        createThread: vi.fn(),
+      },
+      threadSpawnSession: vi.fn(),
+    } as never);
+    await expect(service.handle({ role: "retrieval", task: "Inspect state" }, serviceContext())).rejects.toMatchObject({
+      harnessCode: "unavailable",
+      message: expect.stringContaining("models.retrievalAgent"),
+    });
   });
 
   it("cleans a captured draft baseline when Thread creation fails", async () => {

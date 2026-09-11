@@ -104,6 +104,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    scoped explore pin。3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
    D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威。
    D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
+   D-227 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
+   Host 校验 `submit_facts`，报告经 wait / read_thread / Zone 2 可见。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -359,6 +361,11 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 不用“纯编辑”标签阻止后来测试。`hard-implement` / `frontend` 角色目录含嵌套工具；Host 按冻结 allowlist 与
 `control.thread` 装配，拒绝扩 scope 与未授权工具（D-215）。沿 `parent.kind: thread` 创建/等待/取消/删除/用量，
 不加深度配额，复用既有并发排队。兄弟经父协调，不复制父完整对话。
+
+`retrieval` 是较长事实 Thread，不是第二个快速 explore。公共入口仍是 `dispatch(role: "retrieval")`。未配置
+`models.retrievalAgent` 时角色不出现且 Host 拒绝无 model 的 retrieval dispatch。工具 allowlist 不含写/bash；
+web 工具仅在 Host 已装配时可用。交付物由 `submit_facts` → `thread.facts.set` 写入，settle 时 Host 封印
+`report.evidence`。取消/失联复用既有 Thread 生命周期（D-227）。
 
 ### 3.7 自动 review
 

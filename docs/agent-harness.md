@@ -542,7 +542,7 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 | --- | --- | --- |
 | `grep` | 已知符号、字面量、错误信息的精确匹配 | 命中位置与上下文 |
 | `explore` | 概念/线索召回、入口定位、相关单元阅读、机械下一跳与有依据的局部补查 | 当前代码、路径、范围、必要关系与具体缺口 |
-| `retrieval` 角色 | 需要较长阅读与语义判断的开放事实问题、跨文件机制追踪 | 有引用的事实回答、支撑材料与未确认部分 |
+| `retrieval` 角色 | 需要较长阅读与语义判断的开放事实问题、跨文件机制追踪 | Host 校验后的事实报告：问题与范围、已核实事实、路径修订/行范围或 URL、证据、unknowns；不含建议或优先级 |
 
 快速工具与 retrieval 共享底层读取和搜索能力，产品职责保持分开。explore 的正式方案由算法、向量和 LLM 分工：算法负责执行，
 向量负责候选召回，LLM 负责规则无法可靠表达的局部语义决策。普通低成本模型不能仅换一个工具名就成为完整检索子 agent；
@@ -1172,7 +1172,7 @@ Handoff（把当前会话提炼为一条草稿 prompt 开新分支，Amp 的做�
 | 槽位 | 服务的能力 | 默认 | 未配置时 |
 | --- | --- | --- | --- |
 | `models.explore` | 查询理解/搜索表达与候选相关性/选段（3.15D） | 未配置 | 使用算法与可用向量，明确模型未参与，不回退主模型 |
-| `models.retrievalAgent` | `retrieval` 角色（纯 LLM 多轮检索） | 未配置 | 角色不注册 |
+| `models.retrievalAgent` | `retrieval` 角色（可等待的事实 Thread；Host 校验 submit_facts） | 未配置 | 角色不注册，不借主模型 |
 | `models.quickImplement` | `quick-implement` 角色 | 未配置 | 角色不注册 |
 | `models.hardImplement` | `hard-implement` 角色 | **主模型** | — |
 | `models.frontend` | `frontend` 角色 | 未配置 | 角色不注册 |
@@ -1360,7 +1360,7 @@ rebase | clean`、包管理安装 / 卸载、路径含 `.env | id_rsa | .ssh`；
 
 | 角色 | 模型槽位 | 工具 | 用途 | 隔离 |
 | --- | --- | --- | --- | --- |
-| 检索 `retrieval` | `models.retrievalAgent` | 只读（grep / read / find / explore） | 纯 LLM 多轮检索，处理 `explore` 管线答不了的跨文件推理问题（第 6.1 节第三级） | 无 |
+| 检索 `retrieval` | `models.retrievalAgent` | 只读：grep / read / find / ls / explore / related / recall / LSP 导航；授权范围内的 webfetch / websearch；`submit_facts`。无 bash / edit / write / apply_patch / dispatch | 较长可等待的 Thread：多次检索后由 Host 校验事实报告（第 6.1 节第三级）。未配置槽位不注册、不借主模型 | 无 |
 | 快速实现 `quick-implement` | `models.quickImplement` | 全工具 | 规格明确、既有模式的实现与相关验证 | 并行时独立工作分支，按需物化 |
 | 难度实现 `hard-implement` | `models.hardImplement`（默认主模型） | 全工具 | 模糊、跨切面、需要推理的实现 | 并行时独立工作分支，按需物化 |
 | 前端设计与实现 `frontend` | `models.frontend` | 全工具 + 预览截图 | UI 设计与实现；Host 预览/Electron 渲染 | 并行时独立工作分支，按需物化 |
@@ -1698,7 +1698,9 @@ T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；
 `looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
 停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219 / D-222）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
 由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
-`dispatch`（D-215）。
+`dispatch`（D-215）。`retrieval` 通过冻结 allowlist 与 `thread.facts.set` 交付事实：Host 按冻结 scope 与
+Documents 读取核对路径/行范围，模型不能自行把不存在或越权来源标成已核实；大材料走 OutputRef。不复制父完整对话
+（`carryBlocks: false`），默认不改工作区（D-227）。
 
 失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等

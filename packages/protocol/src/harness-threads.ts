@@ -33,6 +33,57 @@ export interface ThreadSessionBinding {
   parent: ThreadParent;
 }
 
+export type RetrievalFactStatus = "verified" | "unknown" | "unavailable";
+export type RetrievalEvidenceCompletion =
+  | "complete"
+  | "partial"
+  | "incomplete"
+  | "cancelled"
+  | "unavailable";
+
+export interface RetrievalOutputRef {
+  durability: "ephemeral";
+  generation: string;
+  handle: string;
+}
+
+export interface RetrievalFactSource {
+  kind: "local" | "url" | "output";
+  path?: string;
+  startLine?: number;
+  endLine?: number;
+  revision?: string;
+  origin?: "disk" | "surface-draft" | "working-branch";
+  url?: string;
+  outputRef?: RetrievalOutputRef;
+}
+
+export interface RetrievalFact {
+  claim: string;
+  status: RetrievalFactStatus;
+  sources: RetrievalFactSource[];
+}
+
+export interface RetrievalAttempt {
+  action: string;
+  outcome: "rejected" | "unavailable" | "empty" | "failed";
+  detail?: string;
+}
+
+/**
+ * Host-validated retrieval delivery. The model cannot mark a fact verified;
+ * Host assigns status after scope, path, and source checks. There are no
+ * recommendation or priority fields.
+ */
+export interface RetrievalEvidence {
+  question: string;
+  scope: string[];
+  facts: RetrievalFact[];
+  unknowns: string[];
+  attempted: RetrievalAttempt[];
+  completion: RetrievalEvidenceCompletion;
+}
+
 export interface ThreadReport {
   conclusion: string;
   changedFiles: string[];
@@ -44,7 +95,111 @@ export interface ThreadReport {
   resultCommit?: string;
   /** Native immutable working-state revision read by inspect/merge/reopen. */
   resultRevision?: number;
+  /** Present for retrieval threads; Host-sealed fact material. */
+  evidence?: RetrievalEvidence;
 }
+
+export const emptyRetrievalEvidence = (
+  question: string,
+  scope: readonly string[],
+  completion: RetrievalEvidenceCompletion = "incomplete",
+): RetrievalEvidence => ({
+  question,
+  scope: [...scope],
+  facts: [],
+  unknowns: [],
+  attempted: [],
+  completion,
+});
+
+export const summarizeRetrievalEvidence = (evidence: RetrievalEvidence): string => {
+  const verified = evidence.facts.filter((fact) => fact.status === "verified").length;
+  return `retrieval ${evidence.completion}: ${verified} verified, ${evidence.unknowns.length} unknown, ${evidence.attempted.length} attempted`;
+};
+
+export const formatRetrievalEvidenceText = (evidence: RetrievalEvidence): string => {
+  const lines = [
+    `Question: ${evidence.question}`,
+    `Scope: ${evidence.scope.join(", ") || "(workspace)"}`,
+    `Completion: ${evidence.completion}`,
+    `Facts (${evidence.facts.length}):`,
+  ];
+  for (const fact of evidence.facts) {
+    lines.push(`- [${fact.status}] ${fact.claim}`);
+    for (const source of fact.sources) {
+      if (source.kind === "local") {
+        const range = source.startLine !== undefined && source.endLine !== undefined
+          ? `:${source.startLine}-${source.endLine}`
+          : "";
+        const revision = source.revision ? ` @${source.revision}` : "";
+        const origin = source.origin ? ` (${source.origin})` : "";
+        lines.push(`  ${source.path ?? "?"}${range}${revision}${origin}`);
+        continue;
+      }
+      if (source.kind === "url") {
+        lines.push(`  ${source.url ?? "?"}`);
+        continue;
+      }
+      lines.push(`  output ${source.outputRef?.handle ?? "?"}`);
+    }
+  }
+  if (evidence.unknowns.length > 0) {
+    lines.push("Unknowns:");
+    for (const item of evidence.unknowns) lines.push(`- ${item}`);
+  }
+  if (evidence.attempted.length > 0) {
+    lines.push("Attempted:");
+    for (const item of evidence.attempted) {
+      lines.push(`- ${item.action}: ${item.outcome}${item.detail ? ` (${item.detail})` : ""}`);
+    }
+  }
+  return lines.join("\n");
+};
+
+export const sealRetrievalEvidence = (
+  pending: RetrievalEvidence | undefined,
+  input: {
+    brief: string;
+    scope: readonly string[];
+    outcome: ThreadRunOutcome;
+    exitReason: string | null;
+  },
+): RetrievalEvidence => {
+  const base = pending
+    ? {
+        question: pending.question,
+        scope: [...pending.scope],
+        facts: [...pending.facts],
+        unknowns: [...pending.unknowns],
+        attempted: [...pending.attempted],
+        completion: pending.completion,
+      }
+    : emptyRetrievalEvidence(input.brief, input.scope, "incomplete");
+  if (input.outcome === "cancelled") {
+    return { ...base, completion: "cancelled" };
+  }
+  if (!pending) {
+    const lost = input.exitReason ?? "no validated facts were submitted";
+    return {
+      ...base,
+      completion: "incomplete",
+      unknowns: base.unknowns.includes(lost) ? base.unknowns : [...base.unknowns, lost],
+    };
+  }
+  const verified = pending.facts.filter((fact) => fact.status === "verified").length;
+  const unavailableOnly = pending.facts.length > 0
+    && pending.facts.every((fact) => fact.status === "unavailable");
+  if (verified === 0 && unavailableOnly) return { ...base, completion: "unavailable" };
+  if (
+    verified > 0
+    && pending.unknowns.length === 0
+    && pending.attempted.length === 0
+    && pending.facts.every((fact) => fact.status === "verified")
+  ) {
+    return { ...base, completion: "complete" };
+  }
+  return { ...base, completion: "partial" };
+};
 
 export interface TranscriptRef {
   runtimeId: string;
@@ -168,6 +323,8 @@ export interface Thread {
   integration: ThreadIntegration;
   diffStats: ThreadDiffStats | null;
   report: ThreadReport | null;
+  /** Host-validated retrieval draft; copied into report.evidence at settle. */
+  pendingEvidence?: RetrievalEvidence;
   mergedCommit?: string;
   /** Native result revision most recently integrated into the parent. */
   mergedResultRevision?: number;
@@ -533,6 +690,32 @@ export interface ThreadDispatchParams {
   scope?: string[];
   /** Resolved by pi-host from the session's frozen role catalog. */
   model?: import("./harness-settings.js").ModelSelection;
+}
+
+export interface ThreadFactsSetParams {
+  question: string;
+  facts: Array<{
+    claim: string;
+    sources: Array<{
+      kind: "local" | "url" | "output";
+      path?: string;
+      startLine?: number;
+      endLine?: number;
+      url?: string;
+      outputRef?: RetrievalOutputRef;
+    }>;
+  }>;
+  unknowns?: string[];
+  attempted?: Array<{
+    action: string;
+    outcome: "rejected" | "unavailable" | "empty" | "failed";
+    detail?: string;
+  }>;
+}
+
+export interface ThreadFactsSetResult {
+  text: string;
+  evidence: RetrievalEvidence;
 }
 
 export interface ThreadDispatchResult {

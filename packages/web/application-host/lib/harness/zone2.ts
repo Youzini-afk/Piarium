@@ -89,6 +89,7 @@ export interface Zone2Thread {
   lastToolCall: string | null;
   diffStats: ThreadDiffStats | null;
   conclusion: string | null;
+  evidenceSummary?: string | null;
   deviations: string[];
   overlapWarning?: string | null | undefined;
   mergeReady?: boolean | null;
@@ -176,7 +177,8 @@ function formatThread(thread: Zone2Thread, now: number): string {
   ];
   if (thread.lastToolCall) parts.push(`last tool ${thread.lastToolCall}`);
   if (thread.waitingFor) parts.push(`waiting: ${oneLine(thread.waitingFor)}`);
-  if (thread.conclusion) parts.push(`conclusion: ${oneLine(thread.conclusion)}`);
+  if (thread.evidenceSummary) parts.push(`evidence: ${oneLine(thread.evidenceSummary)}`);
+  else if (thread.conclusion) parts.push(`conclusion: ${oneLine(thread.conclusion)}`);
   else parts.push(`brief: ${oneLine(thread.brief)}`);
   if (thread.diffStats) {
     parts.push(`${thread.diffStats.files} files (+${thread.diffStats.insertions} −${thread.diffStats.deletions})`);

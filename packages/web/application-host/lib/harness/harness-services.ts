@@ -4,6 +4,7 @@ import { encodeDocumentText } from "../documents/inspect.js";
 import { HarnessServiceError } from "./service-error.js";
 import {
   createThreadDispatchService,
+  createThreadFactsSetService,
   createThreadKillService,
   createThreadListService,
   createThreadMergeService,
@@ -827,6 +828,7 @@ export function registerHarnessServices(
     router.register("thread.dispatch", createThreadDispatchService(host));
   }
   if (host.threadRegistry) {
+    router.register("thread.facts.set", createThreadFactsSetService(host));
     router.register("thread.list", createThreadListService(host));
     router.register("thread.wait", createThreadWaitService(host));
     router.register("thread.read", createThreadReadService(host));

@@ -1,4 +1,5 @@
 import {
+  formatRetrievalEvidenceText,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
   normalizeFrozenHarnessPermissions,
   type Thread,
@@ -7,6 +8,7 @@ import {
   type ThreadRun,
   type ThreadViewCursor,
 } from "@piarium/protocol";
+import { validateRetrievalEvidence } from "./retrieval-evidence.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
@@ -186,6 +188,9 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!role) {
         throw new HarnessServiceError("invalid-params", `Unknown role: ${params.role}. Available roles: ${Object.keys(ROLE_DEFINITIONS).join(", ")}`);
       }
+      if (role.id === "retrieval" && !params.model) {
+        throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");
+      }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
       assertOwnerTool(owner, "dispatch");
       const concurrency = params.concurrency ?? registry.maxConcurrency;
@@ -246,6 +251,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: normalizeFrozenHarnessPermissions(owner?.manifest.permissions),
         ...(params.model ? { model: params.model } : {}),
         systemPromptFragment: role.systemPromptFragment,
+        ...(role.id === "retrieval" ? { carryBlocks: false } : {}),
         ...(nestedScope.scope.length > 0 ? { scope: nestedScope.scope } : {}),
       };
       let thread: Thread;
@@ -323,6 +329,61 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         ).catch(() => undefined);
       });
       return { text: `dispatched ${thread.id} (${params.role})`, threadId: thread.id, queued: false };
+    },
+  };
+}
+
+export function createThreadFactsSetService(host: HarnessServiceHost): HarnessService<"thread.facts.set"> {
+  return {
+    handle: async (params, ctx) => {
+      const registry = host.threadRegistry;
+      if (!registry || typeof registry.setPendingEvidence !== "function") {
+        throw new HarnessServiceError("unavailable", "Thread registry is not configured");
+      }
+      const binding = await registry.getSessionBinding(ctx.sessionId).catch((error: unknown) => {
+        if (error instanceof ThreadRegistryError && error.code === "stale-binding") {
+          throw new HarnessServiceError("denied", error.message);
+        }
+        throw error;
+      });
+      if (!binding) {
+        throw new HarnessServiceError("denied", "submit_facts is only available on a retrieval thread session");
+      }
+      const thread = typeof registry.getThreadById === "function"
+        ? await registry.getThreadById(binding.owningWorkspaceId, binding.threadId)
+        : null;
+      if (!thread) {
+        throw new HarnessServiceError("denied", "Thread session binding does not match a catalog Thread");
+      }
+      if (thread.role !== "retrieval") {
+        throw new HarnessServiceError("denied", "submit_facts is only available on a retrieval thread");
+      }
+      if (!thread.manifest.tools.includes("submit_facts")) {
+        throw new HarnessServiceError("denied", "Thread tool is not authorized: submit_facts");
+      }
+      if (typeof params.question !== "string" || !params.question.trim()) {
+        throw new HarnessServiceError("invalid-params", "submit_facts requires a question");
+      }
+      if (!Array.isArray(params.facts)) {
+        throw new HarnessServiceError("invalid-params", "submit_facts requires a facts array");
+      }
+      const evidence = await validateRetrievalEvidence({
+        question: params.question,
+        facts: params.facts,
+        ...(params.unknowns ? { unknowns: params.unknowns } : {}),
+        ...(params.attempted ? { attempted: params.attempted } : {}),
+        frozenScope: thread.manifest.scope,
+        ...(ctx.actor.workspaceScope ? { actorScope: ctx.actor.workspaceScope } : {}),
+        brief: thread.brief,
+        ...(host.readExploreFile ? { readFile: host.readExploreFile } : {}),
+        actor: ctx.actor,
+        signal: ctx.signal,
+        ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
+        outputStore: host.outputStore,
+        sessionId: ctx.sessionId,
+      });
+      await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, evidence);
+      return { text: formatRetrievalEvidenceText(evidence), evidence };
     },
   };
 }
@@ -527,11 +588,15 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
           };
         }
         lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
-        lines.push(`Conclusion: ${thread.report.conclusion}`);
-        lines.push(`Changed files: ${thread.report.changedFiles.join(", ") || "(none)"}`);
-        lines.push(`Deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
-        lines.push(`Unresolved: ${thread.report.unresolved.join("; ") || "none"}`);
-        lines.push(`Confidence: ${thread.report.confidence}`);
+        if (thread.report.evidence) {
+          lines.push(formatRetrievalEvidenceText(thread.report.evidence));
+        } else {
+          lines.push(`Conclusion: ${thread.report.conclusion}`);
+          lines.push(`Changed files: ${thread.report.changedFiles.join(", ") || "(none)"}`);
+          lines.push(`Deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
+          lines.push(`Unresolved: ${thread.report.unresolved.join("; ") || "none"}`);
+          lines.push(`Confidence: ${thread.report.confidence}`);
+        }
         return { text: lines.join("\n"), report: thread.report, transcriptRef: thread.report.transcriptRef };
       }
       const since = params.since ?? 0;

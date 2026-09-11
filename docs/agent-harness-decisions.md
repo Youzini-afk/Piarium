@@ -4777,3 +4777,30 @@ ModelRuntime 纵切继续通过。
 | --- | --- | --- | --- |
 | D-023 | superseded in part（user terminal 与命令完成加速由 D-226 接通；steering/计划/子返回加速仍开） | D-226 | 设计 7.3；plan/status 2.2–2.4 |
 | D-226 | implementation（OSC 633 用户命令 → Zone 2；memory.nudge 合并加速现有 keeper） | — | 设计 7.3；plan 2.2–2.4；status 2.2/2.3/2.4；architecture 4.4 |
+
+### D-227 · 2026-09-11 · 3.6（事实检索 Thread）
+
+类型：问题与解法
+
+背景：快速 explore 已能在一次调用内定位秒级事实。较长开放问题仍缺真实生产形状：角色目录有 `retrieval`，但没有 Host 校验的事实权威、冻结只读工具，也没有公开纵切证明父会话能 dispatch、等待并读到报告。
+
+决定：
+
+1. 公共入口仍是 `thread.dispatch(role: "retrieval")`。不新建任务系统、向量库、daemon 或隐藏会话。未配置 `models.retrievalAgent` 时 pi-host `resolveRoles` 省略该角色，Host 另拒绝无 `params.model` 的 retrieval dispatch，不借主模型。
+2. 冻结 allowlist 为只读检索工具加 `submit_facts`：`read` / `grep` / `find` / `ls` / `explore` / `related` / `recall` / LSP 导航，以及 Host 已装配时的 `webfetch` / `websearch`。不含 bash / edit / write / apply_patch / dispatch。`carryBlocks: false`，不复制父完整对话。默认 `worktree: none`；脏 surface 草稿仍走既有 isolated 捕获，以便读草稿，不是为了写工作区。
+3. 事实权威是 Host `thread.facts.set`。公开工具 `submit_facts` 仅当冻结 allowlist 含该名时注册，根会话看不到。Host 按冻结 scope 与 Documents 读取核对路径/1-indexed 行范围；scope 外来源进 `attempted.rejected`，不进入 facts。不存在的路径/越界范围不得标 `verified`。URL 仅 http(s)，且须本会话已存 OutputRef 才 verified。超 `harness.output.visibleBytes` 的摘录走现有 OutputStore。报告结构没有 recommendations / priority。
+4. settle / cancel 时 Host 封印 `report.evidence`，覆盖模型 conclusion / changedFiles / deviations，避免建议漏进报告。lost 不是结算：保留 `pendingEvidence`，现有 resume 开新 Run 时按既有 `startRun` 清掉。wait / read_thread / Zone 2 读同一份封印报告。取消保留已核实 facts，completion 为 `cancelled`。
+
+原因：不能只靠角色提示词约束只读、范围和“不要给建议”。工具、scope、来源验证和 Thread 权限必须在契约里成立。Retrieval 是可等待的 Thread 工作，与一次调用的 explore 重叠成第二个快速搜索会破坏产品边界。
+
+考虑过的替代：(1) 给 retrieval 一个独立任务运行时——重复 Thread/Run/wait/cancel。(2) 把带写的 shared bash 标成只读并靠提示词约束——权限不真实。(3) 未配置时借主模型——违反模型槽位不变量。(4) 在 lost 时封印报告——会把未结算 Run 写成已交付，并与 `startRun` 清 pending 的既有生命周期冲突。
+
+影响：protocol 角色目录 / `thread.facts.set` / `RetrievalEvidence`；Host `retrieval-evidence.ts`、`thread.facts.set`、registry seal、Zone 2 evidence；pi-host `submit_facts`；设计 6.1/9.2.2/9.3.5、plan 0.7/3.6、status 3.6 retrieval、architecture 4.4。
+
+状态：已实施；验证见 status 3.6 retrieval。真实付费 retrieval 质量仅未实测。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-227 | implementation（retrieval 为 Host 校验的事实 Thread；未配置不借主模型） | — | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |
