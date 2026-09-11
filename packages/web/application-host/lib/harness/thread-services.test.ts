@@ -1,10 +1,15 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadMergeService } from "./thread-services.js";
 import type { AgentInputContext } from "@piarium/protocol";
+
+const prepareIsolatedBranch = vi.fn(async () => ({
+  branchId: "thread-baseline",
+  worktree: { path: "/tmp/scratch", base: "zero-commit", viewMode: "virtual" as const, materialized: false, preparationStage: "ready" as const },
+}));
 
 const serviceContext = (inputContext?: AgentInputContext) => ({
   actor: {
@@ -23,7 +28,11 @@ const serviceContext = (inputContext?: AgentInputContext) => ({
 });
 
 describe("thread services", () => {
-  it("persists a starting Run and returns before worktree or child-session setup finishes", async () => {
+  beforeEach(() => {
+    prepareIsolatedBranch.mockClear();
+  });
+
+  it("persists a starting Run and returns before child-session setup finishes", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     let markSpawnStarted!: () => void;
@@ -36,6 +45,7 @@ describe("thread services", () => {
     const service = createThreadDispatchService({
       threadRegistry: registry,
       threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
 
     try {
@@ -61,6 +71,7 @@ describe("thread services", () => {
       await spawnStarted;
 
       expect(result.queued).toBe(false);
+      expect(prepareIsolatedBranch).toHaveBeenCalledOnce();
       expect(spawn).toHaveBeenCalledOnce();
       expect(await registry.getActiveRun("workspace-1", result.threadId)).toMatchObject({
         workerState: "starting",
@@ -86,6 +97,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
       });
       expect(queued.queued).toBe(true);
+      expect(prepareIsolatedBranch).toHaveBeenCalledTimes(2);
       expect(spawn).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
@@ -102,6 +114,7 @@ describe("thread services", () => {
       threadRegistry: registry,
       threadSpawnSession: spawn,
       threadCaptureDraftBaseline: capture,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     const inputContext: AgentInputContext = {
       source: "surface",
@@ -128,6 +141,7 @@ describe("thread services", () => {
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => { throw new Error("draft materialization failed"); }),
       threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: "draft-fixed", cleanup: async () => undefined })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
       const result = await service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
@@ -156,6 +170,7 @@ describe("thread services", () => {
       threadRegistry: registry,
       threadSpawnSession: vi.fn(),
       threadCaptureDraftBaseline: vi.fn(async () => { throw new Error("snapshot expired"); }),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
       await expect(service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
@@ -179,6 +194,7 @@ describe("thread services", () => {
       threadRegistry: registry,
       threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
       threadCaptureDraftBaseline: capture,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
       const result = await service.handle({ role: "retrieval", task: "Inspect state" }, serviceContext({
@@ -206,6 +222,7 @@ describe("thread services", () => {
       },
       threadSpawnSession: vi.fn(),
       threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: "draft-orphan", cleanup })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     await expect(service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
       source: "surface",
@@ -214,6 +231,31 @@ describe("thread services", () => {
       snapshot: { status: "ready", ref: "snapshot-ref" },
     }))).rejects.toThrow("catalog write failed");
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("deletes the Thread when isolated baseline capture fails", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-baseline-fail-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: vi.fn(async () => {
+        throw new Error("baseline capture incomplete");
+      }),
+    } as never);
+    try {
+      await expect(service.handle({
+        concurrency: 1,
+        role: "hard-implement",
+        task: "Capture must finish",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      expect(spawn).not.toHaveBeenCalled();
+      expect(await registry.listThreads("workspace-1", { kind: "session", id: "parent-1" })).toEqual([]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
   });
 
   it("identifies editor-surface conflicts without implying that their disk paths were written", async () => {

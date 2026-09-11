@@ -2195,6 +2195,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     threadRegistry,
     threadCaptureDraftBaseline: (sessionId, workspaceId, context) => threadRuntime!.captureDraftBaseline(sessionId, workspaceId, context),
+    threadPrepareIsolatedBranch: (input) => threadRuntime!.prepareIsolatedBranch(input),
     agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,
     threadTranscriptReader,
     threadSpawnSession: (input) => threadRuntime!.spawn(input),

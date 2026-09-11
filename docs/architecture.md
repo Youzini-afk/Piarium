@@ -672,11 +672,14 @@ materialized directory and settlement folds those changes into a new result befo
 may be reclaimed (D-213).
 
 The baseline includes captured disk inputs and revisioned drafts from the window that submitted the
-user message. The surface retains mutable-buffer ownership. `thread.dispatch` now clones fixed draft
+user message. The surface retains mutable-buffer ownership. `thread.dispatch` clones fixed draft
 bytes and their revision provenance into persistent WorkingState before creating the Thread; queued and
 restarted Runs no longer depend on the ephemeral surface reference. Missing draft content rejects the
-dispatch rather than substituting an unlabelled disk version. Non-draft inputs are still captured when
-the Run materializes, so this slice does not claim a whole-workspace dispatch-time snapshot.
+dispatch rather than substituting an unlabelled disk version. Isolated dispatch then fixes the
+non-draft disk baseline when it creates the WorkingBranch: Git inventories HEAD plus staged,
+unstaged, tracked, deleted, and non-ignored untracked workdir bytes; non-Git and unborn repositories
+perform one cancellable directory capture. Parent drift after that boundary cannot enter the child
+view. Failed or cancelled capture deletes the Thread (D-214).
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

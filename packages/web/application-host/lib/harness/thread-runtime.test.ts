@@ -436,6 +436,80 @@ describe("thread runtime", () => {
     }
   });
 
+  it("fixes the isolated baseline at prepareIsolatedBranch so later parent edits cannot enter the child", async () => {
+    const workspace = join(dataDir, "dispatch-baseline-workspace");
+    const recoveryRoot = join(dataDir, "dispatch-baseline-recovery");
+    const scratch = join(dataDir, "dispatch-baseline-scratch");
+    await fs.promises.mkdir(workspace, { recursive: true });
+    await fs.promises.mkdir(scratch, { recursive: true });
+    await fs.promises.writeFile(join(workspace, "kept.txt"), "dispatch-time\n");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("working-state database missing");
+    const storageContext: WorkspaceRecoveryStorageContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: WORKSPACE },
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      root: recoveryRoot,
+    };
+    const workingStates = {
+      withStore: async <T>(_workspaceId: string, _purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => (
+        operation(await DurableWorkingStateStore.open(storageContext), storageContext)
+      ),
+    };
+    const documents = createDocumentAuthority({
+      hostId: "host-1",
+      dataDir: join(dataDir, "dispatch-baseline-documents"),
+      isAllowedRoot: async () => true,
+      isTrusted: async () => true,
+    });
+    const identity = await documents.resolveWorkspace({ path: workspace });
+    storageContext.identity.workspaceId = identity.workspaceId;
+    const baselineRuntime = createThreadRuntime({
+      registry,
+      workingStates,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: async () => ({
+          cwd: scratch,
+          worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+        }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    try {
+      const input = { ...createInput(), workspaceId: identity.workspaceId };
+      const thread = await registry.createThread(input);
+      await baselineRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: thread.id,
+      });
+      await fs.promises.writeFile(join(workspace, "kept.txt"), "parent after dispatch\n");
+      await workingStates.withStore(identity.workspaceId, "assert-dispatch-baseline", async (store) => {
+        const branch = store.getBranch(`thread-${thread.id}`)!;
+        const kept = branch.baseState["kept.txt"];
+        if (kept?.kind !== "regular-file") throw new Error("expected captured file");
+        expect(await store.getObject(kept.objectHash)).toEqual(Buffer.from("dispatch-time\n"));
+      });
+      const run = await registry.startRun(identity.workspaceId, thread.id);
+      await baselineRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
+      await workingStates.withStore(identity.workspaceId, "assert-spawn-did-not-recapture", async (store) => {
+        const kept = store.getBranch(`thread-${thread.id}`)!.baseState["kept.txt"];
+        if (kept?.kind !== "regular-file") throw new Error("expected captured file");
+        expect(await store.getObject(kept.objectHash)).toEqual(Buffer.from("dispatch-time\n"));
+      });
+    } finally {
+      await baselineRuntime.dispose();
+      await documents.dispose();
+      database.close();
+    }
+  });
+
   it("keeps missing parent block storage explicit without blocking the child", async () => {
     blocksBySession.set("parent-1", null);
     await start();

@@ -72,7 +72,7 @@ export interface ThreadWorktree {
    * `materializing` may have a partial managed directory on disk; it is never
    * safe to open until the state advances to `setup` or `ready`.
    */
-  preparationStage?: "materialize" | "materializing" | "setup" | "ready";
+  preparationStage?: "capturing-baseline" | "materialize" | "materializing" | "setup" | "ready";
   /** Fingerprint of a failed partial materialization used to detect later user changes before retry cleanup. */
   materializationFingerprint?: string;
   /** Physical disk footprint in bytes, if measured. */

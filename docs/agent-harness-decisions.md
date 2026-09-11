@@ -4309,6 +4309,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Host router 生产链与 pi-host journal 有定向证据。真实 Git filter/LFS 一致性、完整桌面 bash 物化后的跨平台 CoW，以及非 Git 大目录物化墙钟未测。
 
+### D-214 · 2026-09-11 · 3.4 / 3.4a（隔离线程在 dispatch 创建分支时固定磁盘基线）
+
+类型：问题与解法
+
+背景：D-212/D-213 已让隔离 Thread Run 读写 WorkingState 视图，但非草稿路径仍在 Run 启动时捕获。queued 线程在排队期间、以及 dispatch 返回到 spawn 之间，父目录的新增、修改、删除、checkout 或提交会进入子基线。Git blob 与工作目录转换后的字节也不能无条件视为相同。失败捕获若留下可运行 Thread，会假装基线完整。
+
+决定：
+
+1. 隔离 `thread.dispatch` 在 `createThread` 之后、返回之前（含 queued）必须调用 Host `threadPrepareIsolatedBranch`。缺 hook 或捕获失败/取消时清理草稿并 `deleteThread`，不留下可运行但基线不完整的 Thread。`createBranch` 只在捕获完成后发生。
+2. Git 工作区在分支创建边界用 `inspectGitBaselineInventory` 固定 HEAD/tree 身份，并枚举 staged、unstaged、tracked mode、已删除与非忽略 untracked。内容一律读取工作目录字节（`fileStore.captureState`），不把 `git cat-file` blob 当作工作区正文。ignored 默认不进；显式 `copyIgnored`/`captureScopes` 必须进入。父之后的漂移不能改变该 base。
+3. 非 Git 与 unborn（`baseRef: "zero-commit"`）在同一边界做一次可取消、有进度的目录捕获。这是分支创建成本，不扩散到普通消息、恢复或每次查询。进度写入 `preparationStage: "capturing-baseline"`；不完整不得宣称完整。
+4. 固定草稿仍是最高优先级覆盖，并在 dispatch 时进入 branch base。spawn 仅在尚无 `workBranchId` 时补捕获（直接 spawn/测试/遗留）；dispatch 已准备的线程不重扫父盘。不实现持续 WorkspaceHead、全仓 watcher 或 Merkle。
+
+影响：protocol `ThreadWorktree.preparationStage`；Host dispatch/runtime/worktree/WorkingState capture；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；dispatch 生产链与 Git/非 Git 捕获有定向证据。真实 Git filter/LFS 一致性、Windows 符号链接/执行位、非 Git 大目录墙钟未测。嵌套线程仍待后续纵切。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4526,4 +4543,5 @@ ModelRuntime 纵切继续通过。
 | D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
 | D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化） | D-213 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-213 | implementation（虚拟文本写入、writeRevision CAS、首次 bash/LSP 原子物化切换） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定） | D-214 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-214 | implementation（dispatch 创建分支时固定 Git/非 Git 磁盘基线） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

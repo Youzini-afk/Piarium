@@ -1432,12 +1432,16 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 
 当前 `thread.dispatch` 纵切在创建 Thread 前同步把固定草稿正文、编码/BOM、原换行和 surface/disk 修订来源复制进 WorkingState；
 `ThreadLaunchManifest.draftBaselineId` 只持久化 Host 对象身份，不进入模型参数。带草稿的角色统一使用 isolated worktree。
-隔离 Run 在启动时捕获 `fixed base + draft` 为 WorkingBranch revision 0。同名 `read` / `grep` / `find` / `ls` / `explore`
-经 Host 分支视图读取该 base 加 delta/tombstone，provenance 标明 branch/base/delta；父 live 目录与 scratch/worktree
-磁盘不能补读未改路径。隔离 Run 从虚拟 scratch 启动；同名 `edit` / `write` / `apply_patch` 把文本变更提交到同一 WorkingState
-delta，不写父目录（D-213）。只有 `bash` 或 LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真实路径时，
-Host 冻结当前修订、等在飞虚拟写入结束、物化该修订并原子切换整个 Run；此后本 Run 的文件工具都走该目录，结算再把目录变化
-收回新结果。切换失败保持原虚拟分支。非草稿路径目前仍取 Run 启动时捕获，并非整个工作区在 dispatch 时的瞬时快照。
+隔离 dispatch 在创建 Thread 之后、返回之前（含 queued）固定非草稿磁盘基线并创建 WorkingBranch revision 0（D-214）。
+Git 工作区固定 HEAD/tree 身份，并捕获 staged、unstaged、tracked mode、已删除与非忽略 untracked 的工作目录字节；
+ignored 默认不进，显式 `copyIgnored`/`captureScopes` 必须进入。非 Git 与 unborn 在同一边界做一次可取消、有进度的目录捕获。
+捕获失败或取消删除该 Thread，不留下宣称完整的分支。父之后的新增、修改、删除、checkout 或提交不能改变子基线。
+同名 `read` / `grep` / `find` / `ls` / `explore` 经 Host 分支视图读取该 base 加 delta/tombstone，provenance 标明
+branch/base/delta；父 live 目录与 scratch/worktree 磁盘不能补读未改路径。隔离 Run 从虚拟 scratch 启动；同名
+`edit` / `write` / `apply_patch` 把文本变更提交到同一 WorkingState delta，不写父目录（D-213）。只有 `bash` 或
+LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真实路径时，Host 冻结当前修订、等在飞虚拟
+写入结束、物化该修订并原子切换整个 Run；此后本 Run 的文件工具都走该目录，结算再把目录变化收回新结果。
+切换失败保持原虚拟分支。Git blob 与工作目录转换后的字节不能无条件视为相同；当前基线读取实际输入字节。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
 显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和

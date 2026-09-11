@@ -114,6 +114,19 @@ describe("thread space accounting", () => {
     expect(space.note).toMatch(/already exceeded/i);
   });
 
+  it("keeps an in-progress baseline capture from being treated as a complete branch", () => {
+    expect(assembleKeepReasons({
+      thread: thread({
+        worktree: { path: "/tmp/scratch", base: "zero-commit", materialized: false, viewMode: "virtual", preparationStage: "capturing-baseline" },
+      }),
+      runActive: false,
+      unfinishedIntegration: [],
+      matchesResult: null,
+      hasPublishedResult: false,
+      hasActiveCommands: false,
+    })).toContain("Baseline capture is incomplete");
+  });
+
   it("keeps directories for keep_worktree, active runs, unfinished integration, and unverified content", () => {
     expect(assembleKeepReasons({
       thread: thread({ keepWorktree: true, integration: "conflict", lifecycle: "archived" }),

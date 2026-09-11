@@ -963,15 +963,29 @@ export class WorkingStateStore {
     await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "thread-result", key));
   }
 
-  async captureDirectory(directory: string, relativePaths?: string[]): Promise<Record<string, RecoveryState>> {
+  async captureDirectory(
+    directory: string,
+    relativePaths?: string[],
+    options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void },
+  ): Promise<Record<string, RecoveryState>> {
     const result: Record<string, RecoveryState> = {};
     const files = relativePaths?.map(normalizeRelative) ?? await this.scanDirectoryRelative(directory);
     const identity = { ...this.context.identity, canonicalRoot: directory };
+    let done = 0;
     for (const file of files) {
+      if (options?.signal?.aborted) {
+        throw new DOMException("Workspace baseline capture aborted", "AbortError");
+      }
       const captured = await this.context.fileStore.captureState(identity, this.context.root, file, { store: true });
       result[file] = captured.state;
+      done += 1;
+      options?.onProgress?.(done, files.length);
     }
     return result;
+  }
+
+  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
+    return this.scanCaptureScopes(directory, scopes);
   }
 
   private async scanDirectoryRelative(directory: string, base = directory): Promise<string[]> {

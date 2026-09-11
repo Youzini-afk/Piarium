@@ -93,7 +93,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
    同名 read/grep/find/ls/explore 的 WorkingState 只读视图已接入真实 Thread Run（D-212）。同名 edit/write/apply_patch 已在虚拟
-   Run 上提交 WorkingState delta，首次 bash/LSP 原子切换物化目录（D-213）。dispatch 瞬时基线与嵌套线程仍待后续纵切。
+   Run 上提交 WorkingState delta，首次 bash/LSP 原子切换物化目录（D-213）。隔离 dispatch 已在创建分支时固定 Git/非 Git
+   磁盘基线（D-214）。嵌套线程仍待后续纵切。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -276,12 +277,13 @@ RunManifest 不成为这组能力共同前置。
 原生 Pi 工具、LSP、扩展、shell 需要真实路径时 materialize 并切同一执行视图，不为无目录而禁用正常能力；shared 明示实时共享。
 
 已交付的第一段是 dispatch 草稿基线：请求内复制固定正文与字节格式，Thread catalog 持有不可变 baseline id，queued/lost 恢复从持久
-对象重建；有效草稿是 branch revision 0，不是 child delta。dirty 角色强制 isolated，来源不可用则 dispatch 失败。当前非草稿路径仍
-在 Run 启动时捕获。父会话的同名 read 与 grep 已消费同一固定 surface snapshot；find/ls 已消费同一快照。surface 写回与绑定预览
+对象重建；有效草稿是 branch revision 0，不是 child delta。dirty 角色强制 isolated，来源不可用则 dispatch 失败。D-214 已把非草稿
+路径改到 dispatch 创建分支时固定：Git 捕获工作目录身份与变化集，非 Git/unborn 做一次可取消目录捕获；失败删除 Thread。
+父会话的同名 read 与 grep 已消费同一固定 surface snapshot；find/ls 已消费同一快照。surface 写回与绑定预览
 已按 D-201 接入线程面板 / Document Registry。D-212 已把隔离 Thread Run 的同名只读工具接到 WorkingState 视图：delta 覆盖 base，
 tombstone 隐藏路径，父 drift 不能补读，scope 仍由 Host 拒绝。D-213 已把同名 edit/write/apply_patch 接到同一分支视图：虚拟写入
-做 writeRevision CAS，不碰父磁盘；首次 bash/LSP 冻结修订、等在飞写入、staging 物化后原子切换，失败保持原虚拟分支。整仓
-dispatch 快照尚未交付。
+做 writeRevision CAS，不碰父磁盘；首次 bash/LSP 冻结修订、等在飞写入、staging 物化后原子切换，失败保持原虚拟分支。
+嵌套线程仍待接通。
 
 **D. 环境与执行写回。** Git/copy/CoW 按平台选择，缺 CoW 用正常复制，默认不硬链接可写目录；包管理器缓存可复用。
 setup 采用用户工作区配置，配置一次授权正常重复执行，不猜仓库命令；按工具、依赖输入和实际环境需要运行幂等准备。

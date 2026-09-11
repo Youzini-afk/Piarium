@@ -47,7 +47,9 @@ export const assembleKeepReasons = (input: {
 }): string[] => {
   const reasons: string[] = [];
   if (input.thread.keepWorktree) reasons.push("User requested keep_worktree");
-  if (input.thread.worktree?.preparationStage === "materializing") {
+  if (input.thread.worktree?.preparationStage === "capturing-baseline") {
+    reasons.push("Baseline capture is incomplete");
+  } else if (input.thread.worktree?.preparationStage === "materializing") {
     reasons.push("Directory materialization is incomplete");
   } else if (input.thread.worktree?.preparationStage === "setup") {
     reasons.push("Directory setup is incomplete");

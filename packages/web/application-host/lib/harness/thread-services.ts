@@ -208,6 +208,29 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         await captured.cleanup().catch(() => undefined);
         throw error;
       }
+      if (input.worktree === "isolated") {
+        if (!host.threadPrepareIsolatedBranch) {
+          await captured.cleanup().catch(() => undefined);
+          await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+          throw new HarnessServiceError("unavailable", "Isolated thread baseline capture is not configured");
+        }
+        try {
+          await host.threadPrepareIsolatedBranch({
+            workspaceId,
+            parent,
+            threadId: thread.id,
+            draftBaselineId: captured.draftBaselineId,
+            signal: ctx.signal,
+          });
+        } catch (error) {
+          await captured.cleanup().catch(() => undefined);
+          await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+          throw new HarnessServiceError(
+            "unavailable",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
       if (isQueued) {
         return {
           text: `queued as ${thread.id} (${params.role}) — concurrency is full`,

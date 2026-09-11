@@ -9,6 +9,7 @@ import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
+import { parseGitNullList } from "./working-state/workspace-baseline.js";
 
 export interface ThreadWorktreeCreateResult {
   path: string;
@@ -586,6 +587,47 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const diffStats = parseNumstat(numstatResult);
     diffStats.files = changedFiles.length;
     return { patch: patchResult, untracked: newPaths, changedFiles, diffStats };
+  };
+
+  const inspectGitBaselineInventory = async (
+    directory: string,
+    signal?: AbortSignal,
+  ): Promise<{ kind: "git"; baseRef: string; paths: string[] } | { kind: "directory" }> => {
+    if (signal?.aborted) throw abortError();
+    try {
+      const inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
+      if (inside !== "true") return { kind: "directory" };
+    } catch {
+      return { kind: "directory" };
+    }
+    let baseRef = "zero-commit";
+    try {
+      const head = (await runGit(directory, ["rev-parse", "HEAD"])).stdout.trim();
+      if (head && head !== "HEAD") baseRef = head;
+    } catch {
+      baseRef = "zero-commit";
+    }
+    const collect = async (args: string[]): Promise<string[]> => {
+      if (signal?.aborted) throw abortError();
+      try {
+        return parseGitNullList((await runGit(directory, args)).stdout);
+      } catch {
+        return [];
+      }
+    };
+    const [tracked, deleted, untracked, unstaged, staged, versusHead] = await Promise.all([
+      collect(["ls-files", "-z"]),
+      collect(["ls-files", "-d", "-z"]),
+      collect(["ls-files", "--others", "--exclude-standard", "-z"]),
+      collect(["diff", "--name-only", "-z"]),
+      collect(["diff", "--cached", "--name-only", "-z"]),
+      collect(["diff", "--name-only", "-z", "HEAD"]),
+    ]);
+    return {
+      kind: "git",
+      baseRef,
+      paths: [...new Set([...tracked, ...deleted, ...untracked, ...unstaged, ...staged, ...versusHead])].sort(),
+    };
   };
 
   const inspectWorkspaceIdentity = async (directory: string): Promise<
@@ -1197,7 +1239,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return totalBytes;
   };
 
-  return { prepare, estimatePrepare, inspect, inspectWorkspaceIdentity, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
+  return { prepare, estimatePrepare, inspect, inspectGitBaselineInventory, inspectWorkspaceIdentity, snapshot, importFixedResult, merge, reclaim, materialize, prepareInputs, runSetup, measureDiskUsage };
 }
 
 export type ThreadWorktreeRuntime = ReturnType<typeof createThreadWorktreeRuntime>;

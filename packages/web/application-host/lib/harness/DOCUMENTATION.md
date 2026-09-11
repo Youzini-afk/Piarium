@@ -123,10 +123,12 @@ processes, or a second Host.
 
 The registry persists one versioned atomic catalog per workspace. `Thread` is
 durable work; `ThreadRun` is one execution attempt, and
-`ThreadLaunchManifest` freezes model-adjacent launch inputs. `dispatch` commits
-the Thread plus a `starting` Run and returns immediately. The runtime then
-creates a managed worktree when needed, opens a real persisted Pi child
-session with the role's active-tool allowlist, and projects broker events into
+`ThreadLaunchManifest` freezes model-adjacent launch inputs. Isolated `dispatch`
+creates the Thread, then captures the disk baseline and WorkingBranch before it
+returns — including queued threads. Capture failure or cancellation deletes the
+Thread. `dispatch` then commits a `starting` Run and returns immediately. The
+runtime later opens a real persisted Pi child session with the role's
+active-tool allowlist, and projects broker events into
 progress, attention, report, durable transcript, integration, and verification
 state. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. A hidden
@@ -278,9 +280,12 @@ Run launch includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
-An isolated child captures its execution baseline into the Host working-state
-store before the Pi session starts and stays on a virtual scratch until a path-binding
-tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
+An isolated child fixes its execution baseline when dispatch creates the
+WorkingBranch, not when the Pi session later starts. Git inventories HEAD plus
+staged, unstaged, tracked, deleted, and non-ignored untracked paths and stores
+workdir bytes; non-Git and unborn repositories do one cancellable directory
+scan. Spawn recaptures only when no `workBranchId` exists. The child stays on a
+virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
 which commits text into the unpublished WorkingState delta with `writeRevision` CAS
 and never writes the parent directory. Directory, binary, symlink, and unsupported
 states are rejected. The first `bash` or LSP navigation tool asks

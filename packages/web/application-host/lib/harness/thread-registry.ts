@@ -227,6 +227,7 @@ const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "arc
 const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "thread", "stalled", "looping"]);
 const INTEGRATIONS = new Set<ThreadIntegration>(["none", "dirty", "merge-ready", "conflict", "merged"]);
 const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparationStage"]>>([
+  "capturing-baseline",
   "materialize",
   "materializing",
   "setup",

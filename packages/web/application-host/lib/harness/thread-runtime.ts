@@ -47,6 +47,7 @@ import { formatPublishedResultDiff } from "./working-state/verification-records.
 import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
 import type { ResolvedRole } from "./roles.js";
 import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
+import { withAncestorDirectories } from "./working-state/workspace-baseline.js";
 
 export interface ThreadSessionAdapter {
   create(input: {
@@ -73,7 +74,7 @@ export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
-    Partial<Pick<ThreadWorktreeRuntime, "estimatePrepare" | "importFixedResult" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
+    Partial<Pick<ThreadWorktreeRuntime, "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
@@ -121,6 +122,14 @@ export interface SpawnThreadRunInput extends CreateThreadInput {
 export interface CapturedThreadDraftBaseline {
   draftBaselineId: string | null;
   cleanup(): Promise<void>;
+}
+
+export interface PrepareIsolatedBranchInput {
+  workspaceId: string;
+  parent: ThreadParent;
+  threadId: string;
+  draftBaselineId?: string | null;
+  signal?: AbortSignal;
 }
 
 interface RuntimeBinding {
@@ -1108,6 +1117,118 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
   };
 
+  const prepareIsolatedBranchCore = async (
+    input: PrepareIsolatedBranchInput,
+    preparationSignal: AbortSignal,
+    setPreparationStage: (stage: string) => void,
+  ): Promise<{ branchId: string; worktree: NonNullable<Thread["worktree"]> }> => {
+    if (!options.workingStates) {
+      throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for the isolated baseline");
+    }
+    const existing = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+    if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
+    if (existing.workBranchId && existing.worktree) {
+      return { branchId: existing.workBranchId, worktree: existing.worktree };
+    }
+    const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+    const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
+    const captureScopes = resolveCaptureScopes(sourceRoot, effectiveSettings);
+    const draftBaselineId = input.draftBaselineId ?? existing.manifest.draftBaselineId ?? null;
+    let worktree = existing.worktree;
+    if (!worktree) {
+      setPreparationStage("preparing-worktree");
+      const prep = await options.worktrees.prepare({
+        mode: "isolated",
+        viewMode: "virtual",
+        sourceRoot,
+        threadId: input.threadId,
+        signal: preparationSignal,
+        onWorktreeState: async (candidate) => {
+          candidate.viewMode = "virtual";
+          candidate.materialized = false;
+          candidate.preparationStage = "capturing-baseline";
+          await options.registry.setWorktree(input.workspaceId, input.threadId, candidate);
+        },
+      });
+      if (!prep.worktree) {
+        throw new ThreadRuntimeError("unavailable", "An isolated worktree was not created for the branch baseline");
+      }
+      worktree = prep.worktree;
+    }
+    worktree.viewMode = "virtual";
+    worktree.materialized = false;
+    worktree.preparationStage = "capturing-baseline";
+    delete worktree.materializationFingerprint;
+    await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
+    if (preparationSignal.aborted) throw new DOMException("Thread baseline capture aborted", "AbortError");
+    setPreparationStage("capturing-baseline");
+    const branchId = `thread-${input.threadId}`;
+    try {
+      await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
+        let relativePaths: string[] | undefined;
+        let baseRef = worktree!.base;
+        if (typeof options.worktrees.inspectGitBaselineInventory === "function") {
+          const inventory = await options.worktrees.inspectGitBaselineInventory(sourceRoot, preparationSignal);
+          if (inventory.kind === "git") {
+            const scopePaths = captureScopes.length > 0
+              ? await store.listCaptureScopePaths(sourceRoot, captureScopes)
+              : [];
+            relativePaths = withAncestorDirectories([...inventory.paths, ...scopePaths]);
+            baseRef = inventory.baseRef;
+            worktree!.base = inventory.baseRef;
+          }
+        }
+        const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
+          signal: preparationSignal,
+          onProgress: (done, total) => {
+            worktree!.retentionReason = `Capturing baseline ${done}/${total}`;
+          },
+        });
+        delete worktree!.retentionReason;
+        if (!draftBaselineId) {
+          await store.createBranch(input.workspaceId, branchId, baseline, baseRef, [], captureScopes);
+          return;
+        }
+        const draftBaseline = await store.getDraftBaseline(draftBaselineId);
+        if (!draftBaseline) throw new Error(`Thread draft baseline not found: ${draftBaselineId}`);
+        const drafts = await Promise.all(Object.entries(draftBaseline.pathStates).map(async ([file, state]) => {
+          if (state.kind !== "regular-file") throw new Error(`Thread draft baseline contains a non-file state: ${file}`);
+          const content = await store.getObject(state.objectHash);
+          if (!content) throw new Error(`Thread draft baseline content is missing: ${file}`);
+          return { path: file, content, ...(state.mode === undefined ? {} : { mode: state.mode }) };
+        }));
+        await createBranchWithDraftBaseline(
+          store,
+          input.workspaceId,
+          branchId,
+          baseline,
+          drafts,
+          baseRef,
+          captureScopes,
+        );
+      });
+    } catch (error) {
+      await fs.promises.rm(worktree.path, { recursive: true, force: true }).catch(() => undefined);
+      throw error;
+    }
+    const setupPending = existing.manifest.tools.includes("bash")
+      && Boolean(options.worktrees.runSetup)
+      && Boolean(effectiveSettings?.setup);
+    worktree.preparationStage = setupPending ? "setup" : "ready";
+    delete worktree.retentionReason;
+    await options.registry.setWorkingState(input.workspaceId, input.threadId, { branchId, worktree });
+    return { branchId, worktree };
+  };
+
+  const prepareIsolatedBranch = async (input: PrepareIsolatedBranchInput): Promise<{ branchId: string; worktree: NonNullable<Thread["worktree"]> }> => (
+    runPreparation(input.threadId, (signal, setStage) => {
+      const merged = input.signal
+        ? AbortSignal.any([signal, input.signal])
+        : signal;
+      return prepareIsolatedBranchCore({ ...input, signal: merged }, merged, setStage);
+    })
+  );
+
   const spawn = async (input: SpawnThreadRunInput): Promise<{ sessionId: string }> => {
     let releaseSpaceReservation = async (): Promise<void> => undefined;
     try {
@@ -1279,47 +1400,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // follows the existing branch capture/materialization flow, but must not
     // recopy live parent inputs or replace that scope from current settings.
     const launchBranchCapture = Boolean(worktree && needsBranchCapture && !existing?.workBranchId);
-    const captureScopes = launchBranchCapture ? resolveCaptureScopes(sourceRoot, effectiveSettings) : [];
     if (launchBranchCapture && !virtualIsolated && options.worktrees.prepareInputs && effectiveSettings?.copyIgnored?.length) {
       setPreparationStage("preparing-inputs");
       await options.worktrees.prepareInputs(sourceRoot, worktree!, effectiveSettings, preparationSignal);
       checkPreparation();
     }
-    if (worktree && needsBranchCapture && options.workingStates) {
-      const branchId = `thread-${input.threadId}`;
-      setPreparationStage("capturing-baseline");
-      await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
-        const baseline = await store.captureDirectory(virtualIsolated ? sourceRoot : preparedCwd);
-        if (!draftBaselineId) {
-          await store.createBranch(input.workspaceId, branchId, baseline, worktree!.base, [], captureScopes);
-          return;
-        }
-        const draftBaseline = await store.getDraftBaseline(draftBaselineId);
-        if (!draftBaseline) throw new Error(`Thread draft baseline not found: ${draftBaselineId}`);
-        const drafts = await Promise.all(Object.entries(draftBaseline.pathStates).map(async ([file, state]) => {
-          if (state.kind !== "regular-file") throw new Error(`Thread draft baseline contains a non-file state: ${file}`);
-          const content = await store.getObject(state.objectHash);
-          if (!content) throw new Error(`Thread draft baseline content is missing: ${file}`);
-          return { path: file, content, ...(state.mode === undefined ? {} : { mode: state.mode }) };
-        }));
-        const branch = await createBranchWithDraftBaseline(
-          store,
-          input.workspaceId,
-          branchId,
-          baseline,
-          drafts,
-          worktree!.base,
-          captureScopes,
-        );
-        if (!virtualIsolated) {
-          await store.materializeStates(
-            Object.fromEntries(branch.draftBasePaths.map((file) => [file, branch.baseState[file]!])),
-            preparedCwd,
-          );
-        }
-      });
+    if (worktree && needsBranchCapture && !existing?.workBranchId && options.workingStates) {
+      const prepared = await prepareIsolatedBranchCore({
+        workspaceId: input.workspaceId,
+        parent: input.parent,
+        threadId: input.threadId,
+        draftBaselineId,
+        signal: preparationSignal,
+      }, preparationSignal, setPreparationStage);
+      worktree = prepared.worktree;
+      preparedCwd = worktree.path;
       checkPreparation();
-      await options.registry.setWorkingState(input.workspaceId, input.threadId, { branchId, worktree });
     }
     if (worktree && !virtualIsolated && input.tools.includes("bash") && options.worktrees.runSetup && effectiveSettings?.setup) {
       setPreparationStage("running-setup");
@@ -3479,6 +3575,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   return {
     spawn,
     captureDraftBaseline,
+    prepareIsolatedBranch,
     createDiscussion,
     convertDiscussion,
     scopeForSession,
