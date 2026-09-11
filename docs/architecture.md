@@ -419,7 +419,10 @@ channel; the runtime request carries an opaque reference or an unavailable dirty
 `explore`, `grep`, and the same-name `read` / `find` / `ls` adapters use that fixed snapshot for dirty paths;
 other paths keep each tool's established disk source. Root-session `edit` / `write` / `apply_patch` call Host
 `document.surfaceWrite` for snapshot-owned paths and write the same Document Registry buffer after owner,
-generation, registration, document instance, revision, and hash checks; a later user edit is a conflict and
+generation, registration, document instance, revision, and editor-buffer hash checks. The UI `bufferHash` is
+the normalized editor identity; snapshot text keeps the file's original line endings and is not compared to
+that hash directly. Mixed surface/disk batches persist an `agent-mutation` recovery operation before the first
+write and compensate with the same undo `operationId`. A later user edit is a conflict and
 does not save or write disk. Ordinary disk paths keep the journaled Documents write. Explicit
 selection/diff attachments may still quote text in the prompt, and patch accept/reject uses
 expected-revision writes so an agent edit cannot silently overwrite a dirty buffer. An agent attachment may quote a test failure or stack frame but never

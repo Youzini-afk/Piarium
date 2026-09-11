@@ -12,6 +12,8 @@ import {
   type AgentMutationRecord,
   type AgentSurfaceWriteChange,
 } from './surface-mutation.js';
+import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending.js';
+import type { DurableFileOperationContext } from '../recovery/durable-file-operation.js';
 import {
   canonicalizePathIdentity,
   normalizePathIdentity,
@@ -349,6 +351,11 @@ export interface DocumentAuthorityOptions {
   dirtyBarrierTimeoutMs?: number;
 }
 
+export type DurableMutationStorageFn = <T>(
+  workspaceId: string,
+  operation: (context: DurableFileOperationContext) => Promise<T> | T,
+) => Promise<T>;
+
 export interface DocumentMutationObservation {
   workspaceId: string;
   resourceId: string;
@@ -427,6 +434,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dirtyBarriers = new Map<string, DirtyBarrier>();
   const pendingSurfaceOperations = new Map<string, PendingDocumentSurfaceOperation>();
   const agentMutations = new Map<string, AgentMutationRecord>();
+  let durableMutationStorage: DurableMutationStorageFn | null = null;
   const surfaceSnapshots = createSurfaceSnapshotStore({ caseSensitive: platform !== 'win32' });
   let dirtyPublicationRevision = 0;
   let disposed = false;
@@ -1563,16 +1571,17 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if (result.status !== 'applied' && result.status !== 'undone') continue;
       const target = targetByPath.get(result.resource.resourceId)!;
       const content = result.status === 'applied' ? target.newText : result.content;
+      const editorHash = typeof content === 'string'
+        ? `sha256-${createHash('sha256').update(normalizeEditorLineEndings(content), 'utf8').digest('hex')}`
+        : '';
       if (typeof content !== 'string' || result.documentInstanceId !== target.documentInstanceId
         || result.afterLocalEditRevision === undefined || !result.afterHash
-        || `sha256-${createHash('sha256').update(content, 'utf8').digest('hex')}` !== result.afterHash) {
+        || result.afterHash !== editorHash) {
         throw completionError('Document surface operation completion does not match its target', {
           code: 'stale-completion', statusCode: 409,
         });
       }
-      const serialized = target.lineEnding === 'crlf'
-        ? content.replace(/\n/gu, '\r\n')
-        : target.lineEnding === 'cr' ? content.replace(/\n/gu, '\r') : content;
+      const serialized = serializeEditorContent(content, target.lineEnding);
       surfaceSnapshots.applyOwnerEdit({
         ownerId: pending.ownerId,
         ownerGeneration: pending.generation,
@@ -1586,6 +1595,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         content: serialized,
         encoding: target.encoding,
         bom: target.bom,
+        bufferHash: result.afterHash,
+        lineEnding: target.lineEnding,
       });
       const publication = dirtyBuffersByOwner.get(dirtyBufferKey(pending.ownerId, pending.workspaceId));
       if (publication) {
@@ -1661,9 +1672,19 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         || !Number.isSafeInteger(candidate.localEditRevision) || Number(candidate.localEditRevision) < 0
         || typeof candidate.content !== 'string'
         || (candidate.encoding !== undefined && candidate.encoding !== 'utf-8')
-        || (candidate.bom !== undefined && typeof candidate.bom !== 'boolean')) {
+        || (candidate.bom !== undefined && typeof candidate.bom !== 'boolean')
+        || (candidate.bufferHash !== undefined
+          && (typeof candidate.bufferHash !== 'string' || !/^sha256-[0-9a-f]{64}$/u.test(candidate.bufferHash)))
+        || (candidate.lineEnding !== undefined
+          && !['lf', 'crlf', 'cr'].includes(String(candidate.lineEnding)))) {
         throw new DocumentAuthorityError('Agent input snapshot resource is malformed', { code: 'failed', statusCode: 400 });
       }
+      const lineEnding = candidate.lineEnding === 'crlf' || candidate.lineEnding === 'cr' || candidate.lineEnding === 'lf'
+        ? candidate.lineEnding
+        : detectLineEnding(candidate.content);
+      const bufferHash = typeof candidate.bufferHash === 'string'
+        ? candidate.bufferHash
+        : `sha256-${createHash('sha256').update(normalizeEditorLineEndings(candidate.content), 'utf8').digest('hex')}`;
       return {
         baseRevision: candidate.baseRevision as string | null,
         encoding: candidate.encoding === undefined ? 'utf-8' : candidate.encoding,
@@ -1671,6 +1692,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         content: candidate.content,
         localEditRevision: Number(candidate.localEditRevision),
         resource: { workspaceId: request.workspaceId, resourceId: resource.resourceId },
+        bufferHash,
+        lineEnding,
       };
     });
     const requestedByPath = new Map(resources.map((resource) => [resource.resource.resourceId, resource]));
@@ -1680,10 +1703,14 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       || requestedByPath.size !== publishedByPath.size
       || [...requestedByPath].some(([resourceId, resource]) => {
         const published = publishedByPath.get(resourceId);
+        const publishedHash = published?.bufferHash;
+        const serializedHash = `sha256-${createHash('sha256').update(normalizeEditorLineEndings(resource.content), 'utf8').digest('hex')}`;
         return !published
           || published.resource.workspaceId !== request.workspaceId
           || published.baseRevision !== resource.baseRevision
-          || published.localEditRevision !== resource.localEditRevision;
+          || published.localEditRevision !== resource.localEditRevision
+          || (publishedHash !== undefined && publishedHash !== serializedHash)
+          || (resource.bufferHash !== undefined && resource.bufferHash !== serializedHash);
       })) {
       throw new DocumentAuthorityError('Dirty buffer publication changed before capture', {
         code: 'stale-completion',
@@ -1740,52 +1767,73 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     changes: readonly AgentSurfaceWriteChange[],
     signal?: AbortSignal,
   ): Promise<DocumentSurfaceWriteResult> => {
-    const { result, record } = await applyAgentSurfaceMutation({
-      inspectSnapshot: surfaceSnapshots.inspect,
-      surfaceOwner: surfaceSnapshots.owner,
-      inspectDirtyBuffers,
-      requestSurfaceOperation,
-      inspectWorkspace: async (workspaceId) => mutations.inspect(workspaceId),
-      readDisk: async (workspaceId, resourceId) => {
-        const current = await read({ workspaceId, resourceId });
-        return {
-          status: current.status,
-          ...(current.status === 'ready' ? { content: current.content, revision: current.revision } : {}),
-          ...(current.status === 'binary' || current.status === 'unsupported-encoding'
-            ? { revision: current.revision }
-            : {}),
-        };
-      },
-      writeDisk: async (request) => {
-        const written = await write({
-          resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
-          token: request.token,
-          content: request.content,
-          encoding: request.encoding,
-          bom: request.bom,
-          expectedRevision: request.expectedRevision,
-          operationId: request.operationId,
-        });
-        if (written.status === 'written') return { status: 'written', revision: written.revision };
-        return {
-          status: written.status === 'conflict' ? 'conflict' : 'conflict',
-          message: `${request.resourceId} could not be written on disk.`,
-        };
-      },
-      deleteDisk: async (request) => {
-        const deleted = await remove({
-          resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
-          token: request.token,
-          expectedRevision: request.expectedRevision,
-          operationId: request.operationId,
-        });
-        if (deleted.status === 'deleted') return { status: 'deleted' };
-        if (deleted.status === 'missing') return { status: 'missing' };
-        return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
-      },
-    }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
-    if (record) agentMutations.set(record.operationId, record);
-    return result;
+    const workspaceId = context.source === 'surface' ? context.workspaceId : '';
+    const run = async (durable?: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
+      const { result, record } = await applyAgentSurfaceMutation({
+        inspectSnapshot: surfaceSnapshots.inspect,
+        surfaceOwner: surfaceSnapshots.owner,
+        inspectDirtyBuffers,
+        requestSurfaceOperation,
+        inspectWorkspace: async (id) => mutations.inspect(id),
+        readDisk: async (id, resourceId) => {
+          const current = await read({ workspaceId: id, resourceId });
+          return {
+            status: current.status,
+            ...(current.status === 'ready'
+              ? {
+                  content: current.content,
+                  revision: current.revision,
+                  encoding: current.encoding,
+                  bom: current.bom,
+                }
+              : {}),
+            ...(current.status === 'binary'
+              ? { revision: current.revision }
+              : {}),
+            ...(current.status === 'unsupported-encoding'
+              ? {
+                  revision: current.revision,
+                  ...(current.candidates === undefined ? {} : { candidates: current.candidates }),
+                }
+              : {}),
+          };
+        },
+        writeDisk: async (request) => {
+          const written = await write({
+            resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
+            token: request.token,
+            content: request.content,
+            encoding: request.encoding,
+            bom: request.bom,
+            expectedRevision: request.expectedRevision,
+            operationId: request.operationId,
+          });
+          if (written.status === 'written') return { status: 'written', revision: written.revision };
+          return {
+            status: written.status === 'conflict' ? 'conflict' : 'conflict',
+            message: `${request.resourceId} could not be written on disk.`,
+          };
+        },
+        deleteDisk: async (request) => {
+          const deleted = await remove({
+            resource: { workspaceId: request.workspaceId, resourceId: request.resourceId },
+            token: request.token,
+            expectedRevision: request.expectedRevision,
+            operationId: request.operationId,
+          });
+          if (deleted.status === 'deleted') return { status: 'deleted' };
+          if (deleted.status === 'missing') return { status: 'missing' };
+          return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
+        },
+        ...(durable ? { durable } : {}),
+      }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
+      if (record) agentMutations.set(record.operationId, record);
+      return result;
+    };
+    if (durableMutationStorage && workspaceId) {
+      return durableMutationStorage(workspaceId, (durable) => run(durable));
+    }
+    return run();
   };
 
   /**
@@ -1921,6 +1969,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     agentInputDraftPaths: surfaceSnapshots.draftPaths,
     agentInputSurfaceOwner: surfaceSnapshots.owner,
     applyAgentSurfaceWrite,
+    bindDurableMutationStorage: (fn: DurableMutationStorageFn | null) => {
+      durableMutationStorage = fn;
+    },
     inspectAgentMutation: (operationId: string) => agentMutations.get(operationId) ?? null,
     inspectAgentWriteTarget,
     observeAgentWrite,

@@ -126,6 +126,8 @@ export async function trySurfaceWrite(
       action: "write" | "edit" | "delete";
       content?: string;
       edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+      expectedRevision?: string;
+      expectedHash?: string;
     }>;
   },
   signal?: AbortSignal,

@@ -290,6 +290,8 @@ export interface DocumentSurfaceWriteChange {
   action: DocumentSurfaceWriteAction;
   content?: string;
   edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  expectedRevision?: string;
+  expectedHash?: string;
 }
 
 /**

@@ -2587,6 +2587,8 @@ export const createWorkspaceRecoveryEngine = (
           ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
         };
         await reconcileInterruptedIntegrationOperations(integrationContext);
+        const { reconcileInterruptedAgentMutations } = await import('../documents/agent-mutation-operation.js');
+        await reconcileInterruptedAgentMutations(integrationContext);
         const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
         const workingState = await WorkingStateStore.open(integrationContext);
         await reconcileInterruptedBranchIntegrations(integrationContext, workingState);

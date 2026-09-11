@@ -131,7 +131,8 @@ describe("applyAgentSurfaceMutation", () => {
       updatedAt: new Date().toISOString(),
       workspaceId: "ws",
     };
-    const ops: string[] = [];
+    const ops: Array<{ action: string; operationId: string; targets: number }> = [];
+    let applyId = "";
     const { result } = await applyAgentSurfaceMutation({
       inspectSnapshot: (_session, _context, resourceId) => (
         resourceId === "draft.ts" ? draftInspect : { status: "disk" }
@@ -139,8 +140,9 @@ describe("applyAgentSurfaceMutation", () => {
       surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
       inspectDirtyBuffers: async () => [publication],
       requestSurfaceOperation: async (request: DocumentSurfaceOperationRequest) => {
-        ops.push(request.action);
+        ops.push({ action: request.action, operationId: request.operationId, targets: request.targets.length });
         if (request.action === "apply") {
+          applyId = request.operationId;
           return [{
             resource: { workspaceId: "ws", resourceId: "draft.ts" },
             status: "applied",
@@ -150,6 +152,13 @@ describe("applyAgentSurfaceMutation", () => {
             afterLocalEditRevision: 3,
             afterHash: hash("C"),
           } satisfies DocumentSurfaceOperationResult];
+        }
+        if (request.operationId !== applyId || request.operationId.endsWith(":undo")) {
+          return [{
+            resource: { workspaceId: "ws", resourceId: "draft.ts" },
+            status: "failed",
+            message: "The surface undo baseline is unavailable",
+          }];
         }
         return [{
           resource: { workspaceId: "ws", resourceId: "draft.ts" },
@@ -178,13 +187,98 @@ describe("applyAgentSurfaceMutation", () => {
         { resourceId: "other.ts", action: "write", content: "disk-new" },
       ],
     });
-    expect(ops).toEqual(["apply", "undo"]);
+    expect(ops.map((entry) => entry.action)).toEqual(["apply", "undo"]);
+    expect(ops[0]?.operationId).toBe(ops[1]?.operationId);
+    expect(ops[1]?.targets).toBe(1);
     expect(result.status).toBe("conflict");
     if (result.status === "disk") throw new Error("expected mixed results");
     const byPath = Object.fromEntries(result.results.map((row: DocumentSurfaceWritePathResult) => [row.path, row]));
     expect(byPath["draft.ts"]).toMatchObject({ target: "surface", status: "compensated" });
     expect(byPath["other.ts"]).toMatchObject({ target: "disk", status: "unavailable" });
     expect(result.message).toMatch(/compensated/);
+  });
+
+  it("compensates with a fresh signal after the forward mutation is aborted", async () => {
+    const draftInspect: SurfaceSnapshotInspectResult = {
+      status: "ready",
+      bom: false,
+      content: "B",
+      encoding: "utf-8",
+      localEditRevision: 2,
+      baseRevision: "disk-a",
+      revision: "surface-draft:fixed:2",
+      resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      source: "surface-draft",
+    };
+    const publication: DirtyBufferPublication = {
+      generation: 1,
+      ownerId: "surface",
+      registrationId: "reg-1",
+      resources: [{
+        baseRevision: "disk-a",
+        localEditRevision: 2,
+        documentInstanceId: "doc-1",
+        bufferHash: hash("B"),
+        encoding: "utf-8",
+        bom: false,
+        lineEnding: "lf",
+        resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      }],
+      updatedAt: new Date().toISOString(),
+      workspaceId: "ws",
+    };
+    const forward = new AbortController();
+    const { result } = await applyAgentSurfaceMutation({
+      inspectSnapshot: (_session, _context, resourceId) => (
+        resourceId === "draft.ts" ? draftInspect : { status: "disk" }
+      ),
+      surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
+      inspectDirtyBuffers: async () => [publication],
+      requestSurfaceOperation: async (request, options) => {
+        if (request.action === "apply") {
+          forward.abort();
+          return [{
+            resource: { workspaceId: "ws", resourceId: "draft.ts" },
+            status: "applied",
+            documentInstanceId: "doc-1",
+            beforeLocalEditRevision: 2,
+            beforeHash: hash("B"),
+            afterLocalEditRevision: 3,
+            afterHash: hash("C"),
+          }];
+        }
+        expect(options?.signal?.aborted).toBeFalsy();
+        expect(request.operationId.endsWith(":undo")).toBe(false);
+        return [{
+          resource: { workspaceId: "ws", resourceId: "draft.ts" },
+          status: "undone",
+          documentInstanceId: "doc-1",
+          content: "B",
+          afterLocalEditRevision: 4,
+          afterHash: hash("B"),
+        }];
+      },
+      inspectWorkspace: async () => ({ epoch: 1 }),
+      readDisk: async () => ({ status: "ready", content: "A", revision: "disk-a" }),
+      writeDisk: async () => {
+        throw new Error("aborted mutations must not write disk");
+      },
+      deleteDisk: async () => ({ status: "deleted" }),
+    }, {
+      sessionId: "s1",
+      context: context("ws", ["draft.ts"]),
+      changes: [
+        { resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B", newText: "C" }] },
+        { resourceId: "other.ts", action: "write", content: "disk-new" },
+      ],
+      signal: forward.signal,
+    });
+    expect(result.status).toBe("conflict");
+    if (result.status === "disk") throw new Error("expected mixed results");
+    expect(result.results.find((row) => row.path === "draft.ts")).toMatchObject({
+      target: "surface",
+      status: "compensated",
+    });
   });
 
   it("leaves a later user edit untouched when compensation can no longer match the applied buffer", async () => {
@@ -223,6 +317,9 @@ describe("applyAgentSurfaceMutation", () => {
       surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
       inspectDirtyBuffers: async () => [publication],
       requestSurfaceOperation: async (request) => {
+        if (request.action === "undo" && request.operationId.endsWith(":undo")) {
+          throw new Error("compensation must reuse the apply operationId");
+        }
         if (request.action === "apply") {
           return [{
             resource: { workspaceId: "ws", resourceId: "draft.ts" },
@@ -262,5 +359,169 @@ describe("applyAgentSurfaceMutation", () => {
       status: "needs-attention",
     });
     expect(result.message).toMatch(/needs-attention/);
+  });
+
+  it("compares CRLF snapshot text to the editor-normalized bufferHash", async () => {
+    const draftInspect: SurfaceSnapshotInspectResult = {
+      status: "ready",
+      bom: false,
+      content: "B\r\n",
+      encoding: "utf-8",
+      localEditRevision: 2,
+      baseRevision: "disk-a",
+      revision: "surface-draft:fixed:2",
+      resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      source: "surface-draft",
+      bufferHash: hash("B\n"),
+      lineEnding: "crlf",
+    };
+    const publication: DirtyBufferPublication = {
+      generation: 1,
+      ownerId: "surface",
+      registrationId: "reg-1",
+      resources: [{
+        baseRevision: "disk-a",
+        localEditRevision: 2,
+        documentInstanceId: "doc-1",
+        bufferHash: hash("B\n"),
+        encoding: "utf-8",
+        bom: false,
+        lineEnding: "crlf",
+        resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      }],
+      updatedAt: new Date().toISOString(),
+      workspaceId: "ws",
+    };
+    const { result } = await applyAgentSurfaceMutation({
+      inspectSnapshot: () => draftInspect,
+      surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
+      inspectDirtyBuffers: async () => [publication],
+      requestSurfaceOperation: async (request) => {
+        expect(request.targets[0]?.newText).toBe("C\n");
+        return [{
+          resource: { workspaceId: "ws", resourceId: "draft.ts" },
+          status: "applied",
+          documentInstanceId: "doc-1",
+          beforeLocalEditRevision: 2,
+          beforeHash: hash("B\n"),
+          afterLocalEditRevision: 3,
+          afterHash: hash("C\n"),
+        }];
+      },
+      inspectWorkspace: async () => ({ epoch: 1 }),
+      readDisk: async () => ({ status: "ready", content: "A\r\n", revision: "disk-a" }),
+      writeDisk: async () => {
+        throw new Error("CRLF surface edits must not write disk");
+      },
+      deleteDisk: async () => ({ status: "deleted" }),
+    }, {
+      sessionId: "s1",
+      context: context("ws", ["draft.ts"]),
+      changes: [{ resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B\n", newText: "C\n" }] }],
+    });
+    expect(result.status).toBe("applied");
+  });
+
+  it("undoes a two-path surface batch once with the apply operationId", async () => {
+    const inspectFor = (resourceId: string, content: string): SurfaceSnapshotInspectResult => ({
+      status: "ready",
+      bom: false,
+      content,
+      encoding: "utf-8",
+      localEditRevision: 2,
+      baseRevision: "disk-a",
+      revision: `surface-draft:fixed:2`,
+      resource: { workspaceId: "ws", resourceId },
+      source: "surface-draft",
+    });
+    const publication: DirtyBufferPublication = {
+      generation: 1,
+      ownerId: "surface",
+      registrationId: "reg-1",
+      resources: [
+        {
+          baseRevision: "disk-a",
+          localEditRevision: 2,
+          documentInstanceId: "doc-a",
+          bufferHash: hash("A"),
+          encoding: "utf-8",
+          bom: false,
+          lineEnding: "lf",
+          resource: { workspaceId: "ws", resourceId: "a.ts" },
+        },
+        {
+          baseRevision: "disk-a",
+          localEditRevision: 2,
+          documentInstanceId: "doc-b",
+          bufferHash: hash("B"),
+          encoding: "utf-8",
+          bom: false,
+          lineEnding: "lf",
+          resource: { workspaceId: "ws", resourceId: "b.ts" },
+        },
+      ],
+      updatedAt: new Date().toISOString(),
+      workspaceId: "ws",
+    };
+    const ops: Array<{ action: string; operationId: string; targets: string[] }> = [];
+    let applyId = "";
+    const { result } = await applyAgentSurfaceMutation({
+      inspectSnapshot: (_session, _context, resourceId) => (
+        resourceId === "a.ts" ? inspectFor("a.ts", "A")
+          : resourceId === "b.ts" ? inspectFor("b.ts", "B")
+            : { status: "disk" }
+      ),
+      surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
+      inspectDirtyBuffers: async () => [publication],
+      requestSurfaceOperation: async (request, options) => {
+        ops.push({
+          action: request.action,
+          operationId: request.operationId,
+          targets: request.targets.map((target) => target.resource.resourceId),
+        });
+        if (request.action === "apply") {
+          applyId = request.operationId;
+          return request.targets.map((target, index) => ({
+            resource: target.resource,
+            status: "applied" as const,
+            documentInstanceId: target.documentInstanceId,
+            beforeLocalEditRevision: 2,
+            beforeHash: target.bufferHash,
+            afterLocalEditRevision: 3,
+            afterHash: hash(index === 0 ? "C" : "D"),
+          }));
+        }
+        expect(options?.signal?.aborted).toBeFalsy();
+        expect(request.operationId).toBe(applyId);
+        return request.targets.map((target) => ({
+          resource: target.resource,
+          status: "undone" as const,
+          documentInstanceId: target.documentInstanceId,
+          content: target.resource.resourceId === "a.ts" ? "A" : "B",
+          afterLocalEditRevision: 4,
+          afterHash: target.bufferHash,
+        }));
+      },
+      inspectWorkspace: async () => ({ epoch: 1 }),
+      readDisk: async () => ({ status: "binary", revision: "disk-x" }),
+      writeDisk: async () => {
+        throw new Error("failed disk path must not write");
+      },
+      deleteDisk: async () => ({ status: "deleted" }),
+    }, {
+      sessionId: "s1",
+      context: context("ws", ["a.ts", "b.ts"]),
+      changes: [
+        { resourceId: "a.ts", action: "edit", edits: [{ oldText: "A", newText: "C" }] },
+        { resourceId: "b.ts", action: "edit", edits: [{ oldText: "B", newText: "D" }] },
+        { resourceId: "other.ts", action: "write", content: "disk-new" },
+      ],
+    });
+    expect(ops).toHaveLength(2);
+    expect(ops[0]).toMatchObject({ action: "apply", targets: ["a.ts", "b.ts"] });
+    expect(ops[1]).toMatchObject({ action: "undo", operationId: ops[0]?.operationId, targets: ["a.ts", "b.ts"] });
+    expect(result.status).toBe("conflict");
+    if (result.status === "disk") throw new Error("expected mixed results");
+    expect(result.results.filter((row) => row.target === "surface").every((row) => row.status === "compensated")).toBe(true);
   });
 });

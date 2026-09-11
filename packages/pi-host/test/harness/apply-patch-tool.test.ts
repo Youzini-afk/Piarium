@@ -156,9 +156,16 @@ ccc
           };
         }
         if (method === "document.surfaceWrite") {
-          const changes = params.changes as Array<{ path: string; content?: string }>;
+          const changes = params.changes as Array<{
+            path: string;
+            content?: string;
+            expectedRevision?: string;
+            expectedHash?: string;
+          }>;
           assert.equal(changes[0]?.path, "draft.txt");
           assert.match(changes[0]?.content ?? "", /C unique-on-draft/);
+          assert.equal(changes[0]?.expectedRevision, "surface-draft:fixed:1");
+          assert.match(changes[0]?.expectedHash ?? "", /^sha256-[0-9a-f]{64}$/);
           return {
             status: "applied",
             operationId: "op-1",
@@ -232,5 +239,35 @@ ccc
     assert.match(text, /draft\.txt/);
     assert.match(text, /disk\.txt/);
     assert.equal(readFileSync(join(tmpDir, "disk.txt"), "utf8"), "disk\n");
+  });
+
+  it("stops when readSource is unavailable even if disk already matches the patch", async () => {
+    writeFileSync(join(tmpDir, "draft.txt"), "B unique-on-draft\n");
+    const calls: string[] = [];
+    const bridge = {
+      request: async (method: string, params: Record<string, unknown>) => {
+        calls.push(method);
+        if (method === "fs.lock") {
+          return params.action === "acquire"
+            ? { held: true, leaseIds: ["lease-1"] }
+            : { held: false, released: true };
+        }
+        if (method === "document.readSource") {
+          throw new Error("document source is unavailable");
+        }
+        throw new Error(`unexpected method: ${method}`);
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createApplyPatchTool(bridge, "s1", tmpDir, undefined, { surfaceWrite: true });
+    const text = await executePatch(tool, `*** Begin Patch
+*** Update File: draft.txt
+@@
+-B unique-on-draft
++C unique-on-draft
+*** End Patch`);
+    assert.match(text, /unavailable/);
+    assert.equal(readFileSync(join(tmpDir, "draft.txt"), "utf8"), "B unique-on-draft\n");
+    assert.equal(calls.includes("document.surfaceWrite"), false);
+    assert.equal(calls.includes("document.branchWrite"), false);
   });
 });

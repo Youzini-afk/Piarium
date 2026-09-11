@@ -451,6 +451,8 @@ export function createDocumentSurfaceWriteService(
         action: change.action,
         ...(change.content === undefined ? {} : { content: change.content }),
         ...(change.edits === undefined ? {} : { edits: change.edits }),
+        ...(change.expectedRevision === undefined ? {} : { expectedRevision: change.expectedRevision }),
+        ...(change.expectedHash === undefined ? {} : { expectedHash: change.expectedHash }),
       }));
       return host.documentSurfaceWrite(
         ctx.sessionId,

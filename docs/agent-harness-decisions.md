@@ -4509,7 +4509,7 @@ ModelRuntime 纵切继续通过。
 | D-020 | superseded（0.8.6 全零向量 `searchHybrid` 返回命中；`recall` 的 JS 扫描保留，换 BM25 是产品行为变更另议） | D-141 | agent-harness.md 7.5 |
 | D-021 | reverted | — | status（3b.3 真实状态） |
 | D-022 | experiment-result | — | agent-harness.md 12.2 |
-| D-023 | superseded in part（user terminal 与命令完成加速由 D-226 接通；steering/计划/子返回加速仍开） | D-226 | 设计 7.3；plan/status 2.2–2.4 |
+| D-023 | active-design | — | architecture.md §5.1（已有）、`lib/harness/DOCUMENTATION.md`— 待回写 |
 | D-024 | superseded in part | D-032（对象模型与存储布局） | agent-harness.md 9.3.1 |
 | D-025 | superseded in part | D-035（ask 走 UI、三层模型） | agent-harness.md 9.1.2 |
 | D-026 | superseded in part | D-032（对象模型）、D-033（wait 默认超时）、D-034（`traceHandle`） | agent-harness.md 9.3 |
@@ -4575,7 +4575,7 @@ ModelRuntime 纵切继续通过。
 | D-086 | implementation（普通 find/ls 固定 surface 路径快照） | — | protocol / pi-host / Host Documents+path overlay；设计 5.0/6.1/9.2.5b、plan 3.2、status、architecture |
 | D-087 | implementation（语言服务视图隔离与正文修订绑定） | — | agent-harness 5.0/6.1/6.2/6.4、plan 0.7/3.1/3.2/3.8、status 3.1/3.2/3.8；protocol language identity+results / Host LSP views / Documents / knowledge graph / UI |
 | D-088 | implementation（写入使固定窗口草稿在该路径上失效） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；Documents surface snapshot / recovery turn coordinator / Harness search+explore+thread dispatch |
-| D-089 | superseded in part（拦住写盘、不隐式保存的原则保留；根会话对 snapshot 拥有的路径改为写回同一缓冲） | D-225 | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
+| D-089 | implementation（读写来源不对称：写入前拦住并说清楚） | — | agent-harness 6.1、plan 3.2、status 窗口读取/3.2；protocol document.writeGuard / Documents / Harness router+services / pi-host write+edit+apply_patch |
 | D-090 | implementation（explore 快速检索策略已回写；缺陷 2–8 与 `anchors` 已实施，缺陷 1 复验未达成见 D-092；结构切片已由 3.11 第 1、3 步接上） | D-091（tree-sitter 第 5 步仍待决）、D-092（缺陷 1 未达成部分） | agent-harness 2/5.0/5.7/6/6.1、plan 0.7/3.2、status 3.2/下一步；protocol explore.search / pi-host explore-tool / Host explore+explore-service |
 | D-091 | active-design（结构来源 provider 与 tree-sitter 语法包：wasm 版、接口先行、TS/TSX 首刀、常用语言捆绑 + 其余按需下载、语言 ≥ 3 时设置页；目标覆盖大部分常用语言） | D-093–D-108（第 1–4 步实施拍板） | agent-harness 2/6.1/6.2/D-078 收口表、plan 0.7/3.2/3.11、status 3.11；第 1–4 步已接，第 5 步待做 |
 | D-092 | implementation（候选广度按文件轮转分配；`filesDropped` 与 grep 深度优先截断分开；六个小项已修；验收复验再补两项：`filesDropped` 跨词项/重叠根取最大值作下界而非求和、工具 schema 与 Host 对空白 anchor 同口径） | — | agent-harness 6.1、plan 0.7/3.2、status 3.2/下一步；protocol search.content+explore.search / Host search-service+explore+explore-service / pi-host explore-tool schema |
@@ -4804,3 +4804,32 @@ ModelRuntime 纵切继续通过。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-227 | implementation（retrieval 为 Host 校验的事实 Thread；未配置不借主模型） | — | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |
+
+### D-228 · 2026-09-12 · 3.2（纠正 D-225 正文身份、grouped undo 与耐久补偿）
+
+类型：问题与解法
+
+背景：D-225 让根会话写回同一 Registry 缓冲，但验收发现五处生产契约不成立：UI `bufferHash` 被拿去和序列化 snapshot 正文直接比较；补偿 undo 使用伪造的 `${operationId}:undo`；混合写入只记内存 Map；磁盘补偿固定 utf-8/无 BOM；`apply_patch` 在 `readSource` unavailable/stale 时回退磁盘再覆盖 surface。
+
+决定：
+
+1. `bufferHash` 是规范化编辑器 buffer 身份；snapshot `content` 是带原行尾的序列化文件正文。二者不得直接比较。SurfaceSnapshot 持久携带 `bufferHash`、`lineEnding` 和序列化正文。写回 Registry 前转换成编辑器规范形式；写回后的 snapshot 仍按文件行尾呈现。
+2. apply 与 undo 使用同一个真实 `operationId`。一次 surface batch 只能整组撤销一次，不能按路径拆开同一 undo group。契约测试必须走真实 Document Registry / `attachLiveSurfaceCompleter`，禁止“看见 undo 就成功”的 mock。
+3. 第一笔写入前把 intent、targetKinds、每路径 before/after 身份和阶段记入独立 `agent-mutation` 操作（复用 recovery operations / object references，不冒充 Integration）。取消、I/O throw、UI 断连、Host 中断进入条件补偿或 needs-attention；补偿使用新的 AbortSignal。启动对账只按可观察 before/after 判断；surface owner 不可用时标 needs-attention，不猜成功。
+4. 磁盘成员保存并恢复真实 encoding、BOM、缺失/存在状态和 revision；补偿走 `RecoveryFileStore.applyState` 的原始字节，不重编码成 utf-8。
+5. `apply_patch` 只有 `document.readSource` 明确返回 `source=disk` 时才能读磁盘。unavailable、stale、传输错误必须停止。整文件替换携带所读 surface revision/hash，应用前匹配。AbortSignal 贯通；部分写入后取消走上述耐久补偿。普通纯磁盘 `apply_patch` 公开行为保持不变。
+
+原因：D-225 的产品方向成立，但身份、事务和补偿实现把编辑器规范正文、文件序列化正文和耐久操作记录混成同一套比较/存储，验收反例会写错缓冲或在已有写入后无记录地抛出。
+
+考虑过的替代：(1) 继续比较 snapshot 原文与 `bufferHash`——CRLF/CR dirty 文件会假冲突。(2) 用 Integration `applyDurableFileOperation` 记根会话 mutation——占用 integration 操作并阻塞其他集成。(3) unavailable 时用磁盘正文算 patch——会在 Host 已声明来源不可用时覆盖 surface。
+
+影响：Documents `surface-mutation` / `authority` / `surface-snapshot-store` / `agent-mutation-operation`；recovery `fenceUnfinishedOperations`；pi-host `apply_patch`；设计 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2、architecture 4、Documents DOCUMENTATION。D-225 相应部分在本条索引标 superseded in part。不改写 D-225 正文。
+
+状态：已实施定向反例；完整桌面 Registry 与 Host 进程重启仅未实测。验证见 status 窗口读取/3.2。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-225 | superseded in part（正文身份、grouped undo、耐久 agent-mutation 补偿与 apply_patch 读源由 D-228 纠正；写回同一缓冲的产品方向保留） | D-228 | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；Documents / recovery / pi-host apply_patch |
+| D-228 | implementation（纠正 surface 身份、整组 undo、耐久补偿与 apply_patch 读源） | — | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；architecture 4；Documents DOCUMENTATION |

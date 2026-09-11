@@ -8,6 +8,9 @@ export interface SurfaceSnapshotResource {
   content: string;
   localEditRevision: number;
   resource: { workspaceId: string; resourceId: string };
+  /** Editor-normalized buffer identity (`sha256-` + hex). Not a hash of serialized file text. */
+  bufferHash?: string;
+  lineEnding?: 'lf' | 'crlf' | 'cr';
 }
 
 interface StoredContent {
@@ -55,6 +58,8 @@ export type SurfaceSnapshotInspectResult =
       revision: string;
       resource: { workspaceId: string; resourceId: string };
       source: 'surface-draft';
+      bufferHash?: string;
+      lineEnding?: 'lf' | 'crlf' | 'cr';
     };
 
 export interface SurfaceSnapshotOverlayEntry {
@@ -142,6 +147,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         contentHash: hash,
         localEditRevision: resource.localEditRevision,
         resource: Object.freeze({ ...resource.resource }),
+        ...(resource.bufferHash === undefined ? {} : { bufferHash: resource.bufferHash }),
+        ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
       }));
     }
     const dirtyPaths = Object.freeze([...resources.values()]
@@ -207,6 +214,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
     content: string;
     encoding: string;
     bom: boolean;
+    bufferHash?: string;
+    lineEnding?: 'lf' | 'crlf' | 'cr';
   }): void => {
     const key = pathKey(input.resourceId);
     const hash = contentHash(input.content);
@@ -234,6 +243,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         localEditRevision: input.nextLocalEditRevision,
         encoding: input.encoding,
         bom: input.bom,
+        ...(input.bufferHash === undefined ? {} : { bufferHash: input.bufferHash }),
+        ...(input.lineEnding === undefined ? {} : { lineEnding: input.lineEnding }),
       }));
       snapshot.invalidated.delete(key);
     }
@@ -346,6 +357,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
       revision: draft.revision,
       resource: { ...resource.resource },
       source: 'surface-draft',
+      ...(resource.bufferHash === undefined ? {} : { bufferHash: resource.bufferHash }),
+      ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
     };
   };
 
@@ -381,6 +394,8 @@ export const createSurfaceSnapshotStore = (options: SurfaceSnapshotStoreOptions 
         localEditRevision: resource.localEditRevision,
         resource: { ...resource.resource },
         revision: `surface-draft:${snapshot.ref}:${resource.localEditRevision}`,
+        ...(resource.bufferHash === undefined ? {} : { bufferHash: resource.bufferHash }),
+        ...(resource.lineEnding === undefined ? {} : { lineEnding: resource.lineEnding }),
       });
     }
     return { status: 'ready', resources, supersededPaths, workspaceId: snapshot.workspaceId };

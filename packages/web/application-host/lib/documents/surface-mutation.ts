@@ -12,12 +12,33 @@ import type {
   MutationToken,
 } from "./authority.js";
 import type { SurfaceSnapshotInspectResult } from "./surface-snapshot-store.js";
+import {
+  detectLineEnding,
+  normalizeEditorLineEndings,
+  serializeEditorContent,
+  type DocumentLineEnding,
+} from "./line-ending.js";
+import {
+  beginAgentMutationOperation,
+  compensateAgentMutationDiskPath,
+  finalizeAgentMutationOperation,
+  markAgentMutationPathApplied,
+  markAgentMutationPathNeedsAttention,
+  markAgentMutationSurfaceCompensated,
+  type AgentMutationDiskIdentity,
+  type AgentMutationSurfaceBinding,
+  type PersistedAgentMutationData,
+} from "./agent-mutation-operation.js";
+import type { DurableFileOperationContext } from "../recovery/durable-file-operation.js";
+import type { RecoveryState } from "../recovery/journal-files.js";
 
 export interface AgentSurfaceWriteChange {
   resourceId: string;
   action: DocumentSurfaceWriteChange["action"];
   content?: string;
   edits?: ReadonlyArray<{ oldText: string; newText: string }>;
+  expectedRevision?: string;
+  expectedHash?: string;
 }
 
 export interface AgentMutationRecord {
@@ -39,6 +60,15 @@ export interface SurfaceMutationDiskDeleteResult {
   message?: string;
 }
 
+export interface SurfaceMutationDiskRead {
+  status: "ready" | "missing" | "binary" | "unsupported-encoding";
+  content?: string;
+  revision?: string;
+  encoding?: string;
+  bom?: boolean;
+  candidates?: string[];
+}
+
 export interface SurfaceMutationDependencies {
   inspectSnapshot: (
     sessionId: string,
@@ -55,11 +85,7 @@ export interface SurfaceMutationDependencies {
     options?: { signal?: AbortSignal },
   ) => Promise<DocumentSurfaceOperationResult[]>;
   inspectWorkspace: (workspaceId: string) => Promise<{ epoch: number }>;
-  readDisk: (workspaceId: string, resourceId: string) => Promise<{
-    status: "ready" | "missing" | "binary" | "unsupported-encoding";
-    content?: string;
-    revision?: string;
-  }>;
+  readDisk: (workspaceId: string, resourceId: string) => Promise<SurfaceMutationDiskRead>;
   writeDisk: (input: {
     workspaceId: string;
     resourceId: string;
@@ -77,6 +103,8 @@ export interface SurfaceMutationDependencies {
     token: MutationToken;
     operationId: string;
   }) => Promise<SurfaceMutationDiskDeleteResult>;
+  durable?: DurableFileOperationContext;
+  workspaceRoot?: string;
 }
 
 type PlannedClass = "surface" | "disk" | "conflict" | "unavailable";
@@ -86,15 +114,27 @@ interface PlannedPath {
   class: PlannedClass;
   inspect?: Extract<SurfaceSnapshotInspectResult, { status: "ready" }>;
   newText?: string;
+  editorText?: string;
+  lineEnding?: DocumentLineEnding;
   binding?: NonNullable<DirtyBufferPublication["resources"][number]>;
   publication?: DirtyBufferPublication;
   result?: DocumentSurfaceWritePathResult;
-  diskBefore?: { content: string; revision: string | null };
+  diskBefore?: {
+    content: string;
+    revision: string | null;
+    encoding: string;
+    bom: boolean;
+    existed: boolean;
+    state?: RecoveryState;
+  };
+  diskAfter?: RecoveryState;
 }
 
 const contentHash = (content: string): string => (
   `sha256-${createHash("sha256").update(content, "utf8").digest("hex")}`
 );
+
+const editorBufferHash = (content: string): string => contentHash(normalizeEditorLineEndings(content));
 
 const sameResource = (left: string, right: string): boolean => (
   process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right
@@ -117,6 +157,29 @@ export const applyTextEdits = (
   return next;
 };
 
+const applySurfaceEdits = (
+  serialized: string,
+  edits: ReadonlyArray<{ oldText: string; newText: string }>,
+  lineEnding: DocumentLineEnding,
+): string => {
+  try {
+    return applyTextEdits(serialized, edits);
+  } catch (serializedError) {
+    try {
+      const normalized = applyTextEdits(
+        normalizeEditorLineEndings(serialized),
+        edits.map((edit) => ({
+          oldText: normalizeEditorLineEndings(edit.oldText),
+          newText: normalizeEditorLineEndings(edit.newText),
+        })),
+      );
+      return serializeEditorContent(normalized, lineEnding);
+    } catch {
+      throw serializedError;
+    }
+  }
+};
+
 const isBinaryText = (content: string): boolean => content.includes("\0");
 
 const findPublished = (
@@ -125,6 +188,10 @@ const findPublished = (
 ): DirtyBufferPublication["resources"][number] | undefined => (
   publication?.resources.find((resource) => sameResource(resource.resource.resourceId, resourceId))
 );
+
+const snapshotBufferHash = (
+  inspect: Extract<SurfaceSnapshotInspectResult, { status: "ready" }>,
+): string => inspect.bufferHash ?? editorBufferHash(inspect.content);
 
 const liveMismatch = (
   inspect: Extract<SurfaceSnapshotInspectResult, { status: "ready" }>,
@@ -139,7 +206,7 @@ const liveMismatch = (
   }
   if (binding.baseRevision !== inspect.baseRevision
     || binding.localEditRevision !== inspect.localEditRevision
-    || binding.bufferHash !== contentHash(inspect.content)
+    || binding.bufferHash !== snapshotBufferHash(inspect)
     || binding.documentInstanceId.length === 0) {
     return `${inspect.resource.resourceId} changed in the editor after this turn fixed its draft. `
       + "The live buffer was left untouched and nothing was written to disk.";
@@ -207,6 +274,31 @@ const summarize = (
   };
 };
 
+const diskToken = async (
+  deps: SurfaceMutationDependencies,
+  workspaceId: string,
+): Promise<MutationToken> => {
+  const state = await deps.inspectWorkspace(workspaceId);
+  return {
+    workspaceId,
+    epoch: state.epoch,
+    owner: { kind: "harness", id: "agent-surface-write" },
+  };
+};
+
+const captureDiskState = async (
+  deps: SurfaceMutationDependencies,
+  resourceId: string,
+): Promise<RecoveryState | undefined> => {
+  if (!deps.durable) return undefined;
+  return (await deps.durable.fileStore.captureState(
+    deps.durable.identity,
+    deps.durable.root,
+    resourceId,
+    { store: true },
+  )).state;
+};
+
 export async function applyAgentSurfaceMutation(
   deps: SurfaceMutationDependencies,
   input: {
@@ -240,6 +332,36 @@ export async function applyAgentSurfaceMutation(
       planned.push({ change, class: "disk" });
       continue;
     }
+    if (change.expectedRevision && change.expectedRevision !== inspect.revision) {
+      planned.push({
+        change,
+        class: "conflict",
+        inspect,
+        result: {
+          path: change.resourceId,
+          target: "surface",
+          status: "conflict",
+          revision: inspect.revision,
+          message: `${change.resourceId} no longer matches the surface revision the patch was computed from.`,
+        },
+      });
+      continue;
+    }
+    if (change.expectedHash && change.expectedHash !== snapshotBufferHash(inspect)) {
+      planned.push({
+        change,
+        class: "conflict",
+        inspect,
+        result: {
+          path: change.resourceId,
+          target: "surface",
+          status: "conflict",
+          revision: inspect.revision,
+          message: `${change.resourceId} no longer matches the surface hash the patch was computed from.`,
+        },
+      });
+      continue;
+    }
     if (change.action === "delete") {
       planned.push({
         change,
@@ -255,15 +377,16 @@ export async function applyAgentSurfaceMutation(
       });
       continue;
     }
+    const lineEnding = inspect.lineEnding ?? detectLineEnding(inspect.content);
     let newText: string;
     try {
       if (change.action === "write") {
         if (typeof change.content !== "string") throw new Error("write requires text content");
-        newText = change.content;
+        newText = serializeEditorContent(change.content, lineEnding);
       } else {
         const edits = change.edits ?? [];
         if (edits.length === 0) throw new Error("edit requires at least one replacement");
-        newText = applyTextEdits(inspect.content, edits);
+        newText = applySurfaceEdits(inspect.content, edits, lineEnding);
       }
     } catch (error) {
       planned.push({
@@ -295,7 +418,14 @@ export async function applyAgentSurfaceMutation(
       });
       continue;
     }
-    planned.push({ change, class: "surface", inspect, newText });
+    planned.push({
+      change,
+      class: "surface",
+      inspect,
+      newText,
+      editorText: normalizeEditorLineEndings(newText),
+      lineEnding,
+    });
   }
 
   if (planned.every((item) => item.class === "disk")) {
@@ -344,72 +474,193 @@ export async function applyAgentSurfaceMutation(
   const operationId = randomUUID();
   const applied: Array<
     | { kind: "surface"; item: PlannedPath; receipt: DocumentSurfaceOperationResult }
-    | { kind: "disk"; item: PlannedPath; before: { content: string; revision: string | null } }
+    | { kind: "disk"; item: PlannedPath; before: NonNullable<PlannedPath["diskBefore"]> }
   > = [];
+  let durable: PersistedAgentMutationData | null = null;
+
+  const persistIntent = async (): Promise<PersistedAgentMutationData | null> => {
+    if (!deps.durable) return durable;
+    if (durable) return durable;
+    const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
+    const surfaceBindings: Record<string, AgentMutationSurfaceBinding> = {};
+    const diskIdentities: Record<string, AgentMutationDiskIdentity> = {};
+    const targets: Record<string, { expected: RecoveryState; target: RecoveryState }> = {};
+    const safety: Record<string, RecoveryState> = {};
+    const targetKinds: Record<string, "surface" | "disk"> = {};
+    for (const item of [...toApplySurface, ...toApplyDisk]) {
+      targetKinds[item.change.resourceId] = item.class === "disk" ? "disk" : "surface";
+    }
+    for (const item of toApplySurface) {
+      const binding = item.binding!;
+      const inspect = item.inspect!;
+      surfaceBindings[item.change.resourceId] = {
+        ownerId: owner!.ownerId,
+        ownerGeneration: owner!.generation,
+        ownerRegistrationId: item.publication!.registrationId!,
+        documentInstanceId: binding.documentInstanceId!,
+        baseRevision: inspect.baseRevision,
+        beforeLocalEditRevision: inspect.localEditRevision,
+        beforeHash: binding.bufferHash!,
+        encoding: binding.encoding ?? inspect.encoding,
+        bom: binding.bom ?? inspect.bom,
+        lineEnding: binding.lineEnding ?? item.lineEnding ?? "lf",
+      };
+      const placeholder: RecoveryState = { kind: "missing" };
+      targets[item.change.resourceId] = { expected: placeholder, target: placeholder };
+      safety[item.change.resourceId] = placeholder;
+    }
+    for (const item of toApplyDisk) {
+      const before = await captureDiskState(deps, item.change.resourceId);
+      const current = await deps.readDisk(workspaceId, item.change.resourceId);
+      const state = before ?? { kind: current.status === "missing" ? "missing" : "unsupported" as const };
+      item.diskBefore = {
+        content: current.status === "ready" ? current.content ?? "" : "",
+        revision: current.status === "ready" || current.status === "binary" || current.status === "unsupported-encoding"
+          ? current.revision ?? null
+          : null,
+        encoding: current.status === "ready"
+          ? current.encoding ?? "utf-8"
+          : current.candidates?.[0] ?? (current.status === "unsupported-encoding" ? "unsupported" : current.encoding ?? "utf-8"),
+        bom: current.status === "ready"
+          ? current.bom ?? false
+          : Boolean(current.candidates?.[0]?.startsWith("utf-16")),
+        existed: current.status !== "missing",
+        ...(before ? { state: before } : {}),
+      };
+      diskIdentities[item.change.resourceId] = {
+        encoding: item.diskBefore.encoding,
+        bom: item.diskBefore.bom,
+        revision: item.diskBefore.revision,
+        existed: item.diskBefore.existed,
+      };
+      targets[item.change.resourceId] = { expected: state, target: state };
+      safety[item.change.resourceId] = state;
+    }
+    return beginAgentMutationOperation(deps.durable, {
+      operationId,
+      sessionId: input.sessionId,
+      workspaceId,
+      targetKinds,
+      surfaceBindings,
+      diskIdentities,
+      targets,
+      safety,
+    });
+  };
 
   const compensate = async (): Promise<void> => {
-    for (const entry of [...applied].reverse()) {
-      if (entry.kind === "surface") {
-        const binding = entry.item.binding!;
-        const inspect = entry.item.inspect!;
-        const afterRevision = entry.receipt.afterLocalEditRevision;
-        const afterHash = entry.receipt.afterHash;
-        if (afterRevision === undefined || !afterHash || !entry.item.publication?.registrationId) {
+    const compensateSignal = new AbortController().signal;
+    const surfaceApplied = applied.filter((entry): entry is Extract<typeof applied[number], { kind: "surface" }> => (
+      entry.kind === "surface"
+    ));
+    if (surfaceApplied.length > 0 && owner) {
+      const registrationId = surfaceApplied[0]?.item.publication?.registrationId;
+      if (!registrationId) {
+        for (const entry of surfaceApplied) {
           entry.item.result = {
             path: entry.item.change.resourceId,
             target: "surface",
             status: "needs-attention",
             message: `${entry.item.change.resourceId} was written to the editor buffer but could not be compensated.`,
           };
-          continue;
+          if (deps.durable && durable) {
+            markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+          }
         }
+      } else {
         try {
           const undone = await deps.requestSurfaceOperation({
             action: "undo",
-            generation: owner!.generation,
-            operationId: `${operationId}:undo`,
-            ownerId: owner!.ownerId,
-            registrationId: entry.item.publication.registrationId,
-            workspaceId: owner!.workspaceId,
-            targets: [{
-              baseRevision: inspect.baseRevision,
-              bufferHash: binding.bufferHash!,
-              documentInstanceId: binding.documentInstanceId!,
-              encoding: binding.encoding ?? inspect.encoding,
-              bom: binding.bom ?? inspect.bom,
-              lineEnding: binding.lineEnding ?? "lf",
-              localEditRevision: inspect.localEditRevision,
-              expectedAppliedRevision: afterRevision,
-              expectedAppliedHash: afterHash,
-              resource: { workspaceId: owner!.workspaceId, resourceId: entry.item.change.resourceId },
-            }],
-          }, input.signal ? { signal: input.signal } : {});
-          const receipt = undone[0];
-          entry.item.result = receipt?.status === "undone"
-            ? {
+            generation: owner.generation,
+            operationId,
+            ownerId: owner.ownerId,
+            registrationId,
+            workspaceId: owner.workspaceId,
+            targets: surfaceApplied.map((entry) => {
+              const binding = entry.item.binding!;
+              const inspect = entry.item.inspect!;
+              return {
+                baseRevision: inspect.baseRevision,
+                bufferHash: binding.bufferHash!,
+                documentInstanceId: binding.documentInstanceId!,
+                encoding: binding.encoding ?? inspect.encoding,
+                bom: binding.bom ?? inspect.bom,
+                lineEnding: binding.lineEnding ?? entry.item.lineEnding ?? "lf",
+                localEditRevision: inspect.localEditRevision,
+                expectedAppliedRevision: entry.receipt.afterLocalEditRevision!,
+                expectedAppliedHash: entry.receipt.afterHash!,
+                resource: { workspaceId: owner.workspaceId, resourceId: entry.item.change.resourceId },
+              };
+            }),
+          }, { signal: compensateSignal });
+          const byPath = new Map(undone.map((receipt) => [receipt.resource.resourceId, receipt]));
+          for (const entry of surfaceApplied) {
+            const receipt = [...byPath.entries()].find(([path]) => (
+              sameResource(path, entry.item.change.resourceId)
+            ))?.[1];
+            const restored = receipt?.status === "undone"
+              && receipt.afterHash === entry.item.binding!.bufferHash;
+            if (restored) {
+              entry.item.result = {
                 path: entry.item.change.resourceId,
                 target: "surface",
                 status: "compensated",
                 message: `${entry.item.change.resourceId} was restored to the editor buffer from before this mutation.`,
+              };
+              if (deps.durable && durable) {
+                markAgentMutationSurfaceCompensated(deps.durable, durable, entry.item.change.resourceId);
               }
-            : {
+            } else {
+              entry.item.result = {
                 path: entry.item.change.resourceId,
                 target: "surface",
                 status: "needs-attention",
                 message: `${entry.item.change.resourceId} changed after it was written, so compensation left the live buffer untouched.`,
               };
+              if (deps.durable && durable) {
+                markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+              }
+            }
+          }
         } catch {
-          entry.item.result = {
-            path: entry.item.change.resourceId,
-            target: "surface",
-            status: "needs-attention",
-            message: `${entry.item.change.resourceId} changed after it was written, so compensation left the live buffer untouched.`,
-          };
+          for (const entry of surfaceApplied) {
+            if (entry.item.result?.status === "applied") {
+              entry.item.result = {
+                path: entry.item.change.resourceId,
+                target: "surface",
+                status: "needs-attention",
+                message: `${entry.item.change.resourceId} changed after it was written, so compensation left the live buffer untouched.`,
+              };
+              if (deps.durable && durable) {
+                markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+              }
+            }
+          }
         }
+      }
+    }
+
+    for (const entry of [...applied].reverse()) {
+      if (entry.kind !== "disk") continue;
+      if (deps.durable && durable && entry.before.state) {
+        const outcome = await compensateAgentMutationDiskPath(deps.durable, durable, entry.item.change.resourceId);
+        entry.item.result = outcome === "compensated"
+          ? {
+              path: entry.item.change.resourceId,
+              target: "disk",
+              status: "compensated",
+              message: `${entry.item.change.resourceId} was restored on disk after a later path failed.`,
+            }
+          : {
+              path: entry.item.change.resourceId,
+              target: "disk",
+              status: "needs-attention",
+              message: `${entry.item.change.resourceId} changed after it was written, so compensation left disk untouched.`,
+            };
         continue;
       }
-      if (entry.before.revision === null && entry.before.content === "") {
-        const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
+      const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
+      if (!entry.before.existed) {
         const removed = await deps.deleteDisk({
           workspaceId,
           resourceId: entry.item.change.resourceId,
@@ -432,13 +683,12 @@ export async function applyAgentSurfaceMutation(
             };
         continue;
       }
-      const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
       const restored = await deps.writeDisk({
         workspaceId,
         resourceId: entry.item.change.resourceId,
         content: entry.before.content,
-        encoding: "utf-8",
-        bom: false,
+        encoding: entry.before.encoding,
+        bom: entry.before.bom,
         expectedRevision: entry.item.result?.revision ?? null,
         token: await diskToken(deps, workspaceId),
         operationId: `${operationId}:compensate`,
@@ -462,8 +712,11 @@ export async function applyAgentSurfaceMutation(
   };
 
   let failed = false;
-  if (toApplySurface.length > 0 && owner && publication?.registrationId) {
-    try {
+  try {
+    if (toApplySurface.length > 0 || toApplyDisk.length > 0) {
+      durable = await persistIntent();
+    }
+    if (toApplySurface.length > 0 && owner && publication?.registrationId) {
       input.signal?.throwIfAborted();
       const receipts = await deps.requestSurfaceOperation({
         action: "apply",
@@ -481,9 +734,9 @@ export async function applyAgentSurfaceMutation(
             documentInstanceId: binding.documentInstanceId!,
             encoding: binding.encoding ?? inspect.encoding,
             bom: binding.bom ?? inspect.bom,
-            lineEnding: binding.lineEnding ?? "lf",
+            lineEnding: binding.lineEnding ?? item.lineEnding ?? "lf",
             localEditRevision: inspect.localEditRevision,
-            newText: item.newText!,
+            newText: item.editorText ?? normalizeEditorLineEndings(item.newText!),
             resource: { workspaceId: owner.workspaceId, resourceId: item.change.resourceId },
           };
         }),
@@ -501,6 +754,12 @@ export async function applyAgentSurfaceMutation(
               : "applied"}:${receipt.afterLocalEditRevision}`,
           };
           applied.push({ kind: "surface", item, receipt });
+          if (deps.durable && durable) {
+            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+              afterLocalEditRevision: receipt.afterLocalEditRevision,
+              ...(receipt.afterHash === undefined ? {} : { afterHash: receipt.afterHash }),
+            });
+          }
           continue;
         }
         item.result = pathResult({
@@ -514,151 +773,215 @@ export async function applyAgentSurfaceMutation(
         failed = true;
         break;
       }
-    } catch (error) {
-      failed = true;
-      const message = error instanceof Error ? error.message : String(error);
-      for (const item of toApplySurface) {
-        if (!item.result) {
-          item.result = pathResult({
-            path: item.change.resourceId,
-            target: "surface",
-            status: "conflict",
-            revision: item.inspect?.revision,
-            message: /stale|changed|disconnected|binding/iu.test(message)
-              ? `${item.change.resourceId} changed in the editor after this turn fixed its draft. `
-                + "The live buffer was left untouched and nothing was written to disk."
-              : message,
-          });
-        }
+    }
+  } catch (error) {
+    failed = true;
+    const message = error instanceof Error ? error.message : String(error);
+    for (const item of toApplySurface) {
+      if (!item.result) {
+        item.result = pathResult({
+          path: item.change.resourceId,
+          target: "surface",
+          status: "conflict",
+          revision: item.inspect?.revision,
+          message: /stale|changed|disconnected|binding|aborted/iu.test(message)
+            ? `${item.change.resourceId} changed in the editor after this turn fixed its draft. `
+              + "The live buffer was left untouched and nothing was written to disk."
+            : message,
+        });
       }
     }
-    if (failed) await compensate();
   }
+  if (failed) await compensate();
 
   if (!failed && toApplyDisk.length > 0) {
     const workspaceId = owner?.workspaceId
       ?? (input.context.source === "surface" ? input.context.workspaceId : "");
     const token = await diskToken(deps, workspaceId);
     for (const item of toApplyDisk) {
-      input.signal?.throwIfAborted();
-      if (item.change.action === "delete") {
+      try {
+        input.signal?.throwIfAborted();
+        if (item.change.action === "delete") {
+          const current = await deps.readDisk(workspaceId, item.change.resourceId);
+          if (current.status !== "ready" || !current.revision) {
+            item.result = {
+              path: item.change.resourceId,
+              target: "disk",
+              status: current.status === "missing" ? "conflict" : "unavailable",
+              message: `${item.change.resourceId} is not a writable text file on disk.`,
+            };
+            failed = true;
+            await compensate();
+            break;
+          }
+          const deleted = await deps.deleteDisk({
+            workspaceId,
+            resourceId: item.change.resourceId,
+            expectedRevision: current.revision,
+            token,
+            operationId,
+          });
+          if (deleted.status !== "deleted") {
+            item.result = {
+              path: item.change.resourceId,
+              target: "disk",
+              status: deleted.status === "conflict" ? "conflict" : "unavailable",
+              message: deleted.message ?? `${item.change.resourceId} could not be deleted on disk.`,
+            };
+            failed = true;
+            await compensate();
+            break;
+          }
+          const before = item.diskBefore ?? {
+            content: current.content ?? "",
+            revision: current.revision,
+            encoding: current.encoding ?? "utf-8",
+            bom: current.bom ?? false,
+            existed: true,
+            ...(await captureDiskState(deps, item.change.resourceId).then((state) => (
+              state ? { state } : {}
+            ))),
+          };
+          item.diskBefore = before;
+          item.result = { path: item.change.resourceId, target: "disk", status: "applied" };
+          applied.push({ kind: "disk", item, before });
+          if (deps.durable && durable) {
+            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId);
+          }
+          continue;
+        }
+        let nextText = item.change.content;
         const current = await deps.readDisk(workspaceId, item.change.resourceId);
-        if (current.status !== "ready" || !current.revision) {
+        if (item.change.action === "edit") {
+          if (current.status !== "ready" || typeof current.content !== "string") {
+            item.result = {
+              path: item.change.resourceId,
+              target: "disk",
+              status: current.status === "unsupported-encoding" || current.status === "binary"
+                ? "unavailable"
+                : "conflict",
+              message: `${item.change.resourceId} is not a writable text file on disk.`,
+            };
+            failed = true;
+            await compensate();
+            break;
+          }
+          try {
+            nextText = applySurfaceEdits(
+              current.content,
+              item.change.edits ?? [],
+              detectLineEnding(current.content),
+            );
+          } catch (error) {
+            item.result = {
+              path: item.change.resourceId,
+              target: "disk",
+              status: "conflict",
+              message: error instanceof Error ? error.message : String(error),
+            };
+            failed = true;
+            await compensate();
+            break;
+          }
+        }
+        if (typeof nextText !== "string") {
           item.result = {
             path: item.change.resourceId,
             target: "disk",
-            status: current.status === "missing" ? "conflict" : "unavailable",
+            status: "unavailable",
+            message: "write requires text content",
+          };
+          failed = true;
+          await compensate();
+          break;
+        }
+        if (isBinaryText(nextText) || current.status === "binary") {
+          item.result = {
+            path: item.change.resourceId,
+            target: "disk",
+            status: "unavailable",
+            message: `${item.change.resourceId} is not a text file.`,
+          };
+          failed = true;
+          await compensate();
+          break;
+        }
+        const encoding = current.status === "ready" ? current.encoding ?? "utf-8" : "utf-8";
+        const bom = current.status === "ready" ? current.bom ?? false : false;
+        if (current.status === "unsupported-encoding" && item.change.action === "edit") {
+          item.result = {
+            path: item.change.resourceId,
+            target: "disk",
+            status: "unavailable",
             message: `${item.change.resourceId} is not a writable text file on disk.`,
           };
           failed = true;
           await compensate();
           break;
         }
-        const deleted = await deps.deleteDisk({
+        const written = await deps.writeDisk({
           workspaceId,
           resourceId: item.change.resourceId,
-          expectedRevision: current.revision,
+          content: nextText,
+          encoding: current.status === "unsupported-encoding" ? "utf-8" : encoding,
+          bom: current.status === "unsupported-encoding" ? false : bom,
+          expectedRevision: current.status === "ready" || current.status === "unsupported-encoding"
+            ? current.revision ?? null
+            : current.status === "missing" ? null : current.revision ?? null,
           token,
           operationId,
         });
-        if (deleted.status !== "deleted") {
+        if (written.status !== "written") {
           item.result = {
             path: item.change.resourceId,
             target: "disk",
-            status: deleted.status === "conflict" ? "conflict" : "unavailable",
-            message: deleted.message ?? `${item.change.resourceId} could not be deleted on disk.`,
+            status: written.status === "conflict" ? "conflict" : "unavailable",
+            message: written.message ?? `${item.change.resourceId} could not be written on disk.`,
           };
           failed = true;
           await compensate();
           break;
         }
-        item.diskBefore = { content: current.content ?? "", revision: current.revision };
-        item.result = { path: item.change.resourceId, target: "disk", status: "applied" };
-        applied.push({ kind: "disk", item, before: item.diskBefore });
-        continue;
-      }
-      let nextText = item.change.content;
-      const current = await deps.readDisk(workspaceId, item.change.resourceId);
-      if (item.change.action === "edit") {
-        if (current.status !== "ready" || typeof current.content !== "string") {
-          item.result = {
-            path: item.change.resourceId,
-            target: "disk",
-            status: "conflict",
-            message: `${item.change.resourceId} is not a writable text file on disk.`,
+        const after = await captureDiskState(deps, item.change.resourceId);
+        if (deps.durable && durable && after) {
+          durable.targets[item.change.resourceId] = {
+            expected: durable.safety[item.change.resourceId] ?? { kind: "missing" },
+            target: after,
           };
-          failed = true;
-          await compensate();
-          break;
         }
-        try {
-          nextText = applyTextEdits(current.content, item.change.edits ?? []);
-        } catch (error) {
+        const before = item.diskBefore ?? {
+          content: current.status === "ready" ? current.content ?? "" : "",
+          revision: current.status === "ready" || current.status === "unsupported-encoding"
+            ? current.revision ?? null
+            : null,
+          encoding: current.encoding ?? "utf-8",
+          bom: current.bom ?? false,
+          existed: current.status !== "missing",
+        };
+        item.diskBefore = before;
+        item.result = pathResult({
+          path: item.change.resourceId,
+          target: "disk",
+          status: "applied",
+          revision: written.revision,
+        });
+        applied.push({ kind: "disk", item, before });
+        if (deps.durable && durable) {
+          markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId);
+        }
+      } catch (error) {
+        failed = true;
+        if (!item.result) {
           item.result = {
             path: item.change.resourceId,
             target: "disk",
             status: "conflict",
             message: error instanceof Error ? error.message : String(error),
           };
-          failed = true;
-          await compensate();
-          break;
         }
-      }
-      if (typeof nextText !== "string") {
-        item.result = {
-          path: item.change.resourceId,
-          target: "disk",
-          status: "unavailable",
-          message: "write requires text content",
-        };
-        failed = true;
         await compensate();
         break;
       }
-      if (isBinaryText(nextText) || current.status === "binary") {
-        item.result = {
-          path: item.change.resourceId,
-          target: "disk",
-          status: "unavailable",
-          message: `${item.change.resourceId} is not a text file.`,
-        };
-        failed = true;
-        await compensate();
-        break;
-      }
-      const written = await deps.writeDisk({
-        workspaceId,
-        resourceId: item.change.resourceId,
-        content: nextText,
-        encoding: "utf-8",
-        bom: false,
-        expectedRevision: current.status === "ready" ? current.revision ?? null : null,
-        token,
-        operationId,
-      });
-      if (written.status !== "written") {
-        item.result = {
-          path: item.change.resourceId,
-          target: "disk",
-          status: written.status === "conflict" ? "conflict" : "unavailable",
-          message: written.message ?? `${item.change.resourceId} could not be written on disk.`,
-        };
-        failed = true;
-        await compensate();
-        break;
-      }
-      item.diskBefore = {
-        content: current.status === "ready" ? current.content ?? "" : "",
-        revision: current.status === "ready" ? current.revision ?? null : null,
-      };
-      item.result = pathResult({
-        path: item.change.resourceId,
-        target: "disk",
-        status: "applied",
-        revision: written.revision,
-      });
-      applied.push({ kind: "disk", item, before: item.diskBefore });
     }
   } else if (failed) {
     for (const item of toApplyDisk) {
@@ -674,6 +997,9 @@ export async function applyAgentSurfaceMutation(
   }
 
   const result = summarize(planned, operationId);
+  if (deps.durable && durable) {
+    finalizeAgentMutationOperation(deps.durable, durable, result.status === "disk" ? [] : result.results);
+  }
   const record: AgentMutationRecord = {
     operationId,
     sessionId: input.sessionId,
@@ -686,15 +1012,3 @@ export async function applyAgentSurfaceMutation(
   };
   return { result, record };
 }
-
-const diskToken = async (
-  deps: SurfaceMutationDependencies,
-  workspaceId: string,
-): Promise<MutationToken> => {
-  const state = await deps.inspectWorkspace(workspaceId);
-  return {
-    workspaceId,
-    epoch: state.epoch,
-    owner: { kind: "harness", id: "agent-surface-write" },
-  };
-};

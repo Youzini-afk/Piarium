@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normalizeEditorLineEndings } from './line-ending.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -128,7 +129,7 @@ export const createDocumentAuthorityHarness = async (
 };
 
 export const hashSurfaceText = (text: string): string => (
-  `sha256-${createHash('sha256').update(text, 'utf8').digest('hex')}`
+  `sha256-${createHash('sha256').update(normalizeEditorLineEndings(text), 'utf8').digest('hex')}`
 );
 
 export interface LiveSurfaceBuffer {
@@ -156,7 +157,12 @@ export const attachLiveSurfaceCompleter = (
     ownerId: string;
     workspaceId: string;
   },
-): { close: () => void } => authority.registerDirtySurface({
+): { close: () => void } => {
+  const undoGroups = new Map<string, {
+    documents: Array<{ resourceId: string; before: LiveSurfaceBuffer }>;
+    consumed: boolean;
+  }>();
+  return authority.registerDirtySurface({
   generation: input.generation,
   ownerId: input.ownerId,
   workspaceId: input.workspaceId,
@@ -172,89 +178,122 @@ export const attachLiveSurfaceCompleter = (
       requestId,
       workspaceId: input.workspaceId,
     });
-    const resources = pending.targets.map((target) => {
+    const failed = (message: string) => pending.targets.map((target) => {
       const current = input.live.get(target.resource.resourceId);
-      if (pending.action === 'apply') {
-        if (!current
-          || current.documentInstanceId !== target.documentInstanceId
-          || current.localEditRevision !== target.localEditRevision
-          || current.bufferHash !== target.bufferHash
-          || current.baseRevision !== target.baseRevision) {
+      return {
+        resource: target.resource,
+        status: 'failed' as const,
+        message,
+        ...(current ? {
+          documentInstanceId: current.documentInstanceId,
+          afterLocalEditRevision: current.localEditRevision,
+          afterHash: current.bufferHash,
+        } : {}),
+      };
+    });
+    let resources;
+    if (pending.action === 'undo') {
+      const group = undoGroups.get(pending.operationId);
+      if (!group || group.consumed) {
+        resources = failed('The surface undo baseline is unavailable');
+      } else {
+        const casFailed = pending.targets.some((target) => {
+          const current = input.live.get(target.resource.resourceId);
+          return !current
+            || current.localEditRevision !== target.expectedAppliedRevision
+            || current.bufferHash !== target.expectedAppliedHash;
+        });
+        if (casFailed) {
+          resources = failed('Document surface binding changed after apply');
+        } else {
+          resources = group.documents.map((document) => {
+            const current = input.live.get(document.resourceId)!;
+            const restored = document.before;
+            const next: LiveSurfaceBuffer = {
+              ...restored,
+              localEditRevision: current.localEditRevision + 1,
+              bufferHash: hashSurfaceText(restored.content),
+            };
+            input.live.set(document.resourceId, next);
+            return {
+              resource: { workspaceId: input.workspaceId, resourceId: document.resourceId },
+              status: 'undone' as const,
+              documentInstanceId: next.documentInstanceId,
+              content: normalizeEditorLineEndings(next.content),
+              afterLocalEditRevision: next.localEditRevision,
+              afterHash: next.bufferHash,
+            };
+          });
+          group.consumed = true;
+        }
+      }
+    } else {
+      resources = pending.targets.map((target) => {
+        const current = input.live.get(target.resource.resourceId);
+        if (pending.action === 'apply') {
+          if (!current
+            || current.documentInstanceId !== target.documentInstanceId
+            || current.localEditRevision !== target.localEditRevision
+            || current.bufferHash !== target.bufferHash
+            || current.baseRevision !== target.baseRevision) {
+            return {
+              resource: target.resource,
+              status: 'failed' as const,
+              message: 'Document surface binding changed',
+              ...(current ? {
+                documentInstanceId: current.documentInstanceId,
+                afterLocalEditRevision: current.localEditRevision,
+                afterHash: current.bufferHash,
+              } : {}),
+            };
+          }
+          const nextContent = normalizeEditorLineEndings(target.newText ?? current.content);
+          const next: LiveSurfaceBuffer = {
+            ...current,
+            content: nextContent,
+            previousContent: current.content,
+            localEditRevision: current.localEditRevision + 1,
+            bufferHash: hashSurfaceText(nextContent),
+          };
+          input.live.set(target.resource.resourceId, next);
           return {
             resource: target.resource,
-            status: 'failed' as const,
-            message: 'Document surface binding changed',
-            ...(current ? {
-              documentInstanceId: current.documentInstanceId,
-              afterLocalEditRevision: current.localEditRevision,
-              afterHash: current.bufferHash,
-            } : {}),
+            status: 'applied' as const,
+            documentInstanceId: current.documentInstanceId,
+            beforeLocalEditRevision: current.localEditRevision,
+            beforeHash: current.bufferHash,
+            afterLocalEditRevision: next.localEditRevision,
+            afterHash: next.bufferHash,
           };
         }
-        const nextContent = target.newText ?? current.content;
-        const next: LiveSurfaceBuffer = {
-          ...current,
-          content: nextContent,
-          previousContent: current.content,
-          localEditRevision: current.localEditRevision + 1,
-          bufferHash: hashSurfaceText(nextContent),
-        };
-        input.live.set(target.resource.resourceId, next);
+        if (!current) {
+          return { resource: target.resource, status: 'failed' as const, message: 'No live buffer' };
+        }
         return {
           resource: target.resource,
-          status: 'applied' as const,
+          status: 'captured' as const,
+          content: current.content,
           documentInstanceId: current.documentInstanceId,
           beforeLocalEditRevision: current.localEditRevision,
           beforeHash: current.bufferHash,
-          afterLocalEditRevision: next.localEditRevision,
-          afterHash: next.bufferHash,
         };
+      });
+      if (pending.action === 'apply' && resources.every((resource) => resource.status === 'applied')) {
+        undoGroups.set(pending.operationId, {
+          consumed: false,
+          documents: pending.targets.map((target) => ({
+            resourceId: target.resource.resourceId,
+            before: {
+              ...input.live.get(target.resource.resourceId)!,
+              content: input.live.get(target.resource.resourceId)!.previousContent
+                ?? input.live.get(target.resource.resourceId)!.content,
+              localEditRevision: target.localEditRevision,
+              bufferHash: target.bufferHash,
+            },
+          })),
+        });
       }
-      if (pending.action === 'undo') {
-        if (!current
-          || current.localEditRevision !== target.expectedAppliedRevision
-          || current.bufferHash !== target.expectedAppliedHash) {
-          return {
-            resource: target.resource,
-            status: 'failed' as const,
-            message: 'Document surface binding changed after apply',
-            ...(current ? {
-              documentInstanceId: current.documentInstanceId,
-              afterLocalEditRevision: current.localEditRevision,
-              afterHash: current.bufferHash,
-            } : {}),
-          };
-        }
-        const restored = current.previousContent ?? current.content;
-        const { previousContent: _cleared, ...rest } = current;
-        const next: LiveSurfaceBuffer = {
-          ...rest,
-          content: restored,
-          localEditRevision: current.localEditRevision + 1,
-          bufferHash: hashSurfaceText(restored),
-        };
-        input.live.set(target.resource.resourceId, next);
-        return {
-          resource: target.resource,
-          status: 'undone' as const,
-          documentInstanceId: current.documentInstanceId,
-          content: restored,
-          afterLocalEditRevision: next.localEditRevision,
-          afterHash: next.bufferHash,
-        };
-      }
-      if (!current) {
-        return { resource: target.resource, status: 'failed' as const, message: 'No live buffer' };
-      }
-      return {
-        resource: target.resource,
-        status: 'captured' as const,
-        content: current.content,
-        documentInstanceId: current.documentInstanceId,
-        beforeLocalEditRevision: current.localEditRevision,
-        beforeHash: current.bufferHash,
-      };
-    });
+    }
     await authority.completeSurfaceOperation({
       generation: input.generation,
       operationId: pending.operationId,
@@ -265,6 +304,7 @@ export const attachLiveSurfaceCompleter = (
     });
   })().catch(() => undefined);
 });
+};
 
 interface ContractNegatedMatchers {
   toBe(expected: unknown): void;

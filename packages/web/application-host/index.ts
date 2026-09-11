@@ -1102,6 +1102,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const foundationalRecoveryEngine = recoveryEngineForOwner({
     owner: { extensionId: 'piarium.builtin.recovery' },
   });
+  documentsAuthority.bindDurableMutationStorage((workspaceId, operation) => (
+    foundationalRecoveryEngine.withWorkspaceStorage(
+      workspaceId,
+      { mode: 'exclusive', purpose: 'agent-mutation', create: true },
+      operation,
+    )
+  ));
   let fencedRecoveryOperations = [];
   try {
     fencedRecoveryOperations = await foundationalRecoveryEngine.fenceUnfinishedOperations();

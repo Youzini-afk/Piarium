@@ -1,11 +1,16 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withPathLock } from "./path-lock.js";
+
+const editorBufferHash = (text: string): string => (
+  `sha256-${createHash("sha256").update(text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), "utf8").digest("hex")}`
+);
 
 const ApplyPatchParams = Type.Object({
   patch: Type.String({
@@ -209,7 +214,7 @@ export function createApplyPatchTool(
     ],
     parameters: ApplyPatchParams,
     executionMode: "sequential",
-    execute: async (toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (toolCallId, params, signal, _onUpdate, _ctx) => {
       const parsed = parseCodexPatch(params.patch);
       if ("error" in parsed) {
         return {
@@ -233,23 +238,43 @@ export function createApplyPatchTool(
           ? bytes.subarray(3).toString("utf8")
           : bytes.toString("utf8");
       };
-      const readPatchBase = async (opPath: string, filePath: string): Promise<string | null> => {
+      const requestOptions = signal === undefined ? {} : { signal };
+      const readPatchBase = async (opPath: string, filePath: string): Promise<{
+        content: string | null;
+        revision?: string;
+        hash?: string;
+        error?: string;
+      }> => {
         if (options.surfaceWrite === true) {
+          let source: Awaited<ReturnType<HostServicesBridge["request"]>>;
           try {
-            const source = await bridge.request("document.readSource", { path: opPath });
-            const draft = decodeDraft(source);
-            if (draft !== null) return draft;
-          } catch {
-            /* Fall through to disk once the Host says this path is not a draft. */
+            source = await bridge.request("document.readSource", { path: opPath }, requestOptions);
+          } catch (error) {
+            return {
+              content: null,
+              error: error instanceof Error ? error.message : String(error),
+            };
           }
+          if (source.source === "disk") {
+            if (existsSync(filePath)) return { content: readFileSync(filePath, "utf8") };
+            return { content: null };
+          }
+          const draft = decodeDraft(source);
+          if (draft === null) {
+            return { content: null, error: `document.readSource did not return readable ${source.source} bytes` };
+          }
+          return {
+            content: draft,
+            hash: editorBufferHash(draft),
+            ...("revision" in source && typeof source.revision === "string" ? { revision: source.revision } : {}),
+          };
         }
-        if (existsSync(filePath)) return readFileSync(filePath, "utf8");
-        if (options.surfaceWrite === true) return null;
+        if (existsSync(filePath)) return { content: readFileSync(filePath, "utf8") };
         try {
-          const source = await bridge.request("document.readSource", { path: opPath });
-          return decodeDraft(source);
+          const source = await bridge.request("document.readSource", { path: opPath }, requestOptions);
+          return { content: decodeDraft(source) };
         } catch {
-          return null;
+          return { content: null };
         }
       };
       const patchResult = await withPathLock(bridge, filePaths, async () => {
@@ -260,6 +285,8 @@ export function createApplyPatchTool(
           content?: string;
           hunks?: number;
           error?: string;
+          expectedRevision?: string;
+          expectedHash?: string;
         }> = [];
         for (const [index, op] of parsed.operations.entries()) {
           const filePath = filePaths[index]!;
@@ -271,17 +298,29 @@ export function createApplyPatchTool(
             prepared.push({ op, filePath, action: "delete" });
             continue;
           }
-          const oldContent = await readPatchBase(op.path, filePath);
-          if (oldContent === null) {
+          const base = await readPatchBase(op.path, filePath);
+          if (base.error) {
+            prepared.push({ op, filePath, action: "write", error: base.error });
+            continue;
+          }
+          if (base.content === null) {
             prepared.push({ op, filePath, action: "write", error: `file not found: ${op.path}` });
             continue;
           }
-          const applyResult = applyCodexHunks(oldContent, op.hunks);
+          const applyResult = applyCodexHunks(base.content, op.hunks);
           if ("error" in applyResult) {
             prepared.push({ op, filePath, action: "write", error: `patch error in ${op.path}: ${applyResult.error}` });
             continue;
           }
-          prepared.push({ op, filePath, action: "write", content: applyResult.result, hunks: applyResult.applied });
+          prepared.push({
+            op,
+            filePath,
+            action: "write",
+            content: applyResult.result,
+            hunks: applyResult.applied,
+            ...(base.revision === undefined ? {} : { expectedRevision: base.revision }),
+            ...(base.hash === undefined ? {} : { expectedHash: base.hash }),
+          });
         }
         const prepareError = prepared.find((row) => row.error);
         if (prepareError?.error) {
@@ -296,7 +335,7 @@ export function createApplyPatchTool(
             action: row.action,
             ...(row.content === undefined ? {} : { content: row.content }),
           })),
-        });
+        }, requestOptions);
         if (virtual.status === "committed") {
           const hunks = prepared.reduce((sum, row) => sum + (row.hunks ?? 0), 0);
           return {
@@ -316,8 +355,10 @@ export function createApplyPatchTool(
               path: row.op.path,
               action: row.action,
               ...(row.content === undefined ? {} : { content: row.content }),
+              ...(row.expectedRevision === undefined ? {} : { expectedRevision: row.expectedRevision }),
+              ...(row.expectedHash === undefined ? {} : { expectedHash: row.expectedHash }),
             })),
-          }, undefined, "apply_patch");
+          }, signal, "apply_patch");
           if (planned !== "disk") {
             return {
               content: [{ type: "text" as const, text: planned.text }],

@@ -102,7 +102,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    session-bindings 对账与知识 owning 解析。D-223 已补级联生命周期 serialization 与 scope 只拒绝完整 `..` 段。
    D-224 已补剩余状态契约：materialized 父条件撤销、cascade admission、binding 当前 owner、默认 native result 失效与
    scoped explore pin。3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
-   D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威。
+   D-225 已让根会话 `edit` / `write` / `apply_patch` 与本轮固定 surface snapshot 共用同一正文权威；
+   D-228 纠正了 CRLF/CR 身份、整组 undo、耐久 `agent-mutation` 补偿、磁盘 encoding/BOM 恢复，以及
+   `apply_patch` 在 `readSource` 非 disk 时不得回退磁盘。完整桌面 Registry 与 Host 进程重启仅未实测。
    D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
    D-227 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
    Host 校验 `submit_facts`，报告经 wait / read_thread / Zone 2 可见。
