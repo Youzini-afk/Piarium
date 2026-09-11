@@ -46,7 +46,7 @@ import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-
 import type { RecoveryState } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
-import type { VirtualWriteGate } from "./working-state/virtual-write-gate.js";
+import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./working-state/virtual-write-gate.js";
 import {
   recoverMaterializationSwitch,
   removeOrphanMaterializationDirs,
@@ -2759,14 +2759,51 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
     let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
     let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
+    let releaseParentWrite = (): void => undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
       const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
-      if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
+      const parentSessionId = parentRun?.sessionId;
+      if (owner?.workBranchId && parentSessionId && options.virtualWriteGate && options.executionViews) {
+        const ticket = await acquireVirtualWriteTicket(
+          options.virtualWriteGate,
+          parentSessionId,
+          () => {
+            const view = options.executionViews?.get(parentSessionId);
+            return !!view && view.mode === "virtual";
+          },
+          extras?.signal,
+        );
+        if (ticket !== "disk") {
+          releaseParentWrite = () => ticket.finish();
+          const latest = await options.registry.getThreadById(workspaceId, parent.id);
+          parentAuthority = {
+            kind: "branch",
+            branchId: latest?.workBranchId ?? owner.workBranchId,
+            sessionId: parentSessionId,
+          };
+        } else {
+          const latest = await options.registry.getThreadById(workspaceId, parent.id);
+          if (latest?.worktree?.path && !isVirtualWorktree(latest.worktree)) {
+            parentRoot = latest.worktree.path;
+            parentAuthority = {
+              kind: "directory",
+              directory: latest.worktree.path,
+              workspaceId: await options.resolveRuntimeWorkspaceId(latest.worktree.path),
+            };
+          } else if (latest?.workBranchId && isVirtualWorktree(latest.worktree)) {
+            parentAuthority = {
+              kind: "branch",
+              branchId: latest.workBranchId,
+              sessionId: parentSessionId,
+            };
+          }
+        }
+      } else if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
         parentAuthority = {
           kind: "branch",
           branchId: owner.workBranchId,
-          ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
+          ...(parentSessionId ? { sessionId: parentSessionId } : {}),
         };
       } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
         parentRoot = owner.worktree.path;
@@ -2887,9 +2924,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       if (!thread.worktree?.resultCommit) throw new Error("Thread has no fixed published result to merge");
       return options.worktrees.merge(parentRoot, thread.worktree);
     };
-    return options.withMergeWriter
-      ? options.withMergeWriter(workspaceId, threadId, operation)
-      : operation();
+    try {
+      return await (options.withMergeWriter
+        ? options.withMergeWriter(workspaceId, threadId, operation)
+        : operation());
+    } finally {
+      releaseParentWrite();
+    }
   };
 
   const previewIntegration = async (

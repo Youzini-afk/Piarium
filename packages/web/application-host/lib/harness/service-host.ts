@@ -115,6 +115,7 @@ export type HarnessDocumentBranchWrite = (
     edits?: ReadonlyArray<{ oldText: string; newText: string }>;
   }>,
   expectedRevision?: number,
+  signal?: AbortSignal,
 ) => Promise<import("@piarium/protocol").DocumentBranchWriteResult>;
 
 export type HarnessWorkingBranchEnsureMaterialized = (

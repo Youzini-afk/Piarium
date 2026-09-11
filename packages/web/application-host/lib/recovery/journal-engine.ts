@@ -97,6 +97,7 @@ import {
 } from './locations.js';
 import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
 import {
+  reconcileInterruptedBranchIntegrations,
   reconcileInterruptedIntegrationOperations,
   type HostResourceOperation,
   type HostResourceOperationGate,
@@ -2573,13 +2574,17 @@ export const createWorkspaceRecoveryEngine = (
           }
           resolved.push(publicOperation(record));
         }
-        await reconcileInterruptedIntegrationOperations({
+        const integrationContext = {
           database,
           fileStore,
           identity,
           resourceOperationGate: resourceOperationGateFor(workspaceId),
           root: storage.root,
-        });
+        };
+        await reconcileInterruptedIntegrationOperations(integrationContext);
+        const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
+        const workingState = await WorkingStateStore.open(integrationContext);
+        await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
       } finally {
         database.close();
         await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));

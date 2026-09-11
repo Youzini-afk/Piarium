@@ -4427,7 +4427,24 @@ ModelRuntime 纵切继续通过。
 
 影响：protocol `ThreadWorktree.executionBaseline`；Host worktree/runtime/store/lookups/explore query、Application Host 装配；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。D-216 / D-217 / D-218 相应部分在索引标 superseded in part。
 
-状态：已实施；Git 父仓库 isolated dispatch → 虚拟写 → ensureMaterialized → shell 写 → settle → native result → merge 根目录、reclaim/rematerialize、staging-promoted 恢复、lease 后重读 view、explore 查询级 pin、无 mode probe、dirty 内容替换拒绝混合基线有定向生产证据。branch Integration 锁顺序/WAL、恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
+状态：已实施；Git 父仓库 isolated dispatch → 虚拟写 → ensureMaterialized → shell 写 → settle → native result → merge 根目录、reclaim/rematerialize、staging-promoted 恢复、lease 后重读 view、explore 查询级 pin、无 mode probe、dirty 内容替换拒绝混合基线有定向生产证据。branch Integration 锁顺序/WAL 见 D-221。恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
+
+### D-221 · 2026-09-11 · 3.4 / 3.4a（branch Integration 锁顺序与写前日志）
+
+类型：问题与解法
+
+背景：D-219 把嵌套 branch 集成写入 operations，但 `mergeResult` 先持有 WorkingState exclusive lease，再经 `runWhenVirtual` 等待 `VirtualWriteGate`。物化已 `beginSwitch`、等待同一 store 时，嵌套 merge 会与之交叉等待。`runWhenVirtual` 用固定两次重试制造失败。branch 集成在 CAS 之后才写一条终态记录，`targetKinds` 误标为 `disk`，启动对账按磁盘文件处理或完全跳过；CAS 成功、complete 写入前崩溃会留下无对账身份的父分支变更。
+
+决定：
+
+1. 唯一锁顺序：先取得父分支写入/切换权威（`VirtualWriteGate`），再决定 branch 或 directory authority，再打开对应 store/目录。任何代码不得持有 WorkingState exclusive lease 后再等待 gate。传入已打开 store 的 `commitBranchWrites` 不得再 `waitSwitch`。
+2. `runWhenVirtual` 按 gate 真实状态、切换结束和取消信号等待或改走 disk，删除固定两次重试。
+3. branch Integration 写前日志：修改父 branch 前先持久化 applying intent（before/after revision、目标 states、retry identity、`targetKinds: "branch"`），再 CAS 父 branch，再写 complete/conflict。通用 disk reconcile 跳过这些行。
+4. 启动对账比较父 branch `writeRevision` 与 before/after 切片：等于 before 则 aborted/retryable；等于 after 则补 complete；都不等则 needs-attention。undo 仅在当前仍等于 after 时 CAS 回 before。`operationId` 在上述崩溃窗口对账后仍可幂等复用。
+
+影响：Host virtual-write-gate / working-branch-writes / integration-coordinator / durable-file-operation / journal-engine fence、thread-runtime merge、Application Host 装配；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。D-219 相应部分在索引标 superseded in part。
+
+状态：已实施；CAS 成功后注入崩溃再经 `fenceUnfinishedOperations` 对账、以及 materialize `beginSwitch` 等待 store 时并发 `runtime.merge` 有定向生产证据。恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
 
 ## 决策索引
 
@@ -4652,5 +4669,6 @@ ModelRuntime 纵切继续通过。
 | D-216 | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正） | D-220 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-217 | superseded in part（物化后重读 view、切换 journal、嵌套写 gate 与树不变量保留；lease 后重取当前 view 与 explore 查询级 immutable snapshot 由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-218 | superseded in part（Git 失败必抛、gitlink/unsupported、sameState 与失败清理保留；fingerprint 增加内容身份，默认 mode 不再探测用户树，由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-219 | implementation（冻结 permissions 进入 session.create/open；directory 集成保持对象库根；branch 集成落 operations；kill/archive 级联；嵌套 captureScopes 继承；scope 规范化） | — | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-219 | superseded in part（冻结 overlay、directory 对象库根、级联与 captureScopes 继承保留；branch 集成锁顺序/WAL 与 disk reconcile 隔离由 D-221 补正） | D-221 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-220 | implementation（执行 Git baseline 与逻辑 base 分离；settle 并入 deltas；lease 后重读与 explore 查询级 pin；umask 默认 mode；fingerprint 内容身份） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-221 | implementation（先 gate 后 store；删除固定两次重试；branch Integration WAL 与独立对账；undo 仅 after→before CAS） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

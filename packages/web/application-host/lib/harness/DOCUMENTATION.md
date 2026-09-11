@@ -358,7 +358,12 @@ document instance, content hash, revision and format. Agent calls resolve that o
 from their fixed inputContext. Documents directs capture/apply/undo to the owning
 Registry; events carry metadata and authenticated requests carry body/receipts.
 The durable Integration records both disk and buffer targets before dispatch and
-does not complete before confirmation. Conditional compensation/undo preserves
+does not complete before confirmation. Nested branch integration first acquires the
+parent write/switch gate, then opens the WorkingState store. It persists an applying
+intent (before/after revision, target states, retry identity, `targetKinds: "branch"`)
+before the parent CAS and writes complete afterward. Startup reconcile compares the
+live parent `writeRevision` to those slices; generic disk reconcile skips branch rows.
+`runWhenVirtual` waits on the real gate, switch completion, or cancel signal. Conditional compensation/undo preserves
 subsequent edits; reconnect or restart cannot reinterpret a surface target as disk.
 `merge-ready` comes from a bound preview; resolution submissions must consume that
 binding. Preview reads and identical projections do not create event feedback loops.

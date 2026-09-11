@@ -704,6 +704,10 @@ current view after the store lease; an explore query copies one immutable snapsh
 Default new-file mode is computed from umask, never by writing a probe file in the user tree.
 Dispatch fingerprints include dirty-path content identities so a mid-scan replacement cannot mint a
 mixed baseline.
+Nested merge takes parent write/switch authority first, then chooses branch or directory authority,
+then opens the store or directory (D-221). No path may hold a WorkingState exclusive lease and then
+wait on `VirtualWriteGate`. Branch integration persists an applying intent before the parent CAS and
+reconciles before/after slices at startup; generic disk reconcile skips `targetKinds: "branch"` rows.
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

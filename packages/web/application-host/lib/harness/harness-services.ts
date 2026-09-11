@@ -363,6 +363,7 @@ export function createDocumentBranchWriteService(
         ctx.sessionId,
         mapped,
         params.expectedRevision,
+        ctx.signal,
       );
     },
   };

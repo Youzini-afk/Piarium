@@ -29,6 +29,7 @@ import {
   markDurableExternalUndoDispatched,
   markDurableIntegrationNeedsAttention,
   markDurableExternalDispatched,
+  reconcileInterruptedBranchIntegrations,
   reconcileInterruptedIntegrationOperations,
   undoDurableIntegrationOperation,
   type DurableExternalBinding,
@@ -93,6 +94,11 @@ export interface IntegrationCoordinatorOptions {
     store: WorkingStateStore;
     sessionId?: string;
   }) => Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
+  holdParentVirtualWrite?: (
+    sessionId: string,
+    signal?: AbortSignal,
+  ) => Promise<{ status: "disk" } | { status: "virtual"; release(): void }>;
+  resolveParentSessionId?: (workspaceId: string, branchId: string) => string | undefined;
   resolveDirectoryApplyContext?: (directory: string) => Promise<{
     workspaceId: string;
     resourceOperationGate: HostResourceOperationGate;
@@ -306,6 +312,8 @@ export class IntegrationCoordinator {
   private readonly beginDirtyStateBarrier?: IntegrationCoordinatorOptions["beginDirtyStateBarrier"];
   private readonly requestSurfaceOperation?: IntegrationCoordinatorOptions["requestSurfaceOperation"];
   private readonly commitParentVirtualWrites?: IntegrationCoordinatorOptions["commitParentVirtualWrites"];
+  private readonly holdParentVirtualWrite?: IntegrationCoordinatorOptions["holdParentVirtualWrite"];
+  private readonly resolveParentSessionId?: IntegrationCoordinatorOptions["resolveParentSessionId"];
   private readonly resolveDirectoryApplyContext?: IntegrationCoordinatorOptions["resolveDirectoryApplyContext"];
   private readonly previewByThread = new Map<string, { workspaceId: string; preview: ThreadIntegrationPreview }>();
 
@@ -315,6 +323,8 @@ export class IntegrationCoordinator {
     this.beginDirtyStateBarrier = options.beginDirtyStateBarrier;
     this.requestSurfaceOperation = options.requestSurfaceOperation;
     this.commitParentVirtualWrites = options.commitParentVirtualWrites;
+    this.holdParentVirtualWrite = options.holdParentVirtualWrite;
+    this.resolveParentSessionId = options.resolveParentSessionId;
     this.resolveDirectoryApplyContext = options.resolveDirectoryApplyContext;
   }
 
@@ -359,7 +369,8 @@ export class IntegrationCoordinator {
       appliedPaths: string[];
       conflictPaths: string[];
       diffStats: { files: number; insertions: number; deletions: number };
-      state: "complete" | "conflict";
+      state: "applying" | "complete" | "conflict";
+      createdAt: string;
     },
   ): void {
     const targets = Object.fromEntries(Object.keys(input.beforeStates).map((file) => [
@@ -374,14 +385,14 @@ export class IntegrationCoordinator {
       workspaceId: input.workspaceId,
       kind: "integration",
       state: input.state,
-      createdAt: new Date().toISOString(),
+      createdAt: input.createdAt,
       updatedAt: new Date().toISOString(),
       data: {
         operationId: input.operationId,
         threadId: input.threadId,
         resultRevision: input.resultRevision,
         targets,
-        targetKinds: Object.fromEntries(Object.keys(targets).map((file) => [file, "disk"])),
+        targetKinds: Object.fromEntries(Object.keys(targets).map((file) => [file, "branch"])),
         externalBindings: {},
         safety: structuredClone(input.beforeStates),
         conflictPaths: [...input.conflictPaths],
@@ -450,8 +461,24 @@ export class IntegrationCoordinator {
     return planned.preview;
   }
 
+  private async holdParentBranchWrite(
+    parentAuthority: IntegrationPlanInput["parentAuthority"],
+    signal?: AbortSignal,
+  ): Promise<() => void> {
+    if (parentAuthority?.kind !== "branch" || !parentAuthority.sessionId || !this.holdParentVirtualWrite) {
+      return () => undefined;
+    }
+    const held = await this.holdParentVirtualWrite(parentAuthority.sessionId, signal);
+    if (held.status === "disk") {
+      throw new Error("Parent working branch is no longer virtual");
+    }
+    return () => held.release();
+  }
+
   async mergeResult(input: IntegrationPlanInput): Promise<IntegrationApplyResult & { changedFiles: string[] }> {
-    return this.workingStates.withStore(input.workspaceId, "thread-result-integration", async (store, context) => {
+    const releaseParentWrite = await this.holdParentBranchWrite(input.parentAuthority, input.signal);
+    try {
+    return await this.workingStates.withStore(input.workspaceId, "thread-result-integration", async (store, context) => {
       if (input.requireTurnBinding && !input.executionId) {
         throw new Error("Parent turn recovery binding is required for integration");
       }
@@ -459,6 +486,7 @@ export class IntegrationCoordinator {
         assertIntegrationTurnBinding(context.database, input.workspaceId, input.executionId);
       }
       await reconcileInterruptedIntegrationOperations(context);
+      await reconcileInterruptedBranchIntegrations(context, store);
       const blocking = context.database.prepare(`
         SELECT id, state FROM operations WHERE workspace_id = ? AND kind = 'integration'
         AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone') LIMIT 1
@@ -550,8 +578,30 @@ export class IntegrationCoordinator {
         if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
         const expectedWriteRevision = parentBranch.writeRevision ?? 0;
         const failed = planned.plan.conflictPaths.length > 0 || planned.preview.unavailablePaths.length > 0;
+        const appliedPaths = failed ? [] : Object.keys(writes).sort();
+        const afterStates = { ...planned.diskParentStates, ...(failed ? {} : writes) };
+        const createdAt = new Date().toISOString();
         let afterWriteRevision = expectedWriteRevision;
         if (!failed) {
+          afterWriteRevision = expectedWriteRevision + 1;
+          this.persistBranchIntegration(context, {
+            operationId: planned.plan.operationId,
+            workspaceId: input.workspaceId,
+            threadId: input.threadId,
+            branchId: input.branchId,
+            resultRevision: input.resultRevision,
+            parentBranchId: parentAuthority.branchId,
+            beforeWriteRevision: expectedWriteRevision,
+            afterWriteRevision,
+            beforeStates: planned.diskParentStates,
+            afterStates,
+            childStates: planned.childStates,
+            appliedPaths,
+            conflictPaths: [],
+            diffStats: planned.plan.diffStats,
+            state: "applying",
+            createdAt,
+          });
           const committed = this.commitParentVirtualWrites
             ? await this.commitParentVirtualWrites({
               workspaceId: input.workspaceId,
@@ -567,8 +617,6 @@ export class IntegrationCoordinator {
           }
           afterWriteRevision = committed.writeRevision;
         }
-        const appliedPaths = failed ? [] : Object.keys(writes).sort();
-        const afterStates = { ...planned.diskParentStates, ...(failed ? {} : writes) };
         this.persistBranchIntegration(context, {
           operationId: planned.plan.operationId,
           workspaceId: input.workspaceId,
@@ -585,6 +633,7 @@ export class IntegrationCoordinator {
           conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
           diffStats: planned.plan.diffStats,
           state: failed ? "conflict" : "complete",
+          createdAt,
         });
         const preview = { ...planned.preview, operationId: planned.plan.operationId };
         this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview });
@@ -785,6 +834,9 @@ export class IntegrationCoordinator {
         preview,
       };
     });
+    } finally {
+      releaseParentWrite();
+    }
   }
 
   async undoIntegration(input: {
@@ -794,7 +846,25 @@ export class IntegrationCoordinator {
     sourceOwner?: { ownerId: string; generation: number };
     signal?: AbortSignal;
   }): Promise<IntegrationApplyResult> {
-    return this.workingStates.withStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
+    const inspection = await this.workingStates.withStore(
+      input.workspaceId,
+      "thread-result-integration-undo-inspect",
+      (_store, context) => inspectDurableIntegrationOperation(context, input.operationId),
+      "shared",
+    );
+    if (inspection.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
+    let releaseParentWrite = (): void => undefined;
+    if (inspection.parentBranchId) {
+      const sessionId = this.resolveParentSessionId?.(input.workspaceId, inspection.parentBranchId);
+      if (sessionId && this.holdParentVirtualWrite) {
+        const held = await this.holdParentVirtualWrite(sessionId, input.signal);
+        if (held.status === "virtual") releaseParentWrite = () => held.release();
+      }
+    }
+    try {
+    return await this.workingStates.withStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
+      await reconcileInterruptedIntegrationOperations(context);
+      await reconcileInterruptedBranchIntegrations(context, store);
       const operation = inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
       if (operation.parentBranchId) {
@@ -828,6 +898,7 @@ export class IntegrationCoordinator {
             status: "needs-attention" as const,
           };
         }
+        const parentSessionId = this.resolveParentSessionId?.(input.workspaceId, operation.parentBranchId);
         const committed = this.commitParentVirtualWrites
           ? await this.commitParentVirtualWrites({
             workspaceId: input.workspaceId,
@@ -835,6 +906,7 @@ export class IntegrationCoordinator {
             files: before,
             expectedWriteRevision: parentBranch.writeRevision ?? 0,
             store,
+            ...(parentSessionId ? { sessionId: parentSessionId } : {}),
           })
           : await store.commitVirtualWrites(operation.parentBranchId, parentBranch.writeRevision ?? 0, before);
         if (committed.status === "conflict") {
@@ -978,6 +1050,9 @@ export class IntegrationCoordinator {
         if (undone.status === "pending") throw new Error(`Integration ${input.operationId} undo did not settle`);
       return { ...undone, status: undone.status as IntegrationApplyResult["status"] };
     });
+    } finally {
+      releaseParentWrite();
+    }
   }
 
   private async plan(input: IntegrationPlanInput): Promise<{

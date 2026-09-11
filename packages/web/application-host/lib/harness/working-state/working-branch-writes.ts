@@ -6,7 +6,7 @@ import type {
 import type { RecoveryState } from "./types.js";
 import { readBranchFile, resolveBranchPath } from "./branch-view.js";
 import type { ThreadExecutionView, ThreadExecutionViewRegistry } from "./execution-view.js";
-import type { VirtualWriteGate } from "./virtual-write-gate.js";
+import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./virtual-write-gate.js";
 import { assertTextUtf8, VirtualWriteTreeError } from "./virtual-write-tree.js";
 import type { WorkingStateStore, WorkspaceWorkingStateAccess } from "./working-state-store.js";
 
@@ -56,45 +56,43 @@ export function createWorkingBranchWriteServices(options: {
     sessionId: string,
     changes: readonly WorkingBranchWriteChange[],
     expectedRevision?: number,
+    signal?: AbortSignal,
   ): Promise<DocumentBranchWriteResult>;
   commitBranchWrites(
     sessionId: string,
     files: Record<string, RecoveryState>,
     expectedWriteRevision?: number,
     store?: WorkingStateStore,
+    signal?: AbortSignal,
   ): Promise<WorkingBranchFilesCommitResult>;
 } {
   const runWhenVirtual = async <T extends DocumentBranchWriteResult | WorkingBranchFilesCommitResult>(
     sessionId: string,
     apply: (view: ThreadExecutionView) => Promise<T>,
+    signal?: AbortSignal,
   ): Promise<T | { status: "disk" } | { status: "rejected"; message: string }> => {
-    const initial = options.views.get(sessionId);
-    if (!initial || initial.mode !== "virtual") return { status: "disk" };
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      const ticket = options.writeGate.begin(sessionId);
-      if (ticket === "switching") {
-        await options.writeGate.waitSwitch(sessionId);
-        const after = options.views.get(sessionId);
-        if (!after || after.mode !== "virtual") return { status: "disk" };
-        continue;
-      }
-      try {
+    const ticket = await acquireVirtualWriteTicket(
+      options.writeGate,
+      sessionId,
+      () => {
         const live = options.views.get(sessionId);
-        if (!live || live.mode !== "virtual") return { status: "disk" };
-        return await apply(live);
-      } catch (error) {
-        if (error instanceof VirtualWriteTreeError) {
-          return { status: "rejected", message: error.message };
-        }
-        throw error;
-      } finally {
-        ticket.finish();
+        return !!live && live.mode === "virtual";
+      },
+      signal,
+    );
+    if (ticket === "disk") return { status: "disk" };
+    try {
+      const live = options.views.get(sessionId);
+      if (!live || live.mode !== "virtual") return { status: "disk" };
+      return await apply(live);
+    } catch (error) {
+      if (error instanceof VirtualWriteTreeError) {
+        return { status: "rejected", message: error.message };
       }
+      throw error;
+    } finally {
+      ticket.finish();
     }
-    const latest = options.views.get(sessionId);
-    return (!latest || latest.mode !== "virtual")
-      ? { status: "disk" }
-      : { status: "rejected", message: "Working-branch write could not proceed while materialization is in progress" };
   };
 
   const persistFiles = async (
@@ -112,7 +110,7 @@ export function createWorkingBranchWriteServices(options: {
   };
 
   return {
-    async branchWrite(sessionId, changes, expectedRevision) {
+    async branchWrite(sessionId, changes, expectedRevision, signal) {
       return runWhenVirtual(sessionId, async (view) => (
         options.workingStates.withStore(view.workspaceId, "working-branch-write", async (store) => {
           const live = options.views.get(sessionId);
@@ -207,20 +205,22 @@ export function createWorkingBranchWriteServices(options: {
             provenance: { branchId: live.branchId, revision: committed.writeRevision, origin },
           };
         })
-      ));
+      ), signal);
     },
 
-    async commitBranchWrites(sessionId, files, expectedWriteRevision, store) {
-      return runWhenVirtual(sessionId, async (view) => {
-        const apply = async (openStore: WorkingStateStore) => {
+    async commitBranchWrites(sessionId, files, expectedWriteRevision, store, signal) {
+      if (store) {
+        const live = options.views.get(sessionId);
+        if (!live || live.mode !== "virtual") return { status: "disk" };
+        return persistFiles(sessionId, store, files, expectedWriteRevision ?? live.writeRevision);
+      }
+      return runWhenVirtual(sessionId, async (view) => (
+        options.workingStates.withStore(view.workspaceId, "working-branch-write", (openStore) => {
           const live = options.views.get(sessionId);
           if (!live || live.mode !== "virtual") return { status: "disk" as const };
           return persistFiles(sessionId, openStore, files, expectedWriteRevision ?? live.writeRevision);
-        };
-        return store
-          ? apply(store)
-          : options.workingStates.withStore(view.workspaceId, "working-branch-write", apply);
-      });
+        })
+      ), signal);
     },
   };
 }

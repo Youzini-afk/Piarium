@@ -82,7 +82,7 @@ interface PersistedIntegrationData extends Record<string, unknown> {
   threadId: string;
   resultRevision: number | string;
   targets: Record<string, DurableFileTarget>;
-  targetKinds: Record<string, "disk" | "surface">;
+  targetKinds: Record<string, "disk" | "surface" | "branch">;
   externalBindings: Record<string, DurableExternalBinding>;
   safety: Record<string, RecoveryState>;
   conflictPaths: string[];
@@ -120,6 +120,11 @@ const writeRecord = (
   createdAt,
   updatedAt: new Date().toISOString(),
 });
+
+const isBranchIntegration = (data: Pick<PersistedIntegrationData, "parentBranchId" | "targetKinds">): boolean => (
+  typeof data.parentBranchId === "string" && data.parentBranchId.length > 0
+  || Object.values(data.targetKinds).some((kind) => kind === "branch")
+);
 
 const contextForPersistedApply = (
   context: DurableFileOperationContext,
@@ -419,16 +424,16 @@ const parsePersistedData = (row: OperationRow): PersistedIntegrationData => {
     };
   };
   const rawTargetKinds = raw.targetKinds;
-  const targetKinds: Record<string, "disk" | "surface"> = rawTargetKinds === undefined
+  const targetKinds: Record<string, "disk" | "surface" | "branch"> = rawTargetKinds === undefined
     ? Object.fromEntries(Object.keys(targets).map((file) => [file, "disk" as const]))
     : (() => {
         if (!rawTargetKinds || typeof rawTargetKinds !== "object" || Array.isArray(rawTargetKinds)) {
           throw new Error(`Integration operation ${row.id} target kinds are malformed`);
         }
         const parsed = Object.fromEntries(Object.entries(rawTargetKinds as Record<string, unknown>).map(([file, kind]) => {
-          if (kind !== "disk" && kind !== "surface") throw new Error(`Integration operation ${row.id} target kind is malformed: ${file}`);
+          if (kind !== "disk" && kind !== "surface" && kind !== "branch") throw new Error(`Integration operation ${row.id} target kind is malformed: ${file}`);
           return [file, kind];
-        })) as Record<string, "disk" | "surface">;
+        })) as Record<string, "disk" | "surface" | "branch">;
         if (Object.keys(targets).some((file) => parsed[file] === undefined)) {
           throw new Error(`Integration operation ${row.id} target kinds are incomplete`);
         }
@@ -502,7 +507,7 @@ export interface DurableIntegrationInspection {
   threadId: string;
   resultRevision: number | string;
   targets: Record<string, DurableFileTarget>;
-  targetKinds: Record<string, "disk" | "surface">;
+  targetKinds: Record<string, "disk" | "surface" | "branch">;
   externalBindings: Record<string, DurableExternalBinding>;
   applyCanonicalRoot?: string;
   parentBranchId?: string;
@@ -814,6 +819,7 @@ export const reconcileInterruptedIntegrationOperations = async (
   const result = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[] };
   for (const row of rows) {
     const data = parsePersistedData(row);
+    if (isBranchIntegration(data)) continue;
     const applyContext = contextForPersistedApply(context, data);
     let unknown = false;
     for (const fileRow of operationFileRows(context.database, row.id)) {
@@ -862,6 +868,62 @@ export const reconcileInterruptedIntegrationOperations = async (
       writeRecord(context.database, row.workspace_id, "aborted", data, new Date().toISOString());
       result.aborted.push(row.id);
     }
+  }
+  return result;
+};
+
+export interface BranchIntegrationView {
+  getBranch(branchId: string): { writeRevision?: number } | null;
+  effectiveState(branchId: string): Record<string, RecoveryState> | null;
+}
+
+const parentSliceMatches = (
+  current: Record<string, RecoveryState>,
+  expected: Record<string, RecoveryState>,
+): boolean => Object.keys(expected).every((file) => sameState(current[file] ?? { kind: "missing" }, expected[file]!));
+
+export const reconcileInterruptedBranchIntegrations = async (
+  context: DurableFileOperationContext,
+  store: BranchIntegrationView,
+): Promise<{ aborted: string[]; completed: string[]; needsAttention: string[] }> => {
+  const rows = context.database.prepare(`
+    SELECT * FROM operations WHERE kind = 'integration'
+    AND workspace_id = ?
+    AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict', 'undone')
+  `).all(context.identity.workspaceId) as Array<OperationRow & { created_at: string }>;
+  const result = { aborted: [] as string[], completed: [] as string[], needsAttention: [] as string[] };
+  for (const row of rows) {
+    const data = parsePersistedData(row);
+    if (!isBranchIntegration(data) || !data.parentBranchId) continue;
+    const branch = store.getBranch(data.parentBranchId);
+    const current = store.effectiveState(data.parentBranchId) ?? {};
+    const before = data.retryBinding?.parentStates ?? data.safety;
+    const after = data.retryBinding?.resultingParentStates ?? Object.fromEntries(
+      Object.entries(data.targets).map(([file, states]) => [file, states.target]),
+    );
+    const revision = branch?.writeRevision ?? 0;
+    if (data.beforeWriteRevision !== undefined && revision === data.beforeWriteRevision && parentSliceMatches(current, before)) {
+      writeRecord(context.database, row.workspace_id, "aborted", {
+        ...data,
+        failure: "Branch integration did not take effect",
+      }, row.created_at);
+      result.aborted.push(row.id);
+      continue;
+    }
+    if (data.afterWriteRevision !== undefined && revision === data.afterWriteRevision && parentSliceMatches(current, after)) {
+      writeRecord(context.database, row.workspace_id, "complete", {
+        ...data,
+        appliedPaths: data.appliedPaths.length > 0 ? data.appliedPaths : Object.keys(after).sort(),
+      }, row.created_at);
+      result.completed.push(row.id);
+      continue;
+    }
+    writeRecord(context.database, row.workspace_id, "needs-attention", {
+      ...data,
+      failure: "Parent branch matches neither the before nor after integration states",
+      needsAttentionPaths: Object.keys(after),
+    }, row.created_at);
+    result.needsAttention.push(row.id);
   }
   return result;
 };

@@ -1356,6 +1356,84 @@ describe("IntegrationCoordinator", () => {
     }
   });
 
+  it("reconciles a branch CAS that crashed before the complete record", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "kept.txt"), "base\n");
+      const published = await h.workingStates.withStore("ws", "branch-crash-setup", async (store) => {
+        const captured = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-parent", captured, "base");
+        await store.createBranch("ws", "thread-child", captured, "base");
+        const object = await store.putObject(Buffer.from("from-child\n"));
+        await store.commitVirtualWrites("thread-child", 0, {
+          "child.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength },
+        });
+        return store.publishHeadResult("thread-child");
+      });
+      const crashing = new IntegrationCoordinator({
+        workingStates: h.workingStates,
+        commitParentVirtualWrites: async (input) => {
+          const committed = await input.store.commitVirtualWrites(
+            input.branchId,
+            input.expectedWriteRevision,
+            input.files,
+          );
+          if (committed.status !== "committed") throw new Error("expected branch CAS to commit before the crash");
+          throw new Error("injected crash after branch CAS");
+        },
+      });
+      await expect(crashing.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-child",
+        branchId: "thread-child",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent" },
+      })).rejects.toThrow("injected crash after branch CAS");
+      const interrupted = await h.workingStates.withStore("ws", "inspect-crashed-branch", async (store, context) => {
+        const row = context.database.prepare(
+          `SELECT id, state FROM operations WHERE kind = 'integration'`,
+        ).get() as { id: string; state: string } | undefined;
+        const live = store.effectiveState("thread-parent")!;
+        return { row, hasChild: live["child.txt"]?.kind === "regular-file" };
+      }, "shared");
+      expect(interrupted.row).toMatchObject({ state: "applying" });
+      expect(interrupted.hasChild).toBe(true);
+      const operationId = interrupted.row!.id;
+      await h.engine.dispose();
+      const restarted = createWorkspaceRecoveryEngine({
+        authorityId: "test",
+        dataDir: h.dataDir,
+        documents: h.documents,
+        sessionNavigation: h.navigation,
+      });
+      await restarted.fenceUnfinishedOperations();
+      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-reconciled-branch", create: false }, ({ database }) => {
+        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(operationId)).toEqual({ state: "complete" });
+      });
+      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
+      const retry = await new IntegrationCoordinator({
+        workingStates: restartedStates,
+      }).mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-child",
+        branchId: "thread-child",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent" },
+      });
+      expect(retry.operationId).toBe(operationId);
+      expect(retry.status).toBe("applied");
+      await restartedStates.withStore("ws", "assert-parent-kept-child", async (store) => {
+        const live = store.effectiveState("thread-parent")!;
+        const childFile = live["child.txt"];
+        if (childFile?.kind !== "regular-file") throw new Error("expected child file after reconcile");
+        expect(await store.getObject(childFile.objectHash)).toEqual(Buffer.from("from-child\n"));
+      }, "shared");
+      await restarted.dispose();
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
   it("persists a branch parent integration so retry is idempotent and undo is reversible", async () => {
     const h = await createHarness();
     try {

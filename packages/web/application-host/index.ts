@@ -85,7 +85,7 @@ import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/w
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
-import { VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
+import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
@@ -1320,22 +1320,38 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         },
       };
     },
+    holdParentVirtualWrite: async (sessionId, signal) => {
+      const ticket = await acquireVirtualWriteTicket(
+        virtualWriteGate,
+        sessionId,
+        () => {
+          const view = threadExecutionViews.get(sessionId);
+          return !!view && view.mode === 'virtual';
+        },
+        signal,
+      );
+      return ticket === 'disk'
+        ? { status: 'disk' as const }
+        : { status: 'virtual' as const, release: () => ticket.finish() };
+    },
+    resolveParentSessionId: (workspaceId, branchId) => (
+      threadExecutionViews.findByBranch(workspaceId, branchId)?.sessionId
+    ),
     commitParentVirtualWrites: async (input) => {
+      const result = await input.store.commitVirtualWrites(
+        input.branchId,
+        input.expectedWriteRevision,
+        input.files,
+      );
       const sessionId = input.sessionId
         ?? threadExecutionViews.findByBranch(input.workspaceId, input.branchId)?.sessionId;
-      if (sessionId) {
-        const result = await workingBranchWrites.commitBranchWrites(
-          sessionId,
-          input.files,
-          input.expectedWriteRevision,
-          input.store,
-        );
-        if (result.status === "committed") return result;
-        if (result.status === "conflict") return result;
-        if (result.status === "rejected") throw new Error(result.message);
-        throw new Error("Parent working branch is no longer virtual");
+      if (result.status === 'committed' && sessionId) {
+        const live = threadExecutionViews.get(sessionId);
+        if (live?.mode === 'virtual') {
+          threadExecutionViews.bind({ ...live, writeRevision: result.writeRevision });
+        }
       }
-      return input.store.commitVirtualWrites(input.branchId, input.expectedWriteRevision, input.files);
+      return result;
     },
   });
   threadRuntime = createThreadRuntime({
@@ -2040,10 +2056,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
-    documentBranchWrite: (sessionId, changes, expectedRevision) => workingBranchWrites.branchWrite(
+    documentBranchWrite: (sessionId, changes, expectedRevision, signal) => workingBranchWrites.branchWrite(
       sessionId,
       changes,
       expectedRevision,
+      signal,
     ),
     workingBranchEnsureMaterialized: (sessionId, signal) => {
       if (!threadRuntime) {

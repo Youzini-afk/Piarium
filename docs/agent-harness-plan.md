@@ -97,8 +97,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    磁盘基线（D-214）。嵌套线程已沿 `parent.kind: "thread"` 接到真实工具能力与 Host 强制（D-215）。D-216 已拆开
    owning/execution workspace，并用 detached Git worktree 或独立 `git init` 隔离物化目录；D-217 已补虚拟写入与切换恢复；
    D-218 已补 dispatch 基线诚实；D-219 已补冻结权限、耐久嵌套集成与级联终止。D-220 已把执行 Git baseline 与逻辑 base
-   拆开，钉住 explore 查询级 snapshot，并用内容身份拒绝混合基线。branch Integration 锁顺序/WAL、恢复时 execution
-   identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段，相关 status 行保持 Partial。
+   拆开，钉住 explore 查询级 snapshot，并用内容身份拒绝混合基线。D-221 已规定 branch Integration 先 gate 后 store，
+   并补写前日志与启动对账。恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续
+   阶段，相关 status 行保持 Partial。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -293,6 +294,8 @@ execution view，仍虚拟则继续写分支；崩溃按 `materializationSwitch`
 D-220：独立 init / detach 后 inspect/settle 使用执行仓库可解析的 `executionBaseline`，`worktree.base` 仍是父状态身份；
 reclaim 后 rematerialize 不得引用已删子仓库对象。WorkingBranch 读取在 store lease 后重取当前 view；explore 查询开始时
 在同一 shared lease 内复制 immutable snapshot。默认新文件 mode 按 umask 计算，不探测用户树。fingerprint 含 dirty 内容身份。
+D-221：嵌套 merge 先取得父分支写入/切换权威，再决定 branch 或 directory，再打开 store/目录；branch 集成先持久化
+applying intent，CAS 后再 complete。启动对账按 before/after 补记录。`runWhenVirtual` 不再用固定次数制造失败。
 D-215 已把 `parent.kind: "thread"` 接到真实 dispatch/wait/read/merge：角色目录装配嵌套工具，Host 拒绝扩 scope 与未授权
 工具；嵌套基线复制父分支视图，孙结果先入父分支再入根工作区。
 

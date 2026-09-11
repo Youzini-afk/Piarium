@@ -206,6 +206,8 @@ async function fixture() {
     workspaceId,
     registry,
     runtime,
+    writeGate,
+    writes,
   };
 }
 
@@ -361,5 +363,24 @@ describe("WorkingState Host virtual write production chain", () => {
     expect(await f.store.getObject(published.pathStates["kept.txt"]!.kind === "regular-file"
       ? published.pathStates["kept.txt"]!.objectHash
       : "")).toEqual(Buffer.from("virtual then shell then disk\n"));
+  });
+
+  it("waits for the real switch or cancel signal instead of failing after two attempts", async () => {
+    const f = await fixture();
+    const controller = new AbortController();
+    await f.writeGate.beginSwitch("session-a");
+    const write = f.writes.branchWrite("session-a", [{
+      resourceId: "kept.txt",
+      action: "write",
+      content: "after switch\n",
+    }], undefined, controller.signal);
+    controller.abort();
+    await expect(write).rejects.toMatchObject({ name: "AbortError" });
+    f.writeGate.endSwitch("session-a");
+    expect(await f.request("document.branchWrite", {
+      path: "kept.txt",
+      action: "write",
+      content: "after switch\n",
+    })).toMatchObject({ ok: true, result: { status: "committed" } });
   });
 });

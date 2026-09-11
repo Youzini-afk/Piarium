@@ -50,7 +50,53 @@ export class VirtualWriteGate {
     this.#switchResolve.delete(sessionId);
   }
 
-  async waitSwitch(sessionId: string): Promise<void> {
-    await this.#switchWait.get(sessionId);
+  switching(sessionId: string): boolean {
+    return this.#switching.has(sessionId);
+  }
+
+  async waitSwitch(sessionId: string, signal?: AbortSignal): Promise<void> {
+    const pending = this.#switchWait.get(sessionId);
+    if (!pending) return;
+    if (!signal) {
+      await pending;
+      return;
+    }
+    signal.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = (): void => {
+        signal.removeEventListener("abort", onAbort);
+        reject(signal.reason instanceof Error ? signal.reason : new DOMException("This operation was aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort);
+      pending.then(() => {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }, (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      });
+    });
   }
 }
+
+export const acquireVirtualWriteTicket = async (
+  gate: VirtualWriteGate,
+  sessionId: string,
+  stillVirtual: () => boolean,
+  signal?: AbortSignal,
+): Promise<{ finish(): void } | "disk"> => {
+  for (;;) {
+    signal?.throwIfAborted();
+    if (!stillVirtual()) return "disk";
+    const ticket = gate.begin(sessionId);
+    if (ticket === "switching") {
+      await gate.waitSwitch(sessionId, signal);
+      continue;
+    }
+    if (!stillVirtual()) {
+      ticket.finish();
+      return "disk";
+    }
+    return ticket;
+  }
+};

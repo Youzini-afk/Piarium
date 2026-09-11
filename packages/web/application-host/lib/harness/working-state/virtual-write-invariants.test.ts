@@ -21,7 +21,7 @@ import { listBranchTextFiles, readBranchFile } from "./branch-view.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchLookups } from "./working-branch-lookups.js";
 import { createWorkingBranchWriteServices } from "./working-branch-writes.js";
-import { VirtualWriteGate } from "./virtual-write-gate.js";
+import { acquireVirtualWriteTicket, VirtualWriteGate } from "./virtual-write-gate.js";
 import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
 
 const disposes: Array<() => Promise<void>> = [];
@@ -136,14 +136,26 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
   }));
   const coordinator = new IntegrationCoordinator({
     workingStates,
+    holdParentVirtualWrite: async (sessionId, signal) => {
+      const ticket = await acquireVirtualWriteTicket(
+        writeGate,
+        sessionId,
+        () => views.get(sessionId)?.mode === "virtual",
+        signal,
+      );
+      return ticket === "disk"
+        ? { status: "disk" }
+        : { status: "virtual", release: () => ticket.finish() };
+    },
+    resolveParentSessionId: (workspaceId, branchId) => views.findByBranch(workspaceId, branchId)?.sessionId,
     commitParentVirtualWrites: async (input) => {
+      const result = await input.store.commitVirtualWrites(input.branchId, input.expectedWriteRevision, input.files);
       const sessionId = input.sessionId ?? views.findByBranch(input.workspaceId, input.branchId)?.sessionId;
-      if (!sessionId) {
-        return input.store.commitVirtualWrites(input.branchId, input.expectedWriteRevision, input.files);
+      if (result.status === "committed" && sessionId) {
+        const live = views.get(sessionId);
+        if (live?.mode === "virtual") views.bind({ ...live, writeRevision: result.writeRevision });
       }
-      const result = await writes.commitBranchWrites(sessionId, input.files, input.expectedWriteRevision, input.store);
-      if (result.status === "committed" || result.status === "conflict") return result;
-      throw new Error(result.status === "rejected" ? result.message : "Parent branch is no longer virtual");
+      return result;
     },
   });
 
