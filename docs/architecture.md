@@ -679,7 +679,9 @@ restarted Runs no longer depend on the ephemeral surface reference. Missing draf
 dispatch rather than substituting an unlabelled disk version. Isolated dispatch then fixes the
 non-draft disk baseline when it creates the WorkingBranch: Git inventories HEAD plus staged,
 unstaged, tracked, deleted, and non-ignored untracked workdir bytes; non-Git and unborn repositories
-perform one cancellable directory capture. Parent drift after that boundary cannot enter the child
+perform one cancellable directory capture. A Git command failure, capture-window parent write,
+active Documents writer, or gitlink fails the dispatch instead of inventing a complete branch
+(D-218). Parent drift after that boundary cannot enter the child
 view. Failed or cancelled capture deletes the Thread (D-214).
 A nested isolated child copies the parent branch effective view when the parent is still virtual, or
 captures the parent materialized directory otherwise (D-215). Nested merge applies the grandchild

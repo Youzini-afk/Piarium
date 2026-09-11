@@ -1311,6 +1311,17 @@ describe("IntegrationCoordinator", () => {
       expect(merged.appliedPaths).toEqual(["added.txt"]);
       expect(await fs.promises.readFile(path.join(h.workspace, "added.txt"), "utf8")).toBe("added by virtual write\n");
       expect(await fs.promises.readFile(path.join(h.workspace, "kept.txt"), "utf8")).toBe("base\n");
+      const added = path.join(h.workspace, "added.txt");
+      const beforeMode = (await fs.promises.lstat(added)).mode & 0o7777;
+      await fs.promises.chmod(added, beforeMode ^ 0o111);
+      const afterMode = (await fs.promises.lstat(added)).mode & 0o7777;
+      if (afterMode === beforeMode) return;
+      const undone = await h.coordinator.undoIntegration({
+        workspaceId: "ws",
+        threadId: "thread-virtual-new",
+        operationId: merged.operationId,
+      });
+      expect(undone.status).toBe("needs-attention");
     } finally {
       await h.engine.dispose();
     }

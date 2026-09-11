@@ -1399,6 +1399,25 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
+    inspectBaselineWriters: async (workspaceId, root) => {
+      const writersOf = async (id: string) => {
+        const inspected = await documentsAuthority.inspectWorkspace(id) as {
+          activeWriters?: Array<{ writerId?: string; id?: string; purpose?: string }>;
+        };
+        return Array.isArray(inspected.activeWriters) ? inspected.activeWriters : [];
+      };
+      const writers = [...await writersOf(workspaceId)];
+      try {
+        const resolved = await documentsAuthority.resolveWorkspace({ path: root });
+        if (resolved.workspaceId !== workspaceId) writers.push(...await writersOf(resolved.workspaceId));
+      } catch {
+        // Scratch and unregistered roots have no Documents writers of their own.
+      }
+      return writers.map((writer) => ({
+        id: writer.writerId ?? writer.id ?? "writer",
+        ...(writer.purpose === undefined ? {} : { purpose: writer.purpose }),
+      }));
+    },
     readBlocks: async (sessionId) => {
       const store = await getKnowledgeStoreForSession(sessionId);
       if (!store) return null;

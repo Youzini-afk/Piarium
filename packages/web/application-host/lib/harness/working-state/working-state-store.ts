@@ -394,6 +394,7 @@ export class WorkingStateStore {
   private readonly pathModule: typeof path;
   private readonly catalogPath: string;
   private document: WorkingStateDocument;
+  private defaultNewFileModeValue: number | undefined;
 
   private constructor(options: WorkingStateStoreOptions, document: WorkingStateDocument) {
     this.context = options;
@@ -770,12 +771,17 @@ export class WorkingStateStore {
   async publishStates(branchId: string, capturedState: Record<string, RecoveryState>, knownChangedPaths?: string[]): Promise<WorkingResult> {
     const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const stampedState: Record<string, RecoveryState> = {};
+    for (const [file, state] of Object.entries(capturedState)) {
+      const normalized = normalizeRelative(file);
+      stampedState[normalized] = await this.stampRegularFileState(state, branch.baseState[normalized]);
+    }
     const candidates = knownChangedPaths
       ? [...new Set(knownChangedPaths.map(normalizeRelative))]
-      : [...new Set([...Object.keys(branch.baseState), ...Object.keys(capturedState)])];
+      : [...new Set([...Object.keys(branch.baseState), ...Object.keys(stampedState)])];
     const changedPaths = candidates.filter((file) => !sameState(
       branch.baseState[file] ?? { kind: "missing" },
-      capturedState[file] ?? { kind: "missing" },
+      stampedState[file] ?? { kind: "missing" },
     )).sort();
     const baseStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
       file,
@@ -783,7 +789,7 @@ export class WorkingStateStore {
     ]));
     const pathStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
       file,
-      clone(capturedState[file] ?? { kind: "missing" as const }),
+      clone(stampedState[file] ?? { kind: "missing" as const }),
     ]));
     const previous = this.document.results[`${branchId}@${branch.headRevision}`];
     if (previous && previous.changedPaths.length === changedPaths.length
@@ -830,9 +836,15 @@ export class WorkingStateStore {
     if (current !== expectedWriteRevision) {
       return { status: "conflict", writeRevision: current };
     }
-    assertVirtualWriteTree(this.effectiveState(branchId) ?? {}, files);
-    const deltas = clone(branch.deltas);
+    const live = this.effectiveState(branchId) ?? {};
+    const stampedFiles: Record<string, RecoveryState> = {};
     for (const [file, next] of Object.entries(files)) {
+      const normalized = normalizeRelative(file);
+      stampedFiles[normalized] = await this.stampRegularFileState(next, live[normalized]);
+    }
+    assertVirtualWriteTree(live, stampedFiles);
+    const deltas = clone(branch.deltas);
+    for (const [file, next] of Object.entries(stampedFiles)) {
       const normalized = normalizeRelative(file);
       if (next.kind === "missing" && !Object.hasOwn(branch.baseState, normalized)) {
         delete deltas[normalized];
@@ -988,6 +1000,35 @@ export class WorkingStateStore {
 
   async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
     return this.scanCaptureScopes(directory, scopes);
+  }
+
+  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> {
+    return this.scanDirectoryRelative(directory);
+  }
+
+  private async defaultNewFileMode(): Promise<number> {
+    if (this.defaultNewFileModeValue !== undefined) return this.defaultNewFileModeValue;
+    const probe = this.pathModule.join(this.context.identity.canonicalRoot, `.piarium-mode-probe-${randomUUID()}`);
+    try {
+      await this.fsPromises.writeFile(probe, Buffer.alloc(0));
+      this.defaultNewFileModeValue = (await this.fsPromises.lstat(probe)).mode & 0o7777;
+    } catch {
+      this.defaultNewFileModeValue = 0o644;
+    } finally {
+      await this.fsPromises.unlink(probe).catch(() => undefined);
+    }
+    return this.defaultNewFileModeValue;
+  }
+
+  private async stampRegularFileState(state: RecoveryState, existing?: RecoveryState): Promise<RecoveryState> {
+    if (state.kind !== "regular-file" || state.mode !== undefined) return state;
+    if (existing?.kind === "regular-file" && existing.mode !== undefined) {
+      return { ...state, mode: existing.mode };
+    }
+    if (!existing || existing.kind === "missing") {
+      return { ...state, mode: await this.defaultNewFileMode() };
+    }
+    return state;
   }
 
   private async scanDirectoryRelative(directory: string, base = directory): Promise<string[]> {

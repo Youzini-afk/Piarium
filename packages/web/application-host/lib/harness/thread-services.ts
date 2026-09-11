@@ -11,6 +11,7 @@ import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { ROLE_DEFINITIONS } from "./roles.js";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
+import { ThreadRuntimeError } from "./thread-runtime.js";
 
 interface ThreadSnapshot {
   thread: Thread;
@@ -257,6 +258,17 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         } catch (error) {
           await captured.cleanup().catch(() => undefined);
           await registry.deleteThread(workspaceId, parent, thread.id).catch(() => undefined);
+          if (error instanceof ThreadRuntimeError) {
+            const code = error.code === "not-found"
+              ? "not-found"
+              : error.code === "invalid-request"
+                ? "invalid-params"
+                : "unavailable";
+            throw new HarnessServiceError(code, error.message, error.retryable);
+          }
+          if (error instanceof DOMException && error.name === "AbortError") {
+            throw new HarnessServiceError("unavailable", error.message, true);
+          }
           throw new HarnessServiceError(
             "unavailable",
             error instanceof Error ? error.message : String(error),

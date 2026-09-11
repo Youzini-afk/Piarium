@@ -121,7 +121,7 @@ describe("workspace baseline capture", () => {
     git(gitCase.workspace, ["config", "core.autocrlf", "false"]);
     await fs.promises.writeFile(path.join(gitCase.workspace, "only.txt"), "unborn\n");
     const gitInventory = await gitCase.worktrees.inspectGitBaselineInventory(gitCase.workspace);
-    expect(gitInventory).toMatchObject({ kind: "git", baseRef: "zero-commit" });
+    expect(gitInventory).toMatchObject({ kind: "git", baseRef: "zero-commit", unborn: true, gitlinks: [] });
     if (gitInventory.kind !== "git") throw new Error("expected unborn git");
     const gitBaseline = await gitCase.store.captureDirectory(
       gitCase.workspace,
@@ -168,5 +168,42 @@ describe("workspace baseline capture", () => {
     await expect(h.store.captureDirectory(h.workspace, ["a.txt"], { signal: controller.signal }))
       .rejects.toMatchObject({ name: "AbortError" });
     expect(h.store.getBranch("missing")).toBeNull();
+  });
+
+  it("does not invent a complete Git inventory when a listing command fails", async () => {
+    const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-git-inventory-fail-"));
+    roots.push(parent);
+    const workspace = path.join(parent, "workspace");
+    await fs.promises.mkdir(workspace);
+    const worktrees = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: path.join(parent, "unused") }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+      runGit: async (_cwd, args) => {
+        if (args[0] === "rev-parse" && args[1] === "--is-inside-work-tree") return { stdout: "true\n", stderr: "" };
+        if (args[0] === "rev-parse" && args[1] === "HEAD") return { stdout: "abc123\n", stderr: "" };
+        if (args[0] === "ls-files" && args.includes("-z") && !args.includes("-s")) {
+          throw new Error("Permission denied");
+        }
+        return { stdout: "", stderr: "" };
+      },
+    });
+    await expect(worktrees.inspectGitBaselineInventory(workspace)).rejects.toThrow(/Permission denied/);
+  });
+
+  it("lists gitlinks instead of treating a submodule as an ordinary directory", async () => {
+    const h = await harness();
+    git(h.workspace, ["init"]);
+    git(h.workspace, ["config", "user.name", "Test"]);
+    git(h.workspace, ["config", "user.email", "test@example.com"]);
+    git(h.workspace, ["config", "core.autocrlf", "false"]);
+    await fs.promises.writeFile(path.join(h.workspace, "tracked.txt"), "ok\n");
+    git(h.workspace, ["add", "tracked.txt"]);
+    git(h.workspace, ["commit", "-m", "base"]);
+    git(h.workspace, ["update-index", "--add", "--cacheinfo", "160000,e69de29bb2d1d6434b8b29ae775ad8c2e48c5391,vendor/lib"]);
+    const inventory = await h.worktrees.inspectGitBaselineInventory(h.workspace);
+    expect(inventory.kind).toBe("git");
+    if (inventory.kind !== "git") throw new Error("expected git inventory");
+    expect(inventory.gitlinks).toEqual(["vendor/lib"]);
+    expect(inventory.paths).toContain("tracked.txt");
   });
 });

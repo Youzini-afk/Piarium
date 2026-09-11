@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadMergeService } from "./thread-services.js";
+import { ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext } from "@piarium/protocol";
 
 const prepareIsolatedBranch = vi.fn(async () => ({
@@ -358,6 +359,39 @@ describe("thread services", () => {
         role: "hard-implement",
         task: "Capture must finish",
       }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      expect(spawn).not.toHaveBeenCalled();
+      expect(await registry.listThreads("workspace-1", { kind: "session", id: "parent-1" })).toEqual([]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves a retryable baseline-changed failure and deletes the Thread", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-baseline-changed-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: vi.fn(async () => {
+        throw new ThreadRuntimeError(
+          "unavailable",
+          "Thread baseline is unavailable because the parent workspace changed during capture (baseline-changed)",
+          { retryable: true },
+        );
+      }),
+    } as never);
+    try {
+      await expect(service.handle({
+        concurrency: 1,
+        role: "hard-implement",
+        task: "Capture must stay honest",
+      }, serviceContext())).rejects.toMatchObject({
+        harnessCode: "unavailable",
+        harnessRetryable: true,
+        message: expect.stringContaining("baseline-changed"),
+      });
       expect(spawn).not.toHaveBeenCalled();
       expect(await registry.listThreads("workspace-1", { kind: "session", id: "parent-1" })).toEqual([]);
     } finally {

@@ -4377,6 +4377,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；定向生产链覆盖失败物化并发写、孙 merge 后再写再物化、树拒绝、修订标签、semantic pin 与崩溃/abort 恢复。dispatch 基线诚实与嵌套权限/级联终止仍待本轮后续阶段。
 
+### D-218 · 2026-09-11 · 3.4 / 3.4a（dispatch 基线诚实、mode 全字段比较与失败清理）
+
+类型：问题与解法
+
+背景：D-214 已在 dispatch 创建 WorkingBranch，但 `inspectGitBaselineInventory` 把 Git 错误吞成空路径或 `{ kind: "directory" }`，仍能生成看起来完整的分支。捕获窗口内父写入或 Host 已知 writer 不会使捕获失败。gitlink 被当成空目录，unsupported 物化被跳过。`matchesClaimedState` 在目标省略 mode 时忽略权限，用户 apply 后 chmod 仍可能被条件补偿当成未变。`createBranch` 成功而 `setWorkingState` 失败会留下未挂 Thread 的 branch。
+
+决定：
+
+1. 只有“不是 git 仓库”才返回 `{ kind: "directory" }`。unborn HEAD（`ambiguous argument 'HEAD'` / `unknown revision` / `needed a single revision`）记 `baseRef: "zero-commit"`、`unborn: true`，仍收集 `ls-files`，不跑 `diff HEAD`。损坏、权限、取消和其他 Git 失败必须抛出，dispatch 失败。
+2. 捕获前取 fingerprint（Git：`baseRef + unborn + paths + gitlinks`；非 Git：目录路径列表），捕获后再检一次。变了或有活跃 Documents writer → `ThreadRuntimeError("unavailable", … baseline-changed, { retryable: true })`。不无限重扫，不加 WorkspaceHead watcher。`ls-files -s` 的 `160000` gitlink 列缺失路径并失败，不把 submodule 当空目录。物化遇到 unsupported 抛错。
+3. 撤回全局 `matchesClaimedState`。apply / compensation / reconcile 一律 `sameState`。`commitVirtualWrites` / `publishStates` 给无 mode 的新 regular-file 写入在 `identity.canonicalRoot` 探测到的真实默认 mode（失败则 `0o644`），使直接 integration 与先物化再 integration 的 mode 一致。
+4. `prepareIsolatedBranch` 失败时：若 Thread 尚未绑定该 `workBranchId` 则 `deleteBranch`，删除 scratch 与孤儿 staging/backup。draft baseline 仍由 dispatch 的 `captured.cleanup()` + `deleteThread` 负责。
+
+影响：Host inventory/runtime/store/materializer/recovery apply 核验、thread services retryable、设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；Git 失败/gitlink、捕获窗口变化、writer、mode 全字段补偿与失败清理有定向生产证据。嵌套权限冻结与级联终止仍待本轮后续阶段。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4595,7 +4612,8 @@ ModelRuntime 纵切继续通过。
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
 | D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化；owning/execution 身份由 D-216 拆开） | D-213 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-214 | superseded in part（dispatch 创建分支时固定 Git/非 Git 磁盘基线保留；catalog 查找不得再用 execution workspaceId） | D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution） | D-216 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-214 | superseded in part（dispatch 固定 Git/非 Git 磁盘基线保留；catalog 不得用 execution workspaceId；Git 错误不得吞成空清单、捕获窗口与 gitlink 由 D-218 补正） | D-216 / D-218 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回） | D-216 / D-218 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-216 | implementation（Host session binding 区分 owning/execution；物化 Git 用 --detach 或独立 init，并记录会写 `.git/worktrees`） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-217 | implementation（物化后重读 execution view；writeRevision 标签；持久切换 journal；嵌套虚拟写走同一 gate；树不变量与 virtual semantic pin） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-218 | implementation（Git inventory 失败必抛；捕获窗口 fingerprint + 活跃 writer；gitlink/unsupported 拒绝；新虚拟文件补真实 mode；apply/补偿 sameState；失败清理未绑定 branch） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

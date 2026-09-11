@@ -149,6 +149,15 @@ describe("materializer", () => {
     expect(await fs.promises.readFile(blocked, "utf8")).toBe("stale");
   });
 
+  it("refuses to skip an unsupported path during materialization", async () => {
+    await expect(materializeWorkingState({
+      targetDir: tempDir,
+      states: { "device": { kind: "unsupported" } },
+      readContent: async () => null,
+    })).rejects.toThrow(/Cannot materialize unsupported path: device/);
+    expect(fs.existsSync(path.join(tempDir, "device"))).toBe(false);
+  });
+
   it("materializes symlinks if supported by platform", async () => {
     const states: Record<string, RecoveryState> = {
       "target.txt": {

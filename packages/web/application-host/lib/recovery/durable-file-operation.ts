@@ -1,5 +1,5 @@
 import type { RecoveryFileStore, RecoveryIdentity, RecoveryState } from "./journal-files.js";
-import { matchesClaimedState, parseRecoveryState, sameState } from "./journal-files.js";
+import { parseRecoveryState, sameState } from "./journal-files.js";
 import type { OperationFileRow, OperationRow, SqliteDatabase } from "./journal-catalog.js";
 import { initOperationFiles, operationFileRows, updateOperationFilePhase, writeOperationRow } from "./journal-catalog.js";
 import { assertIntegrationTurnBinding, bindIntegrationOperationToTurn } from "./integration-turn-binding.js";
@@ -156,7 +156,7 @@ const compensate = async (
     const safety = data.safety[row.path] ?? stateFromJson(row.safety_json, `${row.path} safety`);
     await runPathOperation(context, row.path, "subtree", async () => {
       const current = (await capture(context, row.path, false)).state;
-      if (!matchesClaimedState(current, target)) {
+      if (!sameState(current, target)) {
         updateOperationFilePhase(context.database, data.operationId, row.path, "needs-attention");
         data.needsAttentionPaths.push(row.path);
         return;
@@ -262,7 +262,7 @@ export const applyDurableFileOperation = async (
       await runPathOperation(context, file, "subtree", async () => {
         const current = (await capture(context, file, false)).state;
         if (sameState(current, safety[file]!)) return;
-        if (!matchesClaimedState(current, states.target)) {
+        if (!sameState(current, states.target)) {
           data.needsAttentionPaths.push(file);
           try { updateOperationFilePhase(context.database, spec.id, file, "needs-attention"); } catch { /* The API still reports failure; disk remains untouched. */ }
           return;
@@ -293,7 +293,7 @@ export const applyDurableFileOperation = async (
         if (!sameState(current, safety[file]!)) throw new Error(`Parent workspace changed during integration: ${file}`);
         await context.fileStore.applyState(context.identity, context.root, file, states.target);
         const observed = (await capture(context, file, false)).state;
-        if (!matchesClaimedState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
+        if (!sameState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
         updateOperationFilePhase(context.database, spec.id, file, "target-observed");
         data.appliedPaths.push(file);
       });
@@ -752,17 +752,17 @@ export const reconcileInterruptedIntegrationOperations = async (
       const safety = data.safety[fileRow.path] ?? stateFromJson(fileRow.safety_json, `${fileRow.path} safety`);
       const current = (await capture(context, fileRow.path, false)).state;
       if (fileRow.phase === "apply-intent") {
-        if (matchesClaimedState(current, target)) updateOperationFilePhase(context.database, row.id, fileRow.path, "target-observed");
+        if (sameState(current, target)) updateOperationFilePhase(context.database, row.id, fileRow.path, "target-observed");
         else if (!sameState(current, safety)) {
           updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
           unknown = true;
         }
-      } else if (fileRow.phase === "target-observed" && !matchesClaimedState(current, target)) {
+      } else if (fileRow.phase === "target-observed" && !sameState(current, target)) {
         updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
         unknown = true;
       } else if (fileRow.phase === "compensate-intent") {
         if (sameState(current, safety)) updateOperationFilePhase(context.database, row.id, fileRow.path, "safety-observed");
-        else if (!matchesClaimedState(current, target)) {
+        else if (!sameState(current, target)) {
           updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
           unknown = true;
         }

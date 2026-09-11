@@ -510,6 +510,180 @@ describe("thread runtime", () => {
     }
   });
 
+  it("does not create a complete branch when Git inventory fails or the parent writes during capture", async () => {
+    const workspace = join(dataDir, "baseline-honesty-workspace");
+    const recoveryRoot = join(dataDir, "baseline-honesty-recovery");
+    const scratch = join(dataDir, "baseline-honesty-scratch");
+    await fs.promises.mkdir(workspace, { recursive: true });
+    await fs.promises.mkdir(scratch, { recursive: true });
+    await fs.promises.writeFile(join(workspace, "kept.txt"), "dispatch-time\n");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("working-state database missing");
+    const storageContext: WorkspaceRecoveryStorageContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: WORKSPACE },
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      root: recoveryRoot,
+    };
+    const workingStates = {
+      withStore: async <T>(_workspaceId: string, _purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => (
+        operation(await DurableWorkingStateStore.open(storageContext), storageContext)
+      ),
+    };
+    const documents = createDocumentAuthority({
+      hostId: "host-1",
+      dataDir: join(dataDir, "baseline-honesty-documents"),
+      isAllowedRoot: async () => true,
+      isTrusted: async () => true,
+    });
+    const identity = await documents.resolveWorkspace({ path: workspace });
+    storageContext.identity.workspaceId = identity.workspaceId;
+    const inspectGit = vi.fn(async (): Promise<{
+      kind: "git";
+      baseRef: string;
+      unborn: boolean;
+      paths: string[];
+      gitlinks: string[];
+    }> => {
+      throw new Error("Permission denied");
+    });
+    const honestyRuntime = createThreadRuntime({
+      registry,
+      workingStates,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: async () => ({
+          cwd: scratch,
+          worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+        }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        inspectGitBaselineInventory: inspectGit,
+      },
+    });
+    try {
+      const input = { ...createInput(), workspaceId: identity.workspaceId };
+      const failedInventory = await registry.createThread(input);
+      await expect(honestyRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: failedInventory.id,
+      })).rejects.toThrow(/Permission denied/);
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-git-fail", async (store) => {
+        expect(store.getBranch(`thread-${failedInventory.id}`)).toBeNull();
+      });
+
+      inspectGit.mockReset();
+      inspectGit
+        .mockResolvedValueOnce({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt"], gitlinks: [] })
+        .mockResolvedValueOnce({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt", "late.txt"], gitlinks: [] });
+      const drifted = await registry.createThread({ ...input, brief: "Parent wrote during capture" });
+      await expect(honestyRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: drifted.id,
+      })).rejects.toMatchObject({
+        name: "ThreadRuntimeError",
+        code: "unavailable",
+        retryable: true,
+        message: expect.stringContaining("baseline-changed"),
+      });
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-drift", async (store) => {
+        expect(store.getBranch(`thread-${drifted.id}`)).toBeNull();
+      });
+
+      inspectGit.mockReset();
+      inspectGit.mockResolvedValue({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt"], gitlinks: ["vendor/lib"] });
+      const submodule = await registry.createThread({ ...input, brief: "Reject gitlinks" });
+      await expect(honestyRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: submodule.id,
+      })).rejects.toThrow(/Git submodule paths: vendor\/lib/);
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-gitlink", async (store) => {
+        expect(store.getBranch(`thread-${submodule.id}`)).toBeNull();
+      });
+
+      inspectGit.mockReset();
+      inspectGit.mockResolvedValue({ kind: "git", baseRef: "abc", unborn: false, paths: ["kept.txt"], gitlinks: [] });
+      const writerRuntime = createThreadRuntime({
+        registry,
+        workingStates,
+        inspectBaselineWriters: async () => [{ id: "writer-1", purpose: "documents-write" }],
+        resolveWorkspaceRoot: async () => workspace,
+        resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+        sessions: sessionAdapter,
+        worktrees: {
+          prepare: async () => ({
+            cwd: scratch,
+            worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+          }),
+          snapshot: async (worktree) => worktree,
+          inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+          merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+          inspectGitBaselineInventory: inspectGit,
+        },
+      });
+      const blocked = await registry.createThread({ ...input, brief: "Active writer" });
+      await expect(writerRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: blocked.id,
+      })).rejects.toMatchObject({
+        retryable: true,
+        message: expect.stringContaining("baseline-changed"),
+      });
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-writer", async (store) => {
+        expect(store.getBranch(`thread-${blocked.id}`)).toBeNull();
+      });
+      await writerRuntime.dispose();
+
+      const persistScratch = join(dataDir, "baseline-honesty-persist-scratch");
+      await fs.promises.mkdir(persistScratch, { recursive: true });
+      const persistRuntime = createThreadRuntime({
+        registry,
+        workingStates,
+        resolveWorkspaceRoot: async () => workspace,
+        resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+        sessions: sessionAdapter,
+        worktrees: {
+          prepare: async () => ({
+            cwd: persistScratch,
+            worktree: { path: persistScratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+          }),
+          snapshot: async (worktree) => worktree,
+          inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+          merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+          inspectGitBaselineInventory: inspectGit,
+        },
+      });
+      const originalSetWorkingState = registry.setWorkingState.bind(registry);
+      registry.setWorkingState = async () => {
+        throw new Error("catalog persist failed");
+      };
+      const orphaned = await registry.createThread({ ...input, brief: "Persist failed after createBranch" });
+      await expect(persistRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: orphaned.id,
+      })).rejects.toThrow(/catalog persist failed/);
+      await workingStates.withStore(identity.workspaceId, "assert-orphan-branch-deleted", async (store) => {
+        expect(store.getBranch(`thread-${orphaned.id}`)).toBeNull();
+      });
+      expect(await fs.promises.stat(persistScratch).then(() => true, () => false)).toBe(false);
+      registry.setWorkingState = originalSetWorkingState;
+      await persistRuntime.dispose();
+    } finally {
+      await honestyRuntime.dispose();
+      await documents.dispose();
+      database.close();
+    }
+  });
+
   it("keeps missing parent block storage explicit without blocking the child", async () => {
     blocksBySession.set("parent-1", null);
     await start();

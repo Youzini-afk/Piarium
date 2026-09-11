@@ -1435,7 +1435,9 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 隔离 dispatch 在创建 Thread 之后、返回之前（含 queued）固定非草稿磁盘基线并创建 WorkingBranch revision 0（D-214）。
 Git 工作区固定 HEAD/tree 身份，并捕获 staged、unstaged、tracked mode、已删除与非忽略 untracked 的工作目录字节；
 ignored 默认不进，显式 `copyIgnored`/`captureScopes` 必须进入。非 Git 与 unborn 在同一边界做一次可取消、有进度的目录捕获。
+Git 命令失败、捕获窗口内父写入、活跃 Documents writer，或 gitlink/unsupported，都不得生成完整分支（D-218）。
 捕获失败或取消删除该 Thread，不留下宣称完整的分支。父之后的新增、修改、删除、checkout 或提交不能改变子基线。
+新虚拟 regular-file 在形成结果前写入工作区真实默认 mode；apply 与条件补偿按全字段 `sameState` 比较。
 同名 `read` / `grep` / `find` / `ls` / `explore` 经 Host 分支视图读取该 base 加 delta/tombstone，provenance 标明
 branch/base/delta；父 live 目录与 scratch/worktree 磁盘不能补读未改路径。隔离 Run 从虚拟 scratch 启动；同名
 `edit` / `write` / `apply_patch` 把文本变更提交到同一 WorkingState delta，不写父目录（D-213 / D-217）。只有 `bash` 或

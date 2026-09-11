@@ -9,7 +9,13 @@ import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
-import { parseGitNullList } from "./working-state/workspace-baseline.js";
+import {
+  isNotGitRepositoryError,
+  isUnbornHeadError,
+  parseGitNullList,
+  parseGitStageList,
+  type BaselineInventory,
+} from "./working-state/workspace-baseline.js";
 
 export interface ThreadWorktreeCreateResult {
   path: string;
@@ -592,41 +598,58 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   const inspectGitBaselineInventory = async (
     directory: string,
     signal?: AbortSignal,
-  ): Promise<{ kind: "git"; baseRef: string; paths: string[] } | { kind: "directory" }> => {
+  ): Promise<BaselineInventory> => {
     if (signal?.aborted) throw abortError();
+    let inside: string;
     try {
-      const inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
-      if (inside !== "true") return { kind: "directory" };
-    } catch {
-      return { kind: "directory" };
+      inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
+    } catch (error) {
+      if (isNotGitRepositoryError(error)) return { kind: "directory" };
+      throw error;
     }
+    if (inside !== "true") return { kind: "directory" };
     let baseRef = "zero-commit";
+    let unborn = false;
     try {
+      if (signal?.aborted) throw abortError();
       const head = (await runGit(directory, ["rev-parse", "HEAD"])).stdout.trim();
       if (head && head !== "HEAD") baseRef = head;
-    } catch {
+    } catch (error) {
+      if (!isUnbornHeadError(error)) throw error;
+      unborn = true;
       baseRef = "zero-commit";
     }
-    const collect = async (args: string[]): Promise<string[]> => {
+    const collect = async (args: string[]): Promise<string> => {
       if (signal?.aborted) throw abortError();
-      try {
-        return parseGitNullList((await runGit(directory, args)).stdout);
-      } catch {
-        return [];
-      }
+      return (await runGit(directory, args)).stdout;
     };
-    const [tracked, deleted, untracked, unstaged, staged, versusHead] = await Promise.all([
+    const [tracked, deleted, untracked, unstaged, staged, stagedMeta] = await Promise.all([
       collect(["ls-files", "-z"]),
       collect(["ls-files", "-d", "-z"]),
       collect(["ls-files", "--others", "--exclude-standard", "-z"]),
       collect(["diff", "--name-only", "-z"]),
       collect(["diff", "--cached", "--name-only", "-z"]),
-      collect(["diff", "--name-only", "-z", "HEAD"]),
+      collect(["ls-files", "-s", "-z"]),
     ]);
+    const versusHead = unborn ? [] : parseGitNullList(await collect(["diff", "--name-only", "-z", "HEAD"]));
+    const gitlinks = [...new Set(
+      parseGitStageList(stagedMeta)
+        .filter((entry) => entry.mode === "160000")
+        .map((entry) => entry.path),
+    )].sort();
     return {
       kind: "git",
       baseRef,
-      paths: [...new Set([...tracked, ...deleted, ...untracked, ...unstaged, ...staged, ...versusHead])].sort(),
+      unborn,
+      paths: [...new Set([
+        ...parseGitNullList(tracked),
+        ...parseGitNullList(deleted),
+        ...parseGitNullList(untracked),
+        ...parseGitNullList(unstaged),
+        ...parseGitNullList(staged),
+        ...versusHead,
+      ])].sort(),
+      gitlinks,
     };
   };
 

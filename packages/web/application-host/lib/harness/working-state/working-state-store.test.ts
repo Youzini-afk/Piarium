@@ -369,6 +369,10 @@ describe("WorkingStateStore", () => {
         "kept.txt": { kind: "missing" },
       })).toEqual({ status: "committed", writeRevision: 2 });
       expect(h.store.pathOrigin("thread-1", "src/new.ts")).toBe("delta");
+      expect(h.store.effectiveState("thread-1")!["src/new.ts"]).toMatchObject({
+        kind: "regular-file",
+        mode: expect.any(Number),
+      });
       expect(h.store.effectiveState("thread-1")!["kept.txt"]).toEqual({ kind: "missing" });
       expect(await fs.promises.readFile(path.join(h.workspace, "kept.txt"), "utf8")).toBe("base\n");
       const published = await h.store.publishHeadResult("thread-1");

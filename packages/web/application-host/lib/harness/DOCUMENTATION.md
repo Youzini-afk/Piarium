@@ -125,7 +125,9 @@ The registry persists one versioned atomic catalog per workspace. `Thread` is
 durable work; `ThreadRun` is one execution attempt, and
 `ThreadLaunchManifest` freezes model-adjacent launch inputs. Isolated `dispatch`
 creates the Thread, then captures the disk baseline and WorkingBranch before it
-returns — including queued threads. Capture failure or cancellation deletes the
+returns — including queued threads. Git inventory failures, capture-window parent
+writes, active Documents writers, and gitlinks fail the dispatch instead of
+inventing a complete branch. Capture failure or cancellation deletes the
 Thread. `dispatch` then commits a `starting` Run and returns immediately. The
 runtime later opens a real persisted Pi child session with the role's
 active-tool allowlist, and projects broker events into
@@ -289,8 +291,17 @@ worktree facts before the registry commits the terminal Run and report together.
 An isolated child fixes its execution baseline when dispatch creates the
 WorkingBranch, not when the Pi session later starts. Git inventories HEAD plus
 staged, unstaged, tracked, deleted, and non-ignored untracked paths and stores
-workdir bytes; non-Git and unborn repositories do one cancellable directory
-scan. Spawn recaptures only when no `workBranchId` exists. The child stays on a
+workdir bytes; a command failure is a failed capture, not an empty inventory.
+Unborn HEAD is `baseRef: "zero-commit"` and does not run `diff HEAD`. Gitlinks
+are listed and rejected rather than captured as empty directories. The Host
+fingerprints the inventory or directory path list before and after capture and
+refuses a complete branch when the parent changed or an active Documents writer
+is present (`baseline-changed`, retryable). Unsupported states cannot be
+silently skipped during materialization. New virtual regular files receive the
+workspace's real default mode before a result is formed, so apply and
+compensation compare full `sameState` identities. Failed prepare deletes an
+unbound branch and scratch without touching a still-attached draft baseline.
+Spawn recaptures only when no `workBranchId` exists. The child stays on a
 virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
 which commits text into the unpublished WorkingState delta with `writeRevision` CAS
 and never writes the parent directory. Directory, binary, symlink, and unsupported

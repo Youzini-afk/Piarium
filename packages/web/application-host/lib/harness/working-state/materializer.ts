@@ -163,6 +163,8 @@ export async function materializeWorkingState(
       await fsPromises.rm(absPath, { recursive: true, force: true }).catch(() => {});
       await fsPromises.symlink(state.symlinkTarget, absPath);
       materializedPaths.push(relPath);
+    } else {
+      throw new Error(`Cannot materialize unsupported path: ${relPath}`);
     }
   }
 
