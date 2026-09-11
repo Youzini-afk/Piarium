@@ -198,6 +198,8 @@ export function createExploreSearchService(
             search: (question: string, limit?: number, signal?: AbortSignal) => (
               host.semanticRecall!(workspaceId, question, limit ?? DEFAULT_SEMANTIC_RECALL, {
                 signal: signal ?? ctx.signal,
+                sessionId: ctx.sessionId,
+                inputContext,
                 ...(effectiveParams.paths ? { roots: effectiveParams.paths } : {}),
               })
             ),

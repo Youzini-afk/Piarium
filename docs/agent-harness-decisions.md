@@ -4360,6 +4360,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Documents 分配不同 workspaceId 的公开 nested dispatch、Zone 2 / wait / lost resume 与子 Git 不改父状态有定向生产证据。虚拟写入/修订、dispatch 基线诚实和嵌套集成/权限仍待本轮后续阶段。
 
+### D-217 · 2026-09-11 · 3.4 / 3.4a（虚拟写入、修订标签、物化切换恢复与树不变量）
+
+类型：问题与解法
+
+背景：D-213 把文本写入接到 WorkingState，但 `VirtualWriteGate` 在物化 `switching` 之后直接返回 `disk`，失败时仍可能把后续 write 打到非权威 scratch。物化 rename 没有持久阶段，崩溃会留下半切换目录；调用方 abort 也未传到切换。嵌套 merge 直接 `commitVirtualWrites`，不走写 gate，也不更新父 Run 的 `writeRevision`。`effectiveState(branchId, writeRevision)` 去查已发布 result，虚拟写入后 `headRevision` 仍为 0，read/grep/explore 会用错修订标签。symlink 被跟随后当文件改写；环、非法 UTF-8、regular-file 祖先下建子路径会留下错误 delta。公开 explore semantic 未把虚拟 Run 的 WorkingState 钉进 `threadDocuments`。
+
+决定：
+
+1. 文本写入与改父虚拟分支的入口（含 nested integration）走同一 `VirtualWriteGate`。`switching` 结束后重读 execution view：已物化才返回 disk；仍是 virtual 则再写一次 WorkingState。禁止写非权威 scratch。成功后更新活跃父 Run 的 `writeRevision`。
+2. 物化绑定确定的 `writeRevision`，并把 `ThreadWorktree.materializationSwitch` 记到 catalog（不涨 schema 版本）。阶段为 `staging-ready` / `live-backed-up` / `staging-promoted`。调用方 abort 能回滚就回滚到 virtual，超时后不得在后台完成切换。重启按 journal 恢复到一个权威视图：未 promote 回 virtual，已 promote 完成 materialized。
+3. 读 live deltas 调用 `effectiveState(branchId)`，不用 `writeRevision` 去查 published result。返回的 revision 标签等于实际读取的 `writeRevision`。一次 explore/semantic 查询开始时冻结该视图。
+4. 文本 edit/write/delete 不跟随、不改写 symlink；symlink 环、fatal UTF-8、regular-file/symlink/unsupported 祖先下建子路径、同批 file/directory 祖先冲突一律拒绝且不写 delta。
+
+影响：protocol `ThreadWorktree.materializationSwitch`；Host writes/gate/runtime/integration/explore semantic、branch-view；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；定向生产链覆盖失败物化并发写、孙 merge 后再写再物化、树拒绝、修订标签、semantic pin 与崩溃/abort 恢复。dispatch 基线诚实与嵌套权限/级联终止仍待本轮后续阶段。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4577,7 +4594,8 @@ ModelRuntime 纵切继续通过。
 | D-210 | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 |
 | D-211 | implementation（知识完整 CAS、原子历史去重、Host 固定提议 scope/source、UI 请求代际、auto-accept 消费） | — | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 |
 | D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化；owning/execution 身份由 D-216 拆开） | D-213 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init） | D-214 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-214 | superseded in part（dispatch 创建分支时固定 Git/非 Git 磁盘基线保留；catalog 查找不得再用 execution workspaceId） | D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution） | D-216 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-216 | implementation（Host session binding 区分 owning/execution；物化 Git 用 --detach 或独立 init，并记录会写 `.git/worktrees`） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-217 | implementation（物化后重读 execution view；writeRevision 标签；持久切换 journal；嵌套虚拟写走同一 gate；树不变量与 virtual semantic pin） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

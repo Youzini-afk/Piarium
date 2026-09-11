@@ -81,6 +81,17 @@ export interface ThreadWorktree {
    */
   viewMode?: "virtual" | "materialized";
   /**
+   * Durable directory switch journal for a frozen `writeRevision`.
+   * Restart recovers to one authoritative view; it must not leave a half-switched
+   * live path. Caller abort rolls the switch back to virtual.
+   */
+  materializationSwitch?: {
+    writeRevision: number;
+    stagingPath: string;
+    backupPath: string;
+    stage: "staging-ready" | "live-backed-up" | "staging-promoted";
+  };
+  /**
    * Durable progress through directory reconstruction and environment setup.
    * `materializing` may have a partial managed directory on disk; it is never
    * safe to open until the state advances to `setup` or `ready`.

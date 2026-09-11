@@ -45,7 +45,7 @@ export { createExploreSearchService } from "./explore-service.js";
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
-      const materializeError = await requireMaterializedDirectory(host, ctx.sessionId);
+      const materializeError = await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
       if (materializeError) {
         return {
           kind: "spawn-failed",
@@ -377,7 +377,7 @@ export function createWorkingBranchEnsureMaterializedService(
         throw new HarnessServiceError("unavailable", "Working-branch materialization is unavailable.");
       }
       ctx.signal.throwIfAborted();
-      return host.workingBranchEnsureMaterialized(ctx.sessionId);
+      return host.workingBranchEnsureMaterialized(ctx.sessionId, ctx.signal);
     },
   };
 }
@@ -385,9 +385,10 @@ export function createWorkingBranchEnsureMaterializedService(
 async function requireMaterializedDirectory(
   host: Pick<HarnessServiceHost, "workingBranchEnsureMaterialized">,
   sessionId: string,
+  signal?: AbortSignal,
 ): Promise<string | null> {
   if (!host.workingBranchEnsureMaterialized) return null;
-  const result = await host.workingBranchEnsureMaterialized(sessionId);
+  const result = await host.workingBranchEnsureMaterialized(sessionId, signal);
   return result.status === "failed" ? result.message : null;
 }
 
@@ -725,7 +726,7 @@ export function registerHarnessServices(
       service: import("./router.js").HarnessService<M>,
     ): import("./router.js").HarnessService<M> => ({
       handle: async (params, ctx) => {
-        const materializeError = await requireMaterializedDirectory(host, ctx.sessionId);
+        const materializeError = await requireMaterializedDirectory(host, ctx.sessionId, ctx.signal);
         if (materializeError) throw new HarnessServiceError("unavailable", materializeError);
         return service.handle(params, ctx);
       },

@@ -1,6 +1,7 @@
 import type { WorkingBranchPathOrigin } from "@piarium/protocol";
 import type { RecoveryState } from "./types.js";
 import type { WorkingStateStore } from "./working-state-store.js";
+import { liveViewRevision } from "./virtual-write-tree.js";
 
 export interface BranchViewEntry {
   path: string;
@@ -35,12 +36,23 @@ const normalizeRelative = (value: string): string => {
 const isTextBytes = (bytes: Buffer): boolean => {
   if (bytes.includes(0)) return false;
   try {
-    bytes.toString("utf8");
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
     return true;
   } catch {
     return false;
   }
 };
+
+const liveStates = (
+  store: Pick<WorkingStateStore, "effectiveState" | "getBranch">,
+  branchId: string,
+  revision: number | undefined,
+  live: number,
+): Record<string, RecoveryState> | null => (
+  revision === undefined || revision === live || revision === 0
+    ? store.effectiveState(branchId)
+    : store.effectiveState(branchId, revision)
+);
 
 const descendantOf = (file: string, root: string): boolean => (
   !root || file === root || file.startsWith(`${root}/`)
@@ -121,9 +133,12 @@ export function resolveBranchPath(
   file: string,
   revision?: number,
 ): ResolvedBranchPath | null {
-  const states = store.effectiveState(branchId, revision);
   const branch = store.getBranch(branchId);
-  if (!states || !branch) return null;
+  if (!branch) return null;
+  const live = liveViewRevision(branch);
+  const requested = revision ?? live;
+  const states = liveStates(store, branchId, revision, live);
+  if (!states) return null;
   const path = normalizeRelative(file);
   const origin = store.pathOrigin(branchId, path)
     ?? (branch.draftBasePaths.includes(path) ? "draft-base" : "base");
@@ -132,7 +147,7 @@ export function resolveBranchPath(
       path,
       state: { kind: "missing" },
       origin,
-      revision: branchViewRevision(branchId, revision ?? branch.headRevision, origin),
+      revision: branchViewRevision(branchId, requested, origin),
     };
   }
   const state = states[path] ?? (path === "" ? { kind: "directory" as const } : { kind: "missing" as const });
@@ -140,7 +155,7 @@ export function resolveBranchPath(
     path,
     state,
     origin,
-    revision: branchViewRevision(branchId, revision ?? branch.headRevision, origin),
+    revision: branchViewRevision(branchId, requested, origin),
   };
 }
 
@@ -149,6 +164,7 @@ export async function readBranchFile(
   branchId: string,
   file: string,
   revision?: number,
+  options?: { followSymlinks?: boolean; seen?: ReadonlySet<string> },
 ): Promise<BranchViewFile | { missing: true; path: string; revision: string; origin: WorkingBranchPathOrigin } | { unavailable: string }> {
   const resolved = resolveBranchPath(store, branchId, file, revision);
   if (!resolved) return { unavailable: `Working branch ${branchId} is unavailable` };
@@ -162,13 +178,21 @@ export async function readBranchFile(
     return { unavailable: `${resolved.path} is not a readable file in this branch` };
   }
   if (resolved.state.kind === "symlink") {
+    if (options?.followSymlinks === false) {
+      return { unavailable: `${resolved.path} is a symlink and cannot be read as text` };
+    }
+    const seen = new Set(options?.seen);
+    if (seen.has(resolved.path)) {
+      return { unavailable: `${resolved.path} is a symlink cycle` };
+    }
+    seen.add(resolved.path);
     const target = resolved.state.symlinkTarget;
     if (!target || target.startsWith("/") || /^[A-Za-z]:/.test(target) || target.includes("..")) {
       return { unavailable: `${resolved.path} is a symlink that cannot be resolved inside the branch view` };
     }
     const parent = resolved.path.includes("/") ? resolved.path.slice(0, resolved.path.lastIndexOf("/")) : "";
     const joined = parent ? `${parent}/${target}` : target;
-    return readBranchFile(store, branchId, joined, revision);
+    return readBranchFile(store, branchId, joined, revision, { followSymlinks: true, seen });
   }
   const bytes = await store.getObject(resolved.state.objectHash);
   if (!bytes) return { unavailable: `Working-state object is missing for ${resolved.path}` };
@@ -186,9 +210,12 @@ export async function listBranchTextFiles(
   prefixes: readonly string[],
   revision?: number,
 ): Promise<Array<BranchViewFile & { text: string }>> {
-  const states = store.effectiveState(branchId, revision);
   const branch = store.getBranch(branchId);
-  if (!states || !branch) return [];
+  if (!branch) return [];
+  const live = liveViewRevision(branch);
+  const requested = revision ?? live;
+  const states = liveStates(store, branchId, revision, live);
+  if (!states) return [];
   const roots = prefixes.length > 0 ? prefixes.map(normalizeRelative) : [""];
   const files: Array<BranchViewFile & { text: string }> = [];
   for (const [file, state] of Object.entries(states)) {
@@ -202,7 +229,7 @@ export async function listBranchTextFiles(
       bytes,
       text: bytes.toString("utf8"),
       origin,
-      revision: branchViewRevision(branchId, revision ?? branch.headRevision, origin),
+      revision: branchViewRevision(branchId, requested, origin),
     });
   }
   return files.sort((left, right) => left.path.localeCompare(right.path));

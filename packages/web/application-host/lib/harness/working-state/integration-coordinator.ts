@@ -81,6 +81,14 @@ export interface IntegrationCoordinatorOptions {
     request: DocumentSurfaceOperationRequest,
     options?: { signal?: AbortSignal },
   ) => Promise<DocumentSurfaceOperationResult[]>;
+  commitParentVirtualWrites?: (input: {
+    workspaceId: string;
+    branchId: string;
+    files: Record<string, RecoveryState>;
+    expectedWriteRevision: number;
+    store: WorkingStateStore;
+    sessionId?: string;
+  }) => Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
 }
 
 export interface IntegrationPlanInput {
@@ -97,7 +105,7 @@ export interface IntegrationPlanInput {
   /** Where the parent writable view lives when this Thread is nested. */
   parentAuthority?:
     | { kind: "workspace" }
-    | { kind: "branch"; branchId: string }
+    | { kind: "branch"; branchId: string; sessionId?: string }
     | { kind: "directory"; directory: string };
 }
 
@@ -289,6 +297,7 @@ export class IntegrationCoordinator {
   private readonly inspectDirtyBuffers?: IntegrationCoordinatorOptions["inspectDirtyBuffers"];
   private readonly beginDirtyStateBarrier?: IntegrationCoordinatorOptions["beginDirtyStateBarrier"];
   private readonly requestSurfaceOperation?: IntegrationCoordinatorOptions["requestSurfaceOperation"];
+  private readonly commitParentVirtualWrites?: IntegrationCoordinatorOptions["commitParentVirtualWrites"];
   private readonly previewByThread = new Map<string, { workspaceId: string; preview: ThreadIntegrationPreview }>();
 
   constructor(options: IntegrationCoordinatorOptions) {
@@ -296,6 +305,7 @@ export class IntegrationCoordinator {
     this.inspectDirtyBuffers = options.inspectDirtyBuffers;
     this.beginDirtyStateBarrier = options.beginDirtyStateBarrier;
     this.requestSurfaceOperation = options.requestSurfaceOperation;
+    this.commitParentVirtualWrites = options.commitParentVirtualWrites;
   }
 
   private previewKey(workspaceId: string, threadId: string): string {
@@ -431,11 +441,17 @@ export class IntegrationCoordinator {
         if (planned.plan.conflictPaths.length === 0 && planned.preview.unavailablePaths.length === 0) {
           const parentBranch = store.getBranch(parentAuthority.branchId);
           if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
-          const committed = await store.commitVirtualWrites(
-            parentAuthority.branchId,
-            parentBranch.writeRevision ?? 0,
-            writes,
-          );
+          const expectedWriteRevision = parentBranch.writeRevision ?? 0;
+          const committed = this.commitParentVirtualWrites
+            ? await this.commitParentVirtualWrites({
+              workspaceId: input.workspaceId,
+              branchId: parentAuthority.branchId,
+              files: writes,
+              expectedWriteRevision,
+              store,
+              ...(parentAuthority.sessionId ? { sessionId: parentAuthority.sessionId } : {}),
+            })
+            : await store.commitVirtualWrites(parentAuthority.branchId, expectedWriteRevision, writes);
           if (committed.status === "conflict") {
             throw new Error("Parent branch revision changed during nested merge");
           }

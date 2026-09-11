@@ -295,12 +295,15 @@ virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `ap
 which commits text into the unpublished WorkingState delta with `writeRevision` CAS
 and never writes the parent directory. Directory, binary, symlink, and unsupported
 states are rejected. The first `bash` or LSP navigation tool asks
-`workingBranch.ensureMaterialized`: the Host freezes the current revision, waits for
-in-flight virtual writes, materializes into a staging directory, then atomically
-replaces the scratch. A Git parent then receives an isolated context via
+`workingBranch.ensureMaterialized`: the Host freezes the current `writeRevision`, waits for
+in-flight virtual writes, materializes into a staging directory, journals
+`materializationSwitch`, then atomically replaces the scratch. Callers that arrive
+during the switch re-read the execution view: materialized returns disk, a still-virtual
+branch accepts another WorkingState write. A Git parent then receives an isolated context via
 `git worktree add --detach` (this writes `.git/worktrees` and does not create a
 user-visible branch) or `git init` when HEAD is unborn or the directory would
-otherwise inherit another worktree. Failure deletes staging and keeps the virtual branch readable.
+otherwise inherit another worktree. Failure or caller abort rolls back to the virtual
+branch; restart recovers one authoritative view from the journal.
 Settlement publishes `publishHeadResult` while virtual, or inspects the directory and
 publishes that fold after the switch. Git commits and immutable copy snapshots remain
 migration/reconstruction sources. Merge reads the selected native revision, never the

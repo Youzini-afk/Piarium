@@ -41,6 +41,12 @@ import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import type { VirtualWriteGate } from "./working-state/virtual-write-gate.js";
+import {
+  recoverMaterializationSwitch,
+  removeOrphanMaterializationDirs,
+  rollbackMaterializationSwitch,
+  type MaterializationSwitchJournal,
+} from "./working-state/materialization-switch.js";
 import { encodeDocumentText } from "../documents/inspect.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
@@ -362,6 +368,82 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const stalledThreads = new Set<string>();
   const waitingSessions = new Set<string>();
   const abortController = new AbortController();
+  const mergeSignals = (left: AbortSignal, right?: AbortSignal): AbortSignal => {
+    if (!right) return left;
+    const any = (AbortSignal as unknown as { any?: (signals: AbortSignal[]) => AbortSignal }).any;
+    if (typeof any === "function") return any.call(AbortSignal, [left, right]);
+    const merged = new AbortController();
+    const abort = (): void => merged.abort();
+    if (left.aborted || right.aborted) {
+      merged.abort();
+      return merged.signal;
+    }
+    left.addEventListener("abort", abort, { once: true });
+    right.addEventListener("abort", abort, { once: true });
+    return merged.signal;
+  };
+
+  const clearSwitchJournal = (worktree: NonNullable<Thread["worktree"]>): NonNullable<Thread["worktree"]> => {
+    const next = { ...worktree };
+    delete next.materializationSwitch;
+    return next;
+  };
+
+  const persistWorktree = async (
+    workspaceId: string,
+    threadId: string,
+    worktree: NonNullable<Thread["worktree"]>,
+  ): Promise<void> => {
+    await options.registry.setWorktree(workspaceId, threadId, worktree);
+  };
+
+  const recoverPersistedSwitch = async (input: {
+    workspaceId: string;
+    threadId: string;
+    worktree: NonNullable<Thread["worktree"]>;
+    sourceRoot: string;
+    signal: AbortSignal;
+    intent: "abort" | "restart";
+  }): Promise<NonNullable<Thread["worktree"]>> => {
+    const journal = input.worktree.materializationSwitch;
+    if (!journal) {
+      await removeOrphanMaterializationDirs(input.worktree.path);
+      return input.worktree;
+    }
+    const outcome = await recoverMaterializationSwitch(input.worktree.path, journal, input.intent);
+    if (outcome === "materialized") {
+      if (options.worktrees.attachIsolatedGitContext) {
+        try {
+          input.signal.throwIfAborted();
+          await options.worktrees.attachIsolatedGitContext(
+            input.sourceRoot,
+            input.worktree.path,
+            input.worktree.base,
+            input.signal,
+          );
+        } catch (error) {
+          await rollbackMaterializationSwitch(input.worktree.path, journal);
+          const rolled = clearSwitchJournal(input.worktree);
+          await persistWorktree(input.workspaceId, input.threadId, rolled);
+          throw error;
+        }
+      }
+      const completed = {
+        ...clearSwitchJournal(input.worktree),
+        viewMode: "materialized" as const,
+        materialized: true,
+        preparationStage: input.worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+      };
+      delete completed.materializationFingerprint;
+      await persistWorktree(input.workspaceId, input.threadId, completed);
+      await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
+      await removeOrphanMaterializationDirs(completed.path);
+      return completed;
+    }
+    const rolled = clearSwitchJournal(input.worktree);
+    await persistWorktree(input.workspaceId, input.threadId, rolled);
+    return rolled;
+  };
   interface PreparationTask {
     controller: AbortController;
     promise: Promise<unknown>;
@@ -546,6 +628,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.executionViews || !options.workingStates) return;
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread?.workBranchId) return;
+    let worktree = thread.worktree;
+    if (worktree?.materializationSwitch) {
+      const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+      worktree = await recoverPersistedSwitch({
+        workspaceId: input.workspaceId,
+        threadId: input.threadId,
+        worktree,
+        sourceRoot,
+        signal: abortController.signal,
+        intent: "restart",
+      });
+    }
     const bound = await options.workingStates.withStore(
       input.workspaceId,
       "working-branch-view-bind",
@@ -566,7 +660,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       branchId: thread.workBranchId,
       revision: thread.resultRevision ?? 0,
       writeRevision: bound.writeRevision,
-      mode: isVirtualWorktree(thread.worktree) ? "virtual" : "materialized",
+      mode: isVirtualWorktree(worktree) ? "virtual" : "materialized",
       draftBasePaths: bound.draftBasePaths,
     });
   };
@@ -2511,11 +2605,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
     let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
-    let parentAuthority: { kind: "branch"; branchId: string } | { kind: "directory"; directory: string } | undefined;
+    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string } | undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
       if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
-        parentAuthority = { kind: "branch", branchId: owner.workBranchId };
+        parentAuthority = {
+          kind: "branch",
+          branchId: owner.workBranchId,
+          ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
+        };
       } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
         parentRoot = owner.worktree.path;
         parentAuthority = { kind: "directory", directory: owner.worktree.path };
@@ -2652,11 +2751,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!coordinator || !branchId || resultRevision === undefined) {
       throw new Error("Thread has no published native result to preview");
     }
-    let parentAuthority: { kind: "branch"; branchId: string } | { kind: "directory"; directory: string } | undefined;
+    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string } | undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
       if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
-        parentAuthority = { kind: "branch", branchId: owner.workBranchId };
+        parentAuthority = {
+          kind: "branch",
+          branchId: owner.workBranchId,
+          ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
+        };
       } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
         parentAuthority = { kind: "directory", directory: owner.worktree.path };
       }
@@ -2826,10 +2930,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       volume = null;
     }
     return projectWorkspaceSpace(workspaceId, occupancies, measurementFromHashes(unique), settings?.budget, volume);
-  };
-
-  const persistWorktree = async (workspaceId: string, threadId: string, worktree: NonNullable<Thread["worktree"]>): Promise<void> => {
-    await options.registry.setWorktree(workspaceId, threadId, worktree);
   };
 
   const tryReclaimDirectory = async (
@@ -3471,7 +3571,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
-  const materializeExecutionView = async (sessionId: string): Promise<WorkingBranchEnsureMaterializedResult> => {
+  const materializeExecutionView = async (
+    sessionId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkingBranchEnsureMaterializedResult> => {
     const view = options.executionViews?.get(sessionId);
     if (!view) return { status: "materialized", path: "" };
     if (view.mode === "materialized") {
@@ -3491,8 +3594,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       return { status: "failed", message: "Working-branch materialization did not complete" };
     }
+    const switchSignal = mergeSignals(abortController.signal, signal);
     let releaseReservation = async (): Promise<void> => undefined;
     let keepSpawnReservation = false;
+    let activeJournal: MaterializationSwitchJournal | undefined;
+    let livePath = "";
+    let callerAborted = false;
+    const markCallerAbort = (): void => {
+      callerAborted = true;
+    };
+    if (signal) {
+      if (signal.aborted) callerAborted = true;
+      else signal.addEventListener("abort", markCallerAbort, { once: true });
+    }
     try {
       const latest = options.executionViews?.get(sessionId);
       if (!latest || latest.mode === "materialized") {
@@ -3502,11 +3616,29 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         return { status: "materialized", path: current?.worktree?.path ?? "" };
       }
       const thread = await options.registry.getThreadForSession(latest.workspaceId, sessionId);
-      const worktree = thread?.worktree;
+      let worktree = thread?.worktree;
       if (!thread || !worktree?.path || !thread.workBranchId) {
         return { status: "failed", message: "Virtual run has no scratch directory to materialize" };
       }
+      livePath = worktree.path;
       const sourceRoot = await options.resolveWorkspaceRoot(latest.workspaceId);
+      if (worktree.materializationSwitch) {
+        worktree = await recoverPersistedSwitch({
+          workspaceId: latest.workspaceId,
+          threadId: latest.threadId,
+          worktree,
+          sourceRoot,
+          signal: switchSignal,
+          intent: callerAborted ? "abort" : "restart",
+        });
+        if (worktree.viewMode === "materialized") {
+          options.executionViews?.bind({ ...latest, mode: "materialized" });
+          return { status: "materialized", path: worktree.path };
+        }
+      } else {
+        await removeOrphanMaterializationDirs(worktree.path);
+      }
+      switchSignal.throwIfAborted();
       const settings = await resolveEffectiveWorktreeSettings(latest.workspaceId, thread.parent);
       const footprint = await options.workingStates.withStore(
         latest.workspaceId,
@@ -3548,71 +3680,93 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
       }
       const token = randomUUID();
-      const staging = `${worktree.path}.materializing-${token}`;
-      const backup = `${worktree.path}.virtual-backup-${token}`;
+      const journal: MaterializationSwitchJournal = {
+        writeRevision: latest.writeRevision,
+        stagingPath: `${worktree.path}.materializing-${token}`,
+        backupPath: `${worktree.path}.virtual-backup-${token}`,
+        stage: "staging-ready",
+      };
+      activeJournal = journal;
       await options.workingStates.withStore(latest.workspaceId, "working-branch-materialize", async (store) => {
         const states = store.effectiveState(latest.branchId);
         if (!states) throw new Error(`Working branch ${latest.branchId} is unavailable`);
-        await fs.promises.rm(staging, { recursive: true, force: true });
-        await store.materializeStates(states, staging);
+        await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
+        await store.materializeStates(states, journal.stagingPath);
       });
-      await fs.promises.rm(backup, { recursive: true, force: true });
-      let movedLive = false;
+      switchSignal.throwIfAborted();
+      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: journal });
+      switchSignal.throwIfAborted();
+      await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
       try {
-        await fs.promises.rename(worktree.path, backup);
-        movedLive = true;
+        await fs.promises.rename(worktree.path, journal.backupPath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          await fs.promises.rm(staging, { recursive: true, force: true });
           throw error;
         }
       }
-      try {
-        await fs.promises.rename(staging, worktree.path);
-      } catch (error) {
-        if (movedLive) await fs.promises.rename(backup, worktree.path).catch(() => undefined);
-        await fs.promises.rm(staging, { recursive: true, force: true });
-        throw error;
-      }
-      await fs.promises.rm(backup, { recursive: true, force: true });
+      journal.stage = "live-backed-up";
+      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
+      switchSignal.throwIfAborted();
+      await fs.promises.rename(journal.stagingPath, worktree.path);
+      journal.stage = "staging-promoted";
+      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
+      switchSignal.throwIfAborted();
       if (options.worktrees.attachIsolatedGitContext) {
         await options.worktrees.attachIsolatedGitContext(
           sourceRoot,
           worktree.path,
           worktree.base,
-          abortController.signal,
+          switchSignal,
         );
       }
+      switchSignal.throwIfAborted();
       const nextWorktree = {
-        ...worktree,
+        ...clearSwitchJournal(worktree),
         viewMode: "materialized" as const,
         materialized: true,
         preparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
       };
       delete nextWorktree.materializationFingerprint;
-      await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+      await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+      activeJournal = undefined;
       options.executionViews?.bind({ ...latest, mode: "materialized" });
+      await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
+      await removeOrphanMaterializationDirs(worktree.path);
       keepSpawnReservation = false;
       if (nextWorktree.preparationStage === "setup" && options.worktrees.runSetup && settings?.setup) {
         try {
-          await options.worktrees.runSetup(sourceRoot, nextWorktree, settings, abortController.signal);
+          switchSignal.throwIfAborted();
+          await options.worktrees.runSetup(sourceRoot, nextWorktree, settings, switchSignal);
           nextWorktree.preparationStage = "ready";
           delete nextWorktree.retentionReason;
-          await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+          await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
         } catch (setupErr) {
           const message = setupErr instanceof Error ? setupErr.message : String(setupErr);
           nextWorktree.retentionReason = message;
-          await options.registry.setWorktree(latest.workspaceId, latest.threadId, nextWorktree).catch(reportError);
+          await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree).catch(reportError);
           return { status: "failed", message };
         }
       }
       return { status: "materialized", path: worktree.path };
     } catch (error) {
+      if (activeJournal && livePath) {
+        await rollbackMaterializationSwitch(livePath, activeJournal).catch(reportError);
+        const latest = options.executionViews?.get(sessionId);
+        if (latest) {
+          const current = await options.registry.getThreadForSession(latest.workspaceId, sessionId).catch(() => null);
+          if (current?.worktree) {
+            await persistWorktree(latest.workspaceId, latest.threadId, clearSwitchJournal(current.worktree)).catch(reportError);
+          }
+        }
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      const aborted = callerAborted || switchSignal.aborted;
       return {
         status: "failed",
-        message: error instanceof Error ? error.message : String(error),
+        message: aborted ? `Working-branch materialization was cancelled: ${message}` : message,
       };
     } finally {
+      if (signal) signal.removeEventListener("abort", markCallerAbort);
       gate?.endSwitch(sessionId);
       if (!keepSpawnReservation) await releaseReservation();
     }

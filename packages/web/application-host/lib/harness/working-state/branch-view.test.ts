@@ -93,6 +93,25 @@ describe("WorkingState branch view", () => {
     }
   });
 
+  it("labels unpublished virtual writes with writeRevision instead of headRevision", async () => {
+    const h = await harness();
+    try {
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "thread-1", base);
+      const added = await h.store.putObject(Buffer.from("only virtual\n"));
+      await h.store.commitVirtualWrites("thread-1", 0, {
+        "added.ts": { kind: "regular-file", objectHash: added.hash, byteLength: added.byteLength },
+      });
+      expect(h.store.getBranch("thread-1")?.headRevision).toBe(0);
+      const file = await readBranchFile(h.store, "thread-1", "added.ts");
+      expect(file).toMatchObject({ revision: "working-branch:thread-1@1:delta" });
+      const texts = await listBranchTextFiles(h.store, "thread-1", [""]);
+      expect(texts.find((entry) => entry.path === "added.ts")?.revision).toBe("working-branch:thread-1@1:delta");
+    } finally {
+      h.database.close();
+    }
+  });
+
   it("hides descendants when a directory is tombstoned", async () => {
     const h = await harness();
     try {

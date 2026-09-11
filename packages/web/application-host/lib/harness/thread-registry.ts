@@ -236,6 +236,20 @@ const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparat
   "setup",
   "ready",
 ]);
+const MATERIALIZATION_SWITCH_STAGES = new Set<NonNullable<ThreadWorktree["materializationSwitch"]>["stage"]>([
+  "staging-ready",
+  "live-backed-up",
+  "staging-promoted",
+]);
+
+const isMaterializationSwitch = (value: unknown): value is NonNullable<ThreadWorktree["materializationSwitch"]> => (
+  isRecord(value)
+  && Number.isSafeInteger(value.writeRevision)
+  && Number(value.writeRevision) >= 0
+  && isString(value.stagingPath)
+  && isString(value.backupPath)
+  && MATERIALIZATION_SWITCH_STAGES.has(value.stage as NonNullable<ThreadWorktree["materializationSwitch"]>["stage"])
+);
 
 const isStringArray = (value: unknown): value is string[] => (
   Array.isArray(value) && value.every((entry) => typeof entry === "string")
@@ -452,6 +466,8 @@ const isThread = (value: unknown): value is Thread => {
       && (value.worktree.resultCommit === undefined || isString(value.worktree.resultCommit))
       && (value.worktree.resultPath === undefined || isString(value.worktree.resultPath))
       && (value.worktree.materialized === undefined || typeof value.worktree.materialized === "boolean")
+      && (value.worktree.viewMode === undefined || value.worktree.viewMode === "virtual" || value.worktree.viewMode === "materialized")
+      && (value.worktree.materializationSwitch === undefined || isMaterializationSwitch(value.worktree.materializationSwitch))
       && (value.worktree.preparationStage === undefined
         || WORKTREE_PREPARATION_STAGES.has(value.worktree.preparationStage as NonNullable<ThreadWorktree["preparationStage"]>))
       && (value.worktree.materializationFingerprint === undefined || isString(value.worktree.materializationFingerprint))

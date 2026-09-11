@@ -28,6 +28,15 @@ export class ThreadExecutionViewRegistry {
     return view ? { ...view, writeRevision: view.writeRevision, draftBasePaths: [...view.draftBasePaths] } : undefined;
   }
 
+  findByBranch(workspaceId: string, branchId: string): ThreadExecutionView | undefined {
+    for (const view of this.#bySession.values()) {
+      if (view.workspaceId === workspaceId && view.branchId === branchId) {
+        return { ...view, writeRevision: view.writeRevision, draftBasePaths: [...view.draftBasePaths] };
+      }
+    }
+    return undefined;
+  }
+
   unbind(sessionId: string): void {
     this.#bySession.delete(sessionId);
   }

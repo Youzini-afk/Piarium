@@ -83,6 +83,7 @@ import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
+import { listBranchTextFiles } from './lib/harness/working-state/branch-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
 import { VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
@@ -1311,6 +1312,23 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
     beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
     requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options),
+    commitParentVirtualWrites: async (input) => {
+      const sessionId = input.sessionId
+        ?? threadExecutionViews.findByBranch(input.workspaceId, input.branchId)?.sessionId;
+      if (sessionId) {
+        const result = await workingBranchWrites.commitBranchWrites(
+          sessionId,
+          input.files,
+          input.expectedWriteRevision,
+          input.store,
+        );
+        if (result.status === "committed") return result;
+        if (result.status === "conflict") return result;
+        if (result.status === "rejected") throw new Error(result.message);
+        throw new Error("Parent working branch is no longer virtual");
+      }
+      return input.store.commitVirtualWrites(input.branchId, input.expectedWriteRevision, input.files);
+    },
   });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
@@ -1991,11 +2009,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       changes,
       expectedRevision,
     ),
-    workingBranchEnsureMaterialized: (sessionId) => {
+    workingBranchEnsureMaterialized: (sessionId, signal) => {
       if (!threadRuntime) {
         return Promise.resolve({ status: "failed" as const, message: "Thread runtime is unavailable for materialization" });
       }
-      return threadRuntime.materializeExecutionView(sessionId);
+      return threadRuntime.materializeExecutionView(sessionId, signal);
     },
     commitAgentInputContext: (sessionId, context) => documentsAuthority.commitAgentInputSnapshot(sessionId, context),
     releaseAgentInputContext: (sessionId, context) => documentsAuthority.releaseAgentInputSnapshot(sessionId, context),
@@ -2051,14 +2069,33 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // own Documents workspace. Query that live scope directly. Treating the
       // parent's WorkingState object table as an overlay both misses live child
       // writes and can expose copyIgnored execution inputs to remote inference.
+      // A still-virtual Run is the opposite case: its authoritative files live
+      // only in the pinned WorkingState view, so this query overlays that view.
       const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
+      const execution = sessionId ? threadExecutionViews.get(sessionId) : undefined;
+      const threadDocuments = execution?.mode === 'virtual'
+        ? await harnessWorkingStates.withStore(
+          execution.workspaceId,
+          'semantic-working-state-pin',
+          (store) => listBranchTextFiles(store, execution.branchId, searchOptions?.roots ?? [""]),
+          'shared',
+        )
+        : undefined;
       const draftPaths = sessionId
         ? documentsAuthority.agentInputDraftPaths(sessionId, inputContext)
         : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
       const view = await pinSemanticQueryView({
         inputContext,
         ...(draftPaths === undefined ? {} : { draftPaths }),
-        ...(sessionId
+        ...(threadDocuments
+          ? {
+            threadDocuments: threadDocuments.map((file) => ({
+              path: file.path,
+              content: file.text,
+              revision: file.revision,
+            })),
+          }
+          : sessionId
           ? {
             readDraft: (resourceId: string) => {
               const snapshot = documentsAuthority.readAgentInputSnapshot(sessionId, inputContext, resourceId);

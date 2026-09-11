@@ -667,9 +667,10 @@ read and text-mutation tools use the same fixed branch view; live shared mode re
 Same-name `edit` / `write` / `apply_patch` on an isolated Run commit WorkingState deltas with
 `writeRevision` CAS and do not write the parent directory. The first bash or LSP navigation tool
 freezes that revision, waits for in-flight virtual writes, materializes into staging, and atomically
-switches the Run; a failed switch keeps the virtual branch. After the switch, commands write the
-materialized directory and settlement folds those changes into a new result before that directory
-may be reclaimed (D-213).
+switches the Run. A failed or cancelled switch re-reads the execution view and keeps the virtual
+branch authoritative; crash recovery uses the persisted switch journal so the live path is never
+half-switched. After a successful switch, commands write the materialized directory and settlement
+folds those changes into a new result before that directory may be reclaimed (D-213 / D-217).
 
 The baseline includes captured disk inputs and revisioned drafts from the window that submitted the
 user message. The surface retains mutable-buffer ownership. `thread.dispatch` clones fixed draft

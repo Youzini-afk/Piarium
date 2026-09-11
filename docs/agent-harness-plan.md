@@ -283,8 +283,10 @@ RunManifest 不成为这组能力共同前置。
 路径改到 dispatch 创建分支时固定：Git 捕获工作目录身份与变化集，非 Git/unborn 做一次可取消目录捕获；失败删除 Thread。
 父会话的同名 read 与 grep 已消费同一固定 surface snapshot；find/ls 已消费同一快照。surface 写回与绑定预览
 已按 D-201 接入线程面板 / Document Registry。D-212 已把隔离 Thread Run 的同名只读工具接到 WorkingState 视图：delta 覆盖 base，
-tombstone 隐藏路径，父 drift 不能补读，scope 仍由 Host 拒绝。D-213 已把同名 edit/write/apply_patch 接到同一分支视图：虚拟写入
-做 writeRevision CAS，不碰父磁盘；首次 bash/LSP 冻结修订、等在飞写入、staging 物化后原子切换，失败保持原虚拟分支。
+tombstone 隐藏路径，父 drift 不能补读，scope 仍由 Host 拒绝。D-213 / D-217 已把同名 edit/write/apply_patch 接到同一分支视图：虚拟写入
+做 writeRevision CAS，不碰父磁盘；首次 bash/LSP 冻结修订、等在飞写入、staging 物化后原子切换。失败或取消后重读
+execution view，仍虚拟则继续写分支；崩溃按 `materializationSwitch` 恢复到一个权威视图。修订标签等于实际读取的
+`writeRevision`。嵌套改父虚拟分支走同一写 gate。
 D-215 已把 `parent.kind: "thread"` 接到真实 dispatch/wait/read/merge：角色目录装配嵌套工具，Host 拒绝扩 scope 与未授权
 工具；嵌套基线复制父分支视图，孙结果先入父分支再入根工作区。
 

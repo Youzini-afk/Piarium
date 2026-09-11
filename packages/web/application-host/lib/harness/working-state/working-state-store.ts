@@ -19,6 +19,7 @@ import type {
   WorkingStateVerifications,
 } from "./types.js";
 import { materializeWorkingState } from "./materializer.js";
+import { assertVirtualWriteTree } from "./virtual-write-tree.js";
 
 const SCHEMA_VERSION = 3;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
@@ -829,6 +830,7 @@ export class WorkingStateStore {
     if (current !== expectedWriteRevision) {
       return { status: "conflict", writeRevision: current };
     }
+    assertVirtualWriteTree(this.effectiveState(branchId) ?? {}, files);
     const deltas = clone(branch.deltas);
     for (const [file, next] of Object.entries(files)) {
       const normalized = normalizeRelative(file);

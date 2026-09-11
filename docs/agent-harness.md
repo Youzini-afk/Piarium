@@ -1438,10 +1438,12 @@ ignored 默认不进，显式 `copyIgnored`/`captureScopes` 必须进入。非 G
 捕获失败或取消删除该 Thread，不留下宣称完整的分支。父之后的新增、修改、删除、checkout 或提交不能改变子基线。
 同名 `read` / `grep` / `find` / `ls` / `explore` 经 Host 分支视图读取该 base 加 delta/tombstone，provenance 标明
 branch/base/delta；父 live 目录与 scratch/worktree 磁盘不能补读未改路径。隔离 Run 从虚拟 scratch 启动；同名
-`edit` / `write` / `apply_patch` 把文本变更提交到同一 WorkingState delta，不写父目录（D-213）。只有 `bash` 或
-LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真实路径时，Host 冻结当前修订、等在飞虚拟
+`edit` / `write` / `apply_patch` 把文本变更提交到同一 WorkingState delta，不写父目录（D-213 / D-217）。只有 `bash` 或
+LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真实路径时，Host 冻结当前 `writeRevision`、等在飞虚拟
 写入结束、物化该修订并原子切换整个 Run；此后本 Run 的文件工具都走该目录，结算再把目录变化收回新结果。
-切换失败保持原虚拟分支。Git blob 与工作目录转换后的字节不能无条件视为相同；当前基线读取实际输入字节。
+切换失败或调用方取消后重读 execution view：仍是 virtual 则继续写分支，不得把 scratch 当权威。崩溃按
+`materializationSwitch` 恢复到一个权威视图。read/grep/explore 返回的 revision 等于实际读取的 `writeRevision`。
+Git blob 与工作目录转换后的字节不能无条件视为相同；当前基线读取实际输入字节。
 具备角色目录嵌套工具的子线程经真实 tool registry 与 `control.thread` 能力调用 `dispatch` / `threads` / `wait` /
 `send` / `read_thread` / `merge` / `kill`；Host 把 caller 解析为 `parent.kind: "thread"`，scope 与权限只能继承或收窄
 （D-215）。owning workspace 保存 catalog / WorkingState / 父子关系；execution workspace 只覆盖 scratch 或物化目录的

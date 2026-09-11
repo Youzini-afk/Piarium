@@ -119,6 +119,7 @@ export type HarnessDocumentBranchWrite = (
 
 export type HarnessWorkingBranchEnsureMaterialized = (
   sessionId: string,
+  signal?: AbortSignal,
 ) => Promise<import("@piarium/protocol").WorkingBranchEnsureMaterializedResult>;
 
 export type HarnessDocumentPathOverlayLookup =
