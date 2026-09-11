@@ -208,7 +208,7 @@ export interface HarnessServiceHost {
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@piarium/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
   threadPrepareIsolatedBranch: ((input: PrepareIsolatedBranchInput) => Promise<{ branchId: string; worktree: import("@piarium/protocol").ThreadWorktree }>) | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
-  threadKillSession: ((threadId: string, keepWorktree?: boolean) => Promise<void>) | null;
+  threadKillSession: ((threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
   threadApplyWorktreeDiff: ((
     workspaceId: string,
@@ -324,7 +324,7 @@ export interface HarnessServiceHostOptions {
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
   threadPrepareIsolatedBranch?: HarnessServiceHost["threadPrepareIsolatedBranch"];
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
-  threadKillSession?: (threadId: string, keepWorktree?: boolean) => Promise<void>;
+  threadKillSession?: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   requireThreadMergeJournal?: boolean;
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;

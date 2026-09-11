@@ -1561,7 +1561,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     await threadRegistry.cancelAllForParent(
       workspaceId,
       { kind: 'session', id: sessionId },
-      async (thread) => { await threadRuntime!.kill(thread.id); },
+      async (thread) => { await threadRuntime!.kill(thread.id, false, workspaceId); },
     );
   });
 
@@ -2282,7 +2282,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     agentInputSurfaceOwner: documentsAuthority.agentInputSurfaceOwner,
     threadTranscriptReader,
     threadSpawnSession: (input) => threadRuntime!.spawn(input),
-    threadKillSession: (threadId, keepWorktree) => threadRuntime!.kill(threadId, keepWorktree),
+    threadKillSession: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => (
+      threadRuntime!.kill(threadId, keepWorktree, workspaceId)
+    ),
     requireThreadMergeJournal: true,
     threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId, extras) => (
       threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)

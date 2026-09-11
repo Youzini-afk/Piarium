@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadDispatchService, createThreadKillService, createThreadMergeService } from "./thread-services.js";
-import { ThreadRuntimeError } from "./thread-runtime.js";
-import type { AgentInputContext } from "@piarium/protocol";
+import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
+import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
 
 const prepareIsolatedBranch = vi.fn(async () => ({
   branchId: "thread-baseline",
@@ -469,6 +469,56 @@ describe("thread services", () => {
     expect(result.text).toContain("Disk-based commands still read the saved files");
   });
 
+  it("accepts relative scope names that contain consecutive dots through dispatch", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-scope-dots-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "dotted-session" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const result = await service.handle({
+        role: "check",
+        task: "Names with dots",
+        scope: ["src/foo..bar", "version...txt"],
+      }, serviceContext());
+      const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
+      expect(thread?.manifest.scope).toEqual(["src/foo..bar", "version...txt"]);
+
+      const scoped = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "scoped parent",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch"],
+        permissions: {},
+        scope: ["src"],
+      });
+      const run = await registry.startRun("workspace-1", scoped.id);
+      await registry.markRunRunning("workspace-1", scoped.id, run.id, "dotted-parent");
+      const nested = await service.handle({
+        role: "check",
+        task: "Nested dotted name",
+        scope: ["src/foo..bar"],
+      }, {
+        ...serviceContext(),
+        sessionId: "dotted-parent",
+        actor: { ...serviceContext().actor, sessionId: "dotted-parent" },
+      });
+      const child = await registry.getThread("workspace-1", { kind: "thread", id: scoped.id }, nested.threadId);
+      expect(child?.manifest.scope).toEqual(["src/foo..bar"]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("releases a surface draft when nested scope is rejected", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-scope-cleanup-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
@@ -519,66 +569,128 @@ describe("thread services", () => {
     }
   });
 
-  it("kills descendant threads including queued children", async () => {
+  it("kills descendant threads including queued children through the runtime cascade", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-kill-cascade-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    let seq = 0;
+    const snapshotOf = (sessionId: string): SessionSnapshot => ({
+      activeTools: ["read", "kill"],
+      busy: false,
+      cwd: "/workspace",
+      features: { revision: 0, schemaVersion: 1 },
+      followUp: [],
+      followUpMode: "one-at-a-time",
+      isCompacting: false,
+      isStreaming: false,
+      leafId: "entry-1",
+      pendingMessageCount: 0,
+      retryAttempt: 0,
+      sessionId,
+      steering: [],
+      steeringMode: "all",
+      thinkingLevel: "off",
+      workspace: { authorityId: "workspace-1", id: "workspace-1", kind: "workspace" },
+    });
+    const sessions = {
+      create: vi.fn(async () => snapshotOf(`child-${++seq}`)),
+      open: vi.fn(async (input: { sessionId: string }) => snapshotOf(input.sessionId)),
+      prompt: vi.fn(async () => {}),
+      send: vi.fn(async () => {}),
+      abort: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      snapshot: vi.fn(async (sessionId: string) => snapshotOf(sessionId)),
+      summary: vi.fn(async (sessionId: string): Promise<SessionSummary> => ({
+        allMessagesText: "",
+        createdAt: "2026-09-04T00:00:00.000Z",
+        cwd: "/workspace",
+        firstMessage: "",
+        id: sessionId,
+        messageCount: 0,
+        persisted: true,
+        sessionFile: `/sessions/${sessionId}.jsonl`,
+        updatedAt: "2026-09-04T00:00:00.000Z",
+      })),
+      stats: vi.fn(async (): Promise<SessionStats> => ({
+        cost: 0,
+        sessionId: "unused",
+        tokens: { cacheRead: 0, cacheWrite: 0, input: 0, output: 0, total: 0 },
+        totalMessages: 0,
+        toolCalls: 0,
+        toolResults: 0,
+        assistantMessages: 0,
+        userMessages: 0,
+      })),
+      entries: vi.fn(async (sessionId: string, scope: "branch" | "all" = "branch"): Promise<SessionEntriesResult> => ({
+        sessionId,
+        scope,
+        leafId: "entry-1",
+        entries: [],
+      })),
+    };
+    const runtime = createThreadRuntime({
+      registry,
+      sessions,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "workspace-1",
+      worktrees: {
+        prepare: async () => ({ cwd: "/workspace", worktree: null }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
     const killed: string[] = [];
     const service = createThreadKillService({
       threadRegistry: registry,
-      threadKillSession: async (threadId: string) => {
+      threadKillSession: async (threadId: string, keepWorktree?: boolean, workspaceId?: string) => {
         killed.push(threadId);
+        await runtime.kill(threadId, keepWorktree, workspaceId);
       },
     } as never);
+    const createInput = (
+      parent: { kind: "session" | "thread"; id: string },
+      brief: string,
+      worktree: "isolated" | "none" = "none",
+    ) => ({
+      workspaceId: "workspace-1",
+      parent,
+      brief,
+      role: "hard-implement" as const,
+      kind: "implementation" as const,
+      createdBy: "agent" as const,
+      concurrency: 2,
+      autoRun: true,
+      worktree,
+      tools: ["kill", "read"],
+      permissions: {},
+    });
     try {
-      const parent = await registry.createThread({
-        workspaceId: "workspace-1",
-        parent: { kind: "session", id: "parent-1" },
-        brief: "parent",
-        role: "hard-implement",
-        kind: "implementation",
-        createdBy: "agent",
-        concurrency: 2,
-        autoRun: true,
-        worktree: "isolated",
-        tools: ["kill"],
-        permissions: {},
-      });
-      const child = await registry.createThread({
-        workspaceId: "workspace-1",
-        parent: { kind: "thread", id: parent.id },
-        brief: "child",
-        role: "check",
-        kind: "implementation",
-        createdBy: "agent",
-        concurrency: 2,
-        autoRun: true,
-        worktree: "isolated",
-        tools: ["read"],
-        permissions: {},
-      });
-      const grandchild = await registry.createThread({
-        workspaceId: "workspace-1",
-        parent: { kind: "thread", id: child.id },
-        brief: "grandchild",
-        role: "check",
-        kind: "implementation",
-        createdBy: "agent",
-        concurrency: 2,
-        autoRun: true,
-        worktree: "none",
-        tools: ["read"],
-        permissions: {},
-      });
+      const parent = await registry.createThread(createInput({ kind: "session", id: "parent-1" }, "parent"));
+      const parentRun = await registry.startRun("workspace-1", parent.id);
+      await runtime.spawn({ ...createInput({ kind: "session", id: "parent-1" }, "parent"), threadId: parent.id, runId: parentRun.id });
+      const child = await registry.createThread(createInput({ kind: "thread", id: parent.id }, "child"));
+      const childRun = await registry.startRun("workspace-1", child.id);
+      await runtime.spawn({ ...createInput({ kind: "thread", id: parent.id }, "child"), threadId: child.id, runId: childRun.id });
+      const grandchild = await registry.createThread(createInput({ kind: "thread", id: child.id }, "grandchild"));
       const result = await service.handle({ threadId: parent.id }, serviceContext());
       expect(result.text).toContain(parent.id);
-      expect(killed).toEqual([grandchild.id, child.id, parent.id]);
+      expect(killed).toEqual([parent.id]);
       expect(await registry.getThread("workspace-1", { kind: "thread", id: child.id }, grandchild.id)).toMatchObject({
         lifecycle: "settled",
       });
       expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, child.id)).toMatchObject({
         lifecycle: "settled",
       });
+      expect(await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, parent.id)).toMatchObject({
+        lifecycle: "settled",
+      });
+      expect(await registry.getActiveRun("workspace-1", parent.id)).toMatchObject({ outcome: "cancelled" });
+      expect(await registry.getActiveRun("workspace-1", child.id)).toMatchObject({ outcome: "cancelled" });
+      expect(await registry.getActiveRun("workspace-1", grandchild.id)).toBeNull();
+      expect(sessions.abort).toHaveBeenCalled();
+      expect(sessions.close).toHaveBeenCalled();
     } finally {
+      await runtime.dispose();
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });
     }

@@ -667,6 +667,14 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
   };
 }
 
+const compareThreadsStable = (
+  left: { createdAt: string; id: string },
+  right: { createdAt: string; id: string },
+): number => {
+  const byCreated = left.createdAt.localeCompare(right.createdAt);
+  return byCreated !== 0 ? byCreated : left.id.localeCompare(right.id);
+};
+
 const cascadeStopDescendants = async (
   host: HarnessServiceHost,
   workspaceId: string,
@@ -675,10 +683,11 @@ const cascadeStopDescendants = async (
   reason: string,
 ): Promise<void> => {
   const registry = host.threadRegistry!;
-  const children = await registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true);
+  const children = (await registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true))
+    .toSorted(compareThreadsStable);
   for (const child of children) {
     await cascadeStopDescendants(host, workspaceId, child.id, keepWorktree, reason);
-    if (host.threadKillSession) await host.threadKillSession(child.id, keepWorktree);
+    if (host.threadKillSession) await host.threadKillSession(child.id, keepWorktree, workspaceId);
     await registry.cancelThread(workspaceId, child.id, reason);
   }
 };
@@ -693,8 +702,11 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? false;
-      await cascadeStopDescendants(host, workspaceId, thread.id, keepWorktree, "killed by parent");
-      if (host.threadKillSession) await host.threadKillSession(thread.id, keepWorktree);
+      if (host.threadKillSession) {
+        await host.threadKillSession(thread.id, keepWorktree, workspaceId);
+      } else {
+        await cascadeStopDescendants(host, workspaceId, thread.id, keepWorktree, "killed by parent");
+      }
       await registry.cancelThread(workspaceId, thread.id, "killed by parent");
       return { text: `killed ${thread.id}${keepWorktree ? " (worktree kept)" : ""}` };
     },

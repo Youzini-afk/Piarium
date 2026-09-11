@@ -17,4 +17,11 @@ describe("nested thread scope", () => {
     expect(resolveNestedThreadScope(["src"], ["C:/windows"])).toEqual({ ok: false, expanded: ["C:/windows"] });
     expect(resolveNestedThreadScope(["src"], ["src/./app"])).toEqual({ ok: true, scope: ["src/app"] });
   });
+
+  it("accepts relative names that contain consecutive dots and only rejects a .. segment", () => {
+    expect(resolveNestedThreadScope([], ["src/foo..bar"])).toEqual({ ok: true, scope: ["src/foo..bar"] });
+    expect(resolveNestedThreadScope([], ["version...txt"])).toEqual({ ok: true, scope: ["version...txt"] });
+    expect(resolveNestedThreadScope(["src"], ["src/foo..bar"])).toEqual({ ok: true, scope: ["src/foo..bar"] });
+    expect(resolveNestedThreadScope(["src"], ["src\\..\\docs"])).toEqual({ ok: false, expanded: ["src\\..\\docs"] });
+  });
 });

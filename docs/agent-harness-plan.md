@@ -99,7 +99,8 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    D-218 已补 dispatch 基线诚实；D-219 已补冻结权限、耐久嵌套集成与级联终止。D-220 已把执行 Git baseline 与逻辑 base
    拆开，钉住 explore 查询级 snapshot，并用内容身份拒绝混合基线。D-221 已规定 branch Integration 先 gate 后 store，
    并补写前日志与启动对账。D-222 已补 directory reconcile 的 execution Documents gate、dequeue 冻结 overlay、
-   session-bindings 对账与知识 owning 解析。级联生命周期与 scope segment 仍待本轮后续阶段，相关 status 行保持 Partial。
+   session-bindings 对账与知识 owning 解析。D-223 已补级联生命周期 serialization 与 scope 只拒绝完整 `..` 段。
+   3.4 / 3.4a / 3.6 仍保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
 3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
@@ -299,6 +300,8 @@ applying intent，CAS 后再 complete。启动对账按 before/after 补记录�
 D-222：directory 恢复写物化父目录必须走 execution Documents gate，对象库仍在 owning root；dequeue 把 manifest
 permissions 送进 `session.create`；`session-bindings.json` 由 catalog/run 重建并对账；Thread knowledge/recall/Zone 2
 解析 owning workspace，Documents/LSP/shell 仍用 execution。
+D-223：父 kill/archive 按稳定后序进入每个后代自己的 lifecycle serialization；祖先归档或正在级联时拒绝恢复该后代。
+scope 只拒绝完整 `..` 段、绝对路径和盘符路径。
 D-215 已把 `parent.kind: "thread"` 接到真实 dispatch/wait/read/merge：角色目录装配嵌套工具，Host 拒绝扩 scope 与未授权
 工具；嵌套基线复制父分支视图，孙结果先入父分支再入根工作区。
 

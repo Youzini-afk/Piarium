@@ -2761,4 +2761,162 @@ describe("thread runtime", () => {
       lifecycle: "archived",
     });
   });
+
+  const uniqueSessions = () => {
+    let seq = 0;
+    return {
+      ...sessionAdapter,
+      create: vi.fn(async () => snapshot(`child-${++seq}`)),
+      open: vi.fn(async (input: { sessionId: string; cwd: string }) => snapshot(input.sessionId, input.cwd)),
+      snapshot: vi.fn(async (sessionId: string) => snapshot(sessionId)),
+    };
+  };
+
+  it("refuses child restore while a parent archive cascade is in progress", async () => {
+    const sessions = uniqueSessions();
+    let childSessionId = "";
+    let guardRequested!: () => void;
+    let releaseGuard!: () => void;
+    const guardStarted = new Promise<void>((resolve) => { guardRequested = resolve; });
+    const guardAllowed = new Promise<void>((resolve) => { releaseGuard = resolve; });
+    sessions.close = vi.fn(async (sessionId: string) => {
+      if (sessionId === childSessionId) {
+        guardRequested();
+        await guardAllowed;
+      }
+    });
+    const cascadeRuntime = createThreadRuntime({
+      registry,
+      sessions,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const parentInput = createInput();
+    const parent = await registry.createThread(parentInput);
+    const parentRun = await registry.startRun(WORKSPACE, parent.id);
+    await cascadeRuntime.spawn({ ...parentInput, threadId: parent.id, runId: parentRun.id });
+    const childInput = { ...createInput(), parent: { kind: "thread" as const, id: parent.id }, brief: "cascade child" };
+    const child = await registry.createThread(childInput);
+    const childRun = await registry.startRun(WORKSPACE, child.id);
+    await cascadeRuntime.spawn({ ...childInput, threadId: child.id, runId: childRun.id });
+    childSessionId = (await registry.getActiveRun(WORKSPACE, child.id))?.sessionId ?? "";
+
+    const archiving = cascadeRuntime.archiveUser(WORKSPACE, PARENT, parent.id);
+    await guardStarted;
+    const restoring = cascadeRuntime.restoreUser(WORKSPACE, { kind: "thread", id: parent.id }, child.id);
+    const restoreRefused = expect(restoring).rejects.toMatchObject({ code: "conflict" });
+    releaseGuard();
+    await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
+    await restoreRefused;
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+      lifecycle: "archived",
+    });
+    expect(await registry.getActiveRun(WORKSPACE, child.id)).toMatchObject({ outcome: "cancelled" });
+    await cascadeRuntime.dispose();
+  });
+
+  it("refuses child restore while a parent kill cascade is in progress", async () => {
+    const sessions = uniqueSessions();
+    let parentSessionId = "";
+    let holdParentClose!: () => void;
+    let parentCloseStarted!: () => void;
+    const parentCloseReady = new Promise<void>((resolve) => { parentCloseStarted = resolve; });
+    const parentCloseAllowed = new Promise<void>((resolve) => { holdParentClose = resolve; });
+    sessions.close = vi.fn(async (sessionId: string) => {
+      if (sessionId === parentSessionId) {
+        parentCloseStarted();
+        await parentCloseAllowed;
+      }
+    });
+    const killRuntime = createThreadRuntime({
+      registry,
+      sessions,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const parentInput = createInput();
+    const parent = await registry.createThread(parentInput);
+    const parentRun = await registry.startRun(WORKSPACE, parent.id);
+    await killRuntime.spawn({ ...parentInput, threadId: parent.id, runId: parentRun.id });
+    parentSessionId = (await registry.getActiveRun(WORKSPACE, parent.id))?.sessionId ?? "";
+    const childInput = { ...createInput(), parent: { kind: "thread" as const, id: parent.id }, brief: "kill child" };
+    const child = await registry.createThread(childInput);
+    const childRun = await registry.startRun(WORKSPACE, child.id);
+    await killRuntime.spawn({ ...childInput, threadId: child.id, runId: childRun.id });
+
+    const killing = killRuntime.kill(parent.id, false, WORKSPACE);
+    await parentCloseReady;
+    await expect(killRuntime.restoreUser(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+    holdParentClose();
+    await killing;
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+      lifecycle: "settled",
+    });
+    expect(await registry.getActiveRun(WORKSPACE, child.id)).toMatchObject({ outcome: "cancelled" });
+    expect(await registry.getActiveRun(WORKSPACE, parent.id)).toMatchObject({ outcome: "cancelled" });
+    await killRuntime.dispose();
+  });
+
+  it("serializes child merge with parent archive and does not resurrect the child", async () => {
+    const sessions = uniqueSessions();
+    let mergeStarted!: () => void;
+    let releaseMerge!: () => void;
+    const mergeReady = new Promise<void>((resolve) => { mergeStarted = resolve; });
+    const mergeAllowed = new Promise<void>((resolve) => { releaseMerge = resolve; });
+    const mergeRuntime = createThreadRuntime({
+      registry,
+      sessions,
+      withMergeWriter: async (_workspaceId, _threadId, operation) => {
+        mergeStarted();
+        await mergeAllowed;
+        return operation();
+      },
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "fixed-result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 1, conflicts: [], conflictState: "none", changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 1, deletions: 0 } }),
+      },
+    });
+    const parentInput = createInput();
+    const parent = await registry.createThread(parentInput);
+    const parentRun = await registry.startRun(WORKSPACE, parent.id);
+    await mergeRuntime.spawn({ ...parentInput, threadId: parent.id, runId: parentRun.id });
+    const childInput = { ...createInput(), parent: { kind: "thread" as const, id: parent.id }, brief: "merge child" };
+    const child = await registry.createThread(childInput);
+    const childRun = await registry.startRun(WORKSPACE, child.id);
+    await mergeRuntime.spawn({ ...childInput, threadId: child.id, runId: childRun.id });
+    const current = await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id);
+    await registry.setWorktree(WORKSPACE, child.id, { ...current!.worktree!, resultCommit: "fixed-result" });
+
+    const merging = mergeRuntime.merge(WORKSPACE, { kind: "thread", id: parent.id }, child.id);
+    await mergeReady;
+    const archiving = mergeRuntime.archiveUser(WORKSPACE, PARENT, parent.id);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    releaseMerge();
+    await expect(merging).resolves.toMatchObject({ merged: 1 });
+    await expect(archiving).resolves.toMatchObject({ thread: { lifecycle: "archived" } });
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+      lifecycle: "archived",
+    });
+    expect(await registry.getActiveRun(WORKSPACE, child.id)).toMatchObject({ outcome: "cancelled" });
+    await expect(mergeRuntime.merge(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).rejects.toThrow(/archived/);
+    await mergeRuntime.dispose();
+  });
 });

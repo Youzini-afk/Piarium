@@ -4463,6 +4463,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；生产 dequeue → `session.create` 的 accept-edits、directory reconcile 走 execution gate、binding 重建/stale 拒绝、以及 owning≠execution 的 recall/suggest/Zone 2 有定向生产证据。级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
 
+### D-223 · 2026-09-11 · 3.4 / 3.4a / 3.6（级联生命周期 serialization 与 scope 完整段）
+
+类型：问题与解法
+
+背景：D-219 规定 kill/archive 先停子孙，但 `archiveUser` 只锁父线程后递归子实现，子 restore/reclaim/merge 不进入该子自己的 lifecycle serialization。持有父锁再等子锁会与「子持有子锁再等父」反转。`runtime.kill` 在没有 session 时直接返回，queued 子孙只靠 services 无锁 `cancelThread`。`cancelThread` 会把已归档线程改成 settled。`parseThreadScopePath` 用 `value.includes("..")` 误拒 `src/foo..bar`、`version...txt`。
+
+决定：
+
+1. 父 kill/archive 先标记 cascade，再按 `createdAt` 然后 `id` 的稳定后序，对每个后代单独 `withThreadLifecycle` 执行该节点的 stop/cancel/archive，最后再锁父。不得持有父 lifecycle 后等待子 lock。
+2. `merge` 在取得父 `VirtualWriteGate` 之后进入该线程自己的 lifecycle；已归档线程拒绝 merge。
+3. restore 在取得本线程 lock 后检查 thread 祖先：祖先 `archived` 或仍在 `cascadingLifecycle` 中则 `conflict`，不能在已归档或正在级联的父下复活。根会话父下的同线程 archive→restore 仍允许。
+4. `runtime.kill(threadId, keepWorktree, workspaceId?)` 在已知 owning workspace 时对 queued 无 session 的后代同样 cancel；生产 `thread.kill` 只调一次 cascade。`cancelThread` 不得把 `archived` 改成 settled。
+5. scope 只拒绝完整 `..` 段、绝对路径和盘符路径。`src/foo..bar`、`version...txt` 经 `resolveNestedThreadScope` / dispatch 接受。
+
+影响：Host thread-runtime/registry/services/nesting、Application Host 装配；设计 9.1.2 / 9.2.5b / 9.3.4、plan 3.4/3.6、status 3.4 / 3.4a / 3.6、architecture 6.1、harness DOCUMENTATION。D-219 相应部分在索引标 superseded in part。
+
+状态：已实施；父 archive/kill 与子 restore/merge 并发、queued 子孙经生产 `thread.kill` cascade、以及 dotted relative scope 经 dispatch 接受有定向生产证据。3.4 / 3.4a / 3.6 保持 Partial：代码反例已关，真实付费嵌套 Pi 与完整桌面重启未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4686,7 +4704,8 @@ ModelRuntime 纵切继续通过。
 | D-216 | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正；session-bindings 可重建索引、知识 owning 解析与 directory reconcile 的 execution gate 由 D-222 补正） | D-220 / D-222 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-217 | superseded in part（物化后重读 view、切换 journal、嵌套写 gate 与树不变量保留；lease 后重取当前 view 与 explore 查询级 immutable snapshot 由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-218 | superseded in part（Git 失败必抛、gitlink/unsupported、sameState 与失败清理保留；fingerprint 增加内容身份，默认 mode 不再探测用户树，由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-219 | superseded in part（冻结 overlay、directory 对象库根、级联与 captureScopes 继承保留；branch 集成锁顺序/WAL 由 D-221 补正；dequeue 必须传 manifest permissions、directory 恢复必须走 execution gate 由 D-222 补正） | D-221 / D-222 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-219 | superseded in part（冻结 overlay、directory 对象库根、级联与 captureScopes 继承保留；branch 集成锁顺序/WAL 由 D-221 补正；dequeue 必须传 manifest permissions、directory 恢复必须走 execution gate 由 D-222 补正；级联必须进入每个后代自己的 lifecycle serialization、scope 只拒绝完整 `..` 段由 D-223 补正） | D-221 / D-222 / D-223 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-220 | implementation（执行 Git baseline 与逻辑 base 分离；settle 并入 deltas；lease 后重读与 explore 查询级 pin；umask 默认 mode；fingerprint 内容身份） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-221 | implementation（先 gate 后 store；删除固定两次重试；branch Integration WAL 与独立对账；undo 仅 after→before CAS） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-222 | implementation（directory reconcile 走 execution Documents gate；dequeue 传冻结 overlay；session-bindings 可重建索引；知识/recall/Zone 2 解析 owning workspace） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-223 | implementation（父 kill/archive 按稳定后序进入每个后代自己的 lifecycle serialization；祖先归档/级联中拒绝 restore；scope 只拒绝完整 `..` 段） | — | 设计 9.1.2 / 9.2.5b / 9.3.4；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |

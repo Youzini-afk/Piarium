@@ -25,7 +25,7 @@ export const parseThreadScopePath = (
   const slashNormalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
   if (isAbsoluteThreadScope(value, slashNormalized)) return { ok: false, path: value };
   const parts = slashNormalized.split("/").filter((part) => part.length > 0 && part !== ".");
-  if (parts.includes("..") || value.includes("..")) return { ok: false, path: value };
+  if (parts.includes("..")) return { ok: false, path: value };
   return { ok: true, path: parts.length === 0 ? (slashNormalized === "." ? "." : "") : parts.join("/") };
 };
 

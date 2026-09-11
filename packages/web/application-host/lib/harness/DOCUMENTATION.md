@@ -140,7 +140,10 @@ and can only be tightened by later live settings. Nested merge writes the
 grandchild result onto that parent authority — directory apply keeps recovery
 objects in the owning object library, branch apply is a durable Integration —
 before the parent result reaches the workspace. Killing or archiving a parent
-cancels descendant preparation and Runs first. Sibling threads do not talk;
+walks descendants in stable createdAt/id post-order and enters each child's own
+lifecycle serialization; restore is refused while an ancestor is archived or the
+cascade is in progress. Scope rejects a complete `..` segment, absolute paths,
+and drive-letter paths, not names such as `src/foo..bar`. Sibling threads do not talk;
 the root session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
@@ -387,9 +390,11 @@ blocked for `keep_worktree`, unfinished Integration, active writers, editor
 surfaces, background commands, or unverified/uncollected content. Budget uses
 only the user-configured `harness.worktree.budget`, across all parent sessions in
 the workspace, including known costs of first materialization and restore. Archive
-waits for preparation/setup and real session shutdown. Restore binds the original
+waits for preparation/setup and real session shutdown, and archives each
+descendant on that descendant's lifecycle turn before the parent. Restore binds the original
 session to a new Run; a failed restore stays archived and cannot open an occupied
-path. The Documents reclaim guard remains held through deletion. Thread panel routes
+path. Restore of a descendant is refused while an ancestor is archived or being
+archived. The Documents reclaim guard remains held through deletion. Thread panel routes
 `GET /space` and archive/restore/reclaim share this Host projection.
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never

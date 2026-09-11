@@ -1826,6 +1826,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const catalog = await loadWorkspace(workspaceId);
     const thread = findThread(catalog, threadId);
     if (!thread) return null;
+    if (thread.lifecycle === "archived") return structuredClone(thread);
     const run = activeRunFor(catalog, thread);
     if (run && run.outcome === null) return endRun(workspaceId, threadId, run.id, "cancelled", exitReason);
     const result = await mutateWorkspace(workspaceId, (draft) => {

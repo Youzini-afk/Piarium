@@ -588,6 +588,49 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  const cascadingLifecycle = new Set<string>();
+  const lifecycleKey = (workspaceId: string, threadId: string): string => `${workspaceId}\0${threadId}`;
+
+  const beginCascade = (workspaceId: string, threadId: string): (() => void) => {
+    const key = lifecycleKey(workspaceId, threadId);
+    cascadingLifecycle.add(key);
+    return () => {
+      cascadingLifecycle.delete(key);
+    };
+  };
+
+  const compareThreadsStable = (left: Thread, right: Thread): number => {
+    const byCreated = left.createdAt.localeCompare(right.createdAt);
+    return byCreated !== 0 ? byCreated : left.id.localeCompare(right.id);
+  };
+
+  const collectDescendantsPostOrder = async (workspaceId: string, threadId: string): Promise<Thread[]> => {
+    const children = (await options.registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true))
+      .toSorted(compareThreadsStable);
+    const ordered: Thread[] = [];
+    for (const child of children) {
+      ordered.push(...await collectDescendantsPostOrder(workspaceId, child.id));
+      ordered.push(child);
+    }
+    return ordered;
+  };
+
+  const ancestorBlocksRestore = async (workspaceId: string, parent: ThreadParent): Promise<string | null> => {
+    let current: ThreadParent | null = parent;
+    while (current?.kind === "thread") {
+      if (cascadingLifecycle.has(lifecycleKey(workspaceId, current.id))) return current.id;
+      const ancestor = await options.registry.getThreadById(workspaceId, current.id);
+      if (!ancestor || ancestor.lifecycle === "archived") return current.id;
+      current = ancestor.parent;
+    }
+    return null;
+  };
+
+  const resolveWorkspaceIdForThread = (threadId: string): string | undefined => {
+    const sessionId = sessionByThread.get(threadId);
+    return sessionId ? bindingsBySession.get(sessionId)?.workspaceId : undefined;
+  };
+
   const assertMaterializationPathAvailable = async (directory: string): Promise<void> => {
     try {
       await fs.promises.lstat(directory);
@@ -2717,17 +2760,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     else await options.sessions.prompt(sessionId, text);
   };
 
-  const kill = async (threadId: string, keepWorktree = false): Promise<void> => {
+  const killOne = async (threadId: string, keepWorktree: boolean, workspaceId?: string): Promise<void> => {
     await waitForPreparation(threadId);
     const sessionId = sessionByThread.get(threadId);
-    if (!sessionId) return;
-    const binding = bindingsBySession.get(sessionId);
+    const binding = sessionId ? bindingsBySession.get(sessionId) : undefined;
+    const owningWorkspaceId = workspaceId ?? binding?.workspaceId;
     try {
-      if (binding) await closeBinding(binding, true);
-      else {
-        terminatingSessions.add(sessionId);
-        await options.sessions.abort(sessionId).catch(reportError);
-        await options.sessions.close(sessionId).catch(reportError);
+      if (sessionId) {
+        if (binding) await closeBinding(binding, true);
+        else {
+          terminatingSessions.add(sessionId);
+          await options.sessions.abort(sessionId).catch(reportError);
+          await options.sessions.close(sessionId).catch(reportError);
+        }
       }
       if (binding) {
         await publishPartialResult(binding.workspaceId, binding.parent, threadId).catch(reportError);
@@ -2737,16 +2782,46 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const killed = await options.registry.getThread(binding.workspaceId, binding.parent, threadId);
           if (killed?.reviewOf) await completeAutoReview(killed, binding.runId, "cancelled", killed.report).catch(reportError);
         }
-        if (!keepWorktree) {
-          await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, threadId).catch(reportError);
-        }
-        await releasePendingMaterializeReservation(threadId);
       }
+      if (owningWorkspaceId) {
+        const thread = await options.registry.getThreadById(owningWorkspaceId, threadId);
+        if (thread && thread.lifecycle !== "archived" && thread.lifecycle !== "settled") {
+          await options.registry.cancelThread(owningWorkspaceId, threadId, "killed by parent");
+        }
+        if (thread && !keepWorktree) {
+          // Already holding this thread's lifecycle turn; do not go through
+          // opportunistic tryAutoReclaimDirectory, which skips a busy lock.
+          await tryReclaimDirectory(owningWorkspaceId, thread.parent, thread).catch(reportError);
+        }
+      }
+      await releasePendingMaterializeReservation(threadId);
     } finally {
-      if (!binding) {
+      if (sessionId && !binding) {
         if (sessionByThread.get(threadId) === sessionId) sessionByThread.delete(threadId);
         terminatingSessions.delete(sessionId);
       }
+    }
+  };
+
+  const kill = async (threadId: string, keepWorktree = false, workspaceId?: string): Promise<void> => {
+    const owningWorkspaceId = workspaceId ?? resolveWorkspaceIdForThread(threadId);
+    if (!owningWorkspaceId) {
+      await killOne(threadId, keepWorktree);
+      return;
+    }
+    const releaseCascade = beginCascade(owningWorkspaceId, threadId);
+    try {
+      const descendants = await collectDescendantsPostOrder(owningWorkspaceId, threadId);
+      for (const child of descendants) {
+        await withThreadLifecycle(owningWorkspaceId, child.id, () => (
+          killOne(child.id, keepWorktree, owningWorkspaceId)
+        ));
+      }
+      await withThreadLifecycle(owningWorkspaceId, threadId, () => (
+        killOne(threadId, keepWorktree, owningWorkspaceId)
+      ));
+    } finally {
+      releaseCascade();
     }
   };
 
@@ -2758,8 +2833,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     executionId?: string,
     extras?: { sourceOwner?: { ownerId: string; generation: number }; expectedBindingFingerprint?: string; resolutions?: ThreadConflictResolution[]; signal?: AbortSignal },
   ) => {
-    const thread = await options.registry.getThread(workspaceId, parent, threadId);
-    if (!thread) throw new Error(`Thread not found: ${threadId}`);
+    const existing = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!existing) throw new Error(`Thread not found: ${threadId}`);
+    let thread = existing;
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
     let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
     let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
@@ -2929,9 +3005,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return options.worktrees.merge(parentRoot, thread.worktree);
     };
     try {
-      return await (options.withMergeWriter
-        ? options.withMergeWriter(workspaceId, threadId, operation)
-        : operation());
+      return await withThreadLifecycle(workspaceId, threadId, async () => {
+        const latest = await options.registry.getThread(workspaceId, parent, threadId);
+        if (!latest) throw new Error(`Thread not found: ${threadId}`);
+        if (latest.lifecycle === "archived") throw new Error("Cannot merge an archived thread");
+        thread = latest;
+        return options.withMergeWriter
+          ? options.withMergeWriter(workspaceId, threadId, operation)
+          : operation();
+      });
     } finally {
       releaseParentWrite();
     }
@@ -3375,7 +3457,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     await releasePendingMaterializeReservation(threadId);
   };
 
-  const archiveUserImpl = async (
+  const archiveOneNode = async (
     workspaceId: string,
     parent: ThreadParent,
     threadId: string,
@@ -3383,10 +3465,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
-    const children = await options.registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true);
-    for (const child of children) {
-      await archiveUserImpl(workspaceId, { kind: "thread", id: threadId }, child.id, keepWorktree);
-    }
     if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
       await stopRunForArchive(workspaceId, parent, threadId);
     }
@@ -3411,15 +3489,26 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string,
     keepWorktree?: boolean,
   ) => {
-    // Archive cancels only this thread's preparation. Workspace budget
-    // coordination uses a separate short reservation critical section.
+    // Archive cancels descendant and target preparation before taking any
+    // thread lock, then archives each descendant on its own lifecycle turn.
     preparations.get(threadId)?.controller.abort();
-    return withThreadLifecycle(workspaceId, threadId, async () => {
-      // Cover a preparation that registered in the small interval between the
-      // eager cancellation above and acquiring this thread's lifecycle turn.
-      preparations.get(threadId)?.controller.abort();
-      return archiveUserImpl(workspaceId, parent, threadId, keepWorktree);
-    });
+    const releaseCascade = beginCascade(workspaceId, threadId);
+    try {
+      const descendants = await collectDescendantsPostOrder(workspaceId, threadId);
+      for (const child of descendants) {
+        preparations.get(child.id)?.controller.abort();
+        await withThreadLifecycle(workspaceId, child.id, async () => {
+          preparations.get(child.id)?.controller.abort();
+          return archiveOneNode(workspaceId, child.parent, child.id, keepWorktree);
+        });
+      }
+      return await withThreadLifecycle(workspaceId, threadId, async () => {
+        preparations.get(threadId)?.controller.abort();
+        return archiveOneNode(workspaceId, parent, threadId, keepWorktree);
+      });
+    } finally {
+      releaseCascade();
+    }
   };
 
   const reopenRestoredSession = async (
@@ -3526,6 +3615,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       };
       const existing = await options.registry.getThread(workspaceId, parent, threadId);
       if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+      const blockedAncestor = await ancestorBlocksRestore(workspaceId, existing.parent);
+      if (blockedAncestor) {
+        throw new ThreadRuntimeError(
+          "conflict",
+          `Cannot restore thread ${threadId} while ancestor ${blockedAncestor} is archived or being archived`,
+        );
+      }
       const existingRun = await options.registry.getActiveRun(workspaceId, threadId);
       const existingSessionId = sessionByThread.get(threadId);
       const existingBinding = existingSessionId ? bindingsBySession.get(existingSessionId) : undefined;

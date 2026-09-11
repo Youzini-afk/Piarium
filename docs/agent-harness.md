@@ -1300,7 +1300,8 @@ accept-edits 下 allow；`process` 除 bypass 外 ask），非 harness 工具（
 3. **OS 沙箱**（第 9.1.1 节）：限制 worker 绕过工具直接访问文件与网络。当前不具备。
 
 `ThreadLaunchManifest.scope` 是任务范围，同时对 Host 能解析出具体路径的服务形成强约束：`search.content` 的返回项、固定来源
-`read`、LSP 路径、`fs.lock` 路径与显式 `shell.exec.cwd` 都必须落在 scope 内。它**不是文件系统沙箱**：shell 命令文本内部可以
+`read`、LSP 路径、`fs.lock` 路径与显式 `shell.exec.cwd` 都必须落在 scope 内。规范化只拒绝完整的 `..` 段、绝对路径和盘符路径，
+不把 `src/foo..bar` 或 `version...txt` 当成穿越（D-223）。它**不是文件系统沙箱**：shell 命令文本内部可以
 改变目录或访问其他路径；Host 未提供固定来源或用户关闭覆盖时，Pi 内置 `read` 也仍在 worker 内直接执行。隔离 worktree 把写入副本与父工作区分开，但只有未来的 OS containment 才能约束
 同用户进程能读写的全部路径。
 
@@ -1464,6 +1465,8 @@ WorkingState exclusive lease 后再等 `VirtualWriteGate`（D-221）。branch In
 `runWhenVirtual` 按 gate、切换结束和取消信号等待或改走 disk。
 directory 恢复写物化父目录走 execution Documents gate，对象库仍在 owning root；无法解析则 needs-attention（D-222）。
 queued dequeue 把 `thread.manifest.permissions` 送进 `session.create`，live bypass 不能放宽冻结 overlay。
+父 kill/archive 按稳定后序进入每个后代自己的 lifecycle serialization，不得持有父锁再等子锁；后代 restore/reclaim/merge 与级联并发时不能留下活跃 Run、半归档或在已归档祖先下复活（D-223）。
+`scope` 只拒绝完整 `..` 段、绝对路径和盘符路径；`src/foo..bar`、`version...txt` 这类相对名必须接受。
 兄弟线程不直接通信；根上下文不复制孙对话正文。不加固定深度上限，复用既有并发与排队。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
@@ -1659,7 +1662,9 @@ ThreadRun {
   Git 跟踪范围；需保留的 ignored 输入/结果同样要已保存，已声明可重建缓存允许删除，未知内容保留并报告。路径必须位于该记录的
   受管根内且身份一致。条件不满足仅保留该目录，不禁用其他线程；显式 keep_worktree 选择继续有效。
   归档取消并等待该 Run 的准备/setup/启动、实际会话与 shell 退出，失败保留绑定和目录。删除期间持续持有 Documents 写者屏障并
-  重核结果。同线程的归档、恢复和回收互斥，自动清理跳过正忙目标。恢复从选定 native resultRevision 重建，沿原 session 绑定新 Run；
+  重核结果。同线程的归档、恢复和回收互斥，自动清理跳过正忙目标。父 kill/archive 对每个后代进入该后代自己的 lifecycle
+  serialization，使用 `createdAt` 再 `id` 的稳定后序，避免递归锁反转；祖先归档或正在级联时拒绝恢复该后代（D-223）。
+  恢复从选定 native resultRevision 重建，沿原 session 绑定新 Run；
   普通已结束/已回收线程的打开也走该链。失败保持原生命周期可重试，不开放错误目录；准备进度持久化为明确阶段，部分目录重试清理核对 fingerprint（D-204）。
 - **占用与背压。** 记录物化目录、对象库、受引用历史及可回收量，删除目录不等于释放结果对象。共享对象在工作区只计一次。
   优先回收符合条件的缓存；新增物化按用户配置预算、实际可用空间与可知准备需求安排，必要时排队或返回可行动的 unavailable，

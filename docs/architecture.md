@@ -690,8 +690,11 @@ the workspace. Directory apply keeps the recovery object library on the owning e
 the materialized parent through the execution workspace Documents gate (D-219 / D-222).
 Branch parent apply is a durable Integration with retry and undo. Child workspace, scope, and the
 frozen permission overlay inherit or narrow and enter `session.create/open`; Host rejects expansion,
-absolute scope paths, and `..`. Nested `captureScopes` inherit the parent WorkingBranch freeze.
-Killing or archiving a parent cancels descendant preparation and Runs first. Role tools come from
+absolute scope paths, drive-letter paths, and a complete `..` segment, not names that merely contain
+consecutive dots (D-223). Nested `captureScopes` inherit the parent WorkingBranch freeze.
+Killing or archiving a parent walks descendants in stable post-order and enters each child's own
+lifecycle serialization before the parent; restore is refused while an ancestor is archived or the
+cascade is in progress (D-223). Role tools come from
 the child's own launch manifest.
 Owning workspace (Thread catalog, WorkingState, knowledge, parent/child lifecycle) is distinct from the
 execution workspace Documents assigns to a scratch or materialized cwd (D-216 / D-222). Thread services,

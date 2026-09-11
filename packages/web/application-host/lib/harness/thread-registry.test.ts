@@ -732,4 +732,15 @@ describe("thread registry", () => {
     expect(restored).toMatchObject({ lifecycle: "settled", report: { conclusion: "keep this" } });
     expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ sessionId: "child-keep", outcome: "success" });
   });
+
+  it("does not reopen an archived thread through cancelThread", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null);
+    await registry.archiveThread(WORKSPACE, thread.id);
+    expect(await registry.cancelThread(WORKSPACE, thread.id, "killed by parent")).toMatchObject({
+      lifecycle: "archived",
+    });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
+  });
 });
