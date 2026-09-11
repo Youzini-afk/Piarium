@@ -4444,7 +4444,24 @@ ModelRuntime 纵切继续通过。
 
 影响：Host virtual-write-gate / working-branch-writes / integration-coordinator / durable-file-operation / journal-engine fence、thread-runtime merge、Application Host 装配；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。D-219 相应部分在索引标 superseded in part。
 
-状态：已实施；CAS 成功后注入崩溃再经 `fenceUnfinishedOperations` 对账、以及 materialize `beginSwitch` 等待 store 时并发 `runtime.merge` 有定向生产证据。恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
+状态：已实施；CAS 成功后注入崩溃再经 `fenceUnfinishedOperations` 对账、以及 materialize `beginSwitch` 等待 store 时并发 `runtime.merge` 有定向生产证据。恢复时 execution identity/权限/知识所有权见 D-222。级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
+
+### D-222 · 2026-09-11 · 3.4 / 3.4a / 3.6（恢复时 execution identity、冻结权限与知识所有权）
+
+类型：问题与解法
+
+背景：D-216 把 catalog 与 Documents 拆开，但启动 directory reconcile 仍用 owning Documents gate 写物化父目录；resolver 失败时还会退回 owning gate。D-219 规定 dequeue 传入冻结 overlay，但 Application Host `onThreadDequeued` 仍把 `permissions: {}` 交给 spawn，`accept-edits` 被冻成 normal。`session-bindings.json` 只是附加 map：catalog 已写、binding 未写或 stale owner 时，`getSessionBinding` 不核对 catalog，`assertOwnerTool` 在 `owner: null` 时跳过 thread tool allowlist。`session.snapshot` 早于 `markRunRunning` 时，knowledge/recall/suggestions/Zone 2 绑到 execution workspace。
+
+决定：
+
+1. directory Integration 持久化 `applyCanonicalRoot` 与 `applyExecutionWorkspaceId`。启动 `fenceUnfinishedOperations` 与 live apply 都经 Documents `resolveWorkspace(directory)` 取得 execution resource gate；对象库 `root` 仍是 owning recovery storage。无法解析或 identity 漂移标 `needs-attention`，不得改用 owning gate 写父目录。
+2. 生产 `onThreadDequeued` 把 `thread.manifest.permissions` 交给 `runtime.spawn`；spawn 再 `normalizeFrozenHarnessPermissions`。缺省/`{}` 仍冻成 normal。pi-host 继续把冻结 overlay 当 user/base，live bypass 只能收紧。
+3. `session-bindings.json` 是 thread catalog/run 的可重建索引。启动对账从 `run.sessionId` 重建；catalog 已写、binding 未写则补上；stale binding 丢弃。每次 `getSessionBinding` 核对 owning workspace、thread、run、session 与 parent。不匹配且无法从 catalog 派生则拒绝（`stale-binding`），不能以 `owner: null` 跳过 allowlist。
+4. Thread session 的 knowledge / recall / suggestions / Zone 2 knowledge 解析到 owning workspace。Documents、LSP、shell、路径与工作区语义索引继续用 execution。`session.snapshot` 若早于 binding，随后 `markRunRunning` 重绑；知识请求惰性读 validated binding。
+
+影响：Host thread-dequeue/registry/services/runtime、durable-file-operation/journal-engine fence、Application Host 装配；设计 9.2.5b / 9.3.5、plan 3.4/3.6、status 3.4 / 3.4a / 3.6、architecture 6.1、harness DOCUMENTATION。D-216 / D-219 相应部分在索引标 superseded in part。
+
+状态：已实施；生产 dequeue → `session.create` 的 accept-edits、directory reconcile 走 execution gate、binding 重建/stale 拒绝、以及 owning≠execution 的 recall/suggest/Zone 2 有定向生产证据。级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
 
 ## 决策索引
 
@@ -4666,9 +4683,10 @@ ModelRuntime 纵切继续通过。
 | D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-214 | superseded in part（dispatch 固定 Git/非 Git 磁盘基线保留；catalog 不得用 execution workspaceId；Git 错误不得吞成空清单、捕获窗口与 gitlink 由 D-218 补正） | D-216 / D-218 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回；权限冻结、级联、durable 嵌套集成与 captureScopes 由 D-219 补正） | D-216 / D-218 / D-219 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
-| D-216 | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正） | D-220 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-216 | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正；session-bindings 可重建索引、知识 owning 解析与 directory reconcile 的 execution gate 由 D-222 补正） | D-220 / D-222 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-217 | superseded in part（物化后重读 view、切换 journal、嵌套写 gate 与树不变量保留；lease 后重取当前 view 与 explore 查询级 immutable snapshot 由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-218 | superseded in part（Git 失败必抛、gitlink/unsupported、sameState 与失败清理保留；fingerprint 增加内容身份，默认 mode 不再探测用户树，由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-219 | superseded in part（冻结 overlay、directory 对象库根、级联与 captureScopes 继承保留；branch 集成锁顺序/WAL 与 disk reconcile 隔离由 D-221 补正） | D-221 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-219 | superseded in part（冻结 overlay、directory 对象库根、级联与 captureScopes 继承保留；branch 集成锁顺序/WAL 由 D-221 补正；dequeue 必须传 manifest permissions、directory 恢复必须走 execution gate 由 D-222 补正） | D-221 / D-222 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-220 | implementation（执行 Git baseline 与逻辑 base 分离；settle 并入 deltas；lease 后重读与 explore 查询级 pin；umask 默认 mode；fingerprint 内容身份） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-221 | implementation（先 gate 后 store；删除固定两次重试；branch Integration WAL 与独立对账；undo 仅 after→before CAS） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-222 | implementation（directory reconcile 走 execution Documents gate；dequeue 传冻结 overlay；session-bindings 可重建索引；知识/recall/Zone 2 解析 owning workspace） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |

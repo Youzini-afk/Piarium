@@ -286,8 +286,12 @@ are omitted.
 Active child threads are added to every parent Zone 2 turn, while settled
 threads use a separate observer cursor and appear only after their event
 sequence changes. Nested child sessions resolve their owning Thread from the
-Host session binding (`sessionId → owning workspace / thread / run`), not from
-the execution workspace Documents assigns to scratch or materialized cwd.
+Host session binding (`sessionId → owning workspace / thread / run`) after
+catalog/run reconciliation, not from the execution workspace Documents assigns
+to scratch or materialized cwd. A missing or mismatched owner is denied; it
+cannot skip the thread tool allowlist. Knowledge, recall, suggestions, and
+Zone 2 knowledge resolve that owning workspace. Documents, LSP, shell, paths,
+and workspace semantic index stay on the execution workspace.
 Run launch includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
@@ -363,7 +367,11 @@ parent write/switch gate, then opens the WorkingState store. It persists an appl
 intent (before/after revision, target states, retry identity, `targetKinds: "branch"`)
 before the parent CAS and writes complete afterward. Startup reconcile compares the
 live parent `writeRevision` to those slices; generic disk reconcile skips branch rows.
-`runWhenVirtual` waits on the real gate, switch completion, or cancel signal. Conditional compensation/undo preserves
+`runWhenVirtual` waits on the real gate, switch completion, or cancel signal.
+Directory apply and startup reconcile resolve the execution Documents gate from
+the persisted parent directory; the object library stays on the owning recovery
+root. Queued dequeue passes the frozen manifest overlay into `session.create`.
+Conditional compensation/undo preserves
 subsequent edits; reconnect or restart cannot reinterpret a surface target as disk.
 `merge-ready` comes from a bound preview; resolution submissions must consume that
 binding. Preview reads and identical projections do not create event feedback loops.

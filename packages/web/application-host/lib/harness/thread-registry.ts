@@ -59,7 +59,8 @@ export type ThreadRegistryErrorCode =
   | "corrupt"
   | "future-schema"
   | "read-failed"
-  | "write-failed";
+  | "write-failed"
+  | "stale-binding";
 
 export class ThreadRegistryError extends Error {
   readonly code: ThreadRegistryErrorCode;
@@ -1090,10 +1091,151 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     });
   };
 
+  const sameBinding = (left: ThreadSessionBinding, right: ThreadSessionBinding): boolean => (
+    left.sessionId === right.sessionId
+    && left.owningWorkspaceId === right.owningWorkspaceId
+    && left.threadId === right.threadId
+    && left.runId === right.runId
+    && parentEquals(left.parent, right.parent)
+  );
+
+  const bindingRank = (run: ThreadRun): number => {
+    if (run.workerState === "running" || run.workerState === "starting") return 3;
+    if (run.workerState === "lost") return 2;
+    return 1;
+  };
+
+  const bindingFromRun = (catalog: ThreadCatalogDocument, run: ThreadRun): ThreadSessionBinding | null => {
+    if (!run.sessionId) return null;
+    const thread = catalog.threads.find((entry) => entry.id === run.threadId) ?? null;
+    if (!thread) return null;
+    return {
+      sessionId: run.sessionId,
+      owningWorkspaceId: catalog.workspaceId,
+      threadId: run.threadId,
+      runId: run.id,
+      parent: thread.parent,
+    };
+  };
+
+  const bindingMatchesCatalog = (binding: ThreadSessionBinding, catalog: ThreadCatalogDocument): boolean => {
+    if (catalog.workspaceId !== binding.owningWorkspaceId) return false;
+    const thread = catalog.threads.find((entry) => entry.id === binding.threadId) ?? null;
+    const run = catalog.runs.find((entry) => entry.id === binding.runId && entry.threadId === binding.threadId);
+    return !!thread
+      && !!run
+      && run.sessionId === binding.sessionId
+      && parentEquals(thread.parent, binding.parent);
+  };
+
+  const readExistingCatalog = async (workspaceId: string): Promise<ThreadCatalogDocument | null> => {
+    if (cache.has(workspaceId)) return cache.get(workspaceId)!;
+    const path = threadCatalogPath(dataDir, hostId, workspaceId);
+    const raw = await readText(path);
+    if (raw === null) return null;
+    return loadWorkspace(workspaceId);
+  };
+
+  const loadHostCatalogs = async (): Promise<void> => {
+    const directory = join(dataDir, "threads", hostId);
+    let entries: fs.Dirent<string>[];
+    try {
+      entries = await fsPromises.readdir(directory, { withFileTypes: true, encoding: "utf8" });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw new ThreadRegistryError("read-failed", `Unable to enumerate thread registries: ${directory}`, directory, { cause: error });
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !isThreadCatalogFileName(entry.name)) continue;
+      const path = join(directory, entry.name);
+      const raw = await readText(path);
+      if (raw === null) continue;
+      const parsed = parseJson(raw, path);
+      if (Array.isArray(parsed)) continue;
+      const catalog = parseCatalog(raw, path);
+      if (threadCatalogPath(dataDir, hostId, catalog.workspaceId) !== path) {
+        throw new ThreadRegistryError("corrupt", `Thread registry filename does not match its workspace identity: ${path}`, path);
+      }
+      if (!cache.has(catalog.workspaceId)) cache.set(catalog.workspaceId, catalog);
+    }
+  };
+
+  const catalogBindingForSession = (sessionId: string): ThreadSessionBinding | null => {
+    let chosen: { binding: ThreadSessionBinding; rank: number } | null = null;
+    for (const catalog of cache.values()) {
+      for (const run of catalog.runs) {
+        if (run.sessionId !== sessionId) continue;
+        const derived = bindingFromRun(catalog, run);
+        if (!derived) continue;
+        const rank = bindingRank(run);
+        if (!chosen || rank > chosen.rank) chosen = { binding: derived, rank };
+      }
+    }
+    return chosen ? structuredClone(chosen.binding) : null;
+  };
+
+  const derivedBindingsFromCatalogs = (): Map<string, ThreadSessionBinding> => {
+    const next = new Map<string, { binding: ThreadSessionBinding; rank: number }>();
+    for (const catalog of cache.values()) {
+      for (const run of catalog.runs) {
+        const derived = bindingFromRun(catalog, run);
+        if (!derived) continue;
+        const rank = bindingRank(run);
+        const existing = next.get(derived.sessionId);
+        if (!existing || rank > existing.rank) next.set(derived.sessionId, { binding: derived, rank });
+      }
+    }
+    return new Map([...next].map(([sessionId, entry]) => [sessionId, entry.binding]));
+  };
+
+  const rebuildSessionBindingsFromCatalogs = async (): Promise<void> => {
+    await ensureSessionBindings();
+    const next = derivedBindingsFromCatalogs();
+    let changed = next.size !== sessionBindings.size;
+    if (!changed) {
+      for (const [sessionId, binding] of next) {
+        const current = sessionBindings.get(sessionId);
+        if (!current || !sameBinding(current, binding)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (!changed) return;
+    await mutateSessionBindings(() => {
+      sessionBindings.clear();
+      for (const [sessionId, binding] of next) sessionBindings.set(sessionId, structuredClone(binding));
+    });
+  };
+
   const getSessionBinding = async (sessionId: string): Promise<ThreadSessionBinding | null> => {
     await ensureSessionBindings();
-    const binding = sessionBindings.get(sessionId);
-    return binding ? structuredClone(binding) : null;
+    const existing = sessionBindings.get(sessionId);
+    if (existing) {
+      const catalog = await readExistingCatalog(existing.owningWorkspaceId);
+      if (catalog && bindingMatchesCatalog(existing, catalog)) return structuredClone(existing);
+    }
+    await loadHostCatalogs();
+    const derived = catalogBindingForSession(sessionId);
+    if (derived) {
+      if (!existing || !sameBinding(existing, derived)) {
+        await mutateSessionBindings(() => {
+          sessionBindings.set(derived.sessionId, structuredClone(derived));
+        });
+      }
+      return structuredClone(derived);
+    }
+    if (existing) {
+      await mutateSessionBindings(() => {
+        sessionBindings.delete(sessionId);
+      });
+      throw new ThreadRegistryError(
+        "stale-binding",
+        `Thread session binding does not match the catalog: ${sessionId}`,
+        threadSessionBindingsPath(dataDir, hostId),
+      );
+    }
+    return null;
   };
 
   const writeCatalog = async (catalog: ThreadCatalogDocument): Promise<void> => {
@@ -2041,6 +2183,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           : new ThreadRegistryError("read-failed", `Unable to inspect thread registry: ${path}`, path, { cause: error });
         failures.push({ code: failure.code, message: failure.message, path: failure.path });
       }
+    }
+    try {
+      await rebuildSessionBindingsFromCatalogs();
+    } catch (error) {
+      const path = threadSessionBindingsPath(dataDir, hostId);
+      const failure = error instanceof ThreadRegistryError
+        ? error
+        : new ThreadRegistryError("write-failed", `Unable to rebuild thread session bindings: ${path}`, path, { cause: error });
+      failures.push({ code: failure.code, message: failure.message, path: failure.path });
     }
     return { failures, legacyFilesSkipped, reconciledRuns, workspaces };
   };

@@ -144,6 +144,7 @@ export interface ThreadRuntimeOptions {
   resolveReviewSettings?(workspaceId: string, parent: ThreadParent): Promise<ReviewSensorSettings> | ReviewSensorSettings;
   resolveReviewRole?(workspaceId: string, parent: ThreadParent): Promise<ResolvedRole | null> | ResolvedRole | null;
   recallProjectKnowledge?(workspaceId: string, query: string): Promise<string>;
+  onThreadSessionBound?(sessionId: string, owningWorkspaceId: string): void;
 }
 
 export interface SpawnThreadRunInput extends CreateThreadInput {
@@ -1805,6 +1806,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       checkPreparation();
       scheduleStallTimer(binding);
       await options.registry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
+      options.onThreadSessionBound?.(sessionId, input.workspaceId);
       checkPreparation();
       await options.sessions.prompt(
         sessionId,
@@ -2523,6 +2525,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             waitingSessions.add(snapshot.sessionId);
           }
           await options.registry.markRunRunning(workspaceId, thread.id, run.id, snapshot.sessionId);
+          options.onThreadSessionBound?.(snapshot.sessionId, workspaceId);
           if (thread.kind === "implementation") {
             scheduleStallTimer(binding);
             await options.sessions.prompt(
@@ -2687,6 +2690,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       runId: converted.run.id,
     });
     await options.registry.markRunRunning(scope.workspaceId, thread.id, converted.run.id, opened.sessionId);
+    options.onThreadSessionBound?.(opened.sessionId, scope.workspaceId);
     try {
       scheduleStallTimer(implementationBinding);
       await options.sessions.prompt(
@@ -3480,6 +3484,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         runId: run.id,
       });
       await options.registry.markRunRunning(workspaceId, thread.id, run.id, opened.sessionId);
+      options.onThreadSessionBound?.(opened.sessionId, workspaceId);
       checkRestore();
       if (thread.kind === "implementation") scheduleStallTimer(binding);
       return run;

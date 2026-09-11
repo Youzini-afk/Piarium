@@ -9,6 +9,7 @@ import {
   ThreadRegistryError,
   createThreadRegistry,
   threadCatalogPath,
+  threadSessionBindingsPath,
   type CreateThreadInput,
   type ThreadParent,
   type ThreadReport,
@@ -81,7 +82,7 @@ describe("thread registry", () => {
     });
   });
 
-  it("reloads the session-to-owning-workspace binding after restart without scanning catalogs", async () => {
+  it("reloads a catalog-matching session binding after restart", async () => {
     const thread = await registry.createThread(createInput());
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
@@ -95,6 +96,42 @@ describe("thread registry", () => {
       parent: PARENT,
     });
     expect(await registry.getThreadForSession("execution-ws", "child-session-1")).toBeNull();
+  });
+
+  it("rebuilds a missing binding from the catalog and rejects a stale owner after restart", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
+    const bindingsPath = threadSessionBindingsPath(dataDir, "test-host");
+    await writeFile(bindingsPath, JSON.stringify({ schemaVersion: 1, bindings: [] }, null, 2), "utf8");
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    await registry.reconcileAfterHostRestart();
+    expect(await registry.getSessionBinding("child-session-1")).toEqual({
+      sessionId: "child-session-1",
+      owningWorkspaceId: WORKSPACE,
+      threadId: thread.id,
+      runId: run.id,
+      parent: PARENT,
+    });
+
+    await writeFile(bindingsPath, JSON.stringify({
+      schemaVersion: 1,
+      bindings: [{
+        sessionId: "ghost-session",
+        owningWorkspaceId: "wrong-ws",
+        threadId: "ghost-thread",
+        runId: "ghost-run",
+        parent: PARENT,
+      }],
+    }, null, 2), "utf8");
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    await expect(registry.getSessionBinding("ghost-session")).rejects.toMatchObject({
+      name: "ThreadRegistryError",
+      code: "stale-binding",
+    });
+    expect(JSON.parse(readFileSync(bindingsPath, "utf8")).bindings).toEqual([]);
   });
 
   it("persists the retained branch and result commit", async () => {

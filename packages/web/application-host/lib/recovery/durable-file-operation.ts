@@ -25,6 +25,8 @@ export interface DurableFileOperationSpec {
   retryBinding?: DurableFileRetryBinding;
   /** Parent materialized directory when apply identity is not the owning workspace root. */
   applyCanonicalRoot?: string;
+  /** Execution workspace that owns Documents/resource gate for applyCanonicalRoot. */
+  applyExecutionWorkspaceId?: string;
 }
 
 export interface DurableExternalBinding {
@@ -69,12 +71,18 @@ export interface HostResourceOperationGate {
   run<Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>): Promise<Result>;
 }
 
+export type ResolveDirectoryApplyContext = (directory: string) => Promise<{
+  workspaceId: string;
+  resourceOperationGate: HostResourceOperationGate;
+}>;
+
 export interface DurableFileOperationContext {
   database: SqliteDatabase;
   fileStore: RecoveryFileStore;
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
   root: string;
+  resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
 }
 
 interface PersistedIntegrationData extends Record<string, unknown> {
@@ -95,6 +103,7 @@ interface PersistedIntegrationData extends Record<string, unknown> {
   requireTurnBinding?: boolean;
   retryBinding?: DurableFileRetryBinding;
   applyCanonicalRoot?: string;
+  applyExecutionWorkspaceId?: string;
   parentBranchId?: string;
   beforeWriteRevision?: number;
   afterWriteRevision?: number;
@@ -126,14 +135,33 @@ const isBranchIntegration = (data: Pick<PersistedIntegrationData, "parentBranchI
   || Object.values(data.targetKinds).some((kind) => kind === "branch")
 );
 
-const contextForPersistedApply = (
+const resolvePersistedApplyContext = async (
   context: DurableFileOperationContext,
-  data: Pick<PersistedIntegrationData, "applyCanonicalRoot">,
-): DurableFileOperationContext => (
-  typeof data.applyCanonicalRoot === "string" && data.applyCanonicalRoot.length > 0
-    ? { ...context, identity: { ...context.identity, canonicalRoot: data.applyCanonicalRoot } }
-    : context
-);
+  data: Pick<PersistedIntegrationData, "applyCanonicalRoot" | "applyExecutionWorkspaceId">,
+): Promise<DurableFileOperationContext | "unresolved"> => {
+  if (typeof data.applyCanonicalRoot !== "string" || data.applyCanonicalRoot.length === 0) return context;
+  if (!context.resolveDirectoryApplyContext) return "unresolved";
+  try {
+    const resolved = await context.resolveDirectoryApplyContext(data.applyCanonicalRoot);
+    if (
+      typeof data.applyExecutionWorkspaceId === "string"
+      && data.applyExecutionWorkspaceId.length > 0
+      && data.applyExecutionWorkspaceId !== resolved.workspaceId
+    ) {
+      return "unresolved";
+    }
+    return {
+      ...context,
+      identity: {
+        ...context.identity,
+        canonicalRoot: data.applyCanonicalRoot,
+      },
+      resourceOperationGate: resolved.resourceOperationGate,
+    };
+  } catch {
+    return "unresolved";
+  }
+};
 
 const capture = (
   context: DurableFileOperationContext,
@@ -167,7 +195,11 @@ const compensate = async (
   data: PersistedIntegrationData,
   rows: OperationFileRow[],
 ): Promise<void> => {
-  const applyContext = contextForPersistedApply(context, data);
+  const applyContext = await resolvePersistedApplyContext(context, data);
+  if (applyContext === "unresolved") {
+    data.needsAttentionPaths = [...new Set([...data.needsAttentionPaths, ...rows.map((row) => row.path)])];
+    return;
+  }
   const compensatingRows = orderForStates(rows, (row) => (
     data.safety[row.path] ?? stateFromJson(row.safety_json, `${row.path} safety`)
   ));
@@ -260,6 +292,7 @@ export const applyDurableFileOperation = async (
     ...(spec.requireTurnBinding ? { requireTurnBinding: true } : {}),
     ...(spec.retryBinding ? { retryBinding: structuredClone(spec.retryBinding) } : {}),
     ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
+    ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
   };
   context.database.transaction(() => {
     writeRecord(context.database, spec.workspaceId, "applying", data, createdAt);
@@ -483,6 +516,9 @@ const parsePersistedData = (row: OperationRow): PersistedIntegrationData => {
     ...(typeof raw.applyCanonicalRoot === "string" && raw.applyCanonicalRoot
       ? { applyCanonicalRoot: raw.applyCanonicalRoot }
       : {}),
+    ...(typeof raw.applyExecutionWorkspaceId === "string" && raw.applyExecutionWorkspaceId
+      ? { applyExecutionWorkspaceId: raw.applyExecutionWorkspaceId }
+      : {}),
     ...(typeof raw.parentBranchId === "string" && raw.parentBranchId
       ? { parentBranchId: raw.parentBranchId }
       : {}),
@@ -510,6 +546,7 @@ export interface DurableIntegrationInspection {
   targetKinds: Record<string, "disk" | "surface" | "branch">;
   externalBindings: Record<string, DurableExternalBinding>;
   applyCanonicalRoot?: string;
+  applyExecutionWorkspaceId?: string;
   parentBranchId?: string;
   beforeWriteRevision?: number;
   afterWriteRevision?: number;
@@ -534,6 +571,7 @@ export const inspectDurableIntegrationOperation = (
     appliedPaths: [...data.appliedPaths],
     safety: structuredClone(data.safety),
     ...(data.applyCanonicalRoot ? { applyCanonicalRoot: data.applyCanonicalRoot } : {}),
+    ...(data.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: data.applyExecutionWorkspaceId } : {}),
     ...(data.parentBranchId ? { parentBranchId: data.parentBranchId } : {}),
     ...(data.beforeWriteRevision === undefined ? {} : { beforeWriteRevision: data.beforeWriteRevision }),
     ...(data.afterWriteRevision === undefined ? {} : { afterWriteRevision: data.afterWriteRevision }),
@@ -820,7 +858,15 @@ export const reconcileInterruptedIntegrationOperations = async (
   for (const row of rows) {
     const data = parsePersistedData(row);
     if (isBranchIntegration(data)) continue;
-    const applyContext = contextForPersistedApply(context, data);
+    const applyContext = await resolvePersistedApplyContext(context, data);
+    if (applyContext === "unresolved") {
+      writeRecord(context.database, row.workspace_id, "needs-attention", {
+        ...data,
+        failure: "Execution directory could not be resolved for directory apply",
+      }, new Date().toISOString());
+      result.needsAttention.push(row.id);
+      continue;
+    }
     let unknown = false;
     for (const fileRow of operationFileRows(context.database, row.id)) {
       if (data.targetKinds[fileRow.path] === "surface") {

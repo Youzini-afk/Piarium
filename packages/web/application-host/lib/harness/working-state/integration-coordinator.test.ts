@@ -38,6 +38,7 @@ const createHarness = async (fileStore = createRecoveryFileStore()) => {
   const workspace = path.join(root, "workspace");
   const dataDir = path.join(root, "data");
   await fs.promises.mkdir(workspace, { recursive: true });
+  const directoryWorkspaces = new Map<string, string>();
   const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
     inspectWorkspace: async () => ({ root: workspace, workspaceId: "ws" }),
     listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId: "ws" }],
@@ -51,9 +52,39 @@ const createHarness = async (fileStore = createRecoveryFileStore()) => {
     commit: async () => ({}),
     commitLeaf: async () => ({}),
   };
-  const engine = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir, documents, fileStore, sessionNavigation: navigation });
+  const resolveDirectoryApplyContext: NonNullable<CreateWorkspaceRecoveryEngineOptions["resolveDirectoryApplyContext"]> = async (directory) => {
+    const normalized = path.resolve(directory);
+    const workspaceId = directoryWorkspaces.get(normalized)
+      ?? (path.resolve(workspace) === normalized ? "ws" : undefined);
+    if (!workspaceId) throw new Error(`Unable to resolve execution workspace: ${directory}`);
+    return {
+      workspaceId,
+      resourceOperationGate: {
+        run: (resources, operation) => documents.runResourceOperation!(workspaceId, resources, operation),
+      },
+    };
+  };
+  const engine = createWorkspaceRecoveryEngine({
+    authorityId: "test",
+    dataDir,
+    documents,
+    fileStore,
+    sessionNavigation: navigation,
+    resolveDirectoryApplyContext,
+  });
   const workingStates = createWorkspaceWorkingStateAccess(engine);
-  return { coordinator: new IntegrationCoordinator({ workingStates }), dataDir, documents, engine, navigation, root, workingStates, workspace };
+  return {
+    coordinator: new IntegrationCoordinator({ workingStates, resolveDirectoryApplyContext }),
+    dataDir,
+    directoryWorkspaces,
+    documents,
+    engine,
+    navigation,
+    resolveDirectoryApplyContext,
+    root,
+    workingStates,
+    workspace,
+  };
 };
 
 const prepareResult = async (h: Awaited<ReturnType<typeof createHarness>>, child: string, branchId = "thread-1") => {
@@ -1332,6 +1363,7 @@ describe("IntegrationCoordinator", () => {
     const parentDir = path.join(h.root, "parent-worktree");
     try {
       await fs.promises.mkdir(parentDir, { recursive: true });
+      h.directoryWorkspaces.set(path.resolve(parentDir), "parent-exec");
       await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "parent\n");
       await fs.promises.writeFile(path.join(parentDir, "a.txt"), "parent\n");
       const child = path.join(h.root, "dir-child");
@@ -1345,12 +1377,183 @@ describe("IntegrationCoordinator", () => {
         resultRevision: result.resultRevision,
         parentAuthority: { kind: "directory", directory: parentDir, workspaceId: "parent-exec" },
       });
+      expect(h.documents.runResourceOperation).toHaveBeenCalledWith(
+        "parent-exec",
+        [expect.objectContaining({ scope: "subtree" })],
+        expect.any(Function),
+      );
+      expect(h.documents.runResourceOperation).not.toHaveBeenCalledWith(
+        "ws",
+        [expect.objectContaining({ resourceId: "a.txt" })],
+        expect.any(Function),
+      );
       expect(merged).toMatchObject({ status: "applied", appliedPaths: ["a.txt"] });
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("grandchild\n");
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("parent\n");
       expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
       const parentListing = await fs.promises.readdir(parentDir, { recursive: true });
       expect(parentListing.some((entry) => String(entry).includes("staging") || String(entry).includes("objects"))).toBe(false);
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("startup directory reconcile writes through the execution Documents gate and keeps objects on the owning root", async () => {
+    const h = await createHarness();
+    const parentDir = path.join(h.root, "parent-worktree");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      h.directoryWorkspaces.set(path.resolve(parentDir), "parent-exec");
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "owning\n");
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "before\n");
+      await h.workingStates.withStore("ws", "seed-directory-crash", async (store, context) => {
+        const before = (await context.fileStore.captureState(
+          { ...context.identity, canonicalRoot: parentDir },
+          context.root,
+          "a.txt",
+          { store: true },
+        )).state;
+        const object = await store.putObject(Buffer.from("after\n"));
+        const target: RecoveryState = {
+          kind: "regular-file",
+          objectHash: object.hash,
+          byteLength: object.byteLength,
+          ...(before.kind === "regular-file" && before.mode !== undefined ? { mode: before.mode } : {}),
+        };
+        const targets = { "a.txt": { expected: before, target } };
+        const data = {
+          operationId: "crashed-directory",
+          threadId: "thread-1",
+          resultRevision: 1,
+          targets,
+          safety: { "a.txt": before },
+          conflictPaths: [],
+          appliedPaths: [],
+          compensatedPaths: [],
+          needsAttentionPaths: [],
+          diffStats: { files: 1, insertions: 0, deletions: 0 },
+          applyCanonicalRoot: parentDir,
+          applyExecutionWorkspaceId: "parent-exec",
+        };
+        context.database.transaction(() => {
+          writeOperationRow(context.database, {
+            id: "crashed-directory",
+            workspaceId: "ws",
+            kind: "integration",
+            state: "applying",
+            data,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          initOperationFiles(context.database, "crashed-directory", targets);
+          updateOperationFilePhase(context.database, "crashed-directory", "a.txt", "apply-intent", {
+            safetyJson: JSON.stringify(before),
+          });
+        }).immediate();
+        await context.fileStore.applyState({ ...context.identity, canonicalRoot: parentDir }, context.root, "a.txt", target);
+      });
+      await h.engine.dispose();
+      vi.mocked(h.documents.runResourceOperation!).mockClear();
+      const restarted = createWorkspaceRecoveryEngine({
+        authorityId: "test",
+        dataDir: h.dataDir,
+        documents: h.documents,
+        sessionNavigation: h.navigation,
+        resolveDirectoryApplyContext: h.resolveDirectoryApplyContext,
+      });
+      await restarted.fenceUnfinishedOperations();
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
+      expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("owning\n");
+      expect(h.documents.runResourceOperation).toHaveBeenCalledWith(
+        "parent-exec",
+        [expect.objectContaining({ scope: "subtree" })],
+        expect.any(Function),
+      );
+      expect(h.documents.runResourceOperation).not.toHaveBeenCalledWith(
+        "ws",
+        [expect.objectContaining({ resourceId: "a.txt" })],
+        expect.any(Function),
+      );
+      expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
+      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-directory-reconcile", create: false }, ({ database }) => {
+        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-directory")).toEqual({ state: "compensated" });
+      });
+      await restarted.dispose();
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("marks directory reconcile needs-attention when the execution directory cannot be resolved", async () => {
+    const h = await createHarness();
+    const parentDir = path.join(h.root, "missing-parent");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "leave-me\n");
+      await h.workingStates.withStore("ws", "seed-unresolved-directory", async (store, context) => {
+        const before = (await context.fileStore.captureState(
+          { ...context.identity, canonicalRoot: parentDir },
+          context.root,
+          "a.txt",
+          { store: true },
+        )).state;
+        const object = await store.putObject(Buffer.from("after\n"));
+        const target: RecoveryState = {
+          kind: "regular-file",
+          objectHash: object.hash,
+          byteLength: object.byteLength,
+          ...(before.kind === "regular-file" && before.mode !== undefined ? { mode: before.mode } : {}),
+        };
+        const targets = { "a.txt": { expected: before, target } };
+        const data = {
+          operationId: "unresolved-directory",
+          threadId: "thread-1",
+          resultRevision: 1,
+          targets,
+          safety: { "a.txt": before },
+          conflictPaths: [],
+          appliedPaths: [],
+          compensatedPaths: [],
+          needsAttentionPaths: [],
+          diffStats: { files: 1, insertions: 0, deletions: 0 },
+          applyCanonicalRoot: parentDir,
+          applyExecutionWorkspaceId: "parent-exec",
+        };
+        context.database.transaction(() => {
+          writeOperationRow(context.database, {
+            id: "unresolved-directory",
+            workspaceId: "ws",
+            kind: "integration",
+            state: "applying",
+            data,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          });
+          initOperationFiles(context.database, "unresolved-directory", targets);
+          updateOperationFilePhase(context.database, "unresolved-directory", "a.txt", "apply-intent", {
+            safetyJson: JSON.stringify(before),
+          });
+        }).immediate();
+        await context.fileStore.applyState({ ...context.identity, canonicalRoot: parentDir }, context.root, "a.txt", target);
+      });
+      await h.engine.dispose();
+      vi.mocked(h.documents.runResourceOperation!).mockClear();
+      const restarted = createWorkspaceRecoveryEngine({
+        authorityId: "test",
+        dataDir: h.dataDir,
+        documents: h.documents,
+        sessionNavigation: h.navigation,
+        resolveDirectoryApplyContext: async () => {
+          throw new Error("execution directory is gone");
+        },
+      });
+      await restarted.fenceUnfinishedOperations();
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("after\n");
+      expect(h.documents.runResourceOperation).not.toHaveBeenCalled();
+      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-unresolved-directory", create: false }, ({ database }) => {
+        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("unresolved-directory")).toEqual({ state: "needs-attention" });
+      });
+      await restarted.dispose();
     } finally {
       await h.engine.dispose();
     }

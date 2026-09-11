@@ -12,6 +12,7 @@ import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { ROLE_DEFINITIONS } from "./roles.js";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
+import { ThreadRegistryError } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
 
 interface ThreadSnapshot {
@@ -26,13 +27,24 @@ const resolveOwningContext = async (
   ctx: HarnessServiceContext,
 ): Promise<{ workspaceId: string; parent: ThreadParent; owner: Thread | null }> => {
   const registry = host.threadRegistry;
-  const binding = registry && typeof registry.getSessionBinding === "function"
-    ? await registry.getSessionBinding(ctx.sessionId)
-    : null;
+  let binding = null;
+  try {
+    binding = registry && typeof registry.getSessionBinding === "function"
+      ? await registry.getSessionBinding(ctx.sessionId)
+      : null;
+  } catch (error) {
+    if (error instanceof ThreadRegistryError && error.code === "stale-binding") {
+      throw new HarnessServiceError("denied", error.message);
+    }
+    throw error;
+  }
   if (binding) {
     const owner = typeof registry!.getThreadById === "function"
       ? await registry!.getThreadById(binding.owningWorkspaceId, binding.threadId)
       : null;
+    if (!owner) {
+      throw new HarnessServiceError("denied", "Thread session binding does not match a catalog Thread");
+    }
     return {
       workspaceId: binding.owningWorkspaceId,
       parent: { kind: "thread", id: binding.threadId },

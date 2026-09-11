@@ -42,6 +42,16 @@ import { assertIntegrationTurnBinding } from "../../recovery/integration-turn-bi
 import { writeOperationRow, type SqliteDatabase } from "../../recovery/journal-catalog.js";
 import { inspectDocumentBytes } from "../../documents/inspect.js";
 
+export class DirectoryApplyUnresolvedError extends Error {
+  readonly directory: string;
+
+  constructor(directory: string, options?: { cause?: unknown }) {
+    super(`Execution workspace could not be resolved for directory apply: ${directory}`, options);
+    this.name = "DirectoryApplyUnresolvedError";
+    this.directory = directory;
+  }
+}
+
 interface PlannedSurfaceTextEdit {
   resourceId: string;
   expectedLocalEditRevision: number;
@@ -335,21 +345,27 @@ export class IntegrationCoordinator {
   private async directoryApplyContext(
     context: DurableFileOperationContext,
     parentAuthority: { kind: "directory"; directory: string; workspaceId?: string },
-  ): Promise<DurableFileOperationContext> {
-    const resolved = this.resolveDirectoryApplyContext
-      ? await this.resolveDirectoryApplyContext(parentAuthority.directory)
-      : parentAuthority.workspaceId
-        ? { workspaceId: parentAuthority.workspaceId, resourceOperationGate: context.resourceOperationGate }
-        : null;
-    return {
-      ...context,
-      identity: {
-        ...context.identity,
-        canonicalRoot: parentAuthority.directory,
-        ...(resolved?.workspaceId ? { workspaceId: resolved.workspaceId } : {}),
-      },
-      ...(resolved?.resourceOperationGate ? { resourceOperationGate: resolved.resourceOperationGate } : {}),
-    };
+  ): Promise<{ context: DurableFileOperationContext; executionWorkspaceId: string }> {
+    if (!this.resolveDirectoryApplyContext) {
+      throw new DirectoryApplyUnresolvedError(parentAuthority.directory);
+    }
+    try {
+      const resolved = await this.resolveDirectoryApplyContext(parentAuthority.directory);
+      return {
+        executionWorkspaceId: resolved.workspaceId,
+        context: {
+          ...context,
+          identity: {
+            ...context.identity,
+            canonicalRoot: parentAuthority.directory,
+          },
+          resourceOperationGate: resolved.resourceOperationGate,
+        },
+      };
+    } catch (error) {
+      if (error instanceof DirectoryApplyUnresolvedError) throw error;
+      throw new DirectoryApplyUnresolvedError(parentAuthority.directory, { cause: error });
+    }
   }
 
   private persistBranchIntegration(
@@ -650,9 +666,28 @@ export class IntegrationCoordinator {
           preview,
         };
       }
-      const applyContext = parentAuthority.kind === "directory"
-        ? await this.directoryApplyContext(context, parentAuthority)
-        : context;
+      let applyContext = context;
+      let applyExecutionWorkspaceId: string | undefined;
+      if (parentAuthority.kind === "directory") {
+        try {
+          const resolved = await this.directoryApplyContext(context, parentAuthority);
+          applyContext = resolved.context;
+          applyExecutionWorkspaceId = resolved.executionWorkspaceId;
+        } catch (error) {
+          if (!(error instanceof DirectoryApplyUnresolvedError)) throw error;
+          return {
+            operationId: planned.plan.operationId,
+            status: "needs-attention",
+            appliedPaths: [],
+            conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
+            changedFiles: planned.changedPaths,
+            needsAttentionPaths: planned.changedPaths,
+            diffStats: planned.plan.diffStats,
+            text: error.message,
+            preview: planned.preview,
+          };
+        }
+      }
       let applied = await applyDurableFileOperation(applyContext, {
         id: planned.plan.operationId,
         workspaceId: input.workspaceId,
@@ -675,6 +710,7 @@ export class IntegrationCoordinator {
           ])),
         },
         ...(parentAuthority.kind === "directory" ? { applyCanonicalRoot: parentAuthority.directory } : {}),
+        ...(applyExecutionWorkspaceId ? { applyExecutionWorkspaceId } : {}),
       });
       const phases: Record<string, IntegrationApplyPhase> = {};
       for (const path of applied.appliedPaths) phases[path] = "disk-applied";
@@ -957,12 +993,26 @@ export class IntegrationCoordinator {
           text: "Integration was undone.",
         };
       }
-      const applyContext = operation.applyCanonicalRoot
-        ? await this.directoryApplyContext(context, {
-          kind: "directory",
-          directory: operation.applyCanonicalRoot,
-        })
-        : context;
+      let applyContext = context;
+      if (operation.applyCanonicalRoot) {
+        try {
+          applyContext = (await this.directoryApplyContext(context, {
+            kind: "directory",
+            directory: operation.applyCanonicalRoot,
+          })).context;
+        } catch (error) {
+          if (!(error instanceof DirectoryApplyUnresolvedError)) throw error;
+          return {
+            ...markDurableIntegrationNeedsAttention(
+              context,
+              input.operationId,
+              operation.appliedPaths,
+              error.message,
+            ),
+            status: "needs-attention" as const,
+          };
+        }
+      }
       const surfacePaths = Object.entries(operation.targetKinds)
         .filter(([, kind]) => kind === "surface")
         .map(([file]) => file)

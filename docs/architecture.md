@@ -686,16 +686,18 @@ view. Failed or cancelled capture deletes the Thread (D-214).
 A nested isolated child copies the parent branch effective view when the parent is still virtual, or
 captures the parent materialized directory otherwise (D-215). Nested merge applies the grandchild
 result onto the parent branch or parent worktree; the parent later folds its published result into
-the workspace. Directory apply keeps the recovery object library on the owning engine root (D-219).
+the workspace. Directory apply keeps the recovery object library on the owning engine root and writes
+the materialized parent through the execution workspace Documents gate (D-219 / D-222).
 Branch parent apply is a durable Integration with retry and undo. Child workspace, scope, and the
 frozen permission overlay inherit or narrow and enter `session.create/open`; Host rejects expansion,
 absolute scope paths, and `..`. Nested `captureScopes` inherit the parent WorkingBranch freeze.
 Killing or archiving a parent cancels descendant preparation and Runs first. Role tools come from
 the child's own launch manifest.
-Owning workspace (Thread catalog, WorkingState, parent/child lifecycle) is distinct from the
-execution workspace Documents assigns to a scratch or materialized cwd (D-216). Thread services,
-Zone 2, and lost resume read the Host session binding; they do not treat `ctx.workspaceId` as the
-catalog key. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
+Owning workspace (Thread catalog, WorkingState, knowledge, parent/child lifecycle) is distinct from the
+execution workspace Documents assigns to a scratch or materialized cwd (D-216 / D-222). Thread services,
+Zone 2, lost resume, and knowledge/recall/suggestions read the Host session binding after catalog
+reconciliation; they do not treat `ctx.workspaceId` as the catalog key or skip a thread tool allowlist
+when the owner is missing. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
 independent `git init`; child Git commands must not discover or mutate the user repository.
 `worktree.base` remains the parent-state identity. Inspect, snapshot, and settle use the execution
 repository's persisted `executionBaseline` after init, detach, crash recovery, or rematerialize
@@ -708,6 +710,9 @@ Nested merge takes parent write/switch authority first, then chooses branch or d
 then opens the store or directory (D-221). No path may hold a WorkingState exclusive lease and then
 wait on `VirtualWriteGate`. Branch integration persists an applying intent before the parent CAS and
 reconciles before/after slices at startup; generic disk reconcile skips `targetKinds: "branch"` rows.
+Startup directory reconcile must resolve the execution Documents gate from the persisted parent
+directory; failure is needs-attention, not an owning-gate write (D-222). Queued dequeue passes the
+frozen manifest overlay into `session.create`.
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

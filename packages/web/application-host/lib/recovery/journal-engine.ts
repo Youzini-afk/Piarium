@@ -101,6 +101,7 @@ import {
   reconcileInterruptedIntegrationOperations,
   type HostResourceOperation,
   type HostResourceOperationGate,
+  type ResolveDirectoryApplyContext,
 } from './durable-file-operation.js';
 
 type FsPromises = typeof fs.promises;
@@ -196,6 +197,7 @@ export interface CreateWorkspaceRecoveryEngineOptions {
   pathModule?: PathModule | undefined;
   sessionNavigation: RecoverySessionNavigation;
   storageOwnerId?: string | undefined;
+  resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
 }
 
 interface RecoveryTargetStates {
@@ -301,6 +303,7 @@ export interface WorkspaceRecoveryStorageContext {
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
   root: string;
+  resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -548,6 +551,7 @@ export const createWorkspaceRecoveryEngine = (
     sessionNavigation,
     storageOwnerId = 'piarium.builtin.recovery',
     fileStore: fileStoreOverride,
+    resolveDirectoryApplyContext,
   } = options;
   const locations = createRecoveryLocationRegistry({
     authorityId,
@@ -2580,6 +2584,7 @@ export const createWorkspaceRecoveryEngine = (
           identity,
           resourceOperationGate: resourceOperationGateFor(workspaceId),
           root: storage.root,
+          ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
         };
         await reconcileInterruptedIntegrationOperations(integrationContext);
         const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
@@ -2771,6 +2776,7 @@ export const createWorkspaceRecoveryEngine = (
           identity,
           resourceOperationGate: resourceOperationGateFor(workspaceId),
           root: storage.root,
+          ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
         });
       } finally {
         database.close();

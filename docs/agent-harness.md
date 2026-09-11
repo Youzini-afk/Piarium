@@ -1449,8 +1449,9 @@ Git blob 与工作目录转换后的字节不能无条件视为相同；当前�
 具备角色目录嵌套工具的子线程经真实 tool registry 与 `control.thread` 能力调用 `dispatch` / `threads` / `wait` /
 `send` / `read_thread` / `merge` / `kill`；Host 把 caller 解析为 `parent.kind: "thread"`，scope 与权限只能继承或收窄
 （D-215）。owning workspace 保存 catalog / WorkingState / 父子关系；execution workspace 只覆盖 scratch 或物化目录的
-Documents、LSP、路径与 shell（D-216）。子会话注册、thread services、Zone 2 和 lost resume 从 Host session binding
-读取 owning workspace，不扫描全部 catalog。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
+Documents、LSP、路径与 shell（D-216）。子会话注册、thread services、Zone 2、lost resume 和 knowledge/recall/suggestions
+从 Host session binding 读取 owning workspace；binding 是 catalog/run 的可重建索引，启动对账并在每次解析时核对
+owning/thread/run/session，owner 缺失或 stale 必须拒绝（D-222）。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
 Git 物化使用 `git worktree add --detach`（会写 `.git/worktrees`，不创建用户可见分支）或独立 `git init`，子 Git 命令不得发现或修改父仓库。
 `worktree.base` / 分支 `baseRef` 仍是父状态身份；inspect/snapshot/settle 使用执行仓库可解析的 `executionBaseline`（D-220）。
 reclaim 清除该执行 SHA；rematerialize 只从父仓库导出父仓库能解析的 commit。结算目录结果并入当前虚拟 delta，避免独立 init
@@ -1461,6 +1462,8 @@ reclaim 清除该执行 SHA；rematerialize 只从父仓库导出父仓库能解
 WorkingState exclusive lease 后再等 `VirtualWriteGate`（D-221）。branch Integration 先持久化 applying intent、before/after
 与 retry identity，再 CAS 父 branch，再写 complete；启动对账按当前 revision/切片补 aborted、complete 或 needs-attention。
 `runWhenVirtual` 按 gate、切换结束和取消信号等待或改走 disk。
+directory 恢复写物化父目录走 execution Documents gate，对象库仍在 owning root；无法解析则 needs-attention（D-222）。
+queued dequeue 把 `thread.manifest.permissions` 送进 `session.create`，live bypass 不能放宽冻结 overlay。
 兄弟线程不直接通信；根上下文不复制孙对话正文。不加固定深度上限，复用既有并发与排队。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
@@ -1680,7 +1683,7 @@ ThreadRun {
 
 T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；连续 6 次完全相同的 `(tool name, 参数哈希)` 翻
 `looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
-停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
+停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219 / D-222）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
 由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
 `dispatch`（D-215）。
 

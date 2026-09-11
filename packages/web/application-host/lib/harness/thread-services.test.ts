@@ -583,4 +583,32 @@ describe("thread services", () => {
       rmSync(dataDir, { force: true, recursive: true });
     }
   });
+
+  it("rejects thread tools when a session binding has no matching catalog owner", async () => {
+    const service = createThreadDispatchService({
+      threadRegistry: {
+        getSessionBinding: async () => ({
+          sessionId: "orphan-session",
+          owningWorkspaceId: "workspace-1",
+          threadId: "missing-thread",
+          runId: "run-1",
+          parent: { kind: "session", id: "parent-1" },
+        }),
+        getThreadById: async () => null,
+        maxConcurrency: 12,
+      },
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    await expect(service.handle({
+      role: "check",
+      task: "Should not skip the owner allowlist",
+    }, {
+      ...serviceContext(),
+      sessionId: "orphan-session",
+      workspaceId: "execution-ws",
+      actor: { ...serviceContext().actor, sessionId: "orphan-session", workspaceId: "execution-ws" },
+    })).rejects.toMatchObject({ harnessCode: "denied" });
+    expect(prepareIsolatedBranch).not.toHaveBeenCalled();
+  });
 });

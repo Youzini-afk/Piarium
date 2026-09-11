@@ -74,6 +74,7 @@ import { DEFAULT_COMPACTION_SETTINGS, collectCompactionFacts, createKeeperCovera
 import { type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
+import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
@@ -1064,6 +1065,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     },
   };
+  const resolveDirectoryApplyContext = async (directory: string) => {
+    const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
+    return {
+      workspaceId: resolved.workspaceId,
+      resourceOperationGate: {
+        run: <Result>(resources: Parameters<DocumentAuthority['runResourceOperation']>[1], operation: () => Promise<Result>) => (
+          documentsAuthority.runResourceOperation(resolved.workspaceId, resources, operation)
+        ),
+      },
+    };
+  };
   const recoveryEngineForOwner = (context: {
     owner?: { extensionId?: string | undefined } | undefined;
   }): WorkspaceRecoveryEngine => {
@@ -1079,6 +1091,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
         documents: documentsAuthority,
         sessionNavigation: recoverySessionNavigation,
+        resolveDirectoryApplyContext,
         storageOwnerId,
       });
       workspaceRecoveryEngines.set(storageOwnerId, engine);
@@ -1163,6 +1176,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let knowledgeVectors: KnowledgeVectorRuntime | null = null;
   const hostId = extensionRuntime.services.hostId;
   let threadRuntime: ReturnType<typeof createThreadRuntime> | null = null;
+  let bindThreadKnowledgeSession = (_sessionId: string, _workspaceId: string): void => undefined;
   const harnessShellActivity = {
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
@@ -1185,40 +1199,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { workspaceId, parent, threadId, report },
       });
     },
-    onThreadDequeued: async (workspaceId, parent, thread) => {
-      if (!threadRuntime) throw new Error('Thread runtime is not ready');
-      const run = await threadRegistry.startRun(workspaceId, thread.id);
-      void threadRuntime.spawn({
-          workspaceId,
-          parent,
-          threadId: thread.id,
-          runId: run.id,
-          brief: thread.brief,
-          ...(thread.role ? { role: thread.role } : {}),
-          kind: thread.kind,
-          createdBy: thread.createdBy,
-          carryBlocks: thread.manifest.carryBlocks,
-          concurrency: thread.manifest.concurrency,
-          ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
-          autoRun: true,
-          worktree: thread.manifest.worktree,
-          ...(thread.model ? { model: thread.model } : {}),
-          tools: thread.manifest.tools,
-          permissions: {},
-          ...(thread.manifest.scope.length > 0 ? { scope: thread.manifest.scope } : {}),
-          ...(thread.manifest.systemPromptFragment ? { systemPromptFragment: thread.manifest.systemPromptFragment } : {}),
-        }).catch(async (error) => {
-        await threadRegistry.endRun(
-          workspaceId,
-          thread.id,
-          run.id,
-          'failure',
-          errorMessage(error),
-        ).catch((endError) => {
-          console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
-        });
-      });
-    },
+    onThreadDequeued: createOnThreadDequeued({
+      getRegistry: () => threadRegistry,
+      getRuntime: () => threadRuntime,
+      formatError: errorMessage,
+      onEndRunFailure: (_error, endError) => {
+        console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
+      },
+    }),
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
   for (const failure of threadRegistryStartup.failures) {
@@ -1311,15 +1299,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
     beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
     requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options),
-    resolveDirectoryApplyContext: async (directory) => {
-      const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
-      return {
-        workspaceId: resolved.workspaceId,
-        resourceOperationGate: {
-          run: (resources, operation) => documentsAuthority.runResourceOperation(resolved.workspaceId, resources, operation),
-        },
-      };
-    },
+    resolveDirectoryApplyContext,
     holdParentVirtualWrite: async (sessionId, signal) => {
       const ticket = await acquireVirtualWriteTicket(
         virtualWriteGate,
@@ -1356,6 +1336,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
+    onThreadSessionBound: (sessionId, owningWorkspaceId) => bindThreadKnowledgeSession(sessionId, owningWorkspaceId),
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,
     executionViews: threadExecutionViews,
@@ -1624,15 +1605,24 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   }
 
-  function knowledgeWorkspaceIdForSession(sessionId: string): string | null {
+  function snapshotKnowledgeWorkspaceId(sessionId: string): string | null {
     const workspace = recordOf(sessionSnapshots.get(sessionId)?.workspace);
     if (workspace.kind !== 'workspace') return null;
     if (typeof workspace.authorityId === 'string') return workspace.authorityId;
     return typeof workspace.id === 'string' ? workspace.id : null;
   }
 
+  async function owningKnowledgeWorkspaceIdForSession(
+    sessionId: string,
+    fallback: string | null = null,
+  ): Promise<string | null> {
+    const binding = await threadRegistry.getSessionBinding(sessionId);
+    if (binding) return binding.owningWorkspaceId;
+    return fallback ?? snapshotKnowledgeWorkspaceId(sessionId);
+  }
+
   async function getKnowledgeStoreForSession(sessionId: string): Promise<KnowledgeStore | null> {
-    const workspaceId = knowledgeWorkspaceIdForSession(sessionId);
+    const workspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId);
     return workspaceId ? getKnowledgeStoreForWorkspace(workspaceId) : null;
   }
 
@@ -1976,6 +1966,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       });
     }));
   };
+  bindThreadKnowledgeSession = bindKnowledgeSession;
 
   // Zone 2 provider — assembles material from the knowledge store
   async function zone2Provider(request: Parameters<typeof knowledgeContextRuntime.zone2Material>[0]) {
@@ -2018,13 +2009,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
 
   // Recall deps provider
-  async function recallDepsProvider(_sessionId: string, workspaceId: string | null): Promise<RecallToolDeps> {
-    if (!workspaceId) throw new Error('No knowledge workspace for session');
-    const workspaceStore = await getKnowledgeStoreForWorkspace(workspaceId);
+  async function recallDepsProvider(sessionId: string, workspaceId: string | null): Promise<RecallToolDeps> {
+    const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
+    if (!owningWorkspaceId) throw new Error('No knowledge workspace for session');
+    const workspaceStore = await getKnowledgeStoreForWorkspace(owningWorkspaceId);
     return {
       workspaceStore,
       userStore: await getUserKnowledgeStore(),
-      workspaceId,
+      workspaceId: owningWorkspaceId,
       ...(knowledgeVectors ? { vectors: knowledgeVectors } : {}),
     };
   }
@@ -2268,11 +2260,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     todoDepsProvider,
     recallDepsProvider,
     knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
-      // Worker user-message suggestions always belong to the actor workspace;
-      // the user-global store is reachable only through explicit Settings/user
-      // promotion routes.
-      const store = workspaceId && workspaceId !== 'user'
-        ? await getKnowledgeStoreForWorkspace(workspaceId)
+      const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, workspaceId);
+      const store = owningWorkspaceId && owningWorkspaceId !== 'user'
+        ? await getKnowledgeStoreForWorkspace(owningWorkspaceId)
         : null;
       if (!store) return null;
       return {
@@ -2281,7 +2271,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         onChanged: () => {
           broadcastGlobalUiEvent?.({
             type: 'piarium:harness-knowledge-changed',
-            properties: { sessionId, scope: 'workspace', ...(workspaceId ? { workspaceId } : {}) },
+            properties: { sessionId, scope: 'workspace', ...(owningWorkspaceId ? { workspaceId: owningWorkspaceId } : {}) },
           });
         },
       };
@@ -2522,7 +2512,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         && harnessWorkspaceId
         && typeof envelopeData.cwd === 'string'
       ) {
-        bindKnowledgeSession(sessionId, harnessWorkspaceId);
+        void threadRegistry.getSessionBinding(sessionId).then((binding) => {
+          bindKnowledgeSession(sessionId, binding?.owningWorkspaceId ?? harnessWorkspaceId);
+        }).catch((error) => {
+          console.error('[HarnessKnowledge] Session knowledge bind failed:', errorMessage(error));
+        });
         if (!harnessSessionRegistration.hasActor(event.actor)) {
           const activeTools = Array.isArray(envelopeData.activeTools)
             ? envelopeData.activeTools.filter((entry): entry is string => typeof entry === 'string')
