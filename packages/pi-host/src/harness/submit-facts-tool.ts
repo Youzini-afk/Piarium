@@ -10,6 +10,7 @@ const FactSource = Type.Object({
   startLine: Type.Optional(Type.Integer({ minimum: 1 })),
   endLine: Type.Optional(Type.Integer({ minimum: 1 })),
   url: Type.Optional(Type.String()),
+  receiptId: Type.Optional(Type.String()),
   outputRef: Type.Optional(Type.Object({
     durability: Type.Literal("ephemeral"),
     generation: Type.String(),
@@ -40,12 +41,12 @@ export function createSubmitFactsTool(bridge: HostServicesBridge): ToolDefinitio
   return defineTool({
     name: "submit_facts",
     label: "Submit Facts",
-    description: "Submit the Host-validated fact report for this retrieval thread. Do not include recommendations, priorities, or architecture advice. The Host verifies local paths and ranges before marking a fact verified.",
-    promptSnippet: "submit_facts: deliver verified facts, sources, and unknowns for this retrieval thread",
+    description: "Submit the Host-validated fact report for this retrieval thread. Do not include recommendations, priorities, or architecture advice. The Host checks local paths, ranges, and URL receipts, then marks sources source-checked. It cannot prove a claim is true.",
+    promptSnippet: "submit_facts: deliver source-checked facts, sources, and unknowns for this retrieval thread",
     promptGuidelines: [
-      "Call submit_facts with the question, verified claims, local path+line ranges or URLs, unknowns, and attempted material.",
+      "Call submit_facts with the thread question, claims, local path+line ranges or URL receiptIds, unknowns, and attempted material.",
       "Do not include recommendations, priorities, or what should change.",
-      "The Host will not mark a missing or out-of-scope path as verified.",
+      "The Host will not mark a missing or out-of-scope path as source-checked. A valid source does not make the claim true.",
     ],
     parameters: SubmitFactsParams,
     executionMode: "sequential",

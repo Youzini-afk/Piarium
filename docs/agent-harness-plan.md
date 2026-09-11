@@ -109,7 +109,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    D-229 纠正了 PowerShell 退出码捕获、`/restart` 代际重置、`sh` 不当作 Bash、用户 shell
    保留、带代际标识的 OSC 观察、Zone 2/keeper 结构编码，以及 `commandId` 持久幂等写入。
    zsh/macOS/Linux 真机用户终端与完整桌面重启仅未实测。
-   D-227 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
+   D-227 / D-230 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
    Host 校验 `submit_facts`，报告经 wait / read_thread / Zone 2 可见。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
@@ -370,7 +370,8 @@ protocol 统一目录/解析/团队提示；不加固定角色轮数/token 限�
 `retrieval` 是较长事实 Thread，不是第二个快速 explore。公共入口仍是 `dispatch(role: "retrieval")`。未配置
 `models.retrievalAgent` 时角色不出现且 Host 拒绝无 model 的 retrieval dispatch。工具 allowlist 不含写/bash；
 web 工具仅在 Host 已装配时可用。交付物由 `submit_facts` → `thread.facts.set` 写入，settle 时 Host 封印
-`report.evidence`。取消/失联复用既有 Thread 生命周期（D-227）。
+`report.evidence`。Host 标 source-checked 而不是 verified，delivery 不用假 completeness，pending 绑定 runId，
+证据走耐久 artifact，嵌套 retrieval 读父冻结状态（D-227 / D-230）。取消/失联复用既有 Thread 生命周期。
 
 ### 3.7 自动 review
 

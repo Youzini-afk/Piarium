@@ -4864,3 +4864,35 @@ ModelRuntime 纵切继续通过。
 | --- | --- | --- | --- |
 | D-226 | superseded in part（PowerShell 退出码、restart 代际、sh 非 Bash、用户 shell 保留、代际 OSC、Zone 2/keeper 编码与持久 commandId 幂等由 D-229 纠正；用户命令进 Zone 2 与 nudge 的产品方向保留） | D-229 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
 | D-229 | implementation（纠正终端命令事实的代际绑定、编码与持久幂等） | — | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
+
+### D-230 · 2026-09-12 · 3.6（纠正 D-227 事实权威与生命周期）
+
+类型：问题与解法
+
+背景：D-227 接通了可等待的 retrieval Thread，但验收发现生产契约不成立：来源存在被写成 claim `verified`；空 unknowns 被推断为 `complete`；`submit_facts.question` 可替换 Thread brief；`setPendingEvidence` 不绑定 runId，Documents 校验期间 settle/lost→resume 会把旧结果写入新 Run；封印报告保存 session-local ephemeral OutputRef；URL 用任意 OutputRef 背书且短 webfetch 不铸 receipt；source 状态随输入顺序变化；本地摘录不保存当时正文身份；嵌套 retrieval 因 `worktree: none` 回到根 live 工作区。
+
+决定：
+
+1. Host 只能证明 `source-checked` / `source-valid`，不能证明 claim 语义为真。协议、格式化、Zone 2、文档和测试统一使用这些名称。不新增正则建议过滤器或第二个 LLM verifier。「报告没有 recommendations 字段」可以保留。
+2. 删除假 completeness。delivery 为 `delivered` / `incomplete` / `cancelled` / `unavailable`。`delivered` 表示 Host 接受了该 Run 的 `submit_facts`，覆盖由 facts/unknowns 自己表达。question 以 Thread brief 为权威。
+3. `setPendingEvidence(workspaceId, threadId, runId, evidence)` 在同一 catalog mutation 内检查 `activeRunId` 与 Run outcome。旧 Run 在 Documents 校验期间 settle、cancel 或被新 Run 替换后，迟到结果必须拒绝。
+4. 封印报告保存耐久 artifact/source 引用（`retrieval-evidence` object references），不保存 ephemeral OutputRef。父会话在子 close 与 Host 重开后经现有 `read_thread`（可 `offset`/`length` 分页）读同一证据正文。archive 保留引用；真正删除 Thread 时释放。
+5. URL 来源必须有 Host 生成且绑定 exact final URL 与正文 hash/revision 的 receipt。短 webfetch 也铸 receipt。任意 OutputRef 不能给另一个 URL 背书。output 来源若接受 ephemeral handle，提交时先复制为耐久 artifact。
+6. source 状态聚合与输入顺序无关；每条来源保留自己的 check。
+7. 本地来源保存当时核对的 revision/contentHash 与耐久 excerpt。后续磁盘变化不得让报告只能指向已消失的旧 revision。
+8. 从虚拟或物化父 Thread dispatch retrieval 时，读取父冻结有效状态：虚拟父复用 `effectiveState` 建只读虚拟基线；物化父固定其目录状态。不得因为 `worktree: none` 回根 live。根会话无草稿保持现有 live 语义；脏 surface 继续既有 isolated capture。
+
+原因：D-227 的产品方向成立，但把来源核对比成语义为真、把提交齐全比成问题 complete、用 ephemeral handle 当跨会话证据、以及 retrieval 子读根 live，都会在验收反例里交付假事实或读到错误工作区。
+
+考虑过的替代：(1) 继续称 `verified`——Host 不能证明 claim。(2) 新增第二个 LLM verifier 或正则建议过滤器——超出 Host 能证明的范围。(3) 另造第二个公共检索工具读证据——`read_thread` 已是父读报告入口。
+
+影响：protocol `RetrievalEvidence` / `FetchResult.receipt` / `thread.read` 分页；Host `retrieval-evidence` / registry pending+runId / artifacts / webfetch receipt / nested baseline；pi-host `submit_facts` / webfetch；设计 6.1/9.2.2/9.3.5、plan 0.7/3.6、status 3.6 retrieval、architecture 4.4。D-227 相应部分在本条索引标 superseded in part。不改写 D-227 正文。
+
+状态：已实施定向反例；真实付费 retrieval、完整桌面 Host 重启与授权 web 抓取仅未实测。验证见 status 3.6 retrieval。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-227 | superseded in part（事实名称、delivery、run 绑定 pending、耐久证据、URL receipt 与嵌套只读基线由 D-230 纠正；retrieval 为可等待 Thread 的产品方向保留） | D-230 | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |
+| D-230 | implementation（纠正 retrieval 来源核验、Run 绑定与耐久证据） | — | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 |

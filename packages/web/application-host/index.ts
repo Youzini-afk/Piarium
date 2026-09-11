@@ -83,6 +83,7 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
+import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
@@ -1152,11 +1153,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   // Web fetch service — SSRF-guarded, domain policy from workspace config
   const ssrfPolicy: SsrfPolicy = { check: checkSsrf, isSameHost };
+  let persistWebFetchReceipt: ((workspaceId: string, receipt: import('@piarium/protocol').RetrievalUrlReceipt, markdown: string) => Promise<void>) | undefined;
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
     domainPolicy: (_workspaceId: string): DomainPolicy => {
       // Domain policy from workspace config — empty by default (no restrictions)
       return { allow: [], block: [] };
+    },
+    persistReceipt: async (workspaceId, receipt, markdown) => {
+      await persistWebFetchReceipt?.(workspaceId, receipt, markdown);
     },
     // Renderer is wired by desktop host (1b.4); web/cloud host has no renderer
   });
@@ -1189,12 +1194,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
+  let releaseRetrievalEvidence: ((workspaceId: string, threadId: string) => Promise<void>) | undefined;
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
+    onThreadRemoved: (workspaceId, threadId) => releaseRetrievalEvidence?.(workspaceId, threadId),
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-thread-changed',
@@ -1258,6 +1265,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }
   };
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
+  const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
+  persistWebFetchReceipt = retrievalArtifacts.persistReceipt;
+  releaseRetrievalEvidence = retrievalArtifacts.releaseEvidence;
   const threadExecutionViews = new ThreadExecutionViewRegistry();
   const virtualWriteGate = new VirtualWriteGate();
   const workingBranchLookups = createWorkingBranchLookups({
@@ -2057,6 +2067,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       documentsAuthority,
       harnessPathAuthority,
       (sessionId, resourceId) => workingBranchLookups.exploreFile(sessionId, resourceId),
+    ),
+    storeRetrievalArtifact: retrievalArtifacts.storeArtifact,
+    readRetrievalArtifact: retrievalArtifacts.readArtifact,
+    protectRetrievalEvidence: retrievalArtifacts.protectEvidence,
+    lookupWebFetchReceipt: async (workspaceId, receiptId) => (
+      webFetchService.lookupReceipt(receiptId) ?? await retrievalArtifacts.lookupReceipt(workspaceId, receiptId)
     ),
     branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
     pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),

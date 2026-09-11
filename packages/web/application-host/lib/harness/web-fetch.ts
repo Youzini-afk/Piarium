@@ -1,5 +1,6 @@
-import type { FetchResult } from "@piarium/protocol";
+import type { FetchResult, RetrievalUrlReceipt } from "@piarium/protocol";
 import { isSameHost } from "./ssrf-policy.js";
+import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
 
 export interface SsrfPolicy {
   check(url: string): Promise<{ blocked: boolean; reason?: "private-network" | "scheme" }>;
@@ -17,6 +18,7 @@ export interface WebFetchDeps {
   renderer?: (url: string) => Promise<string>;
   cacheTtlMs?: number;
   maxBytes?: number;
+  persistReceipt?: (workspaceId: string, receipt: RetrievalUrlReceipt, markdown: string) => Promise<void>;
 }
 
 interface CacheEntry {
@@ -33,6 +35,23 @@ export function createWebFetch(deps: WebFetchDeps) {
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const maxBytes = deps.maxBytes ?? DEFAULT_MAX_BYTES;
   const cache = new Map<string, CacheEntry>();
+  const receipts = new Map<string, RetrievalUrlReceipt>();
+
+  const withReceipt = async (
+    result: Extract<FetchResult, { status: "ok" }>,
+    workspaceId: string,
+  ): Promise<Extract<FetchResult, { status: "ok" }>> => {
+    const receipt = result.receipt ?? mintWebFetchReceipt(result.finalUrl, result.markdown);
+    receipts.set(receipt.receiptId, receipt);
+    if (deps.persistReceipt) {
+      try {
+        await deps.persistReceipt(workspaceId, receipt, result.markdown);
+      } catch {
+        // In-memory receipt still binds this process; reopen lookup uses persisted refs.
+      }
+    }
+    return { ...result, receipt };
+  };
 
   const checkDomainPolicy = (url: string, workspaceId: string): { blocked: boolean; reason?: "domain-blocked" } => {
     const policy = deps.domainPolicy(workspaceId);
@@ -138,7 +157,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (cached && cached.expiresAt > Date.now()) {
       // Mark as from cache
       if (cached.result.status === "ok") {
-        return { ...cached.result, fromCache: true };
+        return withReceipt({ ...cached.result, fromCache: true }, ctx.workspaceId);
       }
       return cached.result;
     }
@@ -226,7 +245,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         try {
           const html = await deps.renderer(currentUrl);
           const { markdown, title } = await extractContent(html, "text/html");
-          const result: FetchResult = {
+          const result = await withReceipt({
             status: "ok",
             url,
             finalUrl: currentUrl,
@@ -236,7 +255,7 @@ export function createWebFetch(deps: WebFetchDeps) {
             fromCache: false,
             rendered: true,
             ...(title ? { title } : {}),
-          };
+          }, ctx.workspaceId);
           cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
           return result;
         } catch (error) {
@@ -259,7 +278,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           };
         }
         const text = await extractPdfText(arrayBuffer);
-        const result: FetchResult = {
+        const result = await withReceipt({
           status: "ok",
           url,
           finalUrl: currentUrl,
@@ -268,7 +287,7 @@ export function createWebFetch(deps: WebFetchDeps) {
           bytes: text.length,
           fromCache: false,
           rendered: false,
-        };
+        }, ctx.workspaceId);
         cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
         return result;
       }
@@ -313,7 +332,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         };
       }
 
-      const result: FetchResult = {
+      const result = await withReceipt({
         status: "ok",
         url,
         finalUrl: currentUrl,
@@ -323,7 +342,7 @@ export function createWebFetch(deps: WebFetchDeps) {
         fromCache: false,
         rendered: false,
         ...(title ? { title } : {}),
-      };
+      }, ctx.workspaceId);
       cache.set(cacheKey, { result, expiresAt: Date.now() + cacheTtlMs });
       return result;
     }
@@ -332,5 +351,9 @@ export function createWebFetch(deps: WebFetchDeps) {
     return { status: "failed", url, reason: "too many redirects" };
   };
 
-  return { fetch: fetchUrl, cache };
+  return {
+    fetch: fetchUrl,
+    cache,
+    lookupReceipt: (receiptId: string): RetrievalUrlReceipt | null => receipts.get(receiptId) ?? null,
+  };
 }

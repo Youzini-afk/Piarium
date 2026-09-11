@@ -174,6 +174,7 @@ export interface ThreadRegistryOptions {
   onThreadDone?: (workspaceId: string, parent: ThreadParent, threadId: string, report: ThreadReport) => void;
   onThreadDequeued?: (workspaceId: string, parent: ThreadParent, thread: Thread) => Promise<void>;
   onObserverError?: (error: unknown) => void;
+  onThreadRemoved?: (workspaceId: string, threadId: string) => void | Promise<void>;
   maxConcurrency?: number;
   fsPromises?: Pick<typeof fs.promises, "mkdir" | "readFile" | "readdir" | "rename" | "rm" | "writeFile">;
   now?: () => Date;
@@ -400,8 +401,9 @@ const isTranscriptRef = (value: unknown): value is ThreadReport["transcriptRef"]
   && (value.branchLeafId === undefined || isString(value.branchLeafId))
 );
 
-const FACT_STATUSES = new Set(["verified", "unknown", "unavailable"]);
-const EVIDENCE_COMPLETIONS = new Set(["complete", "partial", "incomplete", "cancelled", "unavailable"]);
+const FACT_STATUSES = new Set(["source-checked", "unknown", "unavailable", "verified"]);
+const EVIDENCE_COMPLETIONS = new Set(["delivered", "incomplete", "cancelled", "unavailable", "complete", "partial"]);
+const SOURCE_CHECKS = new Set(["source-valid", "unavailable", "unknown"]);
 const ATTEMPT_OUTCOMES = new Set(["rejected", "unavailable", "empty", "failed"]);
 const SOURCE_KINDS = new Set(["local", "url", "output"]);
 const SOURCE_ORIGINS = new Set(["disk", "surface-draft", "working-branch"]);
@@ -413,15 +415,27 @@ const isOutputRef = (value: unknown): value is RetrievalFactSource["outputRef"] 
   && isString(value.handle)
 );
 
+const isArtifactRef = (value: unknown): value is NonNullable<RetrievalFactSource["artifact"]> => (
+  isRecord(value)
+  && value.durability === "durable"
+  && isString(value.hash)
+  && Number.isSafeInteger(value.byteLength)
+);
+
 const isFactSource = (value: unknown): value is RetrievalFactSource => (
   isRecord(value)
   && SOURCE_KINDS.has(value.kind as string)
+  && (value.check === undefined || SOURCE_CHECKS.has(value.check as string))
   && (value.path === undefined || isString(value.path))
   && (value.startLine === undefined || Number.isSafeInteger(value.startLine))
   && (value.endLine === undefined || Number.isSafeInteger(value.endLine))
   && (value.revision === undefined || isString(value.revision))
   && (value.origin === undefined || SOURCE_ORIGINS.has(value.origin as string))
+  && (value.contentHash === undefined || isString(value.contentHash))
+  && (value.excerpt === undefined || isString(value.excerpt))
+  && (value.artifact === undefined || isArtifactRef(value.artifact))
   && (value.url === undefined || isString(value.url))
+  && (value.receiptId === undefined || isString(value.receiptId))
   && (value.outputRef === undefined || isOutputRef(value.outputRef))
 );
 
@@ -449,6 +463,26 @@ const isEvidence = (value: unknown): value is RetrievalEvidence => (
   && Array.isArray(value.attempted) && value.attempted.every(isAttempt)
   && EVIDENCE_COMPLETIONS.has(value.completion as string)
 );
+
+const migrateEvidence = (evidence: RetrievalEvidence): RetrievalEvidence => ({
+  ...evidence,
+  facts: evidence.facts.map((fact) => ({
+    ...fact,
+    status: (fact.status as string) === "verified" ? "source-checked" : fact.status,
+  })),
+  completion: (evidence.completion as string) === "complete" || (evidence.completion as string) === "partial"
+    ? "delivered"
+    : evidence.completion,
+});
+
+const migrateThreadEvidence = (thread: Thread): Thread => {
+  const next = { ...thread };
+  if (next.pendingEvidence) next.pendingEvidence = migrateEvidence(next.pendingEvidence);
+  if (next.report?.evidence) {
+    next.report = { ...next.report, evidence: migrateEvidence(next.report.evidence) };
+  }
+  return next;
+};
 
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
@@ -869,7 +903,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       threads: current.threads.map((thread) => normalizeWorktreePreparation(structuredClone(thread))),
     };
   }
-  catalog.threads = catalog.threads.map(normalizeWorktreePreparation);
+  catalog.threads = catalog.threads.map((thread) => migrateThreadEvidence(normalizeWorktreePreparation(thread)));
   const threadIds = new Set<string>();
   for (const thread of catalog.threads) {
     if (thread.workspaceId !== catalog.workspaceId || threadIds.has(thread.id)) {
@@ -2014,11 +2048,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const setPendingEvidence = async (
     workspaceId: string,
     threadId: string,
+    runId: string,
     evidence: RetrievalEvidence,
   ): Promise<Thread> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
     if (thread.role !== "retrieval") throw new Error(`Thread is not a retrieval role: ${threadId}`);
+    const run = catalog.runs.find((candidate) => candidate.id === runId && candidate.threadId === threadId);
+    if (!run || thread.activeRunId !== runId || run.outcome !== null) {
+      throw new Error(`Retrieval evidence run is not active: ${runId}`);
+    }
     thread.pendingEvidence = structuredClone(evidence);
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
@@ -2265,8 +2304,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     }
   };
 
-  const deleteThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<boolean> => (
-    mutateWorkspace(workspaceId, (catalog) => {
+  const deleteThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<boolean> => {
+    const removed = await mutateWorkspace(workspaceId, (catalog) => {
       const index = catalog.threads.findIndex((thread) => thread.id === threadId && parentEquals(thread.parent, parent));
       if (index < 0) return { value: false, changed: [], write: false };
       const thread = catalog.threads[index]!;
@@ -2283,8 +2322,10 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       catalog.runs = catalog.runs.filter((run) => run.threadId !== threadId);
       for (const key of cursors.keys()) if (key.endsWith(`\0${threadId}`)) cursors.delete(key);
       return { value: true, changed: [], wakeParents: [parent] };
-    })
-  );
+    });
+    if (removed) await Promise.resolve(options.onThreadRemoved?.(workspaceId, threadId)).catch(reportObserverError);
+    return removed;
+  };
 
   const cursorKey = (observerSessionId: string, threadId: string): string => `${observerSessionId}\0${threadId}`;
   const getCursor = (observerSessionId: string, threadId: string): ThreadViewCursor | null => (

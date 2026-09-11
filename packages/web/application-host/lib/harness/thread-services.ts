@@ -2,6 +2,8 @@ import {
   formatRetrievalEvidenceText,
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
   normalizeFrozenHarnessPermissions,
+  sliceUtf8ByBytes,
+  type RetrievalEvidence,
   type Thread,
   type ThreadParent,
   type ThreadReadWhat,
@@ -367,6 +369,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
       if (!Array.isArray(params.facts)) {
         throw new HarnessServiceError("invalid-params", "submit_facts requires a facts array");
       }
+      const runId = binding.runId;
       const evidence = await validateRetrievalEvidence({
         question: params.question,
         facts: params.facts,
@@ -381,8 +384,22 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
         ...(ctx.inputContext ? { inputContext: ctx.inputContext } : {}),
         outputStore: host.outputStore,
         sessionId: ctx.sessionId,
+        ...(host.storeRetrievalArtifact
+          ? { storeArtifact: (bytes) => host.storeRetrievalArtifact!(binding.owningWorkspaceId, bytes) }
+          : {}),
+        ...(host.lookupWebFetchReceipt
+          ? { lookupReceipt: (receiptId) => host.lookupWebFetchReceipt!(binding.owningWorkspaceId, receiptId) }
+          : {}),
       });
-      await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, evidence);
+      try {
+        await registry.setPendingEvidence(binding.owningWorkspaceId, thread.id, runId, evidence);
+      } catch (error) {
+        throw new HarnessServiceError(
+          "denied",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      await host.protectRetrievalEvidence?.(binding.owningWorkspaceId, thread.id, evidence);
       return { text: formatRetrievalEvidenceText(evidence), evidence };
     },
   };
@@ -587,17 +604,32 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
             transcriptRef: null,
           };
         }
+        const evidence = thread.report.evidence
+          ? await hydrateRetrievalEvidence(host, workspaceId, thread.report.evidence)
+          : null;
+        const report = evidence ? { ...thread.report, evidence } : thread.report;
         lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
-        if (thread.report.evidence) {
-          lines.push(formatRetrievalEvidenceText(thread.report.evidence));
+        if (report.evidence) {
+          lines.push(formatRetrievalEvidenceText(report.evidence));
         } else {
-          lines.push(`Conclusion: ${thread.report.conclusion}`);
-          lines.push(`Changed files: ${thread.report.changedFiles.join(", ") || "(none)"}`);
-          lines.push(`Deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
-          lines.push(`Unresolved: ${thread.report.unresolved.join("; ") || "none"}`);
-          lines.push(`Confidence: ${thread.report.confidence}`);
+          lines.push(`Conclusion: ${report.conclusion}`);
+          lines.push(`Changed files: ${report.changedFiles.join(", ") || "(none)"}`);
+          lines.push(`Deviations from brief: ${report.deviations.join("; ") || "none"}`);
+          lines.push(`Unresolved: ${report.unresolved.join("; ") || "none"}`);
+          lines.push(`Confidence: ${report.confidence}`);
         }
-        return { text: lines.join("\n"), report: thread.report, transcriptRef: thread.report.transcriptRef };
+        const full = lines.join("\n");
+        if (params.offset !== undefined || params.length !== undefined) {
+          const slice = sliceUtf8ByBytes(full, params.offset ?? 0, params.length ?? 32_768);
+          return {
+            text: slice.text,
+            report,
+            transcriptRef: report.transcriptRef,
+            nextOffset: slice.nextOffset,
+            eof: slice.eof,
+          };
+        }
+        return { text: full, report, transcriptRef: report.transcriptRef, eof: true };
       }
       const since = params.since ?? 0;
       if (!thread.report) {
@@ -750,6 +782,24 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
     },
   };
 }
+
+const hydrateRetrievalEvidence = async (
+  host: HarnessServiceHost,
+  workspaceId: string,
+  evidence: RetrievalEvidence,
+): Promise<RetrievalEvidence> => {
+  if (!host.readRetrievalArtifact) return evidence;
+  const facts = await Promise.all(evidence.facts.map(async (fact) => ({
+    ...fact,
+    sources: await Promise.all(fact.sources.map(async (source) => {
+      if (source.excerpt || !source.artifact) return source;
+      const bytes = await host.readRetrievalArtifact!(workspaceId, source.artifact.hash);
+      if (!bytes) return source;
+      return { ...source, excerpt: bytes.toString("utf8") };
+    })),
+  })));
+  return { ...evidence, facts };
+};
 
 const compareThreadsStable = (
   left: { createdAt: string; id: string },

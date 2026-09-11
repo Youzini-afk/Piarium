@@ -25,6 +25,7 @@ import type {
   ThreadDispatchResult,
   ThreadFactsSetParams,
   ThreadFactsSetResult,
+  RetrievalUrlReceipt,
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
 import type { HarnessMemoryMode } from "./harness-settings.js";
@@ -209,7 +210,18 @@ export type FsLockResult =
   | { held: false; released: boolean };
 
 export type FetchResult =
-  | { status: "ok"; url: string; finalUrl: string; contentType: string; title?: string; markdown: string; bytes: number; fromCache: boolean; rendered: boolean }
+  | {
+    status: "ok";
+    url: string;
+    finalUrl: string;
+    contentType: string;
+    title?: string;
+    markdown: string;
+    bytes: number;
+    fromCache: boolean;
+    rendered: boolean;
+    receipt?: RetrievalUrlReceipt;
+  }
   | { status: "redirect-cross-host"; url: string; location: string; statusCode: number }
   | { status: "blocked"; url: string; reason: "private-network" | "domain-blocked" | "scheme" }
   | { status: "empty-shell"; url: string; hint: string }

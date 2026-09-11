@@ -447,6 +447,21 @@ const normalizedReferences = (references: unknown): ObjectReference[] => {
   return [...bySlot].map(([slot, objectHash]) => ({ objectHash, slot }));
 };
 
+export const listObjectReferences = (
+  database: SqliteDatabase,
+  workspaceId: string,
+  ownerKind: string,
+  ownerId: string,
+): ObjectReference[] => {
+  const rows = database.prepare(`
+    SELECT slot, object_hash
+    FROM object_references
+    WHERE workspace_id = ? AND owner_kind = ? AND owner_id = ?
+    ORDER BY slot
+  `).all(workspaceId, ownerKind, ownerId) as Array<{ slot: string; object_hash: string }>;
+  return rows.map((row) => ({ slot: row.slot, objectHash: row.object_hash }));
+};
+
 export const deleteObjectReferences = (database: SqliteDatabase, workspaceId: string, ownerKind: string, ownerId: string): void => {
   database.prepare(`
     DELETE FROM object_references

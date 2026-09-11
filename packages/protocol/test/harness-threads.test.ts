@@ -172,14 +172,18 @@ describe("thread protocol types (§9.3)", () => {
     assert.equal(event.parent.kind, "session");
   });
 
-  it("ThreadReadParams supports what and since", () => {
+  it("ThreadReadParams supports what, since, and report paging", () => {
     const params: ThreadReadParams = {
       threadId: "t1",
       what: "steps",
       since: 5,
+      offset: 0,
+      length: 64,
     };
     assert.equal(params.what, "steps");
     assert.equal(params.since, 5);
+    assert.equal(params.offset, 0);
+    assert.equal(params.length, 64);
   });
 
   it("ThreadReadResult carries a durable transcript reference", () => {
@@ -232,7 +236,7 @@ describe("thread protocol types (§9.3)", () => {
     void _check;
   });
 
-  it("seals retrieval evidence without inventing verified facts", () => {
+  it("seals retrieval evidence without inventing source-checked facts or completeness", () => {
     const cancelled = sealRetrievalEvidence(undefined, {
       brief: "Where is login?",
       scope: ["src"],
@@ -240,6 +244,7 @@ describe("thread protocol types (§9.3)", () => {
       exitReason: "killed by parent",
     });
     assert.equal(cancelled.completion, "cancelled");
+    assert.equal(cancelled.question, "Where is login?");
     assert.equal(cancelled.facts.length, 0);
 
     const incomplete = sealRetrievalEvidence(undefined, {
@@ -250,5 +255,26 @@ describe("thread protocol types (§9.3)", () => {
     });
     assert.equal(incomplete.completion, "incomplete");
     assert.ok(incomplete.unknowns.length > 0);
+
+    const delivered = sealRetrievalEvidence({
+      question: "child restatement",
+      scope: ["src"],
+      facts: [{
+        claim: "login is nearby",
+        status: "source-checked",
+        sources: [{ kind: "local", path: "src/auth.ts", startLine: 1, endLine: 1, check: "source-valid" }],
+      }],
+      unknowns: [],
+      attempted: [],
+      completion: "delivered",
+    }, {
+      brief: "Where is login?",
+      scope: ["src"],
+      outcome: "success",
+      exitReason: null,
+    });
+    assert.equal(delivered.completion, "delivered");
+    assert.equal(delivered.question, "Where is login?");
+    assert.equal(delivered.facts[0]?.status, "source-checked");
   });
 });

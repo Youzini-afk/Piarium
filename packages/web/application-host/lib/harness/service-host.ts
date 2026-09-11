@@ -197,7 +197,10 @@ export interface HarnessServiceHost {
     settings: import("@piarium/protocol").HarnessRerankSettings;
     signal?: AbortSignal;
   }) => Promise<import("@piarium/protocol").HarnessRerankResult>;
-  webFetchService: { fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult> } | null;
+  webFetchService: {
+    fetch: (url: string, ctx: { workspaceId: string; render?: boolean }) => Promise<import("@piarium/protocol").FetchResult>;
+    lookupReceipt?: (receiptId: string) => import("@piarium/protocol").RetrievalUrlReceipt | null;
+  } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
   documentReadSource: HarnessDocumentReadSource | null;
   documentPathOverlay: HarnessDocumentPathOverlay | null;
@@ -265,6 +268,10 @@ export interface HarnessServiceHost {
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
+  storeRetrievalArtifact?: (workspaceId: string, bytes: Buffer) => Promise<import("@piarium/protocol").RetrievalArtifactRef>;
+  readRetrievalArtifact?: (workspaceId: string, hash: string) => Promise<Buffer | null>;
+  protectRetrievalEvidence?: (workspaceId: string, threadId: string, evidence: import("@piarium/protocol").RetrievalEvidence) => Promise<void>;
+  lookupWebFetchReceipt?: (workspaceId: string, receiptId: string) => Promise<import("@piarium/protocol").RetrievalUrlReceipt | null>;
   /** Dirty paths this turn's fixed source still owns (D-088). */
   agentInputDraftPaths?: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => readonly string[];
   agentInputSurfaceOwner?: import("../documents/authority.js").DocumentAuthority["agentInputSurfaceOwner"];
@@ -349,6 +356,10 @@ export interface HarnessServiceHostOptions {
   threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
   verification?: VerificationCoordinator;
+  storeRetrievalArtifact?: HarnessServiceHost["storeRetrievalArtifact"];
+  readRetrievalArtifact?: HarnessServiceHost["readRetrievalArtifact"];
+  protectRetrievalEvidence?: HarnessServiceHost["protectRetrievalEvidence"];
+  lookupWebFetchReceipt?: HarnessServiceHost["lookupWebFetchReceipt"];
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -638,6 +649,10 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
     ...(options.readExploreFile ? { readExploreFile: options.readExploreFile } : {}),
+    ...(options.storeRetrievalArtifact ? { storeRetrievalArtifact: options.storeRetrievalArtifact } : {}),
+    ...(options.readRetrievalArtifact ? { readRetrievalArtifact: options.readRetrievalArtifact } : {}),
+    ...(options.protectRetrievalEvidence ? { protectRetrievalEvidence: options.protectRetrievalEvidence } : {}),
+    ...(options.lookupWebFetchReceipt ? { lookupWebFetchReceipt: options.lookupWebFetchReceipt } : {}),
     ...(options.agentInputDraftPaths ? { agentInputDraftPaths: options.agentInputDraftPaths } : {}),
     ...(options.agentInputSurfaceOwner ? { agentInputSurfaceOwner: options.agentInputSurfaceOwner } : {}),
   };

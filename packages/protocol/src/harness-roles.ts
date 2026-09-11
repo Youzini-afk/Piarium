@@ -115,9 +115,10 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
     ],
     worktree: "none",
     systemPromptFragment:
-      "You are a retrieval agent. Gather verified facts for an open question. "
+      "You are a retrieval agent. Gather source-checked facts for an open question. "
       + "Deliver the report only through submit_facts. Do not recommend product changes, priorities, or architecture. "
-      + "Do not edit, write, or run shell commands. Cite local paths with compact line ranges or stored URLs. "
+      + "Do not edit, write, or run shell commands. Cite local paths with compact line ranges or stored URL receipts. "
+      + "The Host can mark a source source-checked or source-valid; it cannot prove a claim is true. "
       + "Record material you tried and could not obtain as unknown.",
     teamDescription: "cheap model; multi-step fact retrieval",
     resultSchema: {
@@ -126,7 +127,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       facts: "{ claim, status, sources }[]",
       unknowns: "string[]",
       attempted: "{ action, outcome, detail? }[]",
-      completion: "complete | partial | incomplete | cancelled | unavailable",
+      completion: "delivered | incomplete | cancelled | unavailable",
     },
   },
 };

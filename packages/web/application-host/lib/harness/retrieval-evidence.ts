@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
 import {
   DEFAULT_HARNESS_SETTINGS,
   type RetrievalAttempt,
+  type RetrievalArtifactRef,
   type RetrievalEvidence,
   type RetrievalFact,
   type RetrievalFactSource,
   type RetrievalOutputRef,
+  type RetrievalSourceCheck,
+  type RetrievalUrlReceipt,
   type ThreadFactsSetParams,
 } from "@piarium/protocol";
 import { parseThreadScopePath, scopePathContainedBy } from "./thread-nesting.js";
@@ -28,6 +32,8 @@ export interface RetrievalEvidenceValidationInput {
   outputStore?: OutputStore;
   sessionId: string;
   visibleBytes?: number;
+  storeArtifact?: (bytes: Buffer) => Promise<RetrievalArtifactRef>;
+  lookupReceipt?: (receiptId: string) => Promise<RetrievalUrlReceipt | null>;
 }
 
 const pathInScope = (path: string, scopes: readonly string[]): boolean => {
@@ -60,26 +66,44 @@ const excerptFor = (content: string, startLine: number, endLine: number): string
   content.split(/\r?\n/).slice(startLine - 1, endLine).join("\n")
 );
 
-const storeLargeExcerpt = (
-  text: string,
-  visibleBytes: number,
-  outputStore: OutputStore | undefined,
-  sessionId: string,
-): RetrievalOutputRef | undefined => {
-  if (!outputStore || Buffer.byteLength(text, "utf8") <= visibleBytes) return undefined;
-  return outputStore.store(sessionId, text, "retrieval").ref;
+const contentHashOf = (text: string): string => (
+  `sha256-${createHash("sha256").update(text, "utf8").digest("hex")}`
+);
+
+const factStatusFrom = (checks: readonly RetrievalSourceCheck[]): RetrievalFact["status"] => {
+  if (checks.includes("source-valid")) return "source-checked";
+  if (checks.includes("unknown")) return "unknown";
+  if (checks.length > 0 && checks.every((check) => check === "unavailable")) return "unavailable";
+  return "unknown";
 };
 
-const validateOutputRef = (
-  ref: RetrievalOutputRef | undefined,
+const readOutputText = (
   outputStore: OutputStore | undefined,
   sessionId: string,
-): { ok: true } | { ok: false; reason: string } => {
+  ref: RetrievalOutputRef | undefined,
+): { ok: true; text: string } | { ok: false; reason: string } => {
   if (!ref) return { ok: false, reason: "output source is missing a handle" };
   if (!outputStore) return { ok: false, reason: "output store is unavailable" };
-  const read = outputStore.read(sessionId, ref.handle);
-  if (read.status === "ready") return { ok: true };
-  return { ok: false, reason: `output handle is ${read.status}` };
+  const first = outputStore.read(sessionId, ref.handle, 0, 1);
+  if (first.status !== "ready") return { ok: false, reason: `output handle is ${first.status}` };
+  const full = outputStore.read(sessionId, ref.handle, 0, Math.max(first.slice.total, 1));
+  if (full.status !== "ready") return { ok: false, reason: `output handle is ${full.status}` };
+  return { ok: true, text: full.slice.text };
+};
+
+const persistExcerpt = async (
+  text: string,
+  visibleBytes: number,
+  storeArtifact: RetrievalEvidenceValidationInput["storeArtifact"],
+): Promise<{ contentHash: string; excerpt?: string; artifact?: RetrievalArtifactRef }> => {
+  const contentHash = contentHashOf(text);
+  const artifact = storeArtifact ? await storeArtifact(Buffer.from(text, "utf8")) : undefined;
+  const excerpt = Buffer.byteLength(text, "utf8") <= visibleBytes ? text : undefined;
+  return {
+    contentHash,
+    ...(excerpt !== undefined ? { excerpt } : {}),
+    ...(artifact ? { artifact } : excerpt === undefined ? { excerpt: text } : {}),
+  };
 };
 
 export async function validateRetrievalEvidence(
@@ -89,7 +113,7 @@ export async function validateRetrievalEvidence(
   const unknowns = [...(input.unknowns ?? [])];
   const facts: RetrievalFact[] = [];
   const visibleBytes = input.visibleBytes ?? DEFAULT_HARNESS_SETTINGS.output.visibleBytes;
-  const question = input.question.trim() || input.brief;
+  const question = input.brief.trim() || input.question.trim();
 
   for (const raw of input.facts) {
     const claim = raw.claim.trim();
@@ -98,46 +122,66 @@ export async function validateRetrievalEvidence(
       continue;
     }
     const sources: RetrievalFactSource[] = [];
-    let status: RetrievalFact["status"] = "unknown";
+    const checks: RetrievalSourceCheck[] = [];
     let rejected = false;
 
     for (const source of raw.sources) {
       if (source.kind === "url") {
         const url = source.url?.trim() ?? "";
         if (!HTTP_URL.test(url)) {
-          status = status === "verified" ? status : "unknown";
+          checks.push("unknown");
+          sources.push({ kind: "url", url, check: "unknown" });
           unknowns.push(`${claim}: URL is missing or is not http(s)`);
           continue;
         }
-        const storedRef = source.outputRef;
-        const refCheck = storedRef
-          ? validateOutputRef(storedRef, input.outputStore, input.sessionId)
+        const receiptId = source.receiptId?.trim() ?? "";
+        const receipt = receiptId && input.lookupReceipt
+          ? await input.lookupReceipt(receiptId)
           : null;
-        if (storedRef && refCheck?.ok) {
-          sources.push({ kind: "url", url, outputRef: storedRef });
-          if (status !== "unavailable") status = "verified";
+        if (!receipt || receipt.receiptId !== receiptId || receipt.finalUrl !== url) {
+          checks.push("unknown");
+          sources.push({
+            kind: "url",
+            url,
+            check: "unknown",
+            ...(receiptId ? { receiptId } : {}),
+          });
+          unknowns.push(`${claim}: URL has no Host receipt bound to this exact final URL`);
           continue;
         }
-        sources.push({ kind: "url", url });
-        if (status !== "verified") status = "unknown";
-        unknowns.push(`${claim}: URL was not stored as independently fetched material`);
+        checks.push("source-valid");
+        sources.push({
+          kind: "url",
+          url,
+          check: "source-valid",
+          receiptId: receipt.receiptId,
+          contentHash: receipt.contentHash,
+          revision: receipt.revision,
+        });
         continue;
       }
 
       if (source.kind === "output") {
         const storedRef = source.outputRef;
-        const refCheck = validateOutputRef(storedRef, input.outputStore, input.sessionId);
-        if (!storedRef || !refCheck.ok) {
-          if (status !== "verified") status = "unavailable";
+        const read = readOutputText(input.outputStore, input.sessionId, storedRef);
+        if (!read.ok) {
+          checks.push("unavailable");
           attempted.push({
             action: `output ${storedRef?.handle ?? "?"}`,
             outcome: "unavailable",
-            detail: refCheck.ok ? "output source is missing a handle" : refCheck.reason,
+            detail: read.reason,
           });
           continue;
         }
-        sources.push({ kind: "output", outputRef: storedRef });
-        if (status !== "unavailable") status = "verified";
+        const persisted = await persistExcerpt(read.text, visibleBytes, input.storeArtifact);
+        checks.push("source-valid");
+        sources.push({
+          kind: "output",
+          check: "source-valid",
+          contentHash: persisted.contentHash,
+          ...(persisted.excerpt !== undefined ? { excerpt: persisted.excerpt } : {}),
+          ...(persisted.artifact ? { artifact: persisted.artifact } : {}),
+        });
         continue;
       }
 
@@ -149,8 +193,8 @@ export async function validateRetrievalEvidence(
         continue;
       }
       if (!input.readFile) {
-        sources.push({ kind: "local", path: authorized.path });
-        if (status !== "verified") status = "unavailable";
+        checks.push("unavailable");
+        sources.push({ kind: "local", path: authorized.path, check: "unavailable" });
         attempted.push({ action: `read ${authorized.path}`, outcome: "unavailable", detail: "document reader is not configured" });
         continue;
       }
@@ -166,7 +210,9 @@ export async function validateRetrievalEvidence(
         continue;
       }
       if (snapshot.status !== "ready") {
-        if (status !== "verified") status = snapshot.status === "unavailable" ? "unavailable" : "unknown";
+        const check: RetrievalSourceCheck = snapshot.status === "unavailable" ? "unavailable" : "unknown";
+        checks.push(check);
+        sources.push({ kind: "local", path: authorized.path, check });
         if (snapshot.status === "unavailable" || snapshot.status === "failed") {
           attempted.push({ action: `read ${authorized.path}`, outcome: snapshot.status === "failed" ? "failed" : "unavailable", detail: snapshot.message });
         } else {
@@ -182,13 +228,14 @@ export async function validateRetrievalEvidence(
         || source.startLine < 1
         || source.endLine < source.startLine
       ) {
+        checks.push("unknown");
         sources.push({
           kind: "local",
           path: authorized.path,
+          check: "unknown",
           revision: snapshot.revision,
           origin: snapshot.source,
         });
-        if (status !== "verified") status = "unknown";
         unknowns.push(`${claim}: ${authorized.path} is missing a compact line range`);
         continue;
       }
@@ -196,30 +243,34 @@ export async function validateRetrievalEvidence(
       const endLine = source.endLine;
       const total = lineCount(snapshot.content);
       if (endLine > total) {
+        checks.push("unknown");
         sources.push({
           kind: "local",
           path: authorized.path,
           startLine,
           endLine,
+          check: "unknown",
           revision: snapshot.revision,
           origin: snapshot.source,
         });
-        if (status !== "verified") status = "unknown";
         unknowns.push(`${claim}: ${authorized.path}:${startLine}-${endLine} is outside the file (${total} lines)`);
         continue;
       }
       const excerpt = excerptFor(snapshot.content, startLine, endLine);
-      const outputRef = storeLargeExcerpt(excerpt, visibleBytes, input.outputStore, input.sessionId);
+      const persisted = await persistExcerpt(excerpt, visibleBytes, input.storeArtifact);
+      checks.push("source-valid");
       sources.push({
         kind: "local",
         path: authorized.path,
         startLine,
         endLine,
+        check: "source-valid",
         revision: snapshot.revision,
         origin: snapshot.source,
-        ...(outputRef ? { outputRef } : {}),
+        contentHash: persisted.contentHash,
+        ...(persisted.excerpt !== undefined ? { excerpt: persisted.excerpt } : {}),
+        ...(persisted.artifact ? { artifact: persisted.artifact } : {}),
       });
-      if (status !== "unavailable") status = "verified";
     }
 
     if (rejected && sources.length === 0) continue;
@@ -228,18 +279,15 @@ export async function validateRetrievalEvidence(
       continue;
     }
     if (sources.length === 0) continue;
-    facts.push({ claim, status, sources });
+    facts.push({ claim, status: factStatusFrom(checks), sources });
   }
 
-  const verified = facts.filter((fact) => fact.status === "verified").length;
   const unavailableOnly = facts.length > 0 && facts.every((fact) => fact.status === "unavailable");
-  const completion = verified === 0 && unavailableOnly
-    ? "unavailable" as const
-    : verified > 0 && unknowns.length === 0 && attempted.length === 0 && facts.every((fact) => fact.status === "verified")
-      ? "complete" as const
-      : facts.length === 0 && unknowns.length === 0 && attempted.length === 0
-        ? "incomplete" as const
-        : "partial" as const;
+  const completion = facts.length === 0 && unknowns.length === 0 && attempted.length === 0
+    ? "incomplete" as const
+    : unavailableOnly
+      ? "unavailable" as const
+      : "delivered" as const;
 
   return {
     question,

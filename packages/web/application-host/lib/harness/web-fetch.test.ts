@@ -117,6 +117,9 @@ describe("web-fetch service", () => {
       expect(result.markdown.length).toBeGreaterThan(0);
       expect(result.rendered).toBe(false);
       expect(result.fromCache).toBe(false);
+      expect(result.receipt?.finalUrl).toBe("https://example.com/");
+      expect(result.receipt?.contentHash).toMatch(/^sha256-/);
+      expect(service.lookupReceipt(result.receipt!.receiptId)?.finalUrl).toBe("https://example.com/");
     }
   });
 

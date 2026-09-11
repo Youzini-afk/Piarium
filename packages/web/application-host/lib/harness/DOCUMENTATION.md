@@ -153,12 +153,17 @@ Draft merge records that disk commands cannot verify unsaved buffers.
 `retrieval` is a Thread role, not a second explore tool. `thread.dispatch`
 freezes the retrieval model slot, read-only allowlist, and scope, and does not
 copy parent blocks. The child delivers facts only through `submit_facts` →
-`thread.facts.set`. Host verifies local paths and compact line ranges against
-Documents and the frozen scope, stores oversized excerpts as OutputRef, and
-seals `report.evidence` on settle/cancel. Lost keeps pending evidence until the
-existing resume path starts a new Run. The report has no recommendation or
-priority fields. Unconfigured `models.retrievalAgent` omits the role and Host
-rejects a retrieval dispatch that has no model.
+`thread.facts.set`. Host checks local paths and compact line ranges against
+Documents and the frozen scope, then marks sources source-checked. It does not
+prove a claim is true and does not infer completeness from empty unknowns.
+Oversized excerpts and child output handles are copied to durable artifacts.
+URL sources require a Host receipt bound to the exact final URL. Pending
+evidence is bound to the active `runId`. Nested retrieval reads the parent
+thread's frozen effective state. Sealed `report.evidence` is visible through
+wait / `read_thread` / Zone 2. Lost keeps pending evidence until the existing
+resume path starts a new Run. The report has no recommendation or priority
+fields. Unconfigured `models.retrievalAgent` omits the role and Host rejects a
+retrieval dispatch that has no model.
 
 One unexpected worker exit is resumed in the same session/worktree as a new
 Run; a second consecutive crash becomes `stalled` instead of entering a crash

@@ -546,7 +546,7 @@ v1 工具在 pi-host 内，不是 Pi 包，因此不出现在 Plugin Settings。
 | --- | --- | --- |
 | `grep` | 已知符号、字面量、错误信息的精确匹配 | 命中位置与上下文 |
 | `explore` | 概念/线索召回、入口定位、相关单元阅读、机械下一跳与有依据的局部补查 | 当前代码、路径、范围、必要关系与具体缺口 |
-| `retrieval` 角色 | 需要较长阅读与语义判断的开放事实问题、跨文件机制追踪 | Host 校验后的事实报告：问题与范围、已核实事实、路径修订/行范围或 URL、证据、unknowns；不含建议或优先级 |
+| `retrieval` 角色 | 需要较长阅读与语义判断的开放事实问题、跨文件机制追踪 | Host 校验后的事实报告：问题与范围、source-checked 事实、路径修订/行范围或带 receipt 的 URL、耐久证据、unknowns；不含建议或优先级。Host 不证明 claim 为真 |
 
 快速工具与 retrieval 共享底层读取和搜索能力，产品职责保持分开。explore 的正式方案由算法、向量和 LLM 分工：算法负责执行，
 向量负责候选召回，LLM 负责规则无法可靠表达的局部语义决策。普通低成本模型不能仅换一个工具名就成为完整检索子 agent；
@@ -1708,8 +1708,9 @@ T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；
 停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219 / D-222）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
 由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
 `dispatch`（D-215）。`retrieval` 通过冻结 allowlist 与 `thread.facts.set` 交付事实：Host 按冻结 scope 与
-Documents 读取核对路径/行范围，模型不能自行把不存在或越权来源标成已核实；大材料走 OutputRef。不复制父完整对话
-（`carryBlocks: false`），默认不改工作区（D-227）。
+Documents 读取核对路径/行范围，模型不能自行把不存在或越权来源标成 source-checked；Host 不能把来源存在写成 claim 为真。
+大材料与子会话 output 复制为耐久 artifact，URL 必须带 Host receipt。不复制父完整对话
+（`carryBlocks: false`），默认不改工作区；嵌套 retrieval 读父冻结有效状态（D-227 / D-230）。
 
 失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等

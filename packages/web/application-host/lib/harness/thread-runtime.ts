@@ -60,6 +60,7 @@ import { formatPublishedResultDiff } from "./working-state/verification-records.
 import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
 import type { ResolvedRole } from "./roles.js";
 import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
+import { pinRetrievalParentBaseline } from "./retrieval-parent-baseline.js";
 import {
   directoryBaselineFingerprint,
   gitBaselineFingerprint,
@@ -1862,6 +1863,31 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         input.threadId,
       ));
       if (actualFailure) throw new ThreadRuntimeError("unavailable", `Worktree budget unavailable: ${actualFailure}`);
+    }
+
+    if (
+      input.role === "retrieval"
+      && input.worktree === "none"
+      && input.parent.kind === "thread"
+      && options.workingStates
+    ) {
+      const current = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+      if (!current?.workBranchId) {
+        const pinned = await pinRetrievalParentBaseline({
+          workspaceId: input.workspaceId,
+          parent: input.parent,
+          childThreadId: input.threadId,
+          cwd: preparedCwd,
+          registry: options.registry,
+          workingStates: options.workingStates,
+        });
+        if (pinned) {
+          await options.registry.setWorkingState(input.workspaceId, input.threadId, {
+            branchId: pinned.branchId,
+            worktree: pinned.worktree,
+          });
+        }
+      }
     }
 
     checkPreparation();

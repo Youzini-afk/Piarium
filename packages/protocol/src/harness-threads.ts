@@ -33,10 +33,10 @@ export interface ThreadSessionBinding {
   parent: ThreadParent;
 }
 
-export type RetrievalFactStatus = "verified" | "unknown" | "unavailable";
+export type RetrievalFactStatus = "source-checked" | "unknown" | "unavailable";
+export type RetrievalSourceCheck = "source-valid" | "unavailable" | "unknown";
 export type RetrievalEvidenceCompletion =
-  | "complete"
-  | "partial"
+  | "delivered"
   | "incomplete"
   | "cancelled"
   | "unavailable";
@@ -47,14 +47,32 @@ export interface RetrievalOutputRef {
   handle: string;
 }
 
+export interface RetrievalArtifactRef {
+  durability: "durable";
+  hash: string;
+  byteLength: number;
+}
+
+export interface RetrievalUrlReceipt {
+  receiptId: string;
+  finalUrl: string;
+  contentHash: string;
+  revision: string;
+}
+
 export interface RetrievalFactSource {
   kind: "local" | "url" | "output";
+  check?: RetrievalSourceCheck;
   path?: string;
   startLine?: number;
   endLine?: number;
   revision?: string;
   origin?: "disk" | "surface-draft" | "working-branch";
+  contentHash?: string;
+  excerpt?: string;
+  artifact?: RetrievalArtifactRef;
   url?: string;
+  receiptId?: string;
   outputRef?: RetrievalOutputRef;
 }
 
@@ -71,9 +89,9 @@ export interface RetrievalAttempt {
 }
 
 /**
- * Host-validated retrieval delivery. The model cannot mark a fact verified;
- * Host assigns status after scope, path, and source checks. There are no
- * recommendation or priority fields.
+ * Host-validated retrieval delivery. Host can prove source-checked /
+ * source-valid identity, not that a claim is semantically true. There are
+ * no recommendation or priority fields.
  */
 export interface RetrievalEvidence {
   question: string;
@@ -113,8 +131,8 @@ export const emptyRetrievalEvidence = (
 });
 
 export const summarizeRetrievalEvidence = (evidence: RetrievalEvidence): string => {
-  const verified = evidence.facts.filter((fact) => fact.status === "verified").length;
-  return `retrieval ${evidence.completion}: ${verified} verified, ${evidence.unknowns.length} unknown, ${evidence.attempted.length} attempted`;
+  const checked = evidence.facts.filter((fact) => fact.status === "source-checked").length;
+  return `retrieval ${evidence.completion}: ${checked} source-checked, ${evidence.unknowns.length} unknown, ${evidence.attempted.length} attempted`;
 };
 
 export const formatRetrievalEvidenceText = (evidence: RetrievalEvidence): string => {
@@ -133,11 +151,20 @@ export const formatRetrievalEvidenceText = (evidence: RetrievalEvidence): string
           : "";
         const revision = source.revision ? ` @${source.revision}` : "";
         const origin = source.origin ? ` (${source.origin})` : "";
-        lines.push(`  ${source.path ?? "?"}${range}${revision}${origin}`);
+        const check = source.check ? ` ${source.check}` : "";
+        lines.push(`  ${source.path ?? "?"}${range}${revision}${origin}${check}`);
+        if (source.excerpt) {
+          for (const line of source.excerpt.split("\n")) lines.push(`    ${line}`);
+        }
         continue;
       }
       if (source.kind === "url") {
-        lines.push(`  ${source.url ?? "?"}`);
+        const receipt = source.receiptId ? ` receipt ${source.receiptId}` : "";
+        lines.push(`  ${source.url ?? "?"}${receipt}`);
+        continue;
+      }
+      if (source.artifact) {
+        lines.push(`  output artifact ${source.artifact.hash}`);
         continue;
       }
       lines.push(`  output ${source.outputRef?.handle ?? "?"}`);
@@ -167,38 +194,37 @@ export const sealRetrievalEvidence = (
 ): RetrievalEvidence => {
   const base = pending
     ? {
-        question: pending.question,
+        question: input.brief,
         scope: [...pending.scope],
-        facts: [...pending.facts],
+        facts: pending.facts.map((fact) => ({
+          ...fact,
+          sources: fact.sources.map((source) => {
+            if (!source.outputRef) return source;
+            const { outputRef: _ephemeral, ...rest } = source;
+            return rest;
+          }),
+        })),
         unknowns: [...pending.unknowns],
         attempted: [...pending.attempted],
         completion: pending.completion,
       }
     : emptyRetrievalEvidence(input.brief, input.scope, "incomplete");
   if (input.outcome === "cancelled") {
-    return { ...base, completion: "cancelled" };
+    return { ...base, question: input.brief, completion: "cancelled" };
   }
   if (!pending) {
     const lost = input.exitReason ?? "no validated facts were submitted";
     return {
       ...base,
+      question: input.brief,
       completion: "incomplete",
       unknowns: base.unknowns.includes(lost) ? base.unknowns : [...base.unknowns, lost],
     };
   }
-  const verified = pending.facts.filter((fact) => fact.status === "verified").length;
   const unavailableOnly = pending.facts.length > 0
     && pending.facts.every((fact) => fact.status === "unavailable");
-  if (verified === 0 && unavailableOnly) return { ...base, completion: "unavailable" };
-  if (
-    verified > 0
-    && pending.unknowns.length === 0
-    && pending.attempted.length === 0
-    && pending.facts.every((fact) => fact.status === "verified")
-  ) {
-    return { ...base, completion: "complete" };
-  }
-  return { ...base, completion: "partial" };
+  if (unavailableOnly) return { ...base, question: input.brief, completion: "unavailable" };
+  return { ...base, question: input.brief, completion: "delivered" };
 };
 
 export interface TranscriptRef {
@@ -548,12 +574,18 @@ export interface ThreadReadParams {
   threadId: string;
   what?: ThreadReadWhat;
   since?: number;
+  /** UTF-8 byte offset when paging a retrieval report. */
+  offset?: number;
+  /** UTF-8 byte length when paging a retrieval report. */
+  length?: number;
 }
 
 export interface ThreadReadResult {
   text: string;
   report: ThreadReport | null;
   transcriptRef: TranscriptRef | null;
+  nextOffset?: number;
+  eof?: boolean;
 }
 
 export type IntegrationApplyPhase =
@@ -702,6 +734,7 @@ export interface ThreadFactsSetParams {
       startLine?: number;
       endLine?: number;
       url?: string;
+      receiptId?: string;
       outputRef?: RetrievalOutputRef;
     }>;
   }>;

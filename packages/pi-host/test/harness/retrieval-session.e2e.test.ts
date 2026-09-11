@@ -378,9 +378,9 @@ describe("retrieval thread public slice", () => {
       assert.ok(childTranscript.length > 0);
       assert.equal(childTranscript.includes(parentUserText), false);
 
-      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.status === "verified" && fact.claim.includes("login")), true);
+      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.status === "source-checked" && fact.claim.includes("login")), true);
       assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim.includes("secret outside")), false);
-      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim === "invented range" && fact.status === "verified"), false);
+      assert.equal(retrieval.report?.evidence?.facts.some((fact) => fact.claim === "invented range" && fact.status === "source-checked"), false);
       assert.equal(retrieval.report?.changedFiles.length, 0);
       assert.equal(JSON.stringify(retrieval.report).includes("priority"), false);
       assert.equal(await readFile(join(workspace, "src", "auth.ts"), "utf8"), authBody);
@@ -391,7 +391,7 @@ describe("retrieval thread public slice", () => {
       );
       assert.equal(zone2.status, "ready");
       if (zone2.status === "ready") {
-        assert.ok(zone2.items.some((item) => item.id === retrieval.id && (item.evidenceSummary ?? item.conclusion ?? "").includes("verified")));
+        assert.ok(zone2.items.some((item) => item.id === retrieval.id && (item.evidenceSummary ?? item.conclusion ?? "").includes("source-checked")));
       }
 
       const second = await parentHost.prompt(parent.sessionId, "Read the retrieval report");
