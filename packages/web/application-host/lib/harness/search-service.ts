@@ -41,6 +41,11 @@ export interface HarnessSearchContext {
   candidateBudget?: number;
   /** Explore-only per-file hit cap applied before the working budget. */
   hitsPerFile?: number;
+  /**
+   * Immutable WorkingState corpus pinned at explore.query.start.
+   * When present, lexical search consumes this snapshot instead of a live branch read.
+   */
+  pinnedBranchCorpus?: Array<{ path: string; text: string }> | null;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -332,8 +337,9 @@ export function createHarnessSearchService(deps: HarnessSearchDeps) {
           searchPrefixes = minimal;
         }
 
-        if (deps.branchCorpus && ctx.actor) {
-          const corpus = await deps.branchCorpus(ctx.actor.sessionId);
+        const pinnedCorpus = ctx.pinnedBranchCorpus;
+        if (pinnedCorpus || (deps.branchCorpus && ctx.actor)) {
+          const corpus = pinnedCorpus ?? await deps.branchCorpus!(ctx.actor!.sessionId);
           if (corpus) {
             const matcher = compileDraftPattern(params.pattern.trim(), params.fixedStrings, params.ignoreCase);
             if (!matcher) return unavailableResult();

@@ -4411,6 +4411,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；directory 对象库根、branch 集成对账/撤销、冻结 overlay 传入 create、级联 kill/archive、captureScopes 继承与非法 scope cleanup 有定向生产证据。真实付费嵌套 Pi 会话与完整桌面 Host 重启未测。
 
+### D-220 · 2026-09-11 · 3.4 / 3.4a（执行 Git 基线、固定视图与 dispatch 内容身份）
+
+类型：问题与解法
+
+背景：D-216 给物化目录做了独立 `git init` / `--detach`，但仍把 WorkingState 的逻辑 `base`（父 HEAD 或 `thread-<id>@<writeRevision>`）交给执行仓库的 inspect/snapshot/settle。独立 init 后该 SHA 在子仓库不可解析，真实链路会出现 bad object，且 init commit 已包含虚拟写时 inspect 只看见后续 shell 写。D-217 的 revision 标签在取得 store lease 前读旧 view，explore 也未在同一 shared lease 内钉住 immutable snapshot。D-218 的 fingerprint 只比路径集合，两个已 dirty/untracked 文件中途换内容仍能拼出混合基线；新文件 mode 还在用户 source root 写 `.piarium-mode-probe-*`。
+
+决定：
+
+1. `ThreadWorktree.base` / `WorkingBranch.baseRef` 只表示父状态身份。独立 `git init`、detached worktree add、崩溃恢复和 rematerialize 必须取得并持久化执行仓库当前可解析的 `executionBaseline`。inspect/snapshot/settle 的 Git 读使用该执行基线；`importFixedResult` 写入 store 时仍用父身份。reclaim 删除执行目录时清除 `executionBaseline`。rematerialize 只从父仓库导出父仓库能 `rev-parse` 的 commit，不得引用已删子仓库对象。
+2. 结算 `publishDirectoryResult` 的候选路径并入当前 `branch.deltas`，使独立 init 后 native result 同时包含已打进执行基线的虚拟写和之后的 shell 写。
+3. WorkingBranch 普通读取在取得 shared store lease 后重新取当前 view，正文与 provenance 使用同一 `writeRevision`。`explore.query.start` 在同一个 shared lease 内复制 immutable effective-state snapshot 与 `writeRevision`；词法、结构、语义和原文读取都消费该快照。
+4. 新文件默认 mode 按 `0o666 & ~umask()` 计算，不在用户树上创建探测文件。虚拟写、draft overlay 与 integration 使用同一函数。
+5. Git/非 Git fingerprint 含 dirty/untracked 路径的内容身份。Documents `beginCapture`/`completeCapture` 与 dirty-state barrier 覆盖整个捕获窗口；窗口内内容替换返回 retryable `baseline-changed`，不留 branch。不增加无限重试、全局 watcher 或无依据硬限制。
+
+影响：protocol `ThreadWorktree.executionBaseline`；Host worktree/runtime/store/lookups/explore query、Application Host 装配；设计 9.2.5b、plan 3.4 C、status 3.4 / 3.4a、architecture 6.1、harness DOCUMENTATION。D-216 / D-217 / D-218 相应部分在索引标 superseded in part。
+
+状态：已实施；Git 父仓库 isolated dispatch → 虚拟写 → ensureMaterialized → shell 写 → settle → native result → merge 根目录、reclaim/rematerialize、staging-promoted 恢复、lease 后重读 view、explore 查询级 pin、无 mode probe、dirty 内容替换拒绝混合基线有定向生产证据。branch Integration 锁顺序/WAL、恢复时 execution identity/权限/知识所有权、级联生命周期与 scope segment 仍待本轮后续阶段。3.4 / 3.4a / 3.6 保持 Partial。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4631,7 +4649,8 @@ ModelRuntime 纵切继续通过。
 | D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-214 | superseded in part（dispatch 固定 Git/非 Git 磁盘基线保留；catalog 不得用 execution workspaceId；Git 错误不得吞成空清单、捕获窗口与 gitlink 由 D-218 补正） | D-216 / D-218 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回；权限冻结、级联、durable 嵌套集成与 captureScopes 由 D-219 补正） | D-216 / D-218 / D-219 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
-| D-216 | implementation（Host session binding 区分 owning/execution；物化 Git 用 --detach 或独立 init，并记录会写 `.git/worktrees`） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
-| D-217 | implementation（物化后重读 execution view；writeRevision 标签；持久切换 journal；嵌套虚拟写走同一 gate；树不变量与 virtual semantic pin） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-218 | implementation（Git inventory 失败必抛；捕获窗口 fingerprint + 活跃 writer；gitlink/unsupported 拒绝；新虚拟文件补真实 mode；apply/补偿 sameState；失败清理未绑定 branch） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-216 | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正） | D-220 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-217 | superseded in part（物化后重读 view、切换 journal、嵌套写 gate 与树不变量保留；lease 后重取当前 view 与 explore 查询级 immutable snapshot 由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-218 | superseded in part（Git 失败必抛、gitlink/unsupported、sameState 与失败清理保留；fingerprint 增加内容身份，默认 mode 不再探测用户树，由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-219 | implementation（冻结 permissions 进入 session.create/open；directory 集成保持对象库根；branch 集成落 operations；kill/archive 级联；嵌套 captureScopes 继承；scope 规范化） | — | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-220 | implementation（执行 Git baseline 与逻辑 base 分离；settle 并入 deltas；lease 后重读与 explore 查询级 pin；umask 默认 mode；fingerprint 内容身份） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |

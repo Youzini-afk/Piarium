@@ -166,8 +166,10 @@ export interface HarnessServiceHost {
       roots?: readonly string[];
       sessionId?: string;
       inputContext?: import("@piarium/protocol").AgentInputContext;
+      threadDocuments?: Array<{ path: string; content: string; revision: string }>;
     },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
+  pinWorkingBranchQuery?: (sessionId: string) => Promise<import("./working-state/working-branch-lookups.js").WorkingBranchQuerySnapshot | null>;
   harnessSettings?: (
     workspaceId: string,
   ) => import("@piarium/protocol").PiSettingsSnapshot | null | Promise<import("@piarium/protocol").PiSettingsSnapshot | null>;
@@ -270,6 +272,7 @@ export interface HarnessServiceHostOptions {
   fileRelations?: HarnessServiceHost["fileRelations"];
   graphRecall?: HarnessServiceHost["graphRecall"];
   semanticRecall?: HarnessServiceHost["semanticRecall"];
+  pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
   shellSetting?: HarnessShellSetting;
@@ -346,6 +349,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const fileRelations = options.fileRelations ?? null;
   const graphRecall = options.graphRecall ?? null;
   const semanticRecall = options.semanticRecall ?? null;
+  const pinWorkingBranchQuery = options.pinWorkingBranchQuery;
   const harnessSettings = options.harnessSettings;
   const rerankExploreViews = options.rerankExploreViews;
   const webFetchService = options.webFetchService ?? null;
@@ -568,6 +572,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     fileRelations,
     graphRecall,
     semanticRecall,
+    ...(pinWorkingBranchQuery ? { pinWorkingBranchQuery } : {}),
     ...(harnessSettings ? { harnessSettings } : {}),
     ...(rerankExploreViews ? { rerankExploreViews } : {}),
     webFetchService,

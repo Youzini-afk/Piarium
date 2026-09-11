@@ -1,14 +1,30 @@
 /** Fixed workspace baseline at branch create: Git inventory or one directory scan. */
 
+import { createHash } from "node:crypto";
+import type fs from "node:fs";
+import type path from "node:path";
+
 export type GitBaselineInventory = {
   kind: "git";
   baseRef: string;
   unborn: boolean;
   paths: string[];
   gitlinks: string[];
+  /** Workdir identity of dirty/untracked paths; detects content replacement with an unchanged path set. */
+  contentIdentities?: Record<string, string>;
 };
 
 export type BaselineInventory = GitBaselineInventory | { kind: "directory" };
+
+export type WorkdirIdentityIo = {
+  readFile: typeof fs.promises.readFile;
+  lstat: typeof fs.promises.lstat;
+  readlink: typeof fs.promises.readlink;
+  join: typeof path.join;
+};
+
+/** Default mode for a newly created regular file. Never creates a probe file in the user tree. */
+export const defaultNewFileMode = (): number => (0o666 & ~process.umask()) || 0o644;
 
 export const withAncestorDirectories = (paths: readonly string[]): string[] => {
   const result = new Set<string>();
@@ -56,8 +72,50 @@ export const gitBaselineFingerprint = (inventory: GitBaselineInventory): string 
   unborn: inventory.unborn,
   paths: [...inventory.paths].sort(),
   gitlinks: [...inventory.gitlinks].sort(),
+  contentIdentities: Object.fromEntries(
+    Object.entries(inventory.contentIdentities ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+  ),
 });
 
-export const directoryBaselineFingerprint = (paths: readonly string[]): string => (
-  `directory:${[...paths].sort().join("\0")}`
-);
+export const directoryBaselineFingerprint = (
+  paths: readonly string[],
+  contentIdentities?: Record<string, string>,
+): string => JSON.stringify({
+  kind: "directory",
+  paths: [...paths].sort(),
+  contentIdentities: Object.fromEntries(
+    Object.entries(contentIdentities ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+  ),
+});
+
+export async function workdirContentIdentities(
+  directory: string,
+  paths: readonly string[],
+  io: WorkdirIdentityIo,
+): Promise<Record<string, string>> {
+  const identities: Record<string, string> = {};
+  for (const relative of [...new Set(paths)].sort()) {
+    if (!relative || relative === ".") continue;
+    const absolute = io.join(directory, ...relative.split("/"));
+    try {
+      const stat = await io.lstat(absolute);
+      if (stat.isSymbolicLink()) {
+        identities[relative] = `symlink:${await io.readlink(absolute)}`;
+        continue;
+      }
+      if (stat.isDirectory()) {
+        identities[relative] = `directory:${(stat.mode & 0o7777).toString(8)}`;
+        continue;
+      }
+      const bytes = await io.readFile(absolute);
+      identities[relative] = `file:${createHash("sha256").update(bytes).digest("hex")}:${(stat.mode & 0o7777).toString(8)}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        identities[relative] = "missing";
+        continue;
+      }
+      throw error;
+    }
+  }
+  return identities;
+}

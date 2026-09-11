@@ -463,6 +463,7 @@ const isThread = (value: unknown): value is Thread => {
     && (value.worktree === null || (isRecord(value.worktree)
       && isString(value.worktree.path)
       && isString(value.worktree.base)
+      && (value.worktree.executionBaseline === undefined || isString(value.worktree.executionBaseline))
       && (value.worktree.branch === undefined || isString(value.worktree.branch))
       && (value.worktree.resultCommit === undefined || isString(value.worktree.resultCommit))
       && (value.worktree.resultPath === undefined || isString(value.worktree.resultPath))

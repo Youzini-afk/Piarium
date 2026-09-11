@@ -1452,6 +1452,11 @@ Git blob 与工作目录转换后的字节不能无条件视为相同；当前�
 Documents、LSP、路径与 shell（D-216）。子会话注册、thread services、Zone 2 和 lost resume 从 Host session binding
 读取 owning workspace，不扫描全部 catalog。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
 Git 物化使用 `git worktree add --detach`（会写 `.git/worktrees`，不创建用户可见分支）或独立 `git init`，子 Git 命令不得发现或修改父仓库。
+`worktree.base` / 分支 `baseRef` 仍是父状态身份；inspect/snapshot/settle 使用执行仓库可解析的 `executionBaseline`（D-220）。
+reclaim 清除该执行 SHA；rematerialize 只从父仓库导出父仓库能解析的 commit。结算目录结果并入当前虚拟 delta，避免独立 init
+把虚拟写吃进执行基线后丢掉。WorkingBranch 普通读取在取得 store lease 后重取当前 view；一次 explore 查询在同一 lease 内
+复制 immutable snapshot，词法/结构/语义/原文都消费它。新文件默认 mode 按 umask 计算，不在用户树写探测文件。
+捕获窗口 fingerprint 含 dirty/untracked 内容身份，路径集合不变但正文被替换时拒绝混合基线。
 兄弟线程不直接通信；根上下文不复制孙对话正文。不加固定深度上限，复用既有并发与排队。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些

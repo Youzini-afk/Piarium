@@ -716,6 +716,17 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
       const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
       expect(attached.kind).toBe("init");
+      expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
+      expect(attached.executionBaseline).not.toBe(parentHead);
+      const inspected = await runtime.inspect({
+        path: live,
+        base: parentHead,
+        executionBaseline: attached.executionBaseline!,
+        viewMode: "materialized",
+        materialized: true,
+      }, "live");
+      expect(inspected.changedFiles).not.toContain(undefined);
+      git(live, ["rev-parse", "--verify", attached.executionBaseline!]);
       const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
       expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
       expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());
@@ -746,6 +757,7 @@ describe("thread worktree runtime", () => {
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
       const attached = await runtime.attachIsolatedGitContext(fixture.repo, live, parentHead);
       expect(attached.kind).toBe("worktree");
+      expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
       expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
       expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());

@@ -1,5 +1,6 @@
 import type { RecoveryState, RegularFileState, WorkingBranch } from "./types.js";
 import type { WorkingStateStore } from "./working-state-store.js";
+import { defaultNewFileMode } from "./workspace-baseline.js";
 
 export interface EditorDraft {
   path: string;
@@ -32,7 +33,7 @@ const normalizeRelPath = (p: string): string => {
   }
   return normalized;
 };
-const DEFAULT_CREATED_FILE_MODE = 0o666 & ~process.umask();
+const DEFAULT_CREATED_FILE_MODE = defaultNewFileMode();
 const DEFAULT_CREATED_DIRECTORY_MODE = (process.platform === "win32" ? 0o666 : 0o777) & ~process.umask();
 
 const ancestorPaths = (rel: string): string[] => {

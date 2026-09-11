@@ -14,8 +14,15 @@ import {
   isUnbornHeadError,
   parseGitNullList,
   parseGitStageList,
+  workdirContentIdentities,
   type BaselineInventory,
 } from "./working-state/workspace-baseline.js";
+
+const executionGitRef = (worktree: ThreadWorktree): string => (
+  worktree.base === "zero-commit"
+    ? worktree.base
+    : (worktree.executionBaseline ?? worktree.base)
+);
 
 export interface ThreadWorktreeCreateResult {
   path: string;
@@ -506,7 +513,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (patch.length > 0) await runGit(created.path, ["apply", "--binary", "--whitespace=nowarn", "-"], patch);
     const untracked = parseNullList(untrackedOutput);
     await copyUntracked(sourceRoot, created.path, untracked);
-    let base = parentHead;
+    let executionBaseline = parentHead;
     if (patch.length > 0 || untracked.length > 0) {
       await runGit(created.path, ["add", "-A"]);
       await runGit(created.path, [
@@ -514,9 +521,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         "-c", "user.email=thread-baseline@piarium.local",
         "commit", "--no-verify", "--no-gpg-sign", "-m", "Piarium thread baseline",
       ]);
-      base = (await runGit(created.path, ["rev-parse", "HEAD"])).stdout.trim();
+      executionBaseline = (await runGit(created.path, ["rev-parse", "HEAD"])).stdout.trim();
     }
-    worktree.base = base;
+    worktree.base = parentHead;
+    worktree.executionBaseline = executionBaseline;
     worktree.preparationStage = "ready";
     await onWorktreeState?.(worktree);
     if (signal?.aborted) throw abortError();
@@ -546,6 +554,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
 
     const targetRef = fixed ? worktree.resultCommit : undefined;
+    const gitBase = executionGitRef(worktree);
     let newPaths: string[];
     let trackedPatchArgs: string[];
     let changedResult: string;
@@ -555,13 +564,13 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (targetRef) {
       // Result is fixed in resultCommit. Read diffs strictly against resultCommit.
       const [{ stdout: added }, { stdout: changed }, { stdout: numstat }] = await Promise.all([
-        runGit(worktree.path, ["diff", "--name-only", "--diff-filter=A", "-z", worktree.base, targetRef]),
-        runGit(worktree.path, ["diff", "--name-only", "-z", worktree.base, targetRef]),
-        runGit(worktree.path, ["diff", "--numstat", worktree.base, targetRef]),
+        runGit(worktree.path, ["diff", "--name-only", "--diff-filter=A", "-z", gitBase, targetRef]),
+        runGit(worktree.path, ["diff", "--name-only", "-z", gitBase, targetRef]),
+        runGit(worktree.path, ["diff", "--numstat", gitBase, targetRef]),
       ]);
       newPaths = parseNullList(added);
       trackedPatchArgs = [
-        "diff", "--binary", worktree.base, targetRef, "--", ".",
+        "diff", "--binary", gitBase, targetRef, "--", ".",
         ...newPaths.map((relative) => `:(exclude,literal)${normalizeRelative(relative, pathModule).replace(/\\/g, "/")}`),
       ];
       patchResult = (await runGit(worktree.path, trackedPatchArgs)).stdout;
@@ -569,7 +578,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       numstatResult = numstat;
     } else {
       const [{ stdout: added }, { stdout: untracked }] = await Promise.all([
-        runGit(worktree.path, ["diff", "--name-only", "--diff-filter=A", "-z", worktree.base]),
+        runGit(worktree.path, ["diff", "--name-only", "--diff-filter=A", "-z", gitBase]),
         runGit(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"]),
       ]);
       // A result snapshot commits formerly-untracked files onto the internal
@@ -577,13 +586,13 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       // silently become part of the tracked patch.
       newPaths = [...new Set([...parseNullList(added), ...parseNullList(untracked)])];
       trackedPatchArgs = [
-        "diff", "--binary", worktree.base, "--", ".",
+        "diff", "--binary", gitBase, "--", ".",
         ...newPaths.map((relative) => `:(exclude,literal)${normalizeRelative(relative, pathModule).replace(/\\/g, "/")}`),
       ];
       const [{ stdout: patch }, { stdout: changed }, { stdout: numstat }] = await Promise.all([
         runGit(worktree.path, trackedPatchArgs),
-        runGit(worktree.path, ["diff", "--name-only", "-z", worktree.base]),
-        runGit(worktree.path, ["diff", "--numstat", worktree.base]),
+        runGit(worktree.path, ["diff", "--name-only", "-z", gitBase]),
+        runGit(worktree.path, ["diff", "--numstat", gitBase]),
       ]);
       patchResult = patch;
       changedResult = changed;
@@ -637,6 +646,19 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         .filter((entry) => entry.mode === "160000")
         .map((entry) => entry.path),
     )].sort();
+    const dirtyPaths = [...new Set([
+      ...parseGitNullList(deleted),
+      ...parseGitNullList(untracked),
+      ...parseGitNullList(unstaged),
+      ...parseGitNullList(staged),
+      ...versusHead,
+    ])].filter((relative) => !gitlinks.includes(relative));
+    const contentIdentities = await workdirContentIdentities(directory, dirtyPaths, {
+      readFile: fsPromises.readFile,
+      lstat: fsPromises.lstat,
+      readlink: fsPromises.readlink,
+      join: pathModule.join,
+    });
     return {
       kind: "git",
       baseRef,
@@ -650,6 +672,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         ...versusHead,
       ])].sort(),
       gitlinks,
+      contentIdentities,
     };
   };
 
@@ -744,10 +767,11 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (!worktree.resultCommit) throw new Error("Legacy thread result has no fixed result reference");
     const branchId = `thread-${threadId}`;
     if (worktree.base !== "zero-commit") {
+      const gitBase = executionGitRef(worktree);
       const git = (args: string[]) => runGit(worktree.path, args).then((result) => ({ ...result, exitCode: 0 }));
-      const changedPaths = await captureGitChangedPaths(git, worktree.base, worktree.resultCommit);
+      const changedPaths = await captureGitChangedPaths(git, gitBase, worktree.resultCommit);
       const [baseState, resultState] = await Promise.all([
-        importGitPathsToStore(store, git, worktree.base, changedPaths),
+        importGitPathsToStore(store, git, gitBase, changedPaths),
         importGitPathsToStore(store, git, worktree.resultCommit, changedPaths),
       ]);
       return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
@@ -1021,6 +1045,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (worktree.materialized === false) {
       worktree.preparationStage = "materialize";
       delete worktree.materializationFingerprint;
+      delete worktree.executionBaseline;
       return { reclaimed: true };
     }
     if (!worktree.resultCommit && !extras?.nativeVerified) {
@@ -1056,6 +1081,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
             worktree.materialized = false;
             worktree.preparationStage = "materialize";
             delete worktree.materializationFingerprint;
+            delete worktree.executionBaseline;
             return { reclaimed: true };
           }
           return {
@@ -1071,6 +1097,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       worktree.materialized = false;
       worktree.preparationStage = "materialize";
       delete worktree.materializationFingerprint;
+      delete worktree.executionBaseline;
       return { reclaimed: true };
     } catch (error) {
       return { reclaimed: false, reason: error instanceof Error ? error.message : String(error) };
@@ -1159,7 +1186,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
   };
 
-  const initIsolatedGit = async (livePath: string, signal?: AbortSignal): Promise<void> => {
+  const initIsolatedGit = async (livePath: string, signal?: AbortSignal): Promise<string> => {
     if (signal?.aborted) throw abortError();
     await runGit(livePath, ["init"]);
     await runGit(livePath, ["add", "-A"]);
@@ -1169,6 +1196,25 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       "commit", "--no-verify", "--no-gpg-sign", "--allow-empty",
       "-m", "Piarium isolated execution baseline",
     ]);
+    const head = (await runGit(livePath, ["rev-parse", "HEAD"])).stdout.trim();
+    if (!head) throw new Error("Isolated execution Git baseline is not resolvable after git init");
+    return head;
+  };
+
+  const resolveLiveHead = async (livePath: string): Promise<string> => {
+    const head = (await runGit(livePath, ["rev-parse", "HEAD"])).stdout.trim();
+    if (!head || head === "HEAD") throw new Error(`Execution Git HEAD is not resolvable in ${livePath}`);
+    return head;
+  };
+
+  const resolveSourceCommit = async (sourceRoot: string, ref: string | undefined): Promise<string | null> => {
+    if (!ref || ref === "zero-commit") return null;
+    try {
+      const verified = (await runGit(sourceRoot, ["rev-parse", "--verify", `${ref}^{commit}`])).stdout.trim();
+      return verified || null;
+    } catch {
+      return null;
+    }
   };
 
   const materialize = async (
@@ -1197,17 +1243,23 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
     worktree.preparationStage = "materializing";
     if (worktree.base !== "zero-commit") {
-      const ref = worktree.resultCommit || worktree.base;
       const source = await inspectSourceGit(sourceRoot);
+      const ref = (await resolveSourceCommit(sourceRoot, worktree.resultCommit))
+        ?? (await resolveSourceCommit(sourceRoot, worktree.base))
+        ?? source.head;
+      if (!ref) {
+        throw new Error("Parent Git baseline is not resolvable for rematerialize");
+      }
       const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, worktree.path) : false;
       if (source.isGit && source.head && !liveInsideSource) {
         await runGit(sourceRoot, ["worktree", "prune"]).catch(() => {});
         if (signal?.aborted) throw abortError();
         await runGit(sourceRoot, ["worktree", "add", "--detach", "--force", worktree.path, ref]);
+        worktree.executionBaseline = await resolveLiveHead(worktree.path);
       } else {
         if (signal?.aborted) throw abortError();
         await exportGitTree(sourceRoot, ref, worktree.path);
-        await initIsolatedGit(worktree.path, signal);
+        worktree.executionBaseline = await initIsolatedGit(worktree.path, signal);
       }
     } else {
       const snapshotDir = fixedCopyResultPath(worktree);
@@ -1227,7 +1279,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       }
       await copyDirRecursive(src, worktree.path);
       if (await inheritsOtherGit(worktree.path)) {
-        await initIsolatedGit(worktree.path, signal);
+        worktree.executionBaseline = await initIsolatedGit(worktree.path, signal);
       }
     }
     worktree.materialized = true;
@@ -1357,7 +1409,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     livePath: string,
     baseRef: string,
     signal?: AbortSignal,
-  ): Promise<{ kind: "worktree" | "init" | "none" }> => {
+  ): Promise<{ kind: "worktree" | "init" | "none"; executionBaseline?: string }> => {
     if (signal?.aborted) throw abortError();
     const source = await inspectSourceGit(sourceRoot);
     const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, livePath) : false;
@@ -1372,7 +1424,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         await runGit(sourceRoot, ["worktree", "add", "--detach", livePath, ref]);
         await copyDirRecursive(overlay, livePath);
         await fsPromises.rm(overlay, { recursive: true, force: true });
-        return { kind: "worktree" };
+        return { kind: "worktree", executionBaseline: await resolveLiveHead(livePath) };
       } catch (error) {
         await fsPromises.rm(livePath, { recursive: true, force: true }).catch(() => undefined);
         await fsPromises.rename(overlay, livePath).catch(() => undefined);
@@ -1380,8 +1432,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       }
     }
     if (source.isGit || liveInsideSource || liveInheritsOther) {
-      await initIsolatedGit(livePath, signal);
-      return { kind: "init" };
+      return { kind: "init", executionBaseline: await initIsolatedGit(livePath, signal) };
     }
     return { kind: "none" };
   };

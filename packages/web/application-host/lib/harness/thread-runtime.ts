@@ -62,6 +62,7 @@ import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.
 import {
   directoryBaselineFingerprint,
   gitBaselineFingerprint,
+  workdirContentIdentities,
   withAncestorDirectories,
   type GitBaselineInventory,
 } from "./working-state/workspace-baseline.js";
@@ -104,6 +105,11 @@ export interface ThreadRuntimeOptions {
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string }>>;
+  beginBaselineCapture?(workspaceId: string): Promise<unknown>;
+  completeBaselineCapture?(capture: unknown): Promise<{ stable: boolean; reasons: string[] }>;
+  beginDirtyStateBarrier?(workspaceId: string, paths: string[]): Promise<{
+    release(): Promise<void>;
+  }>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
   withMergeWriter?<T>(workspaceId: string, threadId: string, operation: () => Promise<T>): Promise<T>;
   onError?: (error: unknown) => void;
@@ -435,15 +441,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     const outcome = await recoverMaterializationSwitch(input.worktree.path, journal, input.intent);
     if (outcome === "materialized") {
+      let executionBaseline = input.worktree.executionBaseline;
       if (options.worktrees.attachIsolatedGitContext) {
         try {
           input.signal.throwIfAborted();
-          await options.worktrees.attachIsolatedGitContext(
+          const attached = await options.worktrees.attachIsolatedGitContext(
             input.sourceRoot,
             input.worktree.path,
             input.worktree.base,
             input.signal,
           );
+          if (attached.executionBaseline) executionBaseline = attached.executionBaseline;
         } catch (error) {
           await rollbackMaterializationSwitch(input.worktree.path, journal);
           const rolled = clearSwitchJournal(input.worktree);
@@ -456,7 +464,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         viewMode: "materialized" as const,
         materialized: true,
         preparationStage: input.worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+        ...(executionBaseline ? { executionBaseline } : {}),
       };
+      if (!executionBaseline) delete completed.executionBaseline;
       delete completed.materializationFingerprint;
       await persistWorktree(input.workspaceId, input.threadId, completed);
       await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
@@ -1341,7 +1351,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     };
     const directoryWindow = async (store: { listWorkspaceBaselinePaths?(directory: string): Promise<string[]> }): Promise<string | null> => {
       if (typeof store.listWorkspaceBaselinePaths !== "function") return null;
-      return directoryBaselineFingerprint(await store.listWorkspaceBaselinePaths(sourceRoot));
+      const paths = await store.listWorkspaceBaselinePaths(sourceRoot);
+      const contentIdentities = await workdirContentIdentities(sourceRoot, paths, {
+        readFile: fs.promises.readFile,
+        lstat: fs.promises.lstat,
+        readlink: fs.promises.readlink,
+        join: path.join,
+      });
+      return directoryBaselineFingerprint(paths, contentIdentities);
     };
     const inspectInventory = async (): Promise<GitBaselineInventory | { kind: "directory" } | null> => {
       if (typeof options.worktrees.inspectGitBaselineInventory !== "function") return null;
@@ -1374,7 +1391,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         captureScopes,
       );
     };
+    let baselineCapture: unknown;
+    let dirtyBarrier: Awaited<ReturnType<NonNullable<ThreadRuntimeOptions["beginDirtyStateBarrier"]>>> | undefined;
     try {
+      if (typeof options.beginDirtyStateBarrier === "function") {
+        dirtyBarrier = await options.beginDirtyStateBarrier(input.workspaceId, ["."]);
+      }
+      if (typeof options.beginBaselineCapture === "function") {
+        baselineCapture = await options.beginBaselineCapture(input.workspaceId);
+      }
       await assertNoActiveBaselineWriters();
       await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
         if (parentVirtualBranchId) {
@@ -1386,6 +1411,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const beforeRevision = parentBranch.writeRevision ?? 0;
           const baseRef = `thread-${input.parent.id}@${beforeRevision}`;
           worktree!.base = baseRef;
+          if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
+            const completed = await options.completeBaselineCapture(baselineCapture);
+            baselineCapture = undefined;
+            if (!completed.stable) {
+              throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
+            }
+          }
           await createFromStates(store, parentView, baseRef);
           const afterRevision = store.getBranch(parentVirtualBranchId)?.writeRevision ?? 0;
           if (afterRevision !== beforeRevision) {
@@ -1430,6 +1462,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
         }
         await assertNoActiveBaselineWriters();
+        if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
+          const completed = await options.completeBaselineCapture(baselineCapture);
+          baselineCapture = undefined;
+          if (!completed.stable) {
+            throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
+          }
+        }
         await createFromStates(store, baseline, baseRef);
       });
       const setupPending = existing.manifest.tools.includes("bash")
@@ -1464,6 +1503,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         await removeOrphanMaterializationDirs(worktree.path).catch(() => undefined);
       }
       throw error;
+    } finally {
+      if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
+        await options.completeBaselineCapture(baselineCapture).catch(() => undefined);
+      }
+      await dirtyBarrier?.release().catch(() => undefined);
     }
     return { branchId, worktree };
   };
@@ -3833,13 +3877,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       journal.stage = "staging-promoted";
       await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
       switchSignal.throwIfAborted();
+      let executionBaseline = worktree.executionBaseline;
       if (options.worktrees.attachIsolatedGitContext) {
-        await options.worktrees.attachIsolatedGitContext(
+        const attached = await options.worktrees.attachIsolatedGitContext(
           sourceRoot,
           worktree.path,
           worktree.base,
           switchSignal,
         );
+        if (attached.executionBaseline) executionBaseline = attached.executionBaseline;
       }
       switchSignal.throwIfAborted();
       const nextWorktree = {
@@ -3847,7 +3893,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         viewMode: "materialized" as const,
         materialized: true,
         preparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+        ...(executionBaseline ? { executionBaseline } : {}),
       };
+      if (!executionBaseline) delete nextWorktree.executionBaseline;
       delete nextWorktree.materializationFingerprint;
       await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
       activeJournal = undefined;

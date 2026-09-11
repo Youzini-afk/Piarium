@@ -83,7 +83,6 @@ import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
-import { listBranchTextFiles } from './lib/harness/working-state/branch-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
 import { VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
@@ -1408,6 +1407,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     resolveRuntimeWorkspaceId: async (cwd) => (await documentsAuthority.resolveWorkspace({ path: cwd })).workspaceId,
+    beginBaselineCapture: (workspaceId) => documentsAuthority.beginCapture(workspaceId),
+    completeBaselineCapture: async (capture) => {
+      const completed = await documentsAuthority.completeCapture(capture);
+      return { stable: completed.stable, reasons: completed.reasons };
+    },
+    beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
     inspectBaselineWriters: async (workspaceId, root) => {
       const writersOf = async (id: string) => {
         const inspected = await documentsAuthority.inspectWorkspace(id) as {
@@ -2018,6 +2023,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       (sessionId, resourceId) => workingBranchLookups.exploreFile(sessionId, resourceId),
     ),
     branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
+    pinWorkingBranchQuery: (sessionId) => workingBranchLookups.pinQuery(sessionId),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: async (sessionId, context, resourceId) => {
       const branch = await workingBranchLookups.readSource(sessionId, resourceId);
@@ -2103,13 +2109,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // only in the pinned WorkingState view, so this query overlays that view.
       const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
       const execution = sessionId ? threadExecutionViews.get(sessionId) : undefined;
-      const threadDocuments = execution?.mode === 'virtual'
-        ? await harnessWorkingStates.withStore(
-          execution.workspaceId,
-          'semantic-working-state-pin',
-          (store) => listBranchTextFiles(store, execution.branchId, searchOptions?.roots ?? [""]),
-          'shared',
-        )
+      const pinnedDocuments = searchOptions?.threadDocuments;
+      const threadDocuments = pinnedDocuments
+        ? pinnedDocuments
+        : execution?.mode === 'virtual' && sessionId
+        ? (await workingBranchLookups.pinQuery(sessionId))?.files.map((file) => ({
+          path: file.path,
+          content: file.text,
+          revision: file.revision,
+        }))
         : undefined;
       const draftPaths = sessionId
         ? documentsAuthority.agentInputDraftPaths(sessionId, inputContext)
@@ -2121,7 +2129,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           ? {
             threadDocuments: threadDocuments.map((file) => ({
               path: file.path,
-              content: file.text,
+              content: file.content,
               revision: file.revision,
             })),
           }

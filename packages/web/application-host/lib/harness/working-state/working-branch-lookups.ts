@@ -4,6 +4,7 @@ import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";
 import { listBranchView, listBranchTextFiles, readBranchFile } from "./branch-view.js";
 import type { ThreadExecutionViewRegistry } from "./execution-view.js";
+import type { RecoveryState } from "./types.js";
 import type { WorkspaceWorkingStateAccess } from "./working-state-store.js";
 
 export interface WorkingBranchLookups {
@@ -11,6 +12,16 @@ export interface WorkingBranchLookups {
   pathOverlay(sessionId: string, resourceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
   searchCorpus(sessionId: string): Promise<Array<{ path: string; text: string }> | null>;
   exploreFile(sessionId: string, resourceId: string): Promise<ExploreFileSnapshot | null>;
+  pinQuery(sessionId: string): Promise<WorkingBranchQuerySnapshot | null>;
+}
+
+export interface WorkingBranchQuerySnapshot {
+  sessionId: string;
+  workspaceId: string;
+  branchId: string;
+  writeRevision: number;
+  files: Array<{ path: string; text: string; revision: string }>;
+  states: Record<string, RecoveryState>;
 }
 
 const provenanceFor = (
@@ -22,6 +33,10 @@ const provenanceFor = (
   origin,
 });
 
+const cloneStates = (states: Record<string, RecoveryState>): Record<string, RecoveryState> => (
+  structuredClone(states)
+);
+
 export function createWorkingBranchLookups(options: {
   views: ThreadExecutionViewRegistry;
   workingStates: WorkspaceWorkingStateAccess;
@@ -30,12 +45,16 @@ export function createWorkingBranchLookups(options: {
     sessionId: string,
     read: (view: NonNullable<ReturnType<ThreadExecutionViewRegistry["get"]>>, store: Parameters<Parameters<WorkspaceWorkingStateAccess["withStore"]>[2]>[0]) => Promise<T> | T,
   ): Promise<T | null> => {
-    const view = options.views.get(sessionId);
-    if (!view || view.mode === "materialized") return null;
+    const bound = options.views.get(sessionId);
+    if (!bound || bound.mode === "materialized") return null;
     return options.workingStates.withStore(
-      view.workspaceId,
+      bound.workspaceId,
       "working-branch-view",
-      (store) => read(view, store),
+      (store) => {
+        const view = options.views.get(sessionId);
+        if (!view || view.mode === "materialized") return null as T;
+        return read(view, store);
+      },
       "shared",
     );
   };
@@ -117,5 +136,38 @@ export function createWorkingBranchLookups(options: {
         };
       });
     },
+
+    async pinQuery(sessionId) {
+      return withView(sessionId, async (view, store) => {
+        const states = store.effectiveState(view.branchId);
+        if (!states) return null;
+        const files = await listBranchTextFiles(store, view.branchId, [""]);
+        return {
+          sessionId,
+          workspaceId: view.workspaceId,
+          branchId: view.branchId,
+          writeRevision: view.writeRevision,
+          files: files.map((file) => ({ path: file.path, text: file.text, revision: file.revision })),
+          states: cloneStates(states),
+        };
+      });
+    },
+  };
+}
+
+export function exploreFileFromSnapshot(
+  snapshot: WorkingBranchQuerySnapshot,
+  resourceId: string,
+): ExploreFileSnapshot {
+  const normalized = resourceId.replace(/\\/g, "/").replace(/^\.\//, "");
+  const file = snapshot.files.find((entry) => entry.path === normalized);
+  if (!file) {
+    return { status: "unavailable", message: `${normalized} is not present in this working branch` };
+  }
+  return {
+    status: "ready",
+    content: file.text,
+    revision: file.revision,
+    source: "working-branch",
   };
 }

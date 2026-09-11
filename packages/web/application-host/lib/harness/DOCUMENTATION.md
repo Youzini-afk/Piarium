@@ -298,12 +298,14 @@ staged, unstaged, tracked, deleted, and non-ignored untracked paths and stores
 workdir bytes; a command failure is a failed capture, not an empty inventory.
 Unborn HEAD is `baseRef: "zero-commit"` and does not run `diff HEAD`. Gitlinks
 are listed and rejected rather than captured as empty directories. The Host
-fingerprints the inventory or directory path list before and after capture and
-refuses a complete branch when the parent changed or an active Documents writer
-is present (`baseline-changed`, retryable). Unsupported states cannot be
-silently skipped during materialization. New virtual regular files receive the
-workspace's real default mode before a result is formed, so apply and
-compensation compare full `sameState` identities. Failed prepare deletes an
+fingerprints the inventory or directory path list plus dirty/untracked content
+identities before and after capture and refuses a complete branch when the parent
+changed, file contents were replaced with the same path set, or an active
+Documents writer is present (`baseline-changed`, retryable). The Documents
+capture generation and dirty-state barrier cover the whole window. Unsupported
+states cannot be silently skipped during materialization. New virtual regular
+files receive the umask-derived default mode without creating a probe file in the
+user tree, so apply and compensation compare full `sameState` identities. Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a
 virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
@@ -317,10 +319,18 @@ during the switch re-read the execution view: materialized returns disk, a still
 branch accepts another WorkingState write. A Git parent then receives an isolated context via
 `git worktree add --detach` (this writes `.git/worktrees` and does not create a
 user-visible branch) or `git init` when HEAD is unborn or the directory would
-otherwise inherit another worktree. Failure or caller abort rolls back to the virtual
+otherwise inherit another worktree. The parent identity stays on `worktree.base`;
+the execution repository records `executionBaseline` after init, detach, crash
+recovery, and rematerialize. Inspect/snapshot/settle resolve that execution
+commit, not the logical parent SHA. Reclaim deletes `executionBaseline` with the
+directory. Ordinary WorkingBranch reads re-fetch the current view after the store
+lease. `explore.query.start` copies an immutable effective-state snapshot and
+`writeRevision` in that same shared lease; lexical, structural, semantic, and
+original-text reads consume it. Failure or caller abort rolls back to the virtual
 branch; restart recovers one authoritative view from the journal.
 Settlement publishes `publishHeadResult` while virtual, or inspects the directory and
-publishes that fold after the switch. Git commits and immutable copy snapshots remain
+publishes that fold after the switch, including unpublished virtual deltas so an
+isolated init cannot drop writes already committed into the execution baseline. Git commits and immutable copy snapshots remain
 migration/reconstruction sources. Merge reads the selected native revision, never the
 live child directory, and applies only baseline-to-result paths through the recovery
 store's selected location, SQLite journal, object store, and workspace lease. Reopen

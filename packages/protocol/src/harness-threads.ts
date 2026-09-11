@@ -68,7 +68,18 @@ export interface ThreadWaitingFor {
 
 export interface ThreadWorktree {
   path: string;
+  /**
+   * Parent-state identity (parent HEAD or `thread-<id>@<writeRevision>`).
+   * Inspect/snapshot/settle must not treat this as a commit that the
+   * execution repository can resolve.
+   */
   base: string;
+  /**
+   * Commit currently resolvable in the execution Git repository after
+   * `git init`, detached worktree add, rematerialize, or crash recovery.
+   * Cleared when the execution directory is reclaimed.
+   */
+  executionBaseline?: string;
   /** Internal branch that retains the baseline and, after settlement, the result. */
   branch?: string;
   /** Commit containing the complete child delta, suitable for later recovery or cleanup. */

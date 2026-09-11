@@ -11,8 +11,12 @@ import { createHarnessPathAuthority } from "../path-authority.js";
 import { createHarnessRouter } from "../router.js";
 import { createHarnessSearchService } from "../search-service.js";
 import { createExploreFileReader } from "../explore-file-reader.js";
+import { createExploreDeps, createExploreQueryStartService } from "../explore-query-services.js";
+import { createExploreQueryStore } from "../explore-query-store.js";
+import type { HarnessServiceContext } from "../router.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchLookups } from "./working-branch-lookups.js";
+import type { WorkingBranchQuerySnapshot } from "./working-branch-lookups.js";
 import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
 
 const disposes: Array<() => Promise<void>> = [];
@@ -187,6 +191,132 @@ describe("WorkingState Host branch view production chain", () => {
 
     const liveGrep = await f.request("search.content", { pattern: "parent live" });
     expect(liveGrep).toMatchObject({ ok: true, result: { status: "empty" } });
+  });
+
+  it("re-reads the live view after the store lease so body and provenance share one revision", async () => {
+    const f = await fixture();
+    let releaseShared: (() => void) | undefined;
+    const sharedGate = new Promise<void>((resolve) => { releaseShared = resolve; });
+    let sharedWaiting: () => void = () => undefined;
+    const sharedWaitingP = new Promise<void>((resolve) => { sharedWaiting = resolve; });
+    const delayed: WorkspaceWorkingStateAccess = {
+      withStore: async (_workspaceId, _purpose, operation, mode) => {
+        if (mode === "shared") {
+          sharedWaiting();
+          await sharedGate;
+        }
+        return operation(f.store, {
+          database: { close() { /* test fixture */ } } as never,
+          fileStore: { captureState: async () => ({ state: { kind: "missing" as const } }) } as never,
+          identity: { authorityId: "test-host", canonicalRoot: f.workspace, filesystemProfile: "test", workspaceId: f.workspaceId },
+          resourceOperationGate: { run: async (_resources, op) => op() },
+          root: f.workspace,
+        });
+      },
+    };
+    const lookups = createWorkingBranchLookups({ views: f.views, workingStates: delayed });
+    const reading = lookups.readSource(f.actor.sessionId, "kept.txt");
+    await sharedWaitingP;
+    const next = await f.store.putObject(Buffer.from("lease-visible body\n"));
+    await f.store.commitVirtualWrite("thread-child", 0, "kept.txt", {
+      kind: "regular-file",
+      objectHash: next.hash,
+      byteLength: next.byteLength,
+    });
+    f.views.bind({ ...f.views.get(f.actor.sessionId)!, writeRevision: 1 });
+    releaseShared?.();
+    const result = await reading;
+    expect(result).toMatchObject({
+      status: "working-branch",
+      provenance: { revision: 1, origin: "delta" },
+    });
+    if (!result || result.status !== "working-branch" || !result.base64) throw new Error("expected working-branch bytes");
+    expect(Buffer.from(result.base64, "base64").toString("utf8")).toBe("lease-visible body\n");
+    expect(result.revision).toContain("@1:");
+  });
+
+  it("pins explore lexical and original-text reads to the start-time snapshot", async () => {
+    const f = await fixture();
+    const lookups = createWorkingBranchLookups({ views: f.views, workingStates: {
+      withStore: async (_workspaceId, _purpose, operation) => operation(f.store, {
+        database: { close() { /* test fixture */ } } as never,
+        fileStore: { captureState: async () => ({ state: { kind: "missing" as const } }) } as never,
+        identity: { authorityId: "test-host", canonicalRoot: f.workspace, filesystemProfile: "test", workspaceId: f.workspaceId },
+        resourceOperationGate: { run: async (_resources, op) => op() },
+        root: f.workspace,
+      }),
+    } });
+    const written = await f.store.putObject(Buffer.from("export const needle = \"pinned-pineapple\";\n"));
+    await f.store.commitVirtualWrite("thread-child", 0, "kept.txt", {
+      kind: "regular-file",
+      objectHash: written.hash,
+      byteLength: written.byteLength,
+    });
+    f.views.bind({ ...f.views.get(f.actor.sessionId)!, writeRevision: 1 });
+    const queryStore = createExploreQueryStore();
+    const pin = { snapshot: null as WorkingBranchQuerySnapshot | null };
+    const searchService = createHarnessSearchService({
+      search: async () => {
+        throw new Error("parent disk search must not run for a pinned branch query");
+      },
+      resolveWorkspaceRoot: async () => f.workspace,
+      branchCorpus: async () => {
+        throw new Error("live branch corpus must not run after explore.query.start pin");
+      },
+    });
+    let semanticDocs: Array<{ path: string; content: string; revision: string }> | undefined;
+    const host = {
+      exploreQueryStore: queryStore,
+      searchService,
+      pinWorkingBranchQuery: async (sessionId: string) => {
+        pin.snapshot = await lookups.pinQuery(sessionId);
+        return pin.snapshot;
+      },
+      readExploreFile: async () => {
+        throw new Error("live explore reader must not run after a working-branch pin");
+      },
+      semanticRecall: async (
+        _workspaceId: string,
+        _question: string,
+        _limit: number,
+        options?: { threadDocuments?: Array<{ path: string; content: string; revision: string }> },
+      ) => {
+        semanticDocs = options?.threadDocuments;
+        return [];
+      },
+    };
+    const ctx: HarnessServiceContext = {
+      actor: f.actor,
+      authorizedPaths: [],
+      sessionId: f.actor.sessionId,
+      workspaceId: f.workspaceId,
+      inputContext: { source: "disk" },
+      signal: new AbortController().signal,
+    };
+    await createExploreQueryStartService(host as never).handle({ question: "pinned-pineapple" }, ctx);
+    expect(pin.snapshot?.writeRevision).toBe(1);
+    const later = await f.store.putObject(Buffer.from("export const needle = \"later-drift\";\n"));
+    await f.store.commitVirtualWrite("thread-child", 1, "kept.txt", {
+      kind: "regular-file",
+      objectHash: later.hash,
+      byteLength: later.byteLength,
+    });
+    f.views.bind({ ...f.views.get(f.actor.sessionId)!, writeRevision: 2 });
+    const deps = createExploreDeps(host as never, ctx, { source: "disk" }, ctx.signal, undefined, pin.snapshot);
+    const search = await deps.rgSearch("pinned-pineapple", { fixedStrings: false });
+    const hits = Array.isArray(search) ? search : search.hits;
+    expect(hits.some((hit) => hit.text.includes("pinned-pineapple"))).toBe(true);
+    expect(hits.some((hit) => hit.text.includes("later-drift"))).toBe(false);
+    const original = await deps.readFile("kept.txt");
+    expect(original).toMatchObject({
+      status: "ready",
+      content: "export const needle = \"pinned-pineapple\";\n",
+      revision: "working-branch:thread-child@1:delta",
+    });
+    await deps.semantic?.search("pinned-pineapple");
+    expect(semanticDocs?.some((file) => file.content.includes("pinned-pineapple"))).toBe(true);
+    expect(semanticDocs?.some((file) => file.content.includes("later-drift"))).toBe(false);
+    queryStore.dispose();
   });
 
   it("rejects a path outside the child scope before reading the branch", async () => {

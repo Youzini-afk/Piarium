@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import fs from "node:fs";
 import { join, resolve } from "node:path";
@@ -13,6 +14,7 @@ import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/journal-files.js";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
+import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
@@ -680,6 +682,103 @@ describe("thread runtime", () => {
       await persistRuntime.dispose();
     } finally {
       await honestyRuntime.dispose();
+      await documents.dispose();
+      database.close();
+    }
+  });
+
+  it("rejects a mixed baseline when dirty file contents change while the Git path set stays the same", async () => {
+    const workspace = join(dataDir, "baseline-content-workspace");
+    const recoveryRoot = join(dataDir, "baseline-content-recovery");
+    await fs.promises.mkdir(workspace, { recursive: true });
+    const git = (args: string[]) => execFileSync("git", args, { cwd: workspace, encoding: "utf8" }).trim();
+    git(["init"]);
+    git(["config", "user.name", "Test"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "core.autocrlf", "false"]);
+    await fs.promises.writeFile(join(workspace, "clean.txt"), "clean\n");
+    git(["add", "."]);
+    git(["commit", "-m", "base"]);
+    await fs.promises.writeFile(join(workspace, "dirty-a.txt"), "dirty-a-before\n");
+    await fs.promises.writeFile(join(workspace, "dirty-b.txt"), "dirty-b-before\n");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("working-state database missing");
+    const storageContext: WorkspaceRecoveryStorageContext = {
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: WORKSPACE },
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      root: recoveryRoot,
+    };
+    const workingStates = {
+      withStore: async <T>(_workspaceId: string, purpose: string, operation: (store: DurableWorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T) => {
+        const store = await DurableWorkingStateStore.open(storageContext);
+        if (purpose !== "thread-baseline-capture") return operation(store, storageContext);
+        const capture = store.captureDirectory.bind(store);
+        store.captureDirectory = async (directory, relativePaths, options) => capture(directory, relativePaths, {
+          ...options,
+          onProgress: (done, total) => {
+            if (done === 1) {
+              fs.writeFileSync(join(workspace, "dirty-a.txt"), "dirty-a-during\n");
+              fs.writeFileSync(join(workspace, "dirty-b.txt"), "dirty-b-during\n");
+            }
+            options?.onProgress?.(done, total);
+          },
+        });
+        return operation(store, storageContext);
+      },
+    };
+    const documents = createDocumentAuthority({
+      hostId: "host-1",
+      dataDir: join(dataDir, "baseline-content-documents"),
+      isAllowedRoot: async () => true,
+      isTrusted: async () => true,
+    });
+    const identity = await documents.resolveWorkspace({ path: workspace });
+    storageContext.identity.workspaceId = identity.workspaceId;
+    const worktrees = createThreadWorktreeRuntime({
+      createWorktree: async () => ({ path: join(dataDir, "unused-worktree") }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+    });
+    const scratch = join(dataDir, "baseline-content-scratch");
+    await fs.promises.mkdir(scratch, { recursive: true });
+    const contentRuntime = createThreadRuntime({
+      registry,
+      workingStates,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => identity.workspaceId,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: async () => ({
+          cwd: scratch,
+          worktree: { path: scratch, base: "zero-commit", viewMode: "virtual", materialized: false },
+        }),
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        inspectGitBaselineInventory: worktrees.inspectGitBaselineInventory,
+      },
+    });
+    try {
+      const drifted = await registry.createThread({
+        ...createInput(),
+        workspaceId: identity.workspaceId,
+        brief: "Dirty contents changed mid-scan",
+      });
+      await expect(contentRuntime.prepareIsolatedBranch({
+        workspaceId: identity.workspaceId,
+        parent: PARENT,
+        threadId: drifted.id,
+      })).rejects.toMatchObject({
+        name: "ThreadRuntimeError",
+        retryable: true,
+        message: expect.stringContaining("baseline-changed"),
+      });
+      await workingStates.withStore(identity.workspaceId, "assert-no-branch-after-content-drift", async (store) => {
+        expect(store.getBranch(`thread-${drifted.id}`)).toBeNull();
+      });
+    } finally {
+      await contentRuntime.dispose();
       await documents.dispose();
       database.close();
     }

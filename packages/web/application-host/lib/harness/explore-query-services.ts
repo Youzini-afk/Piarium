@@ -38,6 +38,10 @@ import { pathInRoots, type ExploreGraphRecall } from "./explore-graph.js";
 import type { StoredExploreQuery } from "./explore-query-store.js";
 import { actorFromHarness, exploreQueryActorsMatch } from "./explore-query-identity.js";
 import { loadSnippetRelations } from "./explore-service.js";
+import {
+  exploreFileFromSnapshot,
+  type WorkingBranchQuerySnapshot,
+} from "./working-state/working-branch-lookups.js";
 
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
@@ -73,6 +77,7 @@ export function createExploreDeps(
   inputContext: AgentInputContext,
   signal: AbortSignal = ctx.signal,
   roots?: readonly string[],
+  snapshot: WorkingBranchQuerySnapshot | null = null,
 ): ExploreDeps {
   const workspaceId = ctx.actor.workspaceId;
   const readFile = host.readExploreFile;
@@ -93,6 +98,7 @@ export function createExploreDeps(
           candidateBudget: options.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET,
           hitsPerFile: options.hitsPerFile ?? DEFAULT_HITS_PER_FILE,
           ...(ctx.actor.workspaceScope !== undefined ? { workspaceScope: ctx.actor.workspaceScope } : {}),
+          ...(snapshot ? { pinnedBranchCorpus: snapshot.files.map((file) => ({ path: file.path, text: file.text })) } : {}),
           signal,
         });
         signal.throwIfAborted();
@@ -119,7 +125,10 @@ export function createExploreDeps(
             : "complete" as const,
       };
     },
-    readFile: (path) => readFile(ctx.actor, path, signal, inputContext),
+    readFile: async (resourceId) => {
+      if (snapshot) return exploreFileFromSnapshot(snapshot, resourceId);
+      return readFile(ctx.actor, resourceId, signal, inputContext);
+    },
     ...(host.structureSource ? {
       structure: {
         outline: (request) => host.structureSource!.outline({
@@ -153,6 +162,15 @@ export function createExploreDeps(
             sessionId: ctx.sessionId,
             inputContext,
             ...(roots ? { roots } : {}),
+            ...(snapshot
+              ? {
+                threadDocuments: snapshot.files.map((file) => ({
+                  path: file.path,
+                  content: file.text,
+                  revision: file.revision,
+                })),
+              }
+              : {}),
           });
         },
       },
@@ -255,7 +273,7 @@ export async function packExploreSearchResult(
 }
 
 export function createExploreQueryStartService(
-  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings">,
+  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings" | "pinWorkingBranchQuery">,
 ): HarnessService<"explore.query.start"> {
   return {
     handle: async (params: ExploreQueryStartParams, ctx) => {
@@ -326,7 +344,14 @@ export function createExploreQueryStartService(
             ...(effectivePaths ? { paths: effectivePaths } : {}),
             ...(params.limit ? { limit: params.limit } : {}),
           },
-          deps: createExploreDeps(host, ctx, inputContext, queryController.signal, effectivePaths),
+          deps: createExploreDeps(
+            host,
+            ctx,
+            inputContext,
+            queryController.signal,
+            effectivePaths,
+            host.pinWorkingBranchQuery ? await host.pinWorkingBranchQuery(ctx.sessionId) : null,
+          ),
           deadlineAt,
           reserveForJudgeMs: params.reserveForJudge || rerankConfigured ? DEFAULT_JUDGE_RESERVE_MS : 0,
           controller: queryController,

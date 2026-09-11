@@ -407,4 +407,39 @@ describe("WorkingStateStore", () => {
       h.database.close();
     }
   });
+
+  it("stamps a new-file mode without creating a probe file in the user source root", async () => {
+    const h = await harness();
+    const writes: string[] = [];
+    const store = await WorkingStateStore.open({
+      ...h.context,
+      fsPromises: {
+        ...fs.promises,
+        writeFile: (async (target: Parameters<typeof fs.promises.writeFile>[0], data: Parameters<typeof fs.promises.writeFile>[1], options?: Parameters<typeof fs.promises.writeFile>[2]) => {
+          writes.push(String(target));
+          return fs.promises.writeFile(target, data, options);
+        }) as typeof fs.promises.writeFile,
+      },
+    });
+    try {
+      const before = await fs.promises.readdir(h.workspace);
+      await fs.promises.writeFile(path.join(h.workspace, "kept.txt"), "base\n");
+      const base = await store.captureDirectory(h.workspace);
+      await store.createBranch("ws", "thread-mode", base);
+      const added = await store.putObject(Buffer.from("new file\n"));
+      await store.commitVirtualWrites("thread-mode", 0, {
+        "fresh.ts": { kind: "regular-file", objectHash: added.hash, byteLength: added.byteLength },
+      });
+      expect(store.effectiveState("thread-mode")!["fresh.ts"]).toMatchObject({
+        kind: "regular-file",
+        mode: expect.any(Number),
+      });
+      expect(writes.some((file) => file.includes(".piarium-mode-probe-"))).toBe(false);
+      const after = await fs.promises.readdir(h.workspace);
+      expect(after.filter((name) => name.startsWith(".piarium-mode-probe-"))).toEqual([]);
+      expect(before.filter((name) => name.startsWith(".piarium-mode-probe-"))).toEqual([]);
+    } finally {
+      h.database.close();
+    }
+  });
 });

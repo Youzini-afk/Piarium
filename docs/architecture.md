@@ -697,6 +697,13 @@ execution workspace Documents assigns to a scratch or materialized cwd (D-216). 
 Zone 2, and lost resume read the Host session binding; they do not treat `ctx.workspaceId` as the
 catalog key. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
 independent `git init`; child Git commands must not discover or mutate the user repository.
+`worktree.base` remains the parent-state identity. Inspect, snapshot, and settle use the execution
+repository's persisted `executionBaseline` after init, detach, crash recovery, or rematerialize
+(D-220). Reclaim drops that SHA with the deleted child objects. Working-branch reads re-fetch the
+current view after the store lease; an explore query copies one immutable snapshot in that lease.
+Default new-file mode is computed from umask, never by writing a probe file in the user tree.
+Dispatch fingerprints include dirty-path content identities so a mid-scan replacement cannot mint a
+mixed baseline.
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

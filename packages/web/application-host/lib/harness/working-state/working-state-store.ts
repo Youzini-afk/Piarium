@@ -20,6 +20,7 @@ import type {
 } from "./types.js";
 import { materializeWorkingState } from "./materializer.js";
 import { assertVirtualWriteTree } from "./virtual-write-tree.js";
+import { defaultNewFileMode as resolveDefaultNewFileMode } from "./workspace-baseline.js";
 
 const SCHEMA_VERSION = 3;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
@@ -914,6 +915,7 @@ export class WorkingStateStore {
     return [...new Set([
       ...branch.draftBasePaths,
       ...scopePaths,
+      ...Object.keys(branch.deltas),
       ...changed,
       ...ancestors,
     ])];
@@ -1007,15 +1009,8 @@ export class WorkingStateStore {
   }
 
   private async defaultNewFileMode(): Promise<number> {
-    if (this.defaultNewFileModeValue !== undefined) return this.defaultNewFileModeValue;
-    const probe = this.pathModule.join(this.context.identity.canonicalRoot, `.piarium-mode-probe-${randomUUID()}`);
-    try {
-      await this.fsPromises.writeFile(probe, Buffer.alloc(0));
-      this.defaultNewFileModeValue = (await this.fsPromises.lstat(probe)).mode & 0o7777;
-    } catch {
-      this.defaultNewFileModeValue = 0o644;
-    } finally {
-      await this.fsPromises.unlink(probe).catch(() => undefined);
+    if (this.defaultNewFileModeValue === undefined) {
+      this.defaultNewFileModeValue = resolveDefaultNewFileMode();
     }
     return this.defaultNewFileModeValue;
   }
