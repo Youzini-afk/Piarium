@@ -381,6 +381,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
+  && (value.permissions === undefined || isRecord(value.permissions))
 );
 
 const isLaunchManifestV4 = (value: unknown): value is Omit<ThreadLaunchManifest, "carryBlocks" | "draftBaselineId"> => (
@@ -490,6 +491,7 @@ const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManif
     systemPromptFragment: role?.systemPromptFragment ?? null,
     tools: [...(role?.tools ?? [])],
     worktree: value.worktree && typeof value.worktree === "object" ? "isolated" : configuredWorktree,
+    permissions: {},
   };
 };
 
@@ -1114,6 +1116,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],
           worktree: input.worktree,
+          permissions: isRecord(input.permissions) ? structuredClone(input.permissions) : {},
         },
         createdBy: input.createdBy,
         kind: input.kind,
@@ -1173,6 +1176,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   const listRuns = async (workspaceId: string, threadId: string): Promise<ThreadRun[]> => {
     const catalog = await loadWorkspace(workspaceId);
     return structuredClone(catalog.runs.filter((run) => run.threadId === threadId).toSorted((a, b) => a.attempt - b.attempt));
+  };
+
+  const getThreadById = async (workspaceId: string, threadId: string): Promise<Thread | null> => {
+    const catalog = await loadWorkspace(workspaceId);
+    return structuredClone(findThread(catalog, threadId));
   };
 
   const getThreadForSession = async (workspaceId: string, sessionId: string): Promise<Thread | null> => {
@@ -1893,6 +1901,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   return {
     createThread,
     getThread,
+    getThreadById,
     listThreads,
     listWorkspaceThreads,
     listThreadSnapshots,

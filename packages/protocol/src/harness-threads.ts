@@ -93,6 +93,8 @@ export interface ThreadLaunchManifest {
   systemPromptFragment: string | null;
   tools: string[];
   worktree: "none" | "shared" | "isolated";
+  /** Frozen Host permission overlay. Nested children inherit or narrow it. */
+  permissions?: Record<string, unknown>;
 }
 
 export interface ThreadTokens {

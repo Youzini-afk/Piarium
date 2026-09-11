@@ -10,6 +10,7 @@ import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { ROLE_DEFINITIONS } from "./roles.js";
+import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
 
 interface ThreadSnapshot {
   thread: Thread;
@@ -17,6 +18,25 @@ interface ThreadSnapshot {
 }
 
 const parentFor = (ctx: HarnessServiceContext): ThreadParent => ({ kind: "session", id: ctx.sessionId });
+
+const resolveCallerParent = async (
+  host: HarnessServiceHost,
+  ctx: HarnessServiceContext,
+): Promise<{ parent: ThreadParent; owner: Thread | null }> => {
+  const workspaceId = ctx.workspaceId;
+  if (workspaceId && host.threadRegistry?.getThreadForSession) {
+    const owner = await host.threadRegistry.getThreadForSession(workspaceId, ctx.sessionId);
+    if (owner) return { parent: { kind: "thread", id: owner.id }, owner };
+  }
+  return { parent: parentFor(ctx), owner: null };
+};
+
+const assertOwnerTool = (owner: Thread | null, tool: ThreadControlToolName): void => {
+  if (!owner) return;
+  if (!owner.manifest.tools.includes(tool)) {
+    throw new HarnessServiceError("denied", `Thread tool is not authorized: ${tool}`);
+  }
+};
 
 const workspaceFor = (ctx: HarnessServiceContext): string => {
   if (!ctx.workspaceId) throw new HarnessServiceError("unavailable", "Thread operations require a workspace");
@@ -148,7 +168,8 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         throw new HarnessServiceError("invalid-params", `Unknown role: ${params.role}. Available roles: ${Object.keys(ROLE_DEFINITIONS).join(", ")}`);
       }
       const workspaceId = workspaceFor(ctx);
-      const parent = parentFor(ctx);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "dispatch");
       const concurrency = params.concurrency ?? registry.maxConcurrency;
       if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
         throw new HarnessServiceError("invalid-params", "Thread concurrency must be a positive integer");
@@ -181,6 +202,13 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         await captured.cleanup().catch(() => undefined);
         throw error;
       }
+      const nestedScope = resolveNestedThreadScope(owner?.manifest.scope ?? [], params.scope);
+      if (!nestedScope.ok) {
+        throw new HarnessServiceError(
+          "denied",
+          `Thread scope cannot expand the parent Run authorization: ${nestedScope.expanded.join(", ")}`,
+        );
+      }
       const input = {
         workspaceId,
         parent,
@@ -196,10 +224,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
               : "isolated" as const,
         ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
         tools: role.tools,
-        permissions: {},
+        permissions: owner?.manifest.permissions ?? {},
         ...(params.model ? { model: params.model } : {}),
         systemPromptFragment: role.systemPromptFragment,
-        ...(params.scope ? { scope: params.scope } : {}),
+        ...(nestedScope.scope.length > 0 ? { scope: nestedScope.scope } : {}),
       };
       let thread: Thread;
       try {
@@ -259,7 +287,8 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
       const workspaceId = workspaceFor(ctx);
-      const parent = parentFor(ctx);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "threads");
       const observer = ctx.sessionId;
       let snapshots = await snapshotsFor(host, workspaceId, parent);
       if (params.ids) snapshots = snapshots.filter(({ thread }) => params.ids!.includes(thread.id));
@@ -306,7 +335,8 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
       const workspaceId = workspaceFor(ctx);
-      const parent = parentFor(ctx);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "wait");
       const observer = ctx.sessionId;
       const timeoutMs = Math.min(
         params.timeoutMs ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
@@ -393,7 +423,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry || !host.threadSendToSession) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       const workspaceId = workspaceFor(ctx);
-      const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "send");
+      const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       if (thread.lifecycle !== "active") {
         throw new HarnessServiceError("unavailable", `Thread is not active: ${params.threadId}`);
@@ -421,7 +453,9 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
       const workspaceId = workspaceFor(ctx);
-      const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "read_thread");
+      const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       const run = await registry.getActiveRun(workspaceId, thread.id);
       const what: ThreadReadWhat = params.what ?? "blocks";
@@ -480,7 +514,9 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       const registry = host.threadRegistry;
       if (!registry || !host.threadApplyWorktreeDiff) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       const workspaceId = workspaceFor(ctx);
-      const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "merge");
+      const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       const selectedRevision = params.resultRevision ?? thread.resultRevision;
       const alreadyMerged = selectedRevision !== undefined
@@ -515,7 +551,7 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
       }
       const result = await host.threadApplyWorktreeDiff(
         workspaceId,
-        parentFor(ctx),
+        parent,
         thread.id,
         params.resultRevision,
         ctx.actor.runId,
@@ -612,7 +648,9 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry) throw new HarnessServiceError("unavailable", "Thread registry not configured");
       const workspaceId = workspaceFor(ctx);
-      const thread = await registry.getThread(workspaceId, parentFor(ctx), params.threadId);
+      const { parent, owner } = await resolveCallerParent(host, ctx);
+      assertOwnerTool(owner, "kill");
+      const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? false;
       if (thread.lifecycle !== "queued" && host.threadKillSession) await host.threadKillSession(thread.id, keepWorktree);

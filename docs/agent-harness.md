@@ -1442,6 +1442,10 @@ branch/base/delta；父 live 目录与 scratch/worktree 磁盘不能补读未改
 LSP 导航（`symbols` / `definition` / `references` / `hover`）首次需要真实路径时，Host 冻结当前修订、等在飞虚拟
 写入结束、物化该修订并原子切换整个 Run；此后本 Run 的文件工具都走该目录，结算再把目录变化收回新结果。
 切换失败保持原虚拟分支。Git blob 与工作目录转换后的字节不能无条件视为相同；当前基线读取实际输入字节。
+具备角色目录嵌套工具的子线程经真实 tool registry 与 `control.thread` 能力调用 `dispatch` / `threads` / `wait` /
+`send` / `read_thread` / `merge` / `kill`；Host 把 caller 解析为 `parent.kind: "thread"`，scope 与权限只能继承或收窄
+（D-215）。嵌套隔离基线复制父分支有效视图，不扫父 live 盘；孙结果先集成到父分支或父物化目录，再由父结果进入根工作区。
+兄弟线程不直接通信；根上下文不复制孙对话正文。不加固定深度上限，复用既有并发与排队。
 
 `harness.worktree.copyIgnored` 在首次准备后规范化为 WorkingBranch 的持久 `captureScopes`（schema 3）。窄结果发布只枚举这些
 显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和
@@ -1660,8 +1664,9 @@ ThreadRun {
 
 T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；连续 6 次完全相同的 `(tool name, 参数哈希)` 翻
 `looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
-停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型和工具经 `session.create/open` 在 Pi 会话构造前冻结；T1 子会话的
-allowlist 不含 `dispatch`，因此嵌套线程仍是后续能力，而不是当前的隐式半支持。
+停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型和工具经 `session.create/open` 在 Pi 会话构造前冻结；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
+由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
+`dispatch`（D-215）。
 
 失败有分类，没有"没结果"：Run 的 `success / failure / cancelled / lost` 记录执行结局；Thread 的 `stalled / looping /
 user / permission` 记录当前需要关注的原因，`integration` 独立记录合并状态。每种是不同的结果（不变量 3）。等待输入是一等

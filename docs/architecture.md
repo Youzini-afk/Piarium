@@ -680,6 +680,11 @@ non-draft disk baseline when it creates the WorkingBranch: Git inventories HEAD 
 unstaged, tracked, deleted, and non-ignored untracked workdir bytes; non-Git and unborn repositories
 perform one cancellable directory capture. Parent drift after that boundary cannot enter the child
 view. Failed or cancelled capture deletes the Thread (D-214).
+A nested isolated child copies the parent branch effective view when the parent is still virtual, or
+captures the parent materialized directory otherwise (D-215). Nested merge applies the grandchild
+result onto the parent branch or parent worktree; the parent later folds its published result into
+the workspace. Child workspace, scope, and the frozen permission overlay inherit or narrow; Host
+rejects expansion. Role tools come from the child's own launch manifest.
 
 Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,

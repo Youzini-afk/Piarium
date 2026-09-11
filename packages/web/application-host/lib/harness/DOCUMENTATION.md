@@ -130,7 +130,12 @@ Thread. `dispatch` then commits a `starting` Run and returns immediately. The
 runtime later opens a real persisted Pi child session with the role's
 active-tool allowlist, and projects broker events into
 progress, attention, report, durable transcript, integration, and verification
-state. After a successful publish, only same-Run observations whose start/end
+state. A child session whose frozen allowlist includes nest tools can dispatch
+again: the Host resolves `parent.kind: "thread"`, narrows scope/permissions, and
+copies the parent branch view (or materialized directory) as the grandchild
+baseline. Nested merge writes the grandchild result onto that parent authority
+before the parent result reaches the workspace. Sibling threads do not talk;
+the root session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
 Draft merge records that disk commands cannot verify unsaved buffers.
@@ -299,6 +304,10 @@ live child directory, and applies only baseline-to-result paths through the reco
 store's selected location, SQLite journal, object store, and workspace lease. Reopen
 of a materialized result rebuilds that directory at the same path; a still-virtual
 branch reopens on scratch and reads the branch view.
+Nested children reuse the same registry, Run, review, archive, and lost-resume
+path. Host restart resumes lost Runs for the snapshot session's owning Thread
+parent, so a parent session snapshot resumes its grandchildren without rewriting
+the first attempt.
 When dispatch carries dirty editor input, the runtime first clones the complete
 fixed surface snapshot into a persistent WorkingState draft baseline. Its id is
 frozen in the Thread launch manifest; queued or restarted Runs overlay the exact

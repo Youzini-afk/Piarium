@@ -94,13 +94,29 @@ export interface IntegrationPlanInput {
   expectedBindingFingerprint?: string;
   signal?: AbortSignal;
   resolutions?: ThreadConflictResolution[];
+  /** Where the parent writable view lives when this Thread is nested. */
+  parentAuthority?:
+    | { kind: "workspace" }
+    | { kind: "branch"; branchId: string }
+    | { kind: "directory"; directory: string };
 }
 
 const mergeTarget = async (
   store: WorkingStateStore,
   pathPlan: ThreeWayPathPlan,
 ): Promise<RecoveryState | null> => {
-  if (pathPlan.decision === "apply-child") return pathPlan.childState;
+  if (pathPlan.decision === "apply-child") {
+    const child = pathPlan.childState;
+    if (
+      child.kind === "regular-file"
+      && child.mode === undefined
+      && pathPlan.parentState.kind === "regular-file"
+      && pathPlan.parentState.mode !== undefined
+    ) {
+      return { ...child, mode: pathPlan.parentState.mode };
+    }
+    return child;
+  }
   if (pathPlan.decision === "merge-clean" && pathPlan.mergedText !== undefined) {
     const bytes = Buffer.from(pathPlan.mergedText, "utf8");
     const object = await store.putObject(bytes);
@@ -401,7 +417,50 @@ export class IntegrationCoordinator {
         }
       }
       input.signal?.throwIfAborted();
-      let applied = await applyDurableFileOperation(context, {
+      const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
+      if (parentAuthority.kind === "branch") {
+        const writes: Record<string, RecoveryState> = {};
+        for (const pathPlan of planned.plan.paths) {
+          if (pathPlan.decision === "keep-parent" || pathPlan.decision === "identical") continue;
+          const target = await mergeTarget(store, pathPlan);
+          if (target) writes[pathPlan.path] = target;
+          else if (pathPlan.decision === "apply-child" && pathPlan.childState.kind === "missing") {
+            writes[pathPlan.path] = { kind: "missing" };
+          }
+        }
+        if (planned.plan.conflictPaths.length === 0 && planned.preview.unavailablePaths.length === 0) {
+          const parentBranch = store.getBranch(parentAuthority.branchId);
+          if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
+          const committed = await store.commitVirtualWrites(
+            parentAuthority.branchId,
+            parentBranch.writeRevision ?? 0,
+            writes,
+          );
+          if (committed.status === "conflict") {
+            throw new Error("Parent branch revision changed during nested merge");
+          }
+        }
+        const appliedPaths = Object.keys(writes).sort();
+        const failed = planned.plan.conflictPaths.length > 0 || planned.preview.unavailablePaths.length > 0;
+        const preview = { ...planned.preview, operationId: planned.plan.operationId };
+        this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview });
+        return {
+          status: failed ? "conflict" : "applied",
+          appliedPaths: failed ? [] : appliedPaths,
+          conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
+          changedFiles: planned.changedPaths,
+          diffStats: planned.plan.diffStats,
+          operationId: planned.plan.operationId,
+          text: failed
+            ? "Nested merge could not apply cleanly to the parent branch"
+            : `Merged ${appliedPaths.length} files into the parent branch`,
+          preview,
+        };
+      }
+      const applyContext = parentAuthority.kind === "directory"
+        ? { ...context, identity: { ...context.identity, canonicalRoot: parentAuthority.directory }, root: parentAuthority.directory }
+        : context;
+      let applied = await applyDurableFileOperation(applyContext, {
         id: planned.plan.operationId,
         workspaceId: input.workspaceId,
         threadId: input.threadId,
@@ -717,11 +776,14 @@ export class IntegrationCoordinator {
     if (!result) throw new Error(`Working result not found: ${input.branchId}@${input.resultRevision}`);
     const branch = store.getBranch(input.branchId);
     if (!branch) throw new Error(`Working branch not found: ${input.branchId}`);
-    const barrier = this.beginDirtyStateBarrier
+    const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
+    const barrier = parentAuthority.kind !== "branch" && this.beginDirtyStateBarrier
       ? await this.beginDirtyStateBarrier(input.workspaceId, result.changedPaths)
       : null;
     try {
-      const publications = this.inspectDirtyBuffers ? await this.inspectDirtyBuffers(input.workspaceId) : [];
+      const publications = parentAuthority.kind !== "branch" && this.inspectDirtyBuffers
+        ? await this.inspectDirtyBuffers(input.workspaceId)
+        : [];
       const dirty = dirtyResourceMap(publications);
       const sourceOwner = input.sourceOwner;
       const sourceOwnerConnected = !sourceOwner || publications.some((publication) => (
@@ -735,10 +797,25 @@ export class IntegrationCoordinator {
       const bindings: ThreadIntegrationPreview["binding"] = {};
       const selectedSurfaces = new Map<string, DirtyBufferInspectResource>();
       const texts: Record<string, { parent?: string; child?: string; baseline?: string }> = {};
+      const parentIdentity = parentAuthority.kind === "directory"
+        ? { ...context.identity, canonicalRoot: parentAuthority.directory }
+        : context.identity;
+      const parentRoot = parentAuthority.kind === "directory" ? parentAuthority.directory : context.root;
+      const parentBranchView = parentAuthority.kind === "branch"
+        ? store.effectiveState(parentAuthority.branchId) ?? {}
+        : null;
 
       for (const file of result.changedPaths) {
-        const disk = (await context.fileStore.captureState(context.identity, context.root, file, { store: true })).state;
+        const disk = parentBranchView
+          ? parentBranchView[file] ?? { kind: "missing" as const }
+          : (await context.fileStore.captureState(parentIdentity, parentRoot, file, { store: true })).state;
         diskParentStates[file] = disk;
+        if (parentAuthority.kind === "branch") {
+          targets[file] = "disk";
+          parentState[file] = disk;
+          bindings[file] = { target: "disk", revision: parentRevisionOf(disk) };
+          continue;
+        }
         const selected = selectDirtyResource(dirty.get(file), input.sourceOwner);
         if (selected.status === "ambiguous"
           || (input.sourceOwner && !sourceOwnerConnected && branch.draftBasePaths.includes(file))) {

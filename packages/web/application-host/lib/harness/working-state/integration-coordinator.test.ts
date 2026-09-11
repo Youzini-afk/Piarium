@@ -1286,4 +1286,33 @@ describe("IntegrationCoordinator", () => {
       await h.engine.dispose();
     }
   });
+
+  it("applies a virtual new file that omitted mode onto the workspace", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "kept.txt"), "base\n");
+      const result = await h.workingStates.withStore("ws", "virtual-new-file", async (store) => {
+        await store.createBranch("ws", "thread-virtual-new", await store.captureDirectory(h.workspace), "base");
+        const object = await store.putObject(Buffer.from("added by virtual write\n"));
+        expect(await store.commitVirtualWrite("thread-virtual-new", 0, "added.txt", {
+          kind: "regular-file",
+          objectHash: object.hash,
+          byteLength: object.byteLength,
+        })).toMatchObject({ status: "committed" });
+        return store.publishHeadResult("thread-virtual-new");
+      });
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-virtual-new",
+        branchId: "thread-virtual-new",
+        resultRevision: result.resultRevision,
+      });
+      expect(merged).toMatchObject({ status: "applied" });
+      expect(merged.appliedPaths).toEqual(["added.txt"]);
+      expect(await fs.promises.readFile(path.join(h.workspace, "added.txt"), "utf8")).toBe("added by virtual write\n");
+      expect(await fs.promises.readFile(path.join(h.workspace, "kept.txt"), "utf8")).toBe("base\n");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
 });

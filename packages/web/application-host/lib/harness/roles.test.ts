@@ -24,6 +24,17 @@ describe("resolveRoles", () => {
     expect(ids).toContain("retrieval");
   });
 
+  it("hardImplement and frontend expose nest tools through the role catalog", () => {
+    expect(ROLE_DEFINITIONS["hard-implement"].tools).toEqual(expect.arrayContaining([
+      "dispatch", "threads", "wait", "send", "read_thread", "merge", "kill",
+    ]));
+    expect(ROLE_DEFINITIONS.frontend.tools).toEqual(expect.arrayContaining([
+      "dispatch", "threads", "wait",
+    ]));
+    expect(ROLE_DEFINITIONS.review.tools).not.toContain("dispatch");
+    expect(ROLE_DEFINITIONS.retrieval.tools).not.toContain("dispatch");
+  });
+
   it("hardImplement defaults to main when unset", () => {
     const roles = resolveRoles({}, mainModel);
     const hard = roles.find((r) => r.id === "hard-implement");

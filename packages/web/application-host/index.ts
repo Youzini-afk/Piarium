@@ -2447,10 +2447,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
             console.error('[Harness] Failed to register session shell:', errorMessage(error));
           });
         }
-        void threadRuntime.resumeLostForParent(
-          harnessWorkspaceId,
-          { kind: 'session', id: sessionId },
-        ).catch((error) => {
+        void (async () => {
+          const owner = await threadRegistry.getThreadForSession(harnessWorkspaceId, sessionId);
+          await threadRuntime.resumeLostForParent(
+            harnessWorkspaceId,
+            owner ? { kind: 'thread', id: owner.id } : { kind: 'session', id: sessionId },
+          );
+        })().catch((error) => {
           console.error('[HarnessThreads] Failed to resume child runs:', errorMessage(error));
         });
       }

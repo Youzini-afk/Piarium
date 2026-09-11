@@ -58,7 +58,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "hard-implement": {
     id: "hard-implement",
     slot: "hardImplement",
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"],
     worktree: "isolated-when-parallel",
     systemPromptFragment:
       "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
@@ -68,7 +68,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   "frontend": {
     id: "frontend",
     slot: "frontend",
-    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore"],
+    tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"],
     worktree: "isolated-when-parallel",
     systemPromptFragment:
       "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",

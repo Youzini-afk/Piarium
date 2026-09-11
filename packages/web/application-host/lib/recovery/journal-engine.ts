@@ -82,6 +82,7 @@ import {
   createRecoveryFileStore,
   normalizeResourceId,
   parseRecoveryState,
+  matchesClaimedState,
   sameState,
   stateIdentity,
   statTree,
@@ -1518,7 +1519,7 @@ export const createWorkspaceRecoveryEngine = (
       // target-observed or compensate-intent: verify disk is at target, then write safety
       if (row.phase === 'target-observed' || row.phase === 'compensate-intent') {
         const current = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-        if (!sameState(current, targetStatesFor(record, relativePath).target)) {
+        if (!matchesClaimedState(current, targetStatesFor(record, relativePath).target)) {
           updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
           throw new RecoveryPrimitiveError('needs-attention', `Cannot compensate a file changed after recovery: ${relativePath}`, {
             origin: 'storage',
@@ -1621,7 +1622,7 @@ export const createWorkspaceRecoveryEngine = (
           }
           await fileStore.applyState(identity, root, relativePath, targetStatesFor(record, relativePath).target);
           const verified = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
-          if (!sameState(verified, targetStatesFor(record, relativePath).target)) {
+          if (!matchesClaimedState(verified, targetStatesFor(record, relativePath).target)) {
             updateOperationFilePhase(database, record.id, relativePath, 'needs-attention');
             throw new RecoveryPrimitiveError('needs-attention', `Restored file did not match its checkpoint: ${relativePath}`, {
               origin: 'storage',
@@ -2440,7 +2441,7 @@ export const createWorkspaceRecoveryEngine = (
     }
     const current = (await fileStore.captureState(identity, root, relativePath, { store: false })).state;
     if (fileRow.phase === 'apply-intent') {
-      if (sameState(current, states.target)) {
+      if (matchesClaimedState(current, states.target)) {
         // File was written but phase wasn't updated — treat as applied.
         updateOperationFilePhase(database, record.id, relativePath, 'target-observed');
         return 'target-observed';
@@ -2459,7 +2460,7 @@ export const createWorkspaceRecoveryEngine = (
         updateOperationFilePhase(database, record.id, relativePath, 'safety-observed');
         return 'safety-observed';
       }
-      if (sameState(current, states.target)) {
+      if (matchesClaimedState(current, states.target)) {
         // Compensation wasn't written yet — still at target.
         return 'compensate-intent';
       }

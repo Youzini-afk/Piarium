@@ -1130,7 +1130,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (existing.workBranchId && existing.worktree) {
       return { branchId: existing.workBranchId, worktree: existing.worktree };
     }
-    const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+    let sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+    let parentVirtualBranchId: string | null = null;
+    if (input.parent.kind === "thread") {
+      const owner = await options.registry.getThreadById(input.workspaceId, input.parent.id);
+      if (!owner) throw new ThreadRuntimeError("not-found", `Parent thread not found: ${input.parent.id}`);
+      if (owner.workBranchId && isVirtualWorktree(owner.worktree)) {
+        parentVirtualBranchId = owner.workBranchId;
+      } else if (owner.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+        sourceRoot = owner.worktree.path;
+      }
+    }
     const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
     const captureScopes = resolveCaptureScopes(sourceRoot, effectiveSettings);
     const draftBaselineId = input.draftBaselineId ?? existing.manifest.draftBaselineId ?? null;
@@ -1165,6 +1175,37 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const branchId = `thread-${input.threadId}`;
     try {
       await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
+        if (parentVirtualBranchId) {
+          const parentView = store.effectiveState(parentVirtualBranchId);
+          const parentBranch = store.getBranch(parentVirtualBranchId);
+          if (!parentView || !parentBranch) {
+            throw new Error(`Parent working branch is unavailable: ${parentVirtualBranchId}`);
+          }
+          const baseRef = `thread-${input.parent.id}@${parentBranch.writeRevision ?? 0}`;
+          worktree!.base = baseRef;
+          if (!draftBaselineId) {
+            await store.createBranch(input.workspaceId, branchId, parentView, baseRef, [], captureScopes);
+            return;
+          }
+          const draftBaseline = await store.getDraftBaseline(draftBaselineId);
+          if (!draftBaseline) throw new Error(`Thread draft baseline not found: ${draftBaselineId}`);
+          const drafts = await Promise.all(Object.entries(draftBaseline.pathStates).map(async ([file, state]) => {
+            if (state.kind !== "regular-file") throw new Error(`Thread draft baseline contains a non-file state: ${file}`);
+            const content = await store.getObject(state.objectHash);
+            if (!content) throw new Error(`Thread draft baseline content is missing: ${file}`);
+            return { path: file, content, ...(state.mode === undefined ? {} : { mode: state.mode }) };
+          }));
+          await createBranchWithDraftBaseline(
+            store,
+            input.workspaceId,
+            branchId,
+            parentView,
+            drafts,
+            baseRef,
+            captureScopes,
+          );
+          return;
+        }
         let relativePaths: string[] | undefined;
         let baseRef = worktree!.base;
         if (typeof options.worktrees.inspectGitBaselineInventory === "function") {
@@ -2461,7 +2502,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
-    const parentRoot = await options.resolveWorkspaceRoot(workspaceId);
+    let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
+    let parentAuthority: { kind: "branch"; branchId: string } | { kind: "directory"; directory: string } | undefined;
+    if (parent.kind === "thread") {
+      const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
+        parentAuthority = { kind: "branch", branchId: owner.workBranchId };
+      } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+        parentRoot = owner.worktree.path;
+        parentAuthority = { kind: "directory", directory: owner.worktree.path };
+      }
+    }
     const coordinator = options.resolveIntegrationCoordinator
       ? await options.resolveIntegrationCoordinator(workspaceId)
       : null;
@@ -2498,6 +2549,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
           ...(extras?.signal ? { signal: extras.signal } : {}),
           ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
+          ...(parentAuthority ? { parentAuthority } : {}),
         });
         if (result.preview) {
           const pendingSurface = result.preview.paths.some((path) => (
@@ -2592,6 +2644,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!coordinator || !branchId || resultRevision === undefined) {
       throw new Error("Thread has no published native result to preview");
     }
+    let parentAuthority: { kind: "branch"; branchId: string } | { kind: "directory"; directory: string } | undefined;
+    if (parent.kind === "thread") {
+      const owner = await options.registry.getThreadById(workspaceId, parent.id);
+      if (owner?.workBranchId && isVirtualWorktree(owner.worktree)) {
+        parentAuthority = { kind: "branch", branchId: owner.workBranchId };
+      } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
+        parentAuthority = { kind: "directory", directory: owner.worktree.path };
+      }
+    }
     const preview = await coordinator.previewResult({
       workspaceId,
       threadId,
@@ -2601,6 +2662,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       ...(extras?.expectedBindingFingerprint ? { expectedBindingFingerprint: extras.expectedBindingFingerprint } : {}),
       ...(extras?.signal ? { signal: extras.signal } : {}),
       ...(extras?.resolutions ? { resolutions: extras.resolutions } : {}),
+      ...(parentAuthority ? { parentAuthority } : {}),
     });
     await options.registry.setIntegration(
       workspaceId,

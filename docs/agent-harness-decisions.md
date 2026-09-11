@@ -4326,6 +4326,24 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；dispatch 生产链与 Git/非 Git 捕获有定向证据。真实 Git filter/LFS 一致性、Windows 符号链接/执行位、非 Git 大目录墙钟未测。嵌套线程仍待后续纵切。
 
+### D-215 · 2026-09-11 · 3.4 / 3.4a / 3.6（嵌套线程经角色能力与 Host 强制接通）
+
+类型：问题与解法
+
+背景：数据模型已支持 `parent.kind: "thread"`，但子会话 allowlist 不含 dispatch，嵌套只是半支持。提示词不能授权工具。子线程若扫父 live 盘，父在孙 dispatch 之后的写入会污染孙基线。孙结果若直接写根工作区，会跳过父分支这一层可写视图。虚拟文本写入常省略 mode；把未声明的 mode 与磁盘捕获的 mode 做全字段相等，会使合法新文件集成失败并回滚。
+
+决定：
+
+1. `hard-implement` 与 `frontend` 的角色目录包含 `dispatch` / `threads` / `wait` / `send` / `read_thread` / `merge` / `kill`。`review` / `check` / `retrieval` / `quick-implement` 不含。pi-host 按冻结 allowlist 与 Host `control.thread` 装配，不靠提示词告诉子 agent 可以嵌套。
+2. `thread.*` 服务用 `getThreadForSession` 把 caller 解析为 owning Thread；`assertOwnerTool` 拒绝冻结 manifest 未列的控制工具。`resolveNestedThreadScope` 只允许继承或收窄；扩 scope 为 `denied`。冻结 `permissions` 写入 `ThreadLaunchManifest`，子线程继承父 overlay，不能从协议扩大。
+3. 嵌套隔离基线：父仍虚拟时复制 `effectiveState`，`baseRef = thread-<parent>@<writeRevision>`；父已物化则捕获父目录。不扫根 live 盘。孙 `publishHeadResult` 经 `parentAuthority: branch|directory` 集成到父可写视图；父再发布并合并到工作区。根 `threads` / Zone 2 只列直接子线程，不把孙正文或完整对话复制进根上下文。
+4. 不加固定深度上限；复用既有并发与排队。同一 Thread/ThreadRun 注册表、Pi session、review、归档、取消与 `resumeLostForParent`。文本集成时，未声明 mode 的目标只核验已声明字段（`matchesClaimedState`）；已声明 mode 仍全字段相等。父 regular-file 的 mode 在 apply-child 时继承到未声明 mode 的子文本。
+5. 本阶段不实现 Merkle、跨平台 CoW、完整 Git LFS/filter 框架、Zone 2 user terminal 或 retrieval/research 扩散。
+
+影响：protocol 角色目录与 `ThreadLaunchManifest.permissions`；Host thread services/runtime/nesting/integration/recovery apply 核验；设计 9.2.5b / 9.3.5、plan 3.6、status 3.4 / 3.4a / 3.6、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；Host 嵌套 dispatch/基线/集成与角色装配有定向证据。真实付费嵌套 Pi 会话与完整桌面 Host 重启未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4545,3 +4563,4 @@ ModelRuntime 纵切继续通过。
 | D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化） | D-213 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定） | D-214 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-214 | implementation（dispatch 创建分支时固定 Git/非 Git 磁盘基线） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-215 | implementation（角色目录 + Host 强制嵌套 dispatch/基线/集成） | — | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |

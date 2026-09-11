@@ -233,6 +233,109 @@ describe("thread services", () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
+  it("parents a nested dispatch to the owning Thread and reuses its concurrency queue", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "grandchild" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const parent = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "parent implementer",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 1,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch", "threads", "wait", "read_thread", "send", "kill", "merge"],
+        permissions: { mode: "accept-edits" },
+      });
+      const run = await registry.startRun("workspace-1", parent.id);
+      await registry.markRunRunning("workspace-1", parent.id, run.id, "child-session");
+      const nestedCtx = { ...serviceContext(), sessionId: "child-session", actor: { ...serviceContext().actor, sessionId: "child-session" } };
+      const first = await service.handle({ concurrency: 1, role: "check", task: "Run the suite" }, nestedCtx);
+      const queued = await service.handle({ concurrency: 1, role: "check", task: "Second check" }, nestedCtx);
+      expect(first.queued).toBe(false);
+      expect(queued.queued).toBe(true);
+      expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, first.threadId)).toMatchObject({
+        parent: { kind: "thread", id: parent.id },
+        role: "check",
+        manifest: { permissions: { mode: "accept-edits" } },
+      });
+      expect(await registry.listThreads("workspace-1", { kind: "session", id: "root-session" })).toEqual([
+        expect.objectContaining({ id: parent.id }),
+      ]);
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects nested scope expansion and unauthorized thread tools", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-deny-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const scoped = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "scoped parent",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch"],
+        permissions: {},
+        scope: ["src"],
+      });
+      const scopedRun = await registry.startRun("workspace-1", scoped.id);
+      await registry.markRunRunning("workspace-1", scoped.id, scopedRun.id, "scoped-session");
+      await expect(service.handle({
+        role: "check",
+        task: "Leave src",
+        scope: ["docs"],
+      }, { ...serviceContext(), sessionId: "scoped-session", actor: { ...serviceContext().actor, sessionId: "scoped-session" } }))
+        .rejects.toMatchObject({ harnessCode: "denied" });
+
+      const review = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "review parent",
+        role: "review",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "none",
+        tools: ["read", "grep"],
+        permissions: {},
+      });
+      const reviewRun = await registry.startRun("workspace-1", review.id);
+      await registry.markRunRunning("workspace-1", review.id, reviewRun.id, "review-session");
+      await expect(service.handle({
+        role: "hard-implement",
+        task: "Should not nest",
+      }, { ...serviceContext(), sessionId: "review-session", actor: { ...serviceContext().actor, sessionId: "review-session" } }))
+        .rejects.toMatchObject({ harnessCode: "denied" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("deletes the Thread when isolated baseline capture fails", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-baseline-fail-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

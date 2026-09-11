@@ -88,6 +88,8 @@ describe("Zone 2 thread projection", () => {
     }));
     const result = await projectZone2Threads({ registry, cursors }, { sessionId: "child-session", workspaceId: WORKSPACE });
     expect(result.status === "ready" ? result.items.map((item) => item.id) : []).toEqual([nested.id]);
+    const root = await projectZone2Threads({ registry, cursors }, { sessionId: PARENT.id, workspaceId: WORKSPACE });
+    expect(root.status === "ready" ? root.items.map((item) => item.id) : []).toEqual([outer.id]);
   });
 
   it("keeps a registry failure distinct from an empty thread list", async () => {

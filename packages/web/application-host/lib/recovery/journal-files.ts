@@ -168,6 +168,15 @@ export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringif
 export const sameState = (left: RecoveryStateLike, right: RecoveryStateLike): boolean =>
   stateIdentity(left) === stateIdentity(right);
 
+/** True when `actual` satisfies every field the claim specified.
+ *  Omitted mode means the claim did not include permissions. */
+export const matchesClaimedState = (actual: RecoveryStateLike, claimed: RecoveryStateLike): boolean => {
+  if (claimed.mode !== undefined || (claimed.kind !== "regular-file" && claimed.kind !== "directory")) {
+    return sameState(actual, claimed);
+  }
+  return sameState({ ...actual, mode: undefined }, claimed);
+};
+
 const statStable = (before: Stats, after: Stats): boolean => (
   before.dev === after.dev
   && before.ino === after.ino
