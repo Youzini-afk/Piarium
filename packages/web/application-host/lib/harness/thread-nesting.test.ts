@@ -10,4 +10,11 @@ describe("nested thread scope", () => {
     expect(resolveNestedThreadScope(["src"], ["docs"])).toEqual({ ok: false, expanded: ["docs"] });
     expect(resolveNestedThreadScope(["src"], ["."])).toEqual({ ok: false, expanded: ["."] });
   });
+
+  it("rejects absolute paths and unresolved parent segments before comparison", () => {
+    expect(resolveNestedThreadScope(["src"], ["/etc/passwd"])).toEqual({ ok: false, expanded: ["/etc/passwd"] });
+    expect(resolveNestedThreadScope(["src"], ["src/../docs"])).toEqual({ ok: false, expanded: ["src/../docs"] });
+    expect(resolveNestedThreadScope(["src"], ["C:/windows"])).toEqual({ ok: false, expanded: ["C:/windows"] });
+    expect(resolveNestedThreadScope(["src"], ["src/./app"])).toEqual({ ok: true, scope: ["src/app"] });
+  });
 });

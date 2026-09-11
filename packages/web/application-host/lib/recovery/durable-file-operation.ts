@@ -23,6 +23,8 @@ export interface DurableFileOperationSpec {
   executionId?: string;
   requireTurnBinding?: boolean;
   retryBinding?: DurableFileRetryBinding;
+  /** Parent materialized directory when apply identity is not the owning workspace root. */
+  applyCanonicalRoot?: string;
 }
 
 export interface DurableExternalBinding {
@@ -92,6 +94,10 @@ interface PersistedIntegrationData extends Record<string, unknown> {
   executionId?: string;
   requireTurnBinding?: boolean;
   retryBinding?: DurableFileRetryBinding;
+  applyCanonicalRoot?: string;
+  parentBranchId?: string;
+  beforeWriteRevision?: number;
+  afterWriteRevision?: number;
 }
 
 const stateFromJson = (value: string | null, label: string): RecoveryState => {
@@ -114,6 +120,15 @@ const writeRecord = (
   createdAt,
   updatedAt: new Date().toISOString(),
 });
+
+const contextForPersistedApply = (
+  context: DurableFileOperationContext,
+  data: Pick<PersistedIntegrationData, "applyCanonicalRoot">,
+): DurableFileOperationContext => (
+  typeof data.applyCanonicalRoot === "string" && data.applyCanonicalRoot.length > 0
+    ? { ...context, identity: { ...context.identity, canonicalRoot: data.applyCanonicalRoot } }
+    : context
+);
 
 const capture = (
   context: DurableFileOperationContext,
@@ -147,6 +162,7 @@ const compensate = async (
   data: PersistedIntegrationData,
   rows: OperationFileRow[],
 ): Promise<void> => {
+  const applyContext = contextForPersistedApply(context, data);
   const compensatingRows = orderForStates(rows, (row) => (
     data.safety[row.path] ?? stateFromJson(row.safety_json, `${row.path} safety`)
   ));
@@ -154,17 +170,17 @@ const compensate = async (
     if (row.phase !== "target-observed" && row.phase !== "compensate-intent") continue;
     const target = stateFromJson(row.target_json, `${row.path} target`);
     const safety = data.safety[row.path] ?? stateFromJson(row.safety_json, `${row.path} safety`);
-    await runPathOperation(context, row.path, "subtree", async () => {
-      const current = (await capture(context, row.path, false)).state;
+    await runPathOperation(applyContext, row.path, "subtree", async () => {
+      const current = (await capture(applyContext, row.path, false)).state;
       if (!sameState(current, target)) {
-        updateOperationFilePhase(context.database, data.operationId, row.path, "needs-attention");
+        updateOperationFilePhase(applyContext.database, data.operationId, row.path, "needs-attention");
         data.needsAttentionPaths.push(row.path);
         return;
       }
-      updateOperationFilePhase(context.database, data.operationId, row.path, "compensate-intent");
+      updateOperationFilePhase(applyContext.database, data.operationId, row.path, "compensate-intent");
       try {
-        await context.fileStore.applyState(context.identity, context.root, row.path, safety);
-        const restored = (await capture(context, row.path, false)).state;
+        await applyContext.fileStore.applyState(applyContext.identity, applyContext.root, row.path, safety);
+        const restored = (await capture(applyContext, row.path, false)).state;
         if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${row.path}`);
       } catch {
         updateOperationFilePhase(context.database, data.operationId, row.path, "needs-attention");
@@ -238,6 +254,7 @@ export const applyDurableFileOperation = async (
     ...(spec.executionId ? { executionId: spec.executionId } : {}),
     ...(spec.requireTurnBinding ? { requireTurnBinding: true } : {}),
     ...(spec.retryBinding ? { retryBinding: structuredClone(spec.retryBinding) } : {}),
+    ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
   };
   context.database.transaction(() => {
     writeRecord(context.database, spec.workspaceId, "applying", data, createdAt);
@@ -458,6 +475,14 @@ const parsePersistedData = (row: OperationRow): PersistedIntegrationData => {
     ...(typeof raw.executionId === "string" ? { executionId: raw.executionId } : {}),
     ...(raw.requireTurnBinding === true ? { requireTurnBinding: true } : {}),
     ...(raw.retryBinding === undefined ? {} : { retryBinding: parseRetryBinding(raw.retryBinding)! }),
+    ...(typeof raw.applyCanonicalRoot === "string" && raw.applyCanonicalRoot
+      ? { applyCanonicalRoot: raw.applyCanonicalRoot }
+      : {}),
+    ...(typeof raw.parentBranchId === "string" && raw.parentBranchId
+      ? { parentBranchId: raw.parentBranchId }
+      : {}),
+    ...(Number.isSafeInteger(raw.beforeWriteRevision) ? { beforeWriteRevision: Number(raw.beforeWriteRevision) } : {}),
+    ...(Number.isSafeInteger(raw.afterWriteRevision) ? { afterWriteRevision: Number(raw.afterWriteRevision) } : {}),
   };
 };
 
@@ -479,6 +504,13 @@ export interface DurableIntegrationInspection {
   targets: Record<string, DurableFileTarget>;
   targetKinds: Record<string, "disk" | "surface">;
   externalBindings: Record<string, DurableExternalBinding>;
+  applyCanonicalRoot?: string;
+  parentBranchId?: string;
+  beforeWriteRevision?: number;
+  afterWriteRevision?: number;
+  retryBinding?: DurableFileRetryBinding;
+  appliedPaths: string[];
+  safety: Record<string, RecoveryState>;
 }
 
 export const inspectDurableIntegrationOperation = (
@@ -494,6 +526,13 @@ export const inspectDurableIntegrationOperation = (
     targets: structuredClone(data.targets),
     targetKinds: structuredClone(data.targetKinds),
     externalBindings: structuredClone(data.externalBindings),
+    appliedPaths: [...data.appliedPaths],
+    safety: structuredClone(data.safety),
+    ...(data.applyCanonicalRoot ? { applyCanonicalRoot: data.applyCanonicalRoot } : {}),
+    ...(data.parentBranchId ? { parentBranchId: data.parentBranchId } : {}),
+    ...(data.beforeWriteRevision === undefined ? {} : { beforeWriteRevision: data.beforeWriteRevision }),
+    ...(data.afterWriteRevision === undefined ? {} : { afterWriteRevision: data.afterWriteRevision }),
+    ...(data.retryBinding ? { retryBinding: structuredClone(data.retryBinding) } : {}),
   };
 };
 
@@ -725,6 +764,45 @@ export const findReusableIntegrationConflict = (
   return null;
 };
 
+export const findReusableCompleteIntegration = (
+  context: DurableFileOperationContext,
+  input: {
+    workspaceId: string;
+    threadId: string;
+    branchId: string;
+    resultRevision: number | string;
+    childStates: Record<string, RecoveryState>;
+    currentParentStates: Record<string, RecoveryState>;
+  },
+): DurableFileOperationResult | null => {
+  const rows = context.database.prepare(`
+    SELECT * FROM operations
+    WHERE workspace_id = ? AND kind = 'integration' AND state = 'complete'
+    ORDER BY updated_at DESC
+  `).all(input.workspaceId) as OperationRow[];
+  for (const row of rows) {
+    const data = parsePersistedData(row);
+    const retry = data.retryBinding;
+    if (!retry
+      || data.threadId !== input.threadId
+      || String(data.resultRevision) !== String(input.resultRevision)
+      || retry.branchId !== input.branchId
+      || !sameStateCollection(retry.childStates, input.childStates)
+      || !sameStateCollection(retry.resultingParentStates, input.currentParentStates)) {
+      continue;
+    }
+    return {
+      operationId: data.operationId,
+      status: "applied",
+      appliedPaths: [], // Already applied; this request writes nothing.
+      conflictPaths: [...data.conflictPaths],
+      diffStats: data.diffStats,
+      text: `Reused integration ${data.operationId}.`,
+    };
+  }
+  return null;
+};
+
 export const reconcileInterruptedIntegrationOperations = async (
   context: DurableFileOperationContext,
 ): Promise<{ compensated: string[]; needsAttention: string[]; aborted: string[] }> => {
@@ -736,6 +814,7 @@ export const reconcileInterruptedIntegrationOperations = async (
   const result = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[] };
   for (const row of rows) {
     const data = parsePersistedData(row);
+    const applyContext = contextForPersistedApply(context, data);
     let unknown = false;
     for (const fileRow of operationFileRows(context.database, row.id)) {
       if (data.targetKinds[fileRow.path] === "surface") {
@@ -750,7 +829,7 @@ export const reconcileInterruptedIntegrationOperations = async (
       }
       const target = stateFromJson(fileRow.target_json, `${fileRow.path} target`);
       const safety = data.safety[fileRow.path] ?? stateFromJson(fileRow.safety_json, `${fileRow.path} safety`);
-      const current = (await capture(context, fileRow.path, false)).state;
+      const current = (await capture(applyContext, fileRow.path, false)).state;
       if (fileRow.phase === "apply-intent") {
         if (sameState(current, target)) updateOperationFilePhase(context.database, row.id, fileRow.path, "target-observed");
         else if (!sameState(current, safety)) {
@@ -775,7 +854,7 @@ export const reconcileInterruptedIntegrationOperations = async (
     }
     const currentRows = operationFileRows(context.database, row.id);
     if (currentRows.some((entry) => entry.phase === "target-observed" || entry.phase === "compensate-intent")) {
-      await compensate(context, data, currentRows);
+      await compensate(applyContext, data, currentRows);
       const state = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
       writeRecord(context.database, row.workspace_id, state, data, new Date().toISOString());
       (state === "compensated" ? result.compensated : result.needsAttention).push(row.id);

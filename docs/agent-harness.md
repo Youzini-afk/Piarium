@@ -1671,7 +1671,7 @@ ThreadRun {
 
 T1 的落地值是：无事件 300 秒只翻 `stalled` 告警、不取消 Run；连续 6 次完全相同的 `(tool name, 参数哈希)` 翻
 `looping`，下一次不同调用自动清除。第一次非预期 worker 退出会在同一会话/worktree 上自动开新 Run；若新 Run 再连续崩溃，
-停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型和工具经 `session.create/open` 在 Pi 会话构造前冻结；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
+停止自动重启并翻 `stalled`，避免形成进程崩溃循环。角色模型、工具和冻结 permission overlay 经 `session.create/open` 在 Pi 会话构造前冻结（D-219）；`hard-implement` 与 `frontend` 的角色目录含嵌套线程工具，
 由 Host 能力与 `assertOwnerTool` 启用，不是提示词授权。`review` / `check` / `retrieval` / `quick-implement` 不含
 `dispatch`（D-215）。
 

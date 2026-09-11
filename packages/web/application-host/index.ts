@@ -1312,6 +1312,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     inspectDirtyBuffers: (workspaceId) => documentsAuthority.inspectDirtyBuffers(workspaceId),
     beginDirtyStateBarrier: (workspaceId, paths) => documentsAuthority.beginDirtyStateBarrier(workspaceId, paths),
     requestSurfaceOperation: (request, options) => documentsAuthority.requestSurfaceOperation(request, options),
+    resolveDirectoryApplyContext: async (directory) => {
+      const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
+      return {
+        workspaceId: resolved.workspaceId,
+        resourceOperationGate: {
+          run: (resources, operation) => documentsAuthority.runResourceOperation(resolved.workspaceId, resources, operation),
+        },
+      };
+    },
     commitParentVirtualWrites: async (input) => {
       const sessionId = input.sessionId
         ?? threadExecutionViews.findByBranch(input.workspaceId, input.branchId)?.sessionId;
@@ -1457,6 +1466,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         {
           ...(input.model ? { model: input.model } : {}),
+          ...(input.permissions ? { permissions: input.permissions } : {}),
           ...(input.scope?.length ? { scope: input.scope } : {}),
           tools: input.tools,
         },
@@ -1464,6 +1474,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       open: (input) => piRuntimeBroker.openSession({
         cwd: input.cwd,
         ...(input.model ? { model: input.model } : {}),
+        ...(input.permissions ? { permissions: input.permissions } : {}),
         ...(input.scope?.length ? { scope: input.scope } : {}),
         sessionId: input.sessionId,
         workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },

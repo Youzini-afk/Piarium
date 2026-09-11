@@ -25,6 +25,7 @@ export {
   evaluateGate,
   defaultRules,
   mergePolicies,
+  normalizeFrozenHarnessPermissions,
   isHighRisk,
   HIGH_RISK_PATTERNS,
   MAX_PERMISSION_PATTERN_LENGTH,

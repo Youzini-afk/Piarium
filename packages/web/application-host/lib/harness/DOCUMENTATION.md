@@ -135,8 +135,12 @@ progress, attention, report, durable transcript, integration, and verification
 state. A child session whose frozen allowlist includes nest tools can dispatch
 again: the Host resolves `parent.kind: "thread"`, narrows scope/permissions, and
 copies the parent branch view (or materialized directory) as the grandchild
-baseline. Nested merge writes the grandchild result onto that parent authority
-before the parent result reaches the workspace. Sibling threads do not talk;
+baseline. The frozen permission overlay is passed through `session.create/open`
+and can only be tightened by later live settings. Nested merge writes the
+grandchild result onto that parent authority — directory apply keeps recovery
+objects in the owning object library, branch apply is a durable Integration —
+before the parent result reaches the workspace. Killing or archiving a parent
+cancels descendant preparation and Runs first. Sibling threads do not talk;
 the root session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
@@ -334,9 +338,11 @@ path-binding tool switches the Run) and use that effective state as branch
 revision zero. Virtual publication reads the live branch head; materialized
 publication reads the directory. Merge and migration continue to read the selected
 fixed result. Draft-derived paths are checked even when Git ignores them.
-Configured `copyIgnored` roots are stored as branch `captureScopes`; narrowed
-publication scans only those roots plus known changed paths, so ignored additions,
-updates, and deletions enter the native result and survive reclaim/materialize.
+Configured `copyIgnored` roots are stored as branch `captureScopes`; nested
+children inherit or narrow that frozen list and do not reread live settings.
+Narrowed publication scans only those roots plus known changed paths, so ignored
+additions, updates, and deletions enter the native result and survive
+reclaim/materialize.
 Draft targets use the originating surface owner and its live Documents registration,
 document instance, content hash, revision and format. Agent calls resolve that owner
 from their fixed inputContext. Documents directs capture/apply/undo to the owning

@@ -181,4 +181,110 @@ describe("nested thread production chain", () => {
       await engine.dispose();
     }
   });
+
+  it("inherits the parent branch captureScopes and ignores later live copyIgnored settings", async () => {
+    const root = await fs.promises.mkdtemp(join(os.tmpdir(), "piarium-nested-scopes-"));
+    roots.push(root);
+    const workspace = join(root, "workspace");
+    const dataDir = join(root, "data");
+    await fs.promises.mkdir(workspace, { recursive: true });
+    await fs.promises.writeFile(join(workspace, "kept.txt"), "root\n");
+    await fs.promises.writeFile(join(workspace, "secret.env"), "parent-secret\n");
+    const engine = createWorkspaceRecoveryEngine({
+      authorityId: "test",
+      dataDir,
+      documents: {
+        inspectWorkspace: async () => ({ root: workspace, workspaceId: "ws" }),
+        listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId: "ws" }],
+        beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
+        inspectDirtyBuffers: async () => [],
+        runResourceOperation: vi.fn(async (_workspaceId, _resources, operation) => operation()),
+      },
+      fileStore: createRecoveryFileStore(),
+      sessionNavigation: {
+        prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
+        prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
+        commit: async () => ({}),
+        commitLeaf: async () => ({}),
+      },
+    });
+    const workingStates = createWorkspaceWorkingStateAccess(engine);
+    const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "host-1" });
+    let copyIgnored = ["secret.env"];
+    const runtime = createThreadRuntime({
+      registry,
+      workingStates,
+      resolveWorkspaceRoot: async () => workspace,
+      resolveRuntimeWorkspaceId: async () => "ws",
+      resolveWorktreeSettings: async () => ({ copyIgnored }),
+      sessions: {
+        create: async () => { throw new Error("session create is not used"); },
+        open: async () => { throw new Error("session open is not used"); },
+        prompt: async () => undefined,
+        send: async () => undefined,
+        abort: async () => undefined,
+        close: async () => undefined,
+        snapshot: async () => { throw new Error("unused"); },
+        summary: async () => { throw new Error("unused"); },
+        stats: async () => { throw new Error("unused"); },
+        entries: async (sessionId) => ({ sessionId, scope: "branch", leafId: null, entries: [] }),
+      },
+      worktrees: {
+        prepare: async (input) => {
+          const path = join(root, `scratch-${input.threadId}`);
+          await fs.promises.mkdir(path, { recursive: true });
+          return {
+            cwd: path,
+            worktree: { path, base: "zero-commit", viewMode: "virtual", materialized: false },
+          };
+        },
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    try {
+      const parent = await registry.createThread({
+        workspaceId: "ws",
+        parent: PARENT,
+        brief: "parent",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 4,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch"],
+        permissions: {},
+      });
+      await runtime.prepareIsolatedBranch({ workspaceId: "ws", parent: PARENT, threadId: parent.id });
+      copyIgnored = ["later.env"];
+      const child = await registry.createThread({
+        workspaceId: "ws",
+        parent: { kind: "thread", id: parent.id },
+        brief: "child",
+        role: "check",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 4,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["read"],
+        permissions: {},
+      });
+      await runtime.prepareIsolatedBranch({
+        workspaceId: "ws",
+        parent: { kind: "thread", id: parent.id },
+        threadId: child.id,
+      });
+      await workingStates.withStore("ws", "assert-inherited-scopes", async (store) => {
+        expect(store.getBranch(`thread-${parent.id}`)?.captureScopes).toEqual(["secret.env"]);
+        expect(store.getBranch(`thread-${child.id}`)?.captureScopes).toEqual(["secret.env"]);
+      }, "shared");
+    } finally {
+      await runtime.dispose();
+      await registry.dispose();
+      await engine.dispose();
+    }
+  });
 });

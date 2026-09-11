@@ -1326,4 +1326,89 @@ describe("IntegrationCoordinator", () => {
       await h.engine.dispose();
     }
   });
+
+  it("applies a materialized parent directory without writing recovery objects into that directory", async () => {
+    const h = await createHarness();
+    const parentDir = path.join(h.root, "parent-worktree");
+    try {
+      await fs.promises.mkdir(parentDir, { recursive: true });
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "parent\n");
+      await fs.promises.writeFile(path.join(parentDir, "a.txt"), "parent\n");
+      const child = path.join(h.root, "dir-child");
+      await fs.promises.cp(h.workspace, child, { recursive: true });
+      await fs.promises.writeFile(path.join(child, "a.txt"), "grandchild\n");
+      const result = await prepareResult(h, child);
+      const merged = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-1",
+        branchId: "thread-1",
+        resultRevision: result.resultRevision,
+        parentAuthority: { kind: "directory", directory: parentDir, workspaceId: "parent-exec" },
+      });
+      expect(merged).toMatchObject({ status: "applied", appliedPaths: ["a.txt"] });
+      expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("grandchild\n");
+      expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("parent\n");
+      expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
+      const parentListing = await fs.promises.readdir(parentDir, { recursive: true });
+      expect(parentListing.some((entry) => String(entry).includes("staging") || String(entry).includes("objects"))).toBe(false);
+    } finally {
+      await h.engine.dispose();
+    }
+  });
+
+  it("persists a branch parent integration so retry is idempotent and undo is reversible", async () => {
+    const h = await createHarness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "kept.txt"), "base\n");
+      const published = await h.workingStates.withStore("ws", "branch-parent-setup", async (store) => {
+        const captured = await store.captureDirectory(h.workspace);
+        await store.createBranch("ws", "thread-parent", captured, "base");
+        await store.createBranch("ws", "thread-child", captured, "base");
+        const object = await store.putObject(Buffer.from("from-child\n"));
+        await store.commitVirtualWrites("thread-child", 0, {
+          "child.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength },
+        });
+        return store.publishHeadResult("thread-child");
+      });
+      const first = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-child",
+        branchId: "thread-child",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent" },
+      });
+      expect(first).toMatchObject({ status: "applied", appliedPaths: ["child.txt"] });
+      const rows = await h.workingStates.withStore("ws", "inspect-branch-integration", async (_store, context) => (
+        context.database.prepare(`SELECT id, state FROM operations WHERE kind = 'integration'`).all() as Array<{ id: string; state: string }>
+      ), "shared");
+      expect(rows).toEqual([{ id: first.operationId, state: "complete" }]);
+      const retry = await h.coordinator.mergeResult({
+        workspaceId: "ws",
+        threadId: "thread-child",
+        branchId: "thread-child",
+        resultRevision: published.resultRevision,
+        parentAuthority: { kind: "branch", branchId: "thread-parent" },
+      });
+      expect(retry.operationId).toBe(first.operationId);
+      expect(retry.status).toBe("applied");
+      await h.workingStates.withStore("ws", "assert-parent-has-child", async (store) => {
+        const live = store.effectiveState("thread-parent")!;
+        const childFile = live["child.txt"];
+        if (childFile?.kind !== "regular-file") throw new Error("expected child file on parent");
+        expect(await store.getObject(childFile.objectHash)).toEqual(Buffer.from("from-child\n"));
+      }, "shared");
+      const undone = await h.coordinator.undoIntegration({
+        workspaceId: "ws",
+        threadId: "thread-child",
+        operationId: first.operationId,
+      });
+      expect(undone.status).toBe("compensated");
+      await h.workingStates.withStore("ws", "assert-parent-restored", async (store) => {
+        const live = store.effectiveState("thread-parent")!;
+        expect(live["child.txt"] ?? { kind: "missing" }).toEqual({ kind: "missing" });
+      }, "shared");
+    } finally {
+      await h.engine.dispose();
+    }
+  });
 });

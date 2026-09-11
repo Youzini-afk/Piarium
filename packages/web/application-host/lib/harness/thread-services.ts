@@ -1,5 +1,6 @@
 import {
   HARNESS_MAX_REQUEST_TIMEOUT_MS,
+  normalizeFrozenHarnessPermissions,
   type Thread,
   type ThreadParent,
   type ThreadReadWhat,
@@ -209,6 +210,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       const nestedScope = resolveNestedThreadScope(owner?.manifest.scope ?? [], params.scope);
       if (!nestedScope.ok) {
+        await captured.cleanup().catch(() => undefined);
         throw new HarnessServiceError(
           "denied",
           `Thread scope cannot expand the parent Run authorization: ${nestedScope.expanded.join(", ")}`,
@@ -229,7 +231,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
               : "isolated" as const,
         ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
         tools: role.tools,
-        permissions: owner?.manifest.permissions ?? {},
+        permissions: normalizeFrozenHarnessPermissions(owner?.manifest.permissions),
         ...(params.model ? { model: params.model } : {}),
         systemPromptFragment: role.systemPromptFragment,
         ...(nestedScope.scope.length > 0 ? { scope: nestedScope.scope } : {}),
@@ -653,6 +655,22 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
   };
 }
 
+const cascadeStopDescendants = async (
+  host: HarnessServiceHost,
+  workspaceId: string,
+  threadId: string,
+  keepWorktree: boolean,
+  reason: string,
+): Promise<void> => {
+  const registry = host.threadRegistry!;
+  const children = await registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true);
+  for (const child of children) {
+    await cascadeStopDescendants(host, workspaceId, child.id, keepWorktree, reason);
+    if (host.threadKillSession) await host.threadKillSession(child.id, keepWorktree);
+    await registry.cancelThread(workspaceId, child.id, reason);
+  }
+};
+
 export function createThreadKillService(host: HarnessServiceHost): HarnessService<"thread.kill"> {
   return {
     handle: async (params, ctx) => {
@@ -663,7 +681,8 @@ export function createThreadKillService(host: HarnessServiceHost): HarnessServic
       const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) return { text: `unknown thread: ${params.threadId}` };
       const keepWorktree = params.keepWorktree ?? false;
-      if (thread.lifecycle !== "queued" && host.threadKillSession) await host.threadKillSession(thread.id, keepWorktree);
+      await cascadeStopDescendants(host, workspaceId, thread.id, keepWorktree, "killed by parent");
+      if (host.threadKillSession) await host.threadKillSession(thread.id, keepWorktree);
       await registry.cancelThread(workspaceId, thread.id, "killed by parent");
       return { text: `killed ${thread.id}${keepWorktree ? " (worktree kept)" : ""}` };
     },

@@ -18,6 +18,7 @@ import type {
   RuntimeMethod,
   RuntimeSourceKind,
   RuntimeWorkerRole,
+  PermissionPolicy,
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
@@ -562,7 +563,12 @@ export class PiRuntimeBroker {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
-    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[] },
+    launch?: {
+      model?: { providerId: string; modelId: string };
+      permissions?: PermissionPolicy;
+      scope?: string[];
+      tools?: string[];
+    },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
     const normalizedCwd = resolve(cwd);
@@ -573,6 +579,7 @@ export class PiRuntimeBroker {
         ...(name === undefined ? {} : { name }),
         ...(parentSession === undefined ? {} : { parentSession }),
         ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
+        ...(launch?.permissions === undefined ? {} : { permissions: launch.permissions }),
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
       });
       this.#bindSession(worker, snapshot.sessionId);
@@ -603,6 +610,7 @@ export class PiRuntimeBroker {
   async openSession(input: {
     cwd?: string;
     model?: { providerId: string; modelId: string };
+    permissions?: PermissionPolicy;
     sessionFile?: string;
     sessionId?: string;
     scope?: string[];
@@ -674,6 +682,7 @@ export class PiRuntimeBroker {
       ...(sessionFile === undefined ? {} : { sessionFile }),
       ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
       ...(input.model === undefined ? {} : { model: { ...input.model } }),
+      ...(input.permissions === undefined ? {} : { permissions: input.permissions }),
       ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
     };
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);

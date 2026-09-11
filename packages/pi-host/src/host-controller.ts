@@ -16,6 +16,8 @@ import {
   type ImageAttachment,
   type JsonValue,
   type ModelSelection,
+  type PermissionPolicy,
+  normalizeFrozenHarnessPermissions,
   parsePiSessionFeatureMutation,
   parseProviderConfigInput,
   PiSessionFeatureValidationError,
@@ -256,6 +258,11 @@ function optionalModelSelection(record: Record<string, unknown>): ModelSelection
     providerId: readString(model, "providerId"),
     modelId: readString(model, "modelId"),
   };
+}
+
+function optionalPermissionPolicy(record: Record<string, unknown>): PermissionPolicy | undefined {
+  if (record.permissions === undefined) return undefined;
+  return normalizeFrozenHarnessPermissions(record.permissions);
 }
 
 function readEmbedParams(params: Record<string, unknown>): HarnessEmbedParams {
@@ -654,6 +661,7 @@ export class HostController {
           optionalString(params, "parentSession"),
           optionalStringList(params, "tools"),
           optionalModelSelection(params),
+          optionalPermissionPolicy(params),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
@@ -661,12 +669,14 @@ export class HostController {
         const sessionId = optionalString(params, "sessionId");
         const tools = optionalStringList(params, "tools");
         const model = optionalModelSelection(params);
+        const permissions = optionalPermissionPolicy(params);
         return this.#sessionHost.open({
           ...(cwd === undefined ? {} : { cwd }),
           ...(sessionFile === undefined ? {} : { sessionFile }),
           ...(sessionId === undefined ? {} : { sessionId }),
           ...(tools === undefined ? {} : { tools }),
           ...(model === undefined ? {} : { model }),
+          ...(permissions === undefined ? {} : { permissions }),
         });
       }
       case "session.resolve": {

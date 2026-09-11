@@ -4394,6 +4394,23 @@ ModelRuntime 纵切继续通过。
 
 状态：已实施；Git 失败/gitlink、捕获窗口变化、writer、mode 全字段补偿与失败清理有定向生产证据。嵌套权限冻结与级联终止仍待本轮后续阶段。
 
+### D-219 · 2026-09-11 · 3.4 / 3.4a / 3.6（嵌套权限冻结、耐久集成与级联生命周期）
+
+类型：问题与解法
+
+背景：D-215 把 permissions 写进 manifest，但 `session.create/open` 不传 overlay，pi-host 每次用 live settings 建 gate，父事后放宽会放宽孙。物化父 directory 集成把对象库 `root` 改成父 worktree，recovery objects/staging 会写进父目录。branch 父集成只 `commitVirtualWrites`，不落 operations 表，重试不幂等，无法对账/撤销。kill 跳过 queued、不取消 preparation；archive 不先停子线程。嵌套 captureScopes 重读 live `copyIgnored`。scope 规范化不拒绝绝对路径和 `..`，带草稿的拒绝不 cleanup。
+
+决定：
+
+1. `session.create/open` 带可选 `permissions`。Thread 四处 create/open（立即启动、queued dequeue、lost resume、archive restore）传入 `normalizeFrozenHarnessPermissions(manifest.permissions)`。缺省/`{}` 冻结为 `{ mode: "normal", rules: [] }`，不是跟 live settings。pi-host 把冻结 overlay 当 user/base，live 当 workspace，`mergePolicies` 只能收紧。
+2. 物化父 directory 集成只改 `identity.canonicalRoot`（及 execution `workspaceId` / resource gate），对象库 `root` 保持 engine dataDir。branch 父集成写入 `kind: integration` 行（child `branchId`/`resultRevision`、parent before/after `writeRevision` 与 path states、`retryBinding`）。complete 重试同一 operationId；undo 在当前等于 after 时 CAS 写回 before。
+3. kill/archive 父线程先递归子：取消 preparation、Run、session，再停父。queued 也走 `threadKillSession`。`runtime.kill` 先 `waitForPreparation`。
+4. 嵌套 WorkingBranch 的 `captureScopes` 继承父冻结范围（可用子 scope 收窄），不读 live settings；父空则子空。scope 拒绝绝对路径和 `..`；带 surface 草稿的拒绝先 `cleanup()`。
+
+影响：protocol session.create/open 与 `normalizeFrozenHarnessPermissions`；pi-host session-host/host-controller；runtime-broker/dispatcher；Host integration/runtime/services/registry/nesting、Application Host 装配；设计 9.2.5b / 9.3.5、plan 3.6、status 3.4 / 3.4a / 3.6、architecture 6.1、harness DOCUMENTATION。
+
+状态：已实施；directory 对象库根、branch 集成对账/撤销、冻结 overlay 传入 create、级联 kill/archive、captureScopes 继承与非法 scope cleanup 有定向生产证据。真实付费嵌套 Pi 会话与完整桌面 Host 重启未测。
+
 ## 决策索引
 
 按 D-030 维护；本节可随时更新，条目正文不动。`folded-in` 表示已回写到设计或 plan。
@@ -4613,7 +4630,8 @@ ModelRuntime 纵切继续通过。
 | D-212 | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化；owning/execution 身份由 D-216 拆开） | D-213 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-213 | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-214 | superseded in part（dispatch 固定 Git/非 Git 磁盘基线保留；catalog 不得用 execution workspaceId；Git 错误不得吞成空清单、捕获窗口与 gitlink 由 D-218 补正） | D-216 / D-218 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
-| D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回） | D-216 / D-218 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
+| D-215 | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回；权限冻结、级联、durable 嵌套集成与 captureScopes 由 D-219 补正） | D-216 / D-218 / D-219 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-216 | implementation（Host session binding 区分 owning/execution；物化 Git 用 --detach 或独立 init，并记录会写 `.git/worktrees`） | — | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |
 | D-217 | implementation（物化后重读 execution view；writeRevision 标签；持久切换 journal；嵌套虚拟写走同一 gate；树不变量与 virtual semantic pin） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
 | D-218 | implementation（Git inventory 失败必抛；捕获窗口 fingerprint + 活跃 writer；gitlink/unsupported 拒绝；新虚拟文件补真实 mode；apply/补偿 sameState；失败清理未绑定 branch） | — | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 |
+| D-219 | implementation（冻结 permissions 进入 session.create/open；directory 集成保持对象库根；branch 集成落 operations；kill/archive 级联；嵌套 captureScopes 继承；scope 规范化） | — | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 |

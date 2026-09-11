@@ -188,6 +188,7 @@ describe("thread runtime", () => {
     }));
     expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({
       model: { providerId: "test-provider", modelId: "test-model" },
+      permissions: { mode: "normal", rules: [] },
       scope: ["src"],
       tools: ["read", "edit"],
       workspaceId: "runtime-workspace-1",
@@ -2598,5 +2599,67 @@ describe("thread runtime", () => {
       });
     });
     await reviewRuntime.dispose();
+  });
+
+  it("aborts in-flight preparation when kill is called without an open session", async () => {
+    let observedAbort = false;
+    let markPrepareStarted!: () => void;
+    const prepareStarted = new Promise<void>((resolve) => { markPrepareStarted = resolve; });
+    const hangingRuntime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      workingStates: {
+        withStore: async () => {
+          throw new Error("working state should not run before worktree prepare");
+        },
+      } as never,
+      worktrees: {
+        prepare: async (input) => {
+          markPrepareStarted();
+          await new Promise<void>((_resolve, reject) => {
+            const abort = () => {
+              observedAbort = true;
+              reject(new DOMException("Thread baseline capture aborted", "AbortError"));
+            };
+            if (input.signal?.aborted) {
+              abort();
+              return;
+            }
+            input.signal?.addEventListener("abort", abort, { once: true });
+          });
+          return { cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } };
+        },
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const thread = await registry.createThread(createInput());
+    const preparing = hangingRuntime.prepareIsolatedBranch({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+    });
+    await prepareStarted;
+    await hangingRuntime.kill(thread.id);
+    await expect(preparing).rejects.toMatchObject({ name: "AbortError" });
+    expect(observedAbort).toBe(true);
+    await hangingRuntime.dispose();
+  });
+
+  it("archives descendant threads before the parent", async () => {
+    const parent = await registry.createThread(createInput());
+    const child = await registry.createThread({
+      ...createInput(),
+      parent: { kind: "thread", id: parent.id },
+      brief: "nested child",
+    });
+    const archived = await runtime.archiveUser(WORKSPACE, PARENT, parent.id);
+    expect(archived.thread.lifecycle).toBe("archived");
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+      lifecycle: "archived",
+    });
   });
 });

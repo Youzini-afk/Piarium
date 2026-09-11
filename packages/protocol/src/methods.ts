@@ -60,6 +60,7 @@ import type {
   HarnessRerankResult,
 } from "./harness-inference.js";
 import type { ModelSelection } from "./harness-settings.js";
+import type { PermissionPolicy } from "./permission-gate.js";
 
 export interface HostMethodMap {
   "agentProvider.action": {
@@ -322,7 +323,15 @@ export interface HostMethodMap {
     result: { closed: boolean };
   };
   "session.create": {
-    params: { cwd: string; model?: ModelSelection; name?: string; parentSession?: string; scope?: string[]; tools?: string[] };
+    params: {
+      cwd: string;
+      model?: ModelSelection;
+      name?: string;
+      parentSession?: string;
+      permissions?: PermissionPolicy;
+      scope?: string[];
+      tools?: string[];
+    };
     result: SessionSnapshot;
   };
   "session.list": {
@@ -411,6 +420,7 @@ export interface HostMethodMap {
     params: {
       cwd?: string;
       model?: ModelSelection;
+      permissions?: PermissionPolicy;
       sessionFile?: string;
       sessionId?: string;
       scope?: string[];

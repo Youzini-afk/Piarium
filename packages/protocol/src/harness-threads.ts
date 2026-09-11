@@ -6,6 +6,8 @@
  * as though the first attempt never ended.
  */
 
+import type { PermissionPolicy } from "./permission-gate.js";
+
 export type ThreadKind = "discussion" | "implementation";
 export type ThreadCreatedBy = "user" | "agent";
 export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";
@@ -118,7 +120,7 @@ export interface ThreadLaunchManifest {
   tools: string[];
   worktree: "none" | "shared" | "isolated";
   /** Frozen Host permission overlay. Nested children inherit or narrow it. */
-  permissions?: Record<string, unknown>;
+  permissions?: PermissionPolicy;
 }
 
 export interface ThreadTokens {

@@ -9,6 +9,8 @@ import {
   type ImageAttachment,
   type JsonValue,
   type ModelSelection,
+  type PermissionPolicy,
+  normalizeFrozenHarnessPermissions,
   parsePiSessionFeatureMutation,
   parseProviderConfigInput,
   PiSessionFeatureValidationError,
@@ -121,6 +123,18 @@ function optionalModelSelection(record: Record<string, unknown>): ModelSelection
     providerId: requireString(model, "providerId"),
     modelId: requireString(model, "modelId"),
   };
+}
+
+function optionalPermissionPolicy(record: Record<string, unknown>): PermissionPolicy | undefined {
+  if (record.permissions === undefined) return undefined;
+  try {
+    return normalizeFrozenHarnessPermissions(record.permissions);
+  } catch (error) {
+    throw new RuntimeDispatchError(
+      "invalid_params",
+      error instanceof Error ? error.message : "permissions is invalid",
+    );
+  }
 }
 
 function optionalFoundationalPackageIds(
@@ -376,6 +390,7 @@ async function dispatchRuntimeRequestUnchecked(
     }
     case "session.create": {
       const model = optionalModelSelection(input);
+      const permissions = optionalPermissionPolicy(input);
       const scope = optionalStringList(input, "scope");
       const tools = optionalStringList(input, "tools");
       return broker.createSession(
@@ -383,10 +398,11 @@ async function dispatchRuntimeRequestUnchecked(
         optionalName(input),
         optionalString(input, "parentSession"),
         optionalSessionWorkspaceBinding(input),
-        model === undefined && scope === undefined && tools === undefined
+        model === undefined && permissions === undefined && scope === undefined && tools === undefined
           ? undefined
           : {
               ...(model === undefined ? {} : { model }),
+              ...(permissions === undefined ? {} : { permissions }),
               ...(scope === undefined ? {} : { scope }),
               ...(tools === undefined ? {} : { tools }),
             },
@@ -398,6 +414,7 @@ async function dispatchRuntimeRequestUnchecked(
       const sessionId = optionalString(input, "sessionId");
       const workspace = optionalSessionWorkspaceBinding(input);
       const model = optionalModelSelection(input);
+      const permissions = optionalPermissionPolicy(input);
       const scope = optionalStringList(input, "scope");
       const tools = optionalStringList(input, "tools");
       if (!sessionFile && !sessionId) {
@@ -411,6 +428,7 @@ async function dispatchRuntimeRequestUnchecked(
         ...(sessionFile === undefined ? {} : { sessionFile }),
         ...(sessionId === undefined ? {} : { sessionId }),
         ...(model === undefined ? {} : { model }),
+        ...(permissions === undefined ? {} : { permissions }),
         ...(scope === undefined ? {} : { scope }),
         ...(tools === undefined ? {} : { tools }),
         ...(workspace === undefined ? {} : { workspace }),

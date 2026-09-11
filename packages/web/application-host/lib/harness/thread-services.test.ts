@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
-import { createThreadDispatchService, createThreadMergeService } from "./thread-services.js";
+import { createThreadDispatchService, createThreadKillService, createThreadMergeService } from "./thread-services.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext } from "@piarium/protocol";
 
@@ -467,5 +467,120 @@ describe("thread services", () => {
     expect(result.surfaceTargetPaths).toEqual(["draft.ts"]);
     expect(result.text).toContain("Editor drafts updated without saving: draft.ts");
     expect(result.text).toContain("Disk-based commands still read the saved files");
+  });
+
+  it("releases a surface draft when nested scope is rejected", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-scope-cleanup-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const cleanup = vi.fn(async () => undefined);
+    const capture = vi.fn(async () => ({ draftBaselineId: "draft-1", cleanup }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+      threadCaptureDraftBaseline: capture,
+    } as never);
+    try {
+      const scoped = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "scoped parent",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["dispatch"],
+        permissions: {},
+        scope: ["src"],
+      });
+      const run = await registry.startRun("workspace-1", scoped.id);
+      await registry.markRunRunning("workspace-1", scoped.id, run.id, "scoped-session");
+      await expect(service.handle({
+        role: "check",
+        task: "Leave src",
+        scope: ["docs"],
+      }, {
+        ...serviceContext({
+          source: "surface",
+          workspaceId: "workspace-1",
+          dirtyPaths: ["draft.ts"],
+          snapshot: { status: "ready", ref: "snapshot-ref" },
+        }),
+        sessionId: "scoped-session",
+        actor: { ...serviceContext().actor, sessionId: "scoped-session" },
+      })).rejects.toMatchObject({ harnessCode: "denied" });
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(await registry.listThreads("workspace-1", { kind: "thread", id: scoped.id })).toEqual([]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("kills descendant threads including queued children", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-kill-cascade-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const killed: string[] = [];
+    const service = createThreadKillService({
+      threadRegistry: registry,
+      threadKillSession: async (threadId: string) => {
+        killed.push(threadId);
+      },
+    } as never);
+    try {
+      const parent = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "parent-1" },
+        brief: "parent",
+        role: "hard-implement",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["kill"],
+        permissions: {},
+      });
+      const child = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "thread", id: parent.id },
+        brief: "child",
+        role: "check",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["read"],
+        permissions: {},
+      });
+      const grandchild = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "thread", id: child.id },
+        brief: "grandchild",
+        role: "check",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "none",
+        tools: ["read"],
+        permissions: {},
+      });
+      const result = await service.handle({ threadId: parent.id }, serviceContext());
+      expect(result.text).toContain(parent.id);
+      expect(killed).toEqual([grandchild.id, child.id, parent.id]);
+      expect(await registry.getThread("workspace-1", { kind: "thread", id: child.id }, grandchild.id)).toMatchObject({
+        lifecycle: "settled",
+      });
+      expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+        lifecycle: "settled",
+      });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
   });
 });

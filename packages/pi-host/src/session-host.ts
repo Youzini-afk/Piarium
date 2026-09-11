@@ -161,6 +161,9 @@ import {
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
   mergeHarnessSettings,
+  mergePolicies,
+  normalizeFrozenHarnessPermissions,
+  type PermissionPolicy,
   parseHarnessEmbeddingSettings,
   parseHarnessRerankSettings,
   parseMemoryEditOps,
@@ -638,6 +641,7 @@ export class SessionHost {
   #harnessCounters: HarnessCounterTracker | undefined;
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
+  #frozenPermissionOverlay: PermissionPolicy | undefined;
   #memoryModeReader: (() => Omit<HarnessMemoryRuntimeState, "lastFailure">) | undefined;
   #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
   #disposed = false;
@@ -739,9 +743,13 @@ export class SessionHost {
     parentSession?: string,
     tools?: string[],
     model?: ModelSelection,
+    permissions?: PermissionPolicy,
   ): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
     this.#sessionModelSelection = model === undefined ? undefined : { ...model };
+    this.#frozenPermissionOverlay = permissions === undefined
+      ? undefined
+      : normalizeFrozenHarnessPermissions(permissions);
     await this.#replaceWith(SessionManager.create(
       cwd,
       getSessionDir(cwd, this.#agentDir),
@@ -762,9 +770,13 @@ export class SessionHost {
     sessionId?: string;
     tools?: string[];
     model?: ModelSelection;
+    permissions?: PermissionPolicy;
   }): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = input.tools === undefined ? undefined : [...new Set(input.tools)];
     this.#sessionModelSelection = input.model === undefined ? undefined : { ...input.model };
+    this.#frozenPermissionOverlay = input.permissions === undefined
+      ? undefined
+      : normalizeFrozenHarnessPermissions(input.permissions);
     let sessionFile = input.sessionFile;
     if (!sessionFile && input.sessionId) {
       const sessions = await this.list(input.cwd);
@@ -2933,6 +2945,13 @@ export class SessionHost {
         ? (settingsManager.getProjectSettings() as { harness?: HarnessSettingsInput }).harness ?? {}
         : {};
       const harnessSettings = mergeHarnessSettings(userHarness, projectHarness);
+      const livePermissions: PermissionPolicy = {
+        mode: harnessSettings.permissions?.mode ?? "normal",
+        rules: harnessSettings.permissions?.rules ?? [],
+      };
+      const sessionPermissions = this.#frozenPermissionOverlay
+        ? mergePolicies(this.#frozenPermissionOverlay, livePermissions)
+        : livePermissions;
       const memoryModeReader = (): Omit<HarnessMemoryRuntimeState, "lastFailure"> => {
         const currentHarness = (settingsManager.getGlobalSettings() as {
           harness?: { memory?: unknown };
@@ -3101,12 +3120,12 @@ export class SessionHost {
               factory: createPermissionGateExtension({
                 sessionId: sessionManager.getSessionId(),
                 policy: buildPermissionPolicy(
-                  harnessSettings.permissions?.mode ?? "normal",
+                  sessionPermissions.mode,
                   Object.fromEntries(
                     Object.entries(harnessSettings.dispatch.askBefore)
                       .filter(([, v]) => v !== undefined),
                   ) as Record<string, boolean>,
-                  harnessSettings.permissions?.rules,
+                  sessionPermissions.rules,
                 ),
                 smartJudge: async (toolName, params) => permissionJudge
                   ? permissionJudge(toolName, params)

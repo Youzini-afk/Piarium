@@ -9,7 +9,8 @@
 import fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
-import { ROLE_DEFINITIONS } from "@piarium/protocol";
+import { normalizeFrozenHarnessPermissions, ROLE_DEFINITIONS } from "@piarium/protocol";
+import { normalizeThreadScopePath } from "./thread-nesting.js";
 import type {
   Thread,
   ThreadAttention,
@@ -510,7 +511,7 @@ const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManif
     systemPromptFragment: role?.systemPromptFragment ?? null,
     tools: [...(role?.tools ?? [])],
     worktree: value.worktree && typeof value.worktree === "object" ? "isolated" : configuredWorktree,
-    permissions: {},
+    permissions: { mode: "normal", rules: [] },
   };
 };
 
@@ -1256,11 +1257,11 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
           draftBaselineId: input.draftBaselineId ?? null,
-          scope: [...(input.scope ?? [])],
+          scope: [...(input.scope ?? [])].map(normalizeThreadScopePath),
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],
           worktree: input.worktree,
-          permissions: isRecord(input.permissions) ? structuredClone(input.permissions) : {},
+          permissions: normalizeFrozenHarnessPermissions(input.permissions),
         },
         createdBy: input.createdBy,
         kind: input.kind,

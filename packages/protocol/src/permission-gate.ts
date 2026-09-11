@@ -294,6 +294,24 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
 
 // ── Policy merge ───────────────────────────────────────────────────
 
+/** Missing or empty catalog overlays freeze to default normal, not live settings. */
+export function normalizeFrozenHarnessPermissions(value: unknown): PermissionPolicy {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { mode: "normal", rules: [] };
+  }
+  const record = value as Record<string, unknown>;
+  const hasMode = typeof record.mode === "string";
+  const hasRules = Array.isArray(record.rules);
+  if (!hasMode && !hasRules) return { mode: "normal", rules: [] };
+  const mode = hasMode ? validatePermissionMode(record.mode, "frozen permission") : "normal";
+  const rules = hasRules
+    ? (record.rules as unknown[]).map((rule, index) => (
+      validatePermissionRule(rule as PermissionRule, `frozen permission[${index}]`)
+    ))
+    : [];
+  return { mode, rules };
+}
+
 export function mergePolicies(user: PermissionPolicy, workspace: Partial<PermissionPolicy>): PermissionPolicy {
   if (!Array.isArray(user.rules)) {
     throw new PermissionPolicyValidationError("user permission rules must be an array");

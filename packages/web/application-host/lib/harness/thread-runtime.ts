@@ -21,7 +21,12 @@ import type {
   WorkingBranchEnsureMaterializedResult,
   WorkspaceThreadSpace,
 } from "@piarium/protocol";
-import { HARNESS_TOOL_META, threadIntegrationBindingFromPreview } from "@piarium/protocol";
+import {
+  HARNESS_TOOL_META,
+  normalizeFrozenHarnessPermissions,
+  threadIntegrationBindingFromPreview,
+} from "@piarium/protocol";
+import { scopePathContainedBy } from "./thread-nesting.js";
 import {
   assembleKeepReasons,
   collectBranchObjectHashes,
@@ -67,11 +72,20 @@ export interface ThreadSessionAdapter {
     name: string;
     parentSession: string;
     model?: { providerId: string; modelId: string };
+    permissions?: import("@piarium/protocol").PermissionPolicy;
     scope?: string[];
     tools: string[];
     workspaceId: string;
   }): Promise<SessionSnapshot>;
-  open(input: { cwd: string; model?: { providerId: string; modelId: string }; scope?: string[]; sessionId: string; tools: string[]; workspaceId: string }): Promise<SessionSnapshot>;
+  open(input: {
+    cwd: string;
+    model?: { providerId: string; modelId: string };
+    permissions?: import("@piarium/protocol").PermissionPolicy;
+    scope?: string[];
+    sessionId: string;
+    tools: string[];
+    workspaceId: string;
+  }): Promise<SessionSnapshot>;
   prompt(sessionId: string, text: string, instructions?: string): Promise<void>;
   send(sessionId: string, text: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
@@ -1253,7 +1267,29 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
     }
     const effectiveSettings = await resolveEffectiveWorktreeSettings(input.workspaceId, input.parent);
-    const captureScopes = resolveCaptureScopes(sourceRoot, effectiveSettings);
+    const inheritNestedCaptureScopes = async (): Promise<string[] | null> => {
+      if (input.parent.kind !== "thread") return null;
+      const owner = await options.registry.getThreadById(input.workspaceId, input.parent.id);
+      if (!owner?.workBranchId || !options.workingStates) return [];
+      return options.workingStates.withStore(
+        input.workspaceId,
+        "thread-nested-capture-scopes",
+        (store) => {
+          const branch = store.getBranch(owner.workBranchId!);
+          if (!branch) throw new Error(`Parent working branch is unavailable: ${owner.workBranchId}`);
+          return [...branch.captureScopes];
+        },
+        "shared",
+      );
+    };
+    const inheritedScopes = await inheritNestedCaptureScopes();
+    let captureScopes = inheritedScopes ?? resolveCaptureScopes(sourceRoot, effectiveSettings);
+    const threadScope = existing.manifest.scope;
+    if (inheritedScopes && threadScope.length > 0) {
+      captureScopes = captureScopes.filter((scope) => (
+        threadScope.some((root) => scopePathContainedBy(root, scope))
+      ));
+    }
     const draftBaselineId = input.draftBaselineId ?? existing.manifest.draftBaselineId ?? null;
     let worktree = existing.worktree;
     if (!worktree) {
@@ -1697,6 +1733,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         name: `${input.role ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession: parent.file,
         ...(input.model ? { model: input.model } : {}),
+        permissions: normalizeFrozenHarnessPermissions(input.permissions),
         ...(input.scope?.length ? { scope: [...input.scope] } : {}),
         tools: [...input.tools],
         workspaceId: runtimeWorkspaceId,
@@ -1821,7 +1858,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       worktree: "none",
       ...(model ? { model } : {}),
       tools,
-      permissions: {},
+      permissions: normalizeFrozenHarnessPermissions({}),
       autoRun: true,
     };
     const thread = await options.registry.createThread(createInput);
@@ -2386,7 +2423,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               worktree: thread.manifest.worktree,
               ...(thread.model ? { model: thread.model } : {}),
               tools: thread.manifest.tools,
-              permissions: {},
+              permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
               ...(thread.manifest.scope.length > 0 ? { scope: thread.manifest.scope } : {}),
               ...(thread.manifest.systemPromptFragment
                 ? { systemPromptFragment: thread.manifest.systemPromptFragment }
@@ -2400,6 +2437,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const snapshot = await options.sessions.open({
             cwd,
             ...(thread.model ? { model: thread.model } : {}),
+            permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
             ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
             sessionId: previous.sessionId!,
             tools: [...thread.manifest.tools],
@@ -2555,6 +2593,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       opened = await options.sessions.open({
         cwd: prepared.cwd,
         ...(model ? { model } : {}),
+        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
         ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
         sessionId: currentRun.sessionId,
         tools,
@@ -2631,6 +2670,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   const kill = async (threadId: string, keepWorktree = false): Promise<void> => {
+    await waitForPreparation(threadId);
     const sessionId = sessionByThread.get(threadId);
     if (!sessionId) return;
     const binding = bindingsBySession.get(sessionId);
@@ -2674,7 +2714,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!thread) throw new Error(`Thread not found: ${threadId}`);
     if (!thread.worktree && !thread.workBranchId) throw new Error("Thread has no published work state to merge");
     let parentRoot = await options.resolveWorkspaceRoot(workspaceId);
-    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string } | undefined;
+    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
       const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
@@ -2686,7 +2726,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         };
       } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
         parentRoot = owner.worktree.path;
-        parentAuthority = { kind: "directory", directory: owner.worktree.path };
+        parentAuthority = {
+          kind: "directory",
+          directory: owner.worktree.path,
+          workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
+        };
       }
     }
     const coordinator = options.resolveIntegrationCoordinator
@@ -2820,7 +2864,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!coordinator || !branchId || resultRevision === undefined) {
       throw new Error("Thread has no published native result to preview");
     }
-    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string } | undefined;
+    let parentAuthority: { kind: "branch"; branchId: string; sessionId?: string } | { kind: "directory"; directory: string; workspaceId?: string } | undefined;
     if (parent.kind === "thread") {
       const owner = await options.registry.getThreadById(workspaceId, parent.id);
       const parentRun = await options.registry.getActiveRun(workspaceId, parent.id);
@@ -2831,7 +2875,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(parentRun?.sessionId ? { sessionId: parentRun.sessionId } : {}),
         };
       } else if (owner?.worktree?.path && !isVirtualWorktree(owner.worktree)) {
-        parentAuthority = { kind: "directory", directory: owner.worktree.path };
+        parentAuthority = {
+          kind: "directory",
+          directory: owner.worktree.path,
+          workspaceId: await options.resolveRuntimeWorkspaceId(owner.worktree.path),
+        };
       }
     }
     const preview = await coordinator.previewResult({
@@ -3246,6 +3294,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    const children = await options.registry.listThreads(workspaceId, { kind: "thread", id: threadId }, true);
+    for (const child of children) {
+      await archiveUserImpl(workspaceId, { kind: "thread", id: threadId }, child.id, keepWorktree);
+    }
     if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
       await stopRunForArchive(workspaceId, parent, threadId);
     }
@@ -3302,6 +3354,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const opened = await options.sessions.open({
         cwd,
         ...(thread.model ? { model: thread.model } : {}),
+        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
         ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
         sessionId,
         tools: [...thread.manifest.tools],

@@ -686,8 +686,12 @@ view. Failed or cancelled capture deletes the Thread (D-214).
 A nested isolated child copies the parent branch effective view when the parent is still virtual, or
 captures the parent materialized directory otherwise (D-215). Nested merge applies the grandchild
 result onto the parent branch or parent worktree; the parent later folds its published result into
-the workspace. Child workspace, scope, and the frozen permission overlay inherit or narrow; Host
-rejects expansion. Role tools come from the child's own launch manifest.
+the workspace. Directory apply keeps the recovery object library on the owning engine root (D-219).
+Branch parent apply is a durable Integration with retry and undo. Child workspace, scope, and the
+frozen permission overlay inherit or narrow and enter `session.create/open`; Host rejects expansion,
+absolute scope paths, and `..`. Nested `captureScopes` inherit the parent WorkingBranch freeze.
+Killing or archiving a parent cancels descendant preparation and Runs first. Role tools come from
+the child's own launch manifest.
 Owning workspace (Thread catalog, WorkingState, parent/child lifecycle) is distinct from the
 execution workspace Documents assigns to a scratch or materialized cwd (D-216). Thread services,
 Zone 2, and lost resume read the Host session binding; they do not treat `ctx.workspaceId` as the

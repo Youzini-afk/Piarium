@@ -23,6 +23,7 @@ import {
 import {
   applyDurableFileOperation,
   finalizeDurableExternalOperation,
+  findReusableCompleteIntegration,
   findReusableIntegrationConflict,
   inspectDurableIntegrationOperation,
   markDurableExternalUndoDispatched,
@@ -31,8 +32,11 @@ import {
   reconcileInterruptedIntegrationOperations,
   undoDurableIntegrationOperation,
   type DurableExternalBinding,
+  type DurableFileOperationContext,
   type DurableFileTarget,
+  type HostResourceOperationGate,
 } from "../../recovery/durable-file-operation.js";
+import { sameState } from "../../recovery/journal-files.js";
 import { assertIntegrationTurnBinding } from "../../recovery/integration-turn-binding.js";
 import { writeOperationRow, type SqliteDatabase } from "../../recovery/journal-catalog.js";
 import { inspectDocumentBytes } from "../../documents/inspect.js";
@@ -89,6 +93,10 @@ export interface IntegrationCoordinatorOptions {
     store: WorkingStateStore;
     sessionId?: string;
   }) => Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
+  resolveDirectoryApplyContext?: (directory: string) => Promise<{
+    workspaceId: string;
+    resourceOperationGate: HostResourceOperationGate;
+  }>;
 }
 
 export interface IntegrationPlanInput {
@@ -106,7 +114,7 @@ export interface IntegrationPlanInput {
   parentAuthority?:
     | { kind: "workspace" }
     | { kind: "branch"; branchId: string; sessionId?: string }
-    | { kind: "directory"; directory: string };
+    | { kind: "directory"; directory: string; workspaceId?: string };
 }
 
 const mergeTarget = async (
@@ -298,6 +306,7 @@ export class IntegrationCoordinator {
   private readonly beginDirtyStateBarrier?: IntegrationCoordinatorOptions["beginDirtyStateBarrier"];
   private readonly requestSurfaceOperation?: IntegrationCoordinatorOptions["requestSurfaceOperation"];
   private readonly commitParentVirtualWrites?: IntegrationCoordinatorOptions["commitParentVirtualWrites"];
+  private readonly resolveDirectoryApplyContext?: IntegrationCoordinatorOptions["resolveDirectoryApplyContext"];
   private readonly previewByThread = new Map<string, { workspaceId: string; preview: ThreadIntegrationPreview }>();
 
   constructor(options: IntegrationCoordinatorOptions) {
@@ -306,6 +315,98 @@ export class IntegrationCoordinator {
     this.beginDirtyStateBarrier = options.beginDirtyStateBarrier;
     this.requestSurfaceOperation = options.requestSurfaceOperation;
     this.commitParentVirtualWrites = options.commitParentVirtualWrites;
+    this.resolveDirectoryApplyContext = options.resolveDirectoryApplyContext;
+  }
+
+  invalidateThread(workspaceId: string, threadId: string): void {
+    this.previewByThread.delete(this.previewKey(workspaceId, threadId));
+  }
+
+  private async directoryApplyContext(
+    context: DurableFileOperationContext,
+    parentAuthority: { kind: "directory"; directory: string; workspaceId?: string },
+  ): Promise<DurableFileOperationContext> {
+    const resolved = this.resolveDirectoryApplyContext
+      ? await this.resolveDirectoryApplyContext(parentAuthority.directory)
+      : parentAuthority.workspaceId
+        ? { workspaceId: parentAuthority.workspaceId, resourceOperationGate: context.resourceOperationGate }
+        : null;
+    return {
+      ...context,
+      identity: {
+        ...context.identity,
+        canonicalRoot: parentAuthority.directory,
+        ...(resolved?.workspaceId ? { workspaceId: resolved.workspaceId } : {}),
+      },
+      ...(resolved?.resourceOperationGate ? { resourceOperationGate: resolved.resourceOperationGate } : {}),
+    };
+  }
+
+  private persistBranchIntegration(
+    context: DurableFileOperationContext,
+    input: {
+      operationId: string;
+      workspaceId: string;
+      threadId: string;
+      branchId: string;
+      resultRevision: number;
+      parentBranchId: string;
+      beforeWriteRevision: number;
+      afterWriteRevision: number;
+      beforeStates: Record<string, RecoveryState>;
+      afterStates: Record<string, RecoveryState>;
+      childStates: Record<string, RecoveryState>;
+      appliedPaths: string[];
+      conflictPaths: string[];
+      diffStats: { files: number; insertions: number; deletions: number };
+      state: "complete" | "conflict";
+    },
+  ): void {
+    const targets = Object.fromEntries(Object.keys(input.beforeStates).map((file) => [
+      file,
+      {
+        expected: input.beforeStates[file]!,
+        target: input.afterStates[file] ?? input.beforeStates[file]!,
+      },
+    ]));
+    writeOperationRow(context.database, {
+      id: input.operationId,
+      workspaceId: input.workspaceId,
+      kind: "integration",
+      state: input.state,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      data: {
+        operationId: input.operationId,
+        threadId: input.threadId,
+        resultRevision: input.resultRevision,
+        targets,
+        targetKinds: Object.fromEntries(Object.keys(targets).map((file) => [file, "disk"])),
+        externalBindings: {},
+        safety: structuredClone(input.beforeStates),
+        conflictPaths: [...input.conflictPaths],
+        appliedPaths: [...input.appliedPaths],
+        compensatedPaths: [],
+        needsAttentionPaths: [],
+        diffStats: input.diffStats,
+        parentBranchId: input.parentBranchId,
+        beforeWriteRevision: input.beforeWriteRevision,
+        afterWriteRevision: input.afterWriteRevision,
+        retryBinding: {
+          branchId: input.branchId,
+          parentStates: structuredClone(input.beforeStates),
+          childStates: structuredClone(input.childStates),
+          resultingParentStates: structuredClone(input.afterStates),
+        },
+      },
+    });
+  }
+
+  private sameParentSlice(
+    current: Record<string, RecoveryState>,
+    expected: Record<string, RecoveryState>,
+  ): boolean {
+    return Object.keys(expected).every((file) => sameState(current[file] ?? { kind: "missing" }, expected[file]!));
   }
 
   private previewKey(workspaceId: string, threadId: string): string {
@@ -379,6 +480,13 @@ export class IntegrationCoordinator {
         resultRevision: input.resultRevision,
         childStates: planned.childStates,
         currentParentStates: planned.diskParentStates,
+      }) ?? findReusableCompleteIntegration(context, {
+        workspaceId: input.workspaceId,
+        threadId: input.threadId,
+        branchId: input.branchId,
+        resultRevision: input.resultRevision,
+        childStates: planned.childStates,
+        currentParentStates: planned.diskParentStates,
       });
       if (reusable) {
         const preview = { ...planned.preview, operationId: reusable.operationId };
@@ -438,10 +546,12 @@ export class IntegrationCoordinator {
             writes[pathPlan.path] = { kind: "missing" };
           }
         }
-        if (planned.plan.conflictPaths.length === 0 && planned.preview.unavailablePaths.length === 0) {
-          const parentBranch = store.getBranch(parentAuthority.branchId);
-          if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
-          const expectedWriteRevision = parentBranch.writeRevision ?? 0;
+        const parentBranch = store.getBranch(parentAuthority.branchId);
+        if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
+        const expectedWriteRevision = parentBranch.writeRevision ?? 0;
+        const failed = planned.plan.conflictPaths.length > 0 || planned.preview.unavailablePaths.length > 0;
+        let afterWriteRevision = expectedWriteRevision;
+        if (!failed) {
           const committed = this.commitParentVirtualWrites
             ? await this.commitParentVirtualWrites({
               workspaceId: input.workspaceId,
@@ -455,14 +565,32 @@ export class IntegrationCoordinator {
           if (committed.status === "conflict") {
             throw new Error("Parent branch revision changed during nested merge");
           }
+          afterWriteRevision = committed.writeRevision;
         }
-        const appliedPaths = Object.keys(writes).sort();
-        const failed = planned.plan.conflictPaths.length > 0 || planned.preview.unavailablePaths.length > 0;
+        const appliedPaths = failed ? [] : Object.keys(writes).sort();
+        const afterStates = { ...planned.diskParentStates, ...(failed ? {} : writes) };
+        this.persistBranchIntegration(context, {
+          operationId: planned.plan.operationId,
+          workspaceId: input.workspaceId,
+          threadId: input.threadId,
+          branchId: input.branchId,
+          resultRevision: input.resultRevision,
+          parentBranchId: parentAuthority.branchId,
+          beforeWriteRevision: expectedWriteRevision,
+          afterWriteRevision,
+          beforeStates: planned.diskParentStates,
+          afterStates,
+          childStates: planned.childStates,
+          appliedPaths,
+          conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
+          diffStats: planned.plan.diffStats,
+          state: failed ? "conflict" : "complete",
+        });
         const preview = { ...planned.preview, operationId: planned.plan.operationId };
         this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview });
         return {
           status: failed ? "conflict" : "applied",
-          appliedPaths: failed ? [] : appliedPaths,
+          appliedPaths,
           conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
           changedFiles: planned.changedPaths,
           diffStats: planned.plan.diffStats,
@@ -474,7 +602,7 @@ export class IntegrationCoordinator {
         };
       }
       const applyContext = parentAuthority.kind === "directory"
-        ? { ...context, identity: { ...context.identity, canonicalRoot: parentAuthority.directory }, root: parentAuthority.directory }
+        ? await this.directoryApplyContext(context, parentAuthority)
         : context;
       let applied = await applyDurableFileOperation(applyContext, {
         id: planned.plan.operationId,
@@ -497,6 +625,7 @@ export class IntegrationCoordinator {
             planned.diskTargets[file]?.target ?? planned.diskParentStates[file]!,
           ])),
         },
+        ...(parentAuthority.kind === "directory" ? { applyCanonicalRoot: parentAuthority.directory } : {}),
       });
       const phases: Record<string, IntegrationApplyPhase> = {};
       for (const path of applied.appliedPaths) phases[path] = "disk-applied";
@@ -668,6 +797,100 @@ export class IntegrationCoordinator {
     return this.workingStates.withStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
       const operation = inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
+      if (operation.parentBranchId) {
+        const parentBranch = store.getBranch(operation.parentBranchId);
+        if (!parentBranch) throw new Error(`Parent working branch not found: ${operation.parentBranchId}`);
+        const before = operation.retryBinding?.parentStates ?? operation.safety;
+        const after = operation.retryBinding?.resultingParentStates ?? Object.fromEntries(
+          Object.entries(operation.targets).map(([file, states]) => [file, states.target]),
+        );
+        const currentView = store.effectiveState(operation.parentBranchId) ?? {};
+        if (this.sameParentSlice(currentView, before)) {
+          this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
+          return {
+            operationId: input.operationId,
+            status: "compensated",
+            appliedPaths: [],
+            conflictPaths: [],
+            compensatedPaths: [...operation.appliedPaths],
+            diffStats: { files: operation.appliedPaths.length, insertions: 0, deletions: 0 },
+            text: "Integration was undone.",
+          };
+        }
+        if (!this.sameParentSlice(currentView, after)) {
+          return {
+            ...markDurableIntegrationNeedsAttention(
+              context,
+              input.operationId,
+              Object.keys(after),
+              "Parent branch changed before the nested integration could be undone",
+            ),
+            status: "needs-attention" as const,
+          };
+        }
+        const committed = this.commitParentVirtualWrites
+          ? await this.commitParentVirtualWrites({
+            workspaceId: input.workspaceId,
+            branchId: operation.parentBranchId,
+            files: before,
+            expectedWriteRevision: parentBranch.writeRevision ?? 0,
+            store,
+          })
+          : await store.commitVirtualWrites(operation.parentBranchId, parentBranch.writeRevision ?? 0, before);
+        if (committed.status === "conflict") {
+          return {
+            ...markDurableIntegrationNeedsAttention(
+              context,
+              input.operationId,
+              Object.keys(after),
+              "Parent branch revision changed during nested undo",
+            ),
+            status: "needs-attention" as const,
+          };
+        }
+        writeOperationRow(context.database, {
+          id: input.operationId,
+          workspaceId: input.workspaceId,
+          kind: "integration",
+          state: "undone",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          data: {
+            operationId: input.operationId,
+            threadId: operation.threadId,
+            resultRevision: operation.resultRevision,
+            targets: operation.targets,
+            targetKinds: operation.targetKinds,
+            externalBindings: operation.externalBindings,
+            safety: operation.safety,
+            conflictPaths: [],
+            appliedPaths: operation.appliedPaths,
+            compensatedPaths: [...operation.appliedPaths],
+            needsAttentionPaths: [],
+            diffStats: { files: operation.appliedPaths.length, insertions: 0, deletions: 0 },
+            parentBranchId: operation.parentBranchId,
+            ...(operation.beforeWriteRevision === undefined ? {} : { beforeWriteRevision: operation.beforeWriteRevision }),
+            ...(operation.afterWriteRevision === undefined ? {} : { afterWriteRevision: operation.afterWriteRevision }),
+            ...(operation.retryBinding ? { retryBinding: operation.retryBinding } : {}),
+          },
+        });
+        this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
+        return {
+          operationId: input.operationId,
+          status: "compensated",
+          appliedPaths: [],
+          conflictPaths: [],
+          compensatedPaths: [...operation.appliedPaths],
+          diffStats: { files: operation.appliedPaths.length, insertions: 0, deletions: 0 },
+          text: "Integration was undone.",
+        };
+      }
+      const applyContext = operation.applyCanonicalRoot
+        ? await this.directoryApplyContext(context, {
+          kind: "directory",
+          directory: operation.applyCanonicalRoot,
+        })
+        : context;
       const surfacePaths = Object.entries(operation.targetKinds)
         .filter(([, kind]) => kind === "surface")
         .map(([file]) => file)
@@ -747,7 +970,7 @@ export class IntegrationCoordinator {
             return { ...attention, status: "needs-attention" as const };
           }
         }
-        const undone = await undoDurableIntegrationOperation(context, {
+        const undone = await undoDurableIntegrationOperation(applyContext, {
           operationId: input.operationId,
           surfaceUndonePaths: undonePaths,
         });
@@ -816,7 +1039,6 @@ export class IntegrationCoordinator {
       const parentIdentity = parentAuthority.kind === "directory"
         ? { ...context.identity, canonicalRoot: parentAuthority.directory }
         : context.identity;
-      const parentRoot = parentAuthority.kind === "directory" ? parentAuthority.directory : context.root;
       const parentBranchView = parentAuthority.kind === "branch"
         ? store.effectiveState(parentAuthority.branchId) ?? {}
         : null;
@@ -824,7 +1046,7 @@ export class IntegrationCoordinator {
       for (const file of result.changedPaths) {
         const disk = parentBranchView
           ? parentBranchView[file] ?? { kind: "missing" as const }
-          : (await context.fileStore.captureState(parentIdentity, parentRoot, file, { store: true })).state;
+          : (await context.fileStore.captureState(parentIdentity, context.root, file, { store: true })).state;
         diskParentStates[file] = disk;
         if (parentAuthority.kind === "branch") {
           targets[file] = "disk";

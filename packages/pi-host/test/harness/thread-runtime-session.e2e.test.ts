@@ -87,7 +87,7 @@ describe("thread runtime with real Pi sessions", () => {
         childRuntimeWorkspaceId = input.workspaceId;
         childScope = input.scope;
         const child = createChildHost();
-        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model);
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
         return created;
@@ -101,6 +101,7 @@ describe("thread runtime with real Pi sessions", () => {
           sessionFile,
           tools: input.tools,
           ...(input.model ? { model: input.model } : {}),
+          ...(input.permissions ? { permissions: input.permissions } : {}),
         });
         childHosts.set(opened.sessionId, child);
         if (opened.sessionFile) childSessionFiles.set(opened.sessionId, opened.sessionFile);
@@ -474,7 +475,7 @@ describe("thread runtime with native working-state integration", () => {
       create: async (input) => {
         if (!spawningRunId) throw new Error("Native child session was created without a Run id");
         const child = createChildHost();
-        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model);
+        const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
         if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
@@ -489,6 +490,7 @@ describe("thread runtime with native working-state integration", () => {
           sessionFile,
           tools: input.tools,
           ...(input.model ? { model: input.model } : {}),
+          ...(input.permissions ? { permissions: input.permissions } : {}),
         });
         childHosts.set(opened.sessionId, child);
         if (opened.sessionFile) childSessionFiles.set(opened.sessionId, opened.sessionFile);
