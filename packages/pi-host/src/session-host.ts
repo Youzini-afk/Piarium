@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -1305,6 +1305,22 @@ export class SessionHost {
       await this.#queueInstructions(instructions, "steer");
       await this.session.steer(text, images === undefined ? undefined : toImages(images));
       await this.#commitInputContext(inputContext, previousContext);
+      const memoryNudge = this.#memoryNudge;
+      if (memoryNudge) {
+        void memoryNudge({
+          reason: "steering",
+          materials: [{
+            id: `steering:${randomUUID()}`,
+            kind: "steering",
+            text,
+          }],
+        }).catch((error: unknown) => {
+          this.#emit("host.log", {
+            level: "warn",
+            message: `Memory keeper steering nudge failed: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        });
+      }
       return true;
     } catch (error) {
       this.#inputContext = previousContext;

@@ -664,6 +664,48 @@ describe("session e2e — memory keeper extension", () => {
     });
   });
 
+  it("accelerates the same keeper with accepted steering material", async () => {
+    await withTempRoot("piarium-s-memory-steering-", async (root) => {
+      const store = await openWorkspaceKnowledge({
+        dataDir: join(root, "data"),
+        hostId: "memory-steering-host",
+        workspaceId: WORKSPACE_ID,
+        embedding: null,
+      });
+      const faux = registerFauxProvider();
+      const keeperContexts: Context[] = [];
+      faux.setResponses([
+        () => fauxAssistantMessage("initial turn"),
+        (context) => {
+          keeperContexts.push(context);
+          return fauxAssistantMessage([fauxToolCall("memory_edit", {
+            ops: [{ op: "create", block: "progress", content: "Steering was recorded." }],
+          })]);
+        },
+      ]);
+      const session = await setupSession({
+        root,
+        faux,
+        serviceHostOptions: {
+          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
+        },
+      });
+      try {
+        const snapshot = await session.host.create(root, undefined, undefined, []);
+        await session.host.prompt(snapshot.sessionId, "start work");
+        await session.host.session.waitForIdle();
+        assert.equal(await session.host.steer(snapshot.sessionId, "change direction"), true);
+        await waitUntil(async () => keeperContexts.length === 1);
+        assert.match(JSON.stringify(keeperContexts[0]!.messages), /steering .*change direction/);
+        await waitUntil(async () => (await store.getBlocks(snapshot.sessionId)).some((block) => block.content === "Steering was recorded."));
+      } finally {
+        await session.dispose();
+        await store.close();
+        faux.unregister();
+      }
+    });
+  });
+
   it("projects a rejected keeper apply while the real Pi conversation continues", async () => {
     await withTempRoot("piarium-s-memory-failure-", async (root) => {
       const store = await openWorkspaceKnowledge({

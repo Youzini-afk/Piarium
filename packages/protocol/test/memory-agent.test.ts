@@ -6,6 +6,7 @@ import {
   evaluateMemoryAgentGate,
   parseMemoryEditOps,
 } from "../src/index.js";
+import type { HostMethodParams } from "../src/index.js";
 
 describe("memory agent protocol", () => {
   it("parses only structured memory_edit operations", () => {
@@ -28,6 +29,15 @@ describe("memory agent protocol", () => {
         ops: [{ op: "replace", block: "progress", content: "new", expectedRevision }],
       }), null);
     }
+  });
+
+  it("types event acceleration materials separately from terminal commands", () => {
+    const params: HostMethodParams<"memory.nudge"> = {
+      sessionId: "session-1",
+      reason: "thread-return",
+      materials: [{ id: "thread-return:thread-1:run-1", kind: "thread-return", text: "child returned" }],
+    };
+    assert.deepEqual(params.materials, [{ id: "thread-return:thread-1:run-1", kind: "thread-return", text: "child returned" }]);
   });
 
   it("does not schedule the first run before meaningful context exists", () => {

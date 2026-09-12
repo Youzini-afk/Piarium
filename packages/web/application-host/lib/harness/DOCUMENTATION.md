@@ -318,6 +318,15 @@ Harness/agent shells stay `source: agent` and never enter
 `<user-terminal>`. `/bin/sh` is not treated as Bash. After a new event is
 stored, Host `memory.nudge` wakes the existing keeper; worker-unavailable
 and keeper failure do not fail the terminal.
+The same keeper receives accepted Pi steering, user plan revisions committed by
+the authenticated context route, and newly persisted child Run reports (D-238).
+Agent/keeper block writes do not trigger that user-plan observer. Registry emits
+the frozen Run/report pair after catalog publication; a stale retained report,
+an ordinary Thread projection, or repeated endRun cannot manufacture a return.
+Nested delivery resolves the live parent Thread session through the owning
+workspace, while its execution workspace may differ. Closed targets are not
+reopened. Material identity deduplicates external delivery; in-flight/cooldown
+requeue preserves the actual text, and off performs no model calls.
 The same Documents post-commit boundary drives an event-based symbol graph:
 known languages bind the file's disk text in the Host language view and replace
 one file's real `file -> defines -> symbol` graph together with the document

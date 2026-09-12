@@ -63,6 +63,7 @@ import { DEFAULT_COMPACTION_SETTINGS, collectCompactionFacts, createKeeperCovera
 import { type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
+import { createThreadMemoryReturnAdapter } from './lib/harness/thread-memory-return.js';
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
@@ -934,6 +935,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     options.piRuntimeBroker
     || (piRuntimeLifecycle?.currentBroker ? piRuntimeBroker : null)
   );
+  const nudgeMemorySession = async (
+    sessionId: string,
+    reason: "plan-edit" | "thread-return",
+    material: { id: string; kind: "plan-edit" | "thread-return"; text: string },
+  ): Promise<void> => {
+    const broker = getReadyPiRuntimeBroker();
+    if (!broker || !sessionSnapshots.has(sessionId)) return;
+    await broker.requestForSession(sessionId, "memory.nudge", {
+      sessionId,
+      reason,
+      materials: [material],
+    });
+  };
   const startPiRuntime = async () => {
     recordStartupPerformance('pi-runtime.warmup.start');
     try {
@@ -1195,6 +1209,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hasActiveCommandAtDirectory: (_directory: string): boolean => false,
     closeSessionShell: async (_sessionId: string): Promise<void> => {},
   };
+  const sessionSnapshots = new Map<string, Record<string, unknown>>();
   const threadRegistry = createThreadRegistry({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
@@ -1221,6 +1236,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { workspaceId, parent, threadId, report },
       });
     },
+    onThreadReturned: (workspaceId, parent, threadId, run, report) => {
+      void nudgeThreadParentMemory(workspaceId, parent, threadId, run, report).catch((error) => {
+        console.error('[HarnessThreads] Memory keeper completion nudge failed:', errorMessage(error));
+      });
+    },
     onThreadDequeued: createOnThreadDequeued({
       getRegistry: () => threadRegistry,
       getRuntime: () => threadRuntime,
@@ -1229,6 +1249,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
       },
     }),
+  });
+  const nudgeThreadParentMemory = createThreadMemoryReturnAdapter({
+    registry: threadRegistry,
+    hasLiveSession: (sessionId) => sessionSnapshots.has(sessionId),
+    rootSessionWorkspaceId: (sessionId) => snapshotKnowledgeWorkspaceId(sessionId),
+    nudgeMemory: (sessionId, material) => nudgeMemorySession(sessionId, "thread-return", material),
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
   for (const failure of threadRegistryStartup.failures) {
@@ -1597,6 +1623,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getBranchEntryIds: branchEntryIdsForSession,
     getUserStore: getUserKnowledgeStore,
     getSuggestionSettings: knowledgeSuggestionSettingsForSession,
+    onPlanChanged: (sessionId, block) => nudgeMemorySession(sessionId, "plan-edit", {
+      id: `plan-edit:${sessionId}:${block.sourceLeafId ?? "root"}:${block.updatedAt}`,
+      kind: "plan-edit",
+      text: [
+        `User edited the session plan block at revision ${block.updatedAt}.`,
+        `Branch leaf: ${block.sourceLeafId ?? "root"}`,
+        block.content,
+      ].join("\n"),
+    }).catch((error) => {
+      console.error('[HarnessMemory] Plan edit nudge failed:', errorMessage(error));
+    }),
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-knowledge-changed',
@@ -2202,7 +2239,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
   const sessionNames = new Map<string, string>();
-  const sessionSnapshots = new Map<string, Record<string, unknown>>();
   recoveryTurnCoordinator = createRecoveryTurnCoordinator({
     documents: documentsAuthority,
     getSessionSnapshot: (sessionId) => sessionSnapshots.get(sessionId) ?? null,

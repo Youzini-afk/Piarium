@@ -269,6 +269,12 @@ keeper. PowerShell uses the command-start `LASTEXITCODE` baseline and reports `1
 that an unchanged native status belongs to the current command. The live PTY path does not replay after
 Host restart. Missing integration is `not-observed`, not a guessed command (D-226 / D-229 / D-233).
 
+Accepted steering, user plan revisions, and newly persisted child Run reports also accelerate that
+same keeper (D-238). The UI plan route observes only its successful user writes; Registry return
+notifications bind the actual Run/report. Nested delivery resolves the active parent's owning session
+instead of comparing its materialized execution workspace to the knowledge store. Notifications carry
+encoded material and reuse the in-flight/cooldown queue; off and duplicate delivery make no model call.
+
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role.
 D-227 makes that role a real Thread: `thread.dispatch(role: "retrieval")` freezes the retrieval model
 slot, read-only tools, and scope; the child may call explore/read/related/recall and authorized web

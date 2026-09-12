@@ -7,6 +7,20 @@ export interface MemoryAgentSettings {
   maxInterval: number;
 }
 
+/**
+ * A host-observed fact that should accelerate the keeper. The identifier is
+ * assigned by the producer of the fact so retries do not enqueue the same
+ * material twice; `text` is still treated as untrusted observation text by
+ * the pi-host keeper.
+ */
+export interface MemoryNudgeMaterial {
+  id: string;
+  kind: "steering" | "plan-edit" | "thread-return";
+  text: string;
+}
+
+export type MemoryNudgeReason = "user-command" | "steering" | "plan-edit" | "thread-return";
+
 export const DEFAULT_MEMORY_AGENT_SETTINGS: MemoryAgentSettings = {
   interval: 5_000,
   blockBudgetTokens: 2_000,

@@ -5063,3 +5063,32 @@ ModelRuntime 纵切继续通过。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-237 | implementation（完整枚举与 missing/代际确认驱动目录删除对账） | — | 设计 6.2；plan/status 3.1；structure DOCUMENTATION |
+
+### D-238 · 2026-09-12 · 2.4（steering、用户计划与子返回加速现有 keeper）
+
+类型：问题与解法
+
+背景：用户终端已有 `memory.nudge`，但用户改变任务方向、修改计划或子线程带回结果后，keeper 仍需等普通 token 门。
+只增加触发名也不够：请求必须携带新材料，且不能把失败 Run 之前保留的旧报告或物化父的 execution 身份当成本次返回。
+
+决定：
+
+1. Pi 接受 steering 并提交输入上下文后投递该消息；用户计划编辑由鉴权 UI 路由在分支/修订校验与持久写入成功后通知。主 agent
+   的 todo 和 keeper 自身写块不走这条观察，避免自触发。观察失败不改变已接受输入或已保存计划的结果。
+2. Registry 新增提交后的 `onThreadReturned` 观察，携带本次 Run 与新报告。success/failure/cancelled 有本次报告才产生返回事实，
+   lost 不冒充结算；同一 endRun 重放不重复发出。既有 success-only 的 `onThreadDone` 保持语义。
+3. 根返回送仍注册的父 Pi session；嵌套返回按当前 Thread/Run/session binding 核对 owning 身份。关闭或过期的接收者不重开，
+   物化执行目录不代替知识工作区。报告保留真实 outcome，材料身份绑定 workspace/thread/run，不以结论相同判成同一次执行。
+4. 新材料使用已有 keeper 的活动模型和 memory_edit 通道；正文作为观察数据编码。外来事件去重与内部等待队列分开，冷却或在飞
+   时不会因重新入队而丢正文，重复已接收事件也不触发空材料模型调用。off 不调用模型，没有新事件不启动循环。
+5. 初次上下文建立前的新材料等下一次有效 turn。`session_tree` 明确切换分支时清空旧待处理材料并使在飞结果失效；切换后新到
+   的事件等新上下文。正常沿同一分支新增 entry 不被当作切换。这是临时加速队列，不承诺跨导航或 Host 重启重播。
+
+验证与边界：生产消费者、定向反例与 faux SessionHost 证据记在 status 2.4。没有新增记忆模型槽位、事件重要性打分或辅助费用面板；
+模型输出质量与完整桌面点击链不由本地测试推定。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-238 | implementation（steering/用户计划/本次 Run 返回携带材料进入现有 keeper） | — | 设计 8.4；plan/status 2.4；pi-host / Host harness |

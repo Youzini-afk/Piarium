@@ -122,6 +122,33 @@ describe("harness context routes", () => {
       .expect(({ body }) => expect(body.code).toBe("branch-conflict"));
   });
 
+  it("notifies the keeper only after an authenticated user plan write succeeds", async () => {
+    const changed: Array<{ sessionId: string; content: string }> = [];
+    const app = express();
+    app.use(express.json());
+    registerHarnessContextRoutes(app, {
+      getStore: async () => store,
+      getBranchEntryIds: async () => [],
+      onPlanChanged: (sessionId, block) => {
+        changed.push({ sessionId, content: block.content });
+      },
+    });
+
+    await request(app)
+      .put("/api/harness/sessions/session-1/blocks/plan")
+      .send({ content: "- [ ] keep the new plan", expectedUpdatedAt: null, expectedBranchLeafId: null })
+      .expect(200);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(changed).toEqual([{ sessionId: "session-1", content: "- [ ] keep the new plan" }]);
+
+    await request(app)
+      .put("/api/harness/sessions/session-1/blocks/plan")
+      .send({ content: "stale", expectedUpdatedAt: null, expectedBranchLeafId: null })
+      .expect(409);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(changed).toHaveLength(1);
+  });
+
   it("uses the session's effective auto-accept policy for explicit suggestions", async () => {
     const app = express();
     app.use(express.json());

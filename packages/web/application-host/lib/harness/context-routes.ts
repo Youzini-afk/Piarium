@@ -13,12 +13,14 @@ import {
   suggestSupersedes,
   type KnowledgeSuggestionsSettings,
 } from "./knowledge-suggestions.js";
+import type { Block } from "../knowledge/store.js";
 
 export interface HarnessContextRoutesOptions {
   getStore(sessionId: string): Promise<KnowledgeStore | null>;
   getBranchEntryIds(sessionId: string): Promise<string[]>;
   getUserStore?: () => Promise<KnowledgeStore>;
   getSuggestionSettings?: (sessionId: string) => Promise<KnowledgeSuggestionsSettings>;
+  onPlanChanged?: (sessionId: string, block: Block) => void | Promise<void>;
   onKnowledgeChanged?: (sessionId: string, scope: KnowledgeScope) => void;
   requireAuth?: RequestHandler;
 }
@@ -41,6 +43,7 @@ export function registerHarnessContextRoutes(
     getBranchEntryIds,
     getUserStore,
     getSuggestionSettings,
+    onPlanChanged,
     onKnowledgeChanged,
     requireAuth = noAuth,
   }: HarnessContextRoutesOptions,
@@ -110,18 +113,22 @@ export function registerHarnessContextRoutes(
         response.status(409).json({ error: "Session branch changed while the block was being edited", code: "branch-conflict" });
         return;
       }
+      const block = await store.upsertBlock({
+        sessionId,
+        label,
+        content,
+        updatedBy: "user",
+        expectedUpdatedAt,
+        branchEntryIds,
+        sourceLeafId: branchLeafId,
+      });
       response.json({
         sessionId,
-        block: await store.upsertBlock({
-          sessionId,
-          label,
-          content,
-          updatedBy: "user",
-          expectedUpdatedAt,
-          branchEntryIds,
-          sourceLeafId: branchLeafId,
-        }),
+        block,
       });
+      if (label === "plan") {
+        void Promise.resolve().then(() => onPlanChanged?.(sessionId, block)).catch(() => undefined);
+      }
     } catch (error) {
       if (error instanceof KnowledgeBlockConflictError) {
         response.status(409).json({ error: error.message, current: error.current });

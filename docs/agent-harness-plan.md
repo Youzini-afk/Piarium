@@ -198,8 +198,9 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 
 SessionSnapshot 与 Context 已显示配置/有效模式、session override 和最近 keeper/compaction 失败；Host 拒绝原因进入失败信息，
 Settings 可修复坏配置。不新增辅助费用或 Token 看板，普通会话已有费用/Token 展示保留（D-080）。
-不承诺相同模型就命中缓存。事件加速已接真实用户命令完成（Host `memory.nudge` → 现有 keeper）；沿已有 token 增长/单个在飞/
-cooldown 去抖调度，有积压才工作。steering、计划编辑、子返回仍可按同一 keeper 入口后补，不另建循环。用户“记住这个”不被普通去抖忽略。
+不承诺相同模型就命中缓存。事件加速已接真实用户命令完成，以及已接受的 steering、用户已保存的计划编辑和本次 Run 的新返回报告
+（D-238，Host `memory.nudge` → 现有 keeper）。沿已有 token 增长/单个在飞/cooldown 调度，等待期间保留材料，重复事件不启动
+空调用；嵌套结果只到仍存活的父会话，不把 execution workspace 当成知识所有者。用户“记住这个”不被普通去抖忽略。
 
 版本/分支/CAS、partial apply、主历史无 memory_edit、默认/关闭/assist、实时模式与失败投影已由 protocol、Host 和真 Pi
 faux-provider 测试覆盖。剩余触发优化随实际事件入口推进，不做付费协议/缓存对照，不等测试者批准。

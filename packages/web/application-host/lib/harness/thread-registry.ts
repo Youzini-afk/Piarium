@@ -172,6 +172,8 @@ export interface ThreadRegistryOptions {
   hostId: string;
   onThreadChanged?: (workspaceId: string, parent: ThreadParent, thread: Thread, activeRun: ThreadRun | null) => void;
   onThreadDone?: (workspaceId: string, parent: ThreadParent, threadId: string, report: ThreadReport) => void;
+  /** A report newly persisted by this completed Run, including failure/cancellation. */
+  onThreadReturned?: (workspaceId: string, parent: ThreadParent, threadId: string, run: ThreadRun, report: ThreadReport) => void;
   onThreadDequeued?: (workspaceId: string, parent: ThreadParent, thread: Thread) => Promise<void>;
   onObserverError?: (error: unknown) => void;
   onThreadRemoved?: (workspaceId: string, threadId: string) => void | Promise<void>;
@@ -234,6 +236,7 @@ interface MutationResult<T> {
   value: T;
   changed: Thread[];
   done?: Array<{ thread: Thread; report: ThreadReport }>;
+  returned?: Array<{ thread: Thread; run: ThreadRun; report: ThreadReport }>;
   wakeParents?: ThreadParent[];
   write?: boolean;
 }
@@ -1420,6 +1423,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           reportObserverError(error);
         }
       }
+      const returned = mutation.returned?.find((entry) => entry.thread.id === thread.id);
+      if (returned) {
+        try {
+          options.onThreadReturned?.(catalog.workspaceId, thread.parent, thread.id, structuredClone(returned.run), structuredClone(returned.report));
+        } catch (error) {
+          reportObserverError(error);
+        }
+      }
       const callbacks = waiters.get(scopeKey(catalog.workspaceId, thread.parent));
       if (callbacks) {
         for (const callback of callbacks) {
@@ -1664,6 +1675,12 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(findThread(catalog, threadId));
   };
 
+  const getThreadSnapshot = async (workspaceId: string, threadId: string): Promise<{ thread: Thread; activeRun: ThreadRun | null } | null> => {
+    const catalog = await loadWorkspace(workspaceId);
+    const thread = findThread(catalog, threadId);
+    return thread ? structuredClone({ thread, activeRun: activeRunFor(catalog, thread) }) : null;
+  };
+
   const getThreadForSession = async (workspaceId: string, sessionId: string): Promise<Thread | null> => {
     const catalog = await loadWorkspace(workspaceId);
     for (const thread of catalog.threads) {
@@ -1853,6 +1870,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         value: thread,
         changed: [thread],
         ...(outcome === "success" && report ? { done: [{ thread, report }] } : {}),
+        ...(outcome !== "lost" && report ? { returned: [{ thread, run, report }] } : {}),
       };
     });
     await maybeDequeue(workspaceId, result.parent).catch(reportObserverError);
@@ -2495,6 +2513,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     assertDispatchAllowed,
     getThread,
     getThreadById,
+    getThreadSnapshot,
     listThreads,
     listWorkspaceThreads,
     listWorkspaceIds,

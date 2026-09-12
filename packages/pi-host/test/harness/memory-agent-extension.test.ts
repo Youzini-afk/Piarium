@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Context } from "@earendil-works/pi-ai";
 import { createMemoryAgentExtension } from "../../src/harness/memory-agent-extension.js";
+import type { MemoryEditOp } from "@piarium/protocol";
 
 const waitFor = async (predicate: () => boolean): Promise<void> => {
   const deadline = Date.now() + 2_000;
@@ -120,7 +121,7 @@ describe("memory agent extension", () => {
       message: { role: "assistant", content: [] },
       toolResults: [],
     } as never, { getContextUsage: () => ({ tokens: 50_000 }) } as never);
-    assert.equal(registrations, 3);
+    assert.equal(registrations, 4);
     assert.equal(calls, 0);
   });
 
@@ -308,5 +309,146 @@ describe("memory agent extension", () => {
     assert.match(material, /\\x3c\/user-terminal\\x3e/);
     assert.equal(material.includes("</user-terminal>"), false);
     assert.equal(material.match(/user-terminal exit/g)?.length, 1);
+  });
+
+  it("passes steering, plan, and thread return material to the keeper and deduplicates retries", async () => {
+    const handlers = new Map<string, (event: never, ctx: never) => unknown>();
+    let modelCalls = 0;
+    let finishFirst!: () => void;
+    const firstModel = new Promise<null>((resolve) => { finishFirst = () => resolve(null); });
+    const materials: string[] = [];
+    const extension = createMemoryAgentExtension({
+      bridge: {
+        request: async (method: string) => method === "memory.blocks.get"
+          ? { blocks: [] }
+          : { applied: 0, rejected: 0, errors: [], changedBlocks: false },
+      } as never,
+      getMode: () => "assist",
+      settings: { interval: 1, blockBudgetTokens: 2_000, totalBudgetTokens: 12_000, minContextTokens: 0, cooldownMs: 20, maxInterval: 20_000 },
+      callModel: async (_model, context) => {
+        modelCalls += 1;
+        if (modelCalls === 1) return firstModel;
+        materials.push(String(context.messages.at(-1)?.content ?? ""));
+        return null;
+      },
+    });
+    extension({ on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler) } as never);
+    handlers.get("context")?.({ messages: [{ role: "user", content: "work", timestamp: 1 }] } as never, {} as never);
+    handlers.get("turn_end")?.({ turnIndex: 1, message: { role: "assistant", content: [] }, toolResults: [] } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    await waitFor(() => modelCalls === 1);
+
+    const event = { id: "plan:1", kind: "plan-edit" as const, text: "User plan <updated>" };
+    await extension.nudge({ reason: "plan-edit", materials: [event] });
+    await extension.nudge({ reason: "plan-edit", materials: [event] });
+    await extension.nudge({
+      reason: "thread-return",
+      materials: [{ id: "thread:1", kind: "thread-return", text: "Child returned: done" }],
+    });
+    finishFirst();
+    await waitFor(() => modelCalls === 2);
+    assert.equal(materials.length, 1);
+    assert.match(materials[0]!, /plan-edit.*User plan \\x3cupdated\\x3e/);
+    assert.match(materials[0]!, /thread-return.*Child returned: done/);
+    assert.equal(materials[0]!.includes("<updated>"), false);
+    assert.deepEqual(await extension.nudge({ reason: "plan-edit", materials: [event] }), {
+      accepted: false,
+      reason: "duplicate",
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, 10));
+    assert.equal(modelCalls, 2, "a repeated material must not start an empty keeper run");
+  });
+
+  it("retains event material that arrives before the first turn context", async () => {
+    const handlers = new Map<string, (event: never, ctx: never) => unknown>();
+    let received = "";
+    const extension = createMemoryAgentExtension({
+      bridge: {
+        request: async (method: string) => method === "memory.blocks.get"
+          ? { blocks: [] }
+          : { applied: 0, rejected: 0, errors: [], changedBlocks: false },
+      } as never,
+      getMode: () => "assist",
+      settings: { interval: 100, blockBudgetTokens: 2_000, totalBudgetTokens: 12_000, minContextTokens: 10_000, cooldownMs: 0, maxInterval: 20_000 },
+      callModel: async (_model, context) => {
+        received = String(context.messages.at(-1)?.content ?? "");
+        return null;
+      },
+    });
+    extension({ on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler) } as never);
+    await extension.nudge({
+      reason: "plan-edit",
+      materials: [{ id: "plan-before-turn", kind: "plan-edit", text: "plan exists before first turn" }],
+    });
+    handlers.get("context")?.({ messages: [{ role: "user", content: "first", timestamp: 1 }] } as never, {} as never);
+    handlers.get("turn_end")?.({ turnIndex: 1, message: { role: "assistant", content: [] }, toolResults: [] } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    await waitFor(() => received.length > 0);
+    assert.match(received, /plan-before-turn/);
+    assert.match(received, /plan exists before first turn/);
+  });
+
+  for (const navigate of [true, false]) it(`keeps keeper authority across ${navigate ? "branch navigation" : "ordinary branch growth"}`, async () => {
+    const handlers = new Map<string, (event: never, ctx: never) => unknown>();
+    let branchEntryIds = ["old-root", "old-leaf"];
+    let modelCalls = 0;
+    let finishFirst!: () => void;
+    const firstModel = new Promise<MemoryEditOp[]>((resolve) => {
+      finishFirst = () => resolve([{ op: "create", block: "progress", content: "first keeper result" }]);
+    });
+    const contexts: string[] = [];
+    const applies: unknown[] = [];
+    const extension = createMemoryAgentExtension({
+      bridge: {
+        request: async (method: string, params: unknown) => {
+          if (method === "memory.blocks.get") return { blocks: [] };
+          applies.push(params);
+          return { applied: 0, rejected: 0, errors: [], changedBlocks: false };
+        },
+      } as never,
+      getMode: () => "assist",
+      settings: { interval: 1, blockBudgetTokens: 2_000, totalBudgetTokens: 12_000, minContextTokens: 0, cooldownMs: 0, maxInterval: 20_000 },
+      getBranchEntryIds: () => branchEntryIds,
+      callModel: async (_model, context) => {
+        modelCalls += 1;
+        contexts.push(JSON.stringify(context.messages));
+        if (modelCalls === 1) return firstModel;
+        return null;
+      },
+    });
+    extension({ on: (event: string, handler: (event: never, ctx: never) => unknown) => handlers.set(event, handler) } as never);
+
+    handlers.get("context")?.({ messages: [{ role: "user", content: "old branch", timestamp: 1 }] } as never, {} as never);
+    handlers.get("turn_end")?.({ turnIndex: 1, message: { role: "assistant", content: [] }, toolResults: [] } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    await waitFor(() => modelCalls === 1);
+
+    await extension.nudge({
+      reason: "plan-edit",
+      materials: [{ id: "old-plan", kind: "plan-edit", text: "old branch plan" }],
+    });
+    branchEntryIds = navigate ? ["old-root", "new-leaf"] : ["old-root", "old-leaf", "new-leaf"];
+    if (navigate) handlers.get("session_tree")?.({ newLeafId: "new-leaf", oldLeafId: "old-leaf" } as never, {} as never);
+    await extension.nudge({
+      reason: "plan-edit",
+      materials: [{ id: "new-plan", kind: "plan-edit", text: "new branch plan" }],
+    });
+    handlers.get("context")?.({ messages: [{ role: "user", content: "new branch", timestamp: 2 }] } as never, {} as never);
+    handlers.get("turn_end")?.({ turnIndex: 1, message: { role: "assistant", content: [] }, toolResults: [] } as never, {
+      getContextUsage: () => ({ tokens: 1 }),
+      getSystemPrompt: () => "system",
+    } as never);
+    finishFirst();
+    await waitFor(() => modelCalls === 2);
+    assert.equal(applies.length, navigate ? 0 : 1, "navigation discards old work, ordinary continuation preserves it");
+    assert.match(contexts[1]!, /new branch plan/);
+    assert.match(contexts[1]!, /new branch/);
+    if (navigate) assert.equal(contexts[1]!.includes("old branch"), false);
   });
 });

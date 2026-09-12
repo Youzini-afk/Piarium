@@ -46,6 +46,7 @@ import {
   type HarnessEmbedParams,
   type HarnessRerankDocument,
   type HarnessRerankParams,
+  type MemoryNudgeMaterial,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
@@ -98,6 +99,31 @@ const readMemoryNudgeCommands = (value: unknown): Array<{
       exitCode: exitCode as number,
       ...(typeof record.cwd === "string" ? { cwd: record.cwd } : {}),
     };
+  });
+};
+
+const readMemoryNudgeMaterials = (value: unknown): MemoryNudgeMaterial[] => {
+  if (!Array.isArray(value)) {
+    throw new HostError("invalid_params", "materials must be an array");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new HostError("invalid_params", `materials[${index}] must be an object`);
+    }
+    const record = item as Record<string, unknown>;
+    const id = record.id;
+    const kind = record.kind;
+    const text = record.text;
+    if (typeof id !== "string" || id.length === 0) {
+      throw new HostError("invalid_params", `materials[${index}].id must be a non-empty string`);
+    }
+    if (kind !== "steering" && kind !== "plan-edit" && kind !== "thread-return") {
+      throw new HostError("invalid_params", `materials[${index}].kind is invalid`);
+    }
+    if (typeof text !== "string" || text.length === 0) {
+      throw new HostError("invalid_params", `materials[${index}].text must be a non-empty string`);
+    }
+    return { id, kind, text };
   });
 };
 
@@ -887,14 +913,23 @@ export class HostController {
         };
       case "memory.nudge": {
         const reason = readString(params, "reason");
-        if (reason !== "user-command") {
-          throw new HostError("invalid_params", "reason must be user-command");
+        if (reason !== "user-command" && reason !== "steering" && reason !== "plan-edit" && reason !== "thread-return") {
+          throw new HostError("invalid_params", "reason must be user-command, steering, plan-edit, or thread-return");
         }
         const rawCommands = params.commands;
         const commands = rawCommands === undefined ? undefined : readMemoryNudgeCommands(rawCommands);
+        const rawMaterials = params.materials;
+        const materials = rawMaterials === undefined ? undefined : readMemoryNudgeMaterials(rawMaterials);
+        if (reason !== "user-command" && (!materials || materials.length === 0)) {
+          throw new HostError("invalid_params", `${reason} memory nudges require observed materials`);
+        }
+        if (reason !== "user-command" && materials?.some((material) => material.kind !== reason)) {
+          throw new HostError("invalid_params", `${reason} memory nudge material kind does not match its reason`);
+        }
         return this.#sessionHost.nudgeMemory(readString(params, "sessionId"), {
-          reason: "user-command",
+          reason,
           ...(commands === undefined ? {} : { commands }),
+          ...(materials === undefined ? {} : { materials }),
         });
       }
       case "agent.abort":
