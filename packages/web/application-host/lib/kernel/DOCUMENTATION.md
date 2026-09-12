@@ -2,10 +2,12 @@
 
 The Application Host owns one `KernelClient` for its lifetime. `KernelClient.start()` spawns the
 real `piarium-kernel` executable, performs the build/protocol/epoch/grant handshake, and keeps the private
-length-framed stdin/stdout transport separate from stderr. Large blob uploads use ordered data chunks with
-backpressure; `AbortSignal` cancellation stops admission or the active kernel operation. `stop()` sends the
-ordered shutdown request and waits for the child to exit. A missing executable, protocol mismatch, malformed
-response, revoked grant, or child exit is an explicit Host failure; it never selects the old backend as a fallback.
+length-framed stdin/stdout transport separate from stderr. The kernel reports a compiled build identity and
+target; packaged Hosts verify the adjacent manifest and executable SHA-256 before spawning it. Large blob
+uploads use ordered data chunks through a bounded request/response transport; `AbortSignal` cancellation
+stops admission or the active kernel operation. `stop()` sends the ordered shutdown request and waits for the
+child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
+an explicit Host failure; it never selects the old backend as a fallback.
 
 ## Responsibility table
 
@@ -18,6 +20,13 @@ response, revoked grant, or child exit is an explicit Host failure; it never sel
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | R1 domain API (`branch.*`, `storage.*`) |
 | Recovery operation/checkpoint records | Rust kernel operation API | R1 idempotent operation records and durable phases |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
+
+Every product-domain call uses an immutable `KernelGrantHandle` obtained for the session/Thread/Run. The
+client's Host-management grant is limited to startup, health, grant management and explicit global maintenance;
+it is not silently substituted for an actor grant. Rust resolves workspace ownership from the durable resource
+(`branch`, `pin`, `operation`, `recovery`, stream or object owner) and applies path scopes to all expanded
+entries. `KernelClient.scoped(handle)` is a convenience that injects that same explicit handle into each
+domain method; it is not a mutable global identity.
 
 R0 is wired from `application-host/index.ts` for Web/serve and Electron's embedded Host. Electron
 stages the executable outside `app.asar`; Web packaging stages it in the package `kernel/` directory.

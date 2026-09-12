@@ -5684,3 +5684,21 @@ Host KernelClient、R0/R1 status 与本模块文档。完整 consumer cutover �
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-256 | implementation（R0/R1 首个纵切返工） | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |
+
+### D-257 · 2026-09-13 · R0/R1 基础返工与重新验收边界
+
+类型：实施纠正与状态收口；部分取代 D-256 的交付状态表述，不改写 D-256 正文
+
+决定：在保留 D-256 全部提交的前提下，补齐承载真实消费者所需的基础不变量：(1) KernelClient 只保留 Host-management grant，产品域调用显式携带不可变 scoped grant；Rust 从持久 branch/pin/operation/recovery/stream/object-owner 身份解析 workspace，并在所有展开读取上执行 path scope；(2) stdin request 与 stdout response 使用有界 channel，控制帧有上限，正文只使用 begin/data/finish 流，撤销先做 admission 阻断并取消排队 token，cancel 核对完整 epoch/grant/request 归属；(3) kernel 返回编译期 build identity/target/arch，staging manifest 携带 protocol、kernel version、target、arch、identity 与 SHA-256，Host/after-pack 逐项核对；(4) storage 增加对象临时 owner/branch attachment、授权的 root/revision/pin `baseRef` fork、pin/recovery identity、publish CAS、format v5 原子初始化、pending GC containment 与 deep relation/AVL/path 检查。
+
+原因：D-256 的纵切已经能在本机子进程完成一组 Rust storage 操作，但旧 client 的全局 actor 身份、排队 revoke、单帧正文、Host buildVersion 回显、对象 owner 缺失和跨 root 授权缺口会在真实 TS consumer 接入后产生跨 workspace 读取、假取消、伪匹配或不可对账的持久事实。先修这些基础契约，才能一次性切换 WorkingState/Recovery/结果/草稿/evidence/materializer，不建设 shadow backend 或兼容 importer。
+
+影响：`kernel/crates/piarium-kernel/src/{runtime,main,protocol,authority,model,storage_schema}.rs`、generated protocol schema/DTO、KernelClient、build/after-pack 脚本与 R0/R1 status/documentation 更新。当前 Application Host 仍只负责 kernel 生命周期；Thread/Run catalog、Registry 缓冲、Pi 会话/模型/凭据、TriviumDB/adapter 与全部产品 storage consumers 维持原所有权。R2–R6 不因本条完成。
+
+证据边界：Windows 本机真实 release 子进程覆盖 scoped scope 读取、owner/跨 workspace、revoke queued write、cancel、restart、pin/GC、baseRef 和事务失败重试；`cargo check --workspace --locked`、generated DTO `--check`、application-host type-check 与 staging manifest smoke 已执行。macOS/Linux 真机、断电级故障、完整 Electron cross-target/package smoke 和产品 consumer cutover 尚未执行，R0 记 Partial（implemented/wired），R1 记 implemented（kernel foundations），不标 wired/proven/default-on。
+
+## D-257 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-257 | implementation correction / partial re-acceptance boundary | —；本条只收口 D-256 后的基础缺口和状态，不改 D-256 正文 | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |

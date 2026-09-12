@@ -1,6 +1,6 @@
 # Piarium native recovery journal
 
-Status: delivered; R1 per-path coverage implemented 2026-09-03; Rust kernel R0 runtime and R1 storage vertical are wired, while the full recovery/WorkingState consumer cutover remains tracked in agent-harness-status.md
+Status: delivered; R1 per-path coverage implemented 2026-09-03; Rust kernel R0/R1 foundations are implemented and locally exercised, while the Application Host still has no recovery/WorkingState consumer cutover
 
 Last updated: 2026-09-12
 
@@ -15,13 +15,13 @@ package.
 The recovery unit is an affected-file change set. A message checkpoint is not a complete manifest of
 the workspace and does not schedule a background archive.
 
-D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the implementation owner of the
-built-in provider's file resources, content/reference storage, and recovery operations. R0 is now wired
-through the real Host child process and R1's kernel storage vertical owns immutable roots, objects,
-revisions, pins, CAS and durable operations. The public recovery service and affected-path semantics
-remain; Document Registry remains the mutable buffer owner and Pi remains the conversation owner. The
-remaining consumer-by-consumer cutover is recorded only in [agent-harness-status.md](agent-harness-status.md)
-and [agent-harness-plan.md](agent-harness-plan.md).
+D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the eventual implementation owner of the
+built-in provider's file resources, content/reference storage, and recovery operations. The current Host starts
+the real child process and the R1 kernel storage foundation owns immutable roots, objects, revisions, pins, CAS
+and durable operations, but recovery/WorkingState consumers have not switched to that adapter. The public
+recovery service and affected-path semantics remain; Document Registry remains the mutable buffer owner and Pi
+remains the conversation owner. The consumer-by-consumer cutover is recorded only in
+[agent-harness-status.md](agent-harness-status.md) and [agent-harness-plan.md](agent-harness-plan.md).
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor
 consulted by Piarium's native rollback path.

@@ -698,8 +698,8 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
 | --- | --- | --- |
-| R0 | ✓ Cargo workspace（`kernel/rust-toolchain.toml` 1.97.1）、私有 kernel 进程、生成 DTO、build/epoch/grant/generation 握手、request/cancel/data 分帧、分块正文/背压/取消/关闭、Electron/Web staging | Host 启动会管理真实子进程；跨平台真机与签名产物仍需 R6 分别验收 |
-| R1 | ✓ kernel storage vertical：typed path state、AVL immutable root/trie、blob durability、固定 revision、branch/CAS/事务 operation、pin/GC/recovery root、durable cleanup retry | TS WorkingState/Recovery/结果/草稿/evidence 的全部消费者尚未完成切换；旧直接 writer 仍按 status 标记，不能提前宣称 R1 全部完成 |
+| R0 | Partial（implemented + wired；待本轮重新验收）Cargo workspace（`kernel/rust-toolchain.toml` 1.97.1）、私有 kernel 进程、generated DTO、build/epoch/grant/generation 握手、request/cancel/data 分帧、分块正文/有界 transport、取消/关闭、Electron/Web staging | Host 已启动真实子进程；compiled identity/manifest、跨平台真机与签名产物仍需分别验收 |
+| R1 | implemented（kernel storage foundations；尚未 wired/proven/default-on）typed path state、AVL immutable root/trie、blob durability、固定 revision、branch/CAS/事务 operation、pin/GC/recovery root、durable cleanup retry | TS WorkingState/Recovery/结果/草稿/evidence 的全部消费者尚未完成切换；旧直接 writer 仍按责任表保留，不能提前宣称 R1 全部完成 |
 | R2 | 磁盘资源 gate、Documents 后端、恢复/Integration/混合 surface 阶段机 | edit/write/apply_patch、保存/文件 CRUD、merge/undo/redo、内置 recovery provider；移除重复锁和文件 apply/补偿实现 |
 | R3 | Git/非 Git 基线、物化切换、执行结果收集、CoW、回收/空间、资源释放 | dispatch/queued/nested/settle/archive/restore/history release/delete；移除旧 thread-worktree 和 materializer 的对应实际操作 |
 | R4 | PTY/命令、外部语言/调试/任务进程和原始输出的统一资源后端 | 用户终端、bash/get_output/write/kill、LSP/DAP/任务/测试启动器；移除对同一进程的旧 provider/进程表 |

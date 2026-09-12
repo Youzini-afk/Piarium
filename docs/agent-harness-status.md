@@ -18,7 +18,7 @@ Last updated: 2026-09-13
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-252 已采纳 Rust 系统内核架构；R0 与 R1 Rust storage vertical 已实现并由本机 release 子进程验证，阶段 R 整体仍未完成。**
+**D-252 已采纳 Rust 系统内核架构；R0/R1 基础已有实现和本机 release 子进程证据，但在本轮重新验收前只记为 partial/implemented，阶段 R 整体仍未完成。**
 目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
 完整 TS consumer cutover、R2–R6 和跨平台/发行证据仍未交付，不把 D-246–D-251 的执行报告视为 Rust 验收通过。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
@@ -168,8 +168,8 @@ R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，�
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
-| R0 协议与进程 | implemented / wired / proven（Windows 本机 release） | `kernel/rust-toolchain.toml` 钉住 1.97.1；生成 DTO（含 request/cancel/data 帧）、真实 framed 子进程、build/protocol/epoch/grant/generation 握手、分块正文、背压、取消、关闭和 Host 启停；macOS/Linux 真机与签名产物未测 |
-| R1 状态与存储 | implemented / wired / proven（Rust storage vertical；生产消费者 cutover 未完成） | typed path state、AVL 持久索引、固定 revision、CAS/事务 operation、pin/delete/GC、durable pending cleanup、grant-owned object read、recovery root retention；TS WorkingState/Recovery 全消费者尚未删除旧 JSON/SQLite writer |
+| R0 协议与进程 | Partial（implemented / wired；尚未重新标 proven） | `kernel/rust-toolchain.toml` 钉住 1.97.1；generated method DTO/request union、真实 framed 子进程、有界 transport、compiled kernel identity/manifest、epoch/grant/generation 握手、分块正文、取消、关闭和 Host 启停已有实现；跨平台真机、签名产物、stdout 断线和任意 cwd 包内发现仍需验收 |
+| R1 状态与存储 | implemented（kernel foundations；尚未 wired/proven/default-on） | typed path state、AVL 持久索引、固定 revision、CAS/事务 operation、pin/delete/GC、durable pending cleanup、workspace/path-scope 授权、object owner、baseRef fork、recovery root identity、deep relationship checks 已实现；Host 尚无 WorkingState/Recovery/结果/草稿/evidence 的生产 cutover，旧 JSON/SQLite writer 仍由原所有者维护 |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -204,6 +204,21 @@ TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有
 `working-state/working-state-store.ts`、`recovery/journal-catalog.ts` 仍是生产消费者的旧直接 writer，本轮已把它们的
 责任和 cutover seam 记录到 `packages/web/application-host/lib/kernel/DOCUMENTATION.md`，但还没有把全部 dispatch/branchWrite/
 recovery/evidence/materializer 调用替换为 kernel adapter；因此 R1 不标 `proven/default-on`，也没有声称删除了旧 writer。
+
+**R0/R1 重新验收边界（D-257，2026-09-13）**：本轮修正了 D-256 纵切中仍不够安全的基础契约，D-256 的“proven”状态在本表中不再沿用。
+
+- R0 现在使用真实 release 子进程和有界 request/response channel（stdin admission queue 及 response queue 各 64 个 envelope）；控制帧上限为 16 MiB，正文只走 `putBlob.begin` → ordered data frames → `putBlob.finish`，旧单帧 `storage.putBlob` 已删除。stdout 写失败会让 kernel 退出，Host 清空半帧并把旧 epoch/handle 置失效。revoke admission 在 worker 前阻断同 grant 的新请求并取消尚未开始的排队 token；cancel 只接受完整匹配的 epoch/grant/request envelope。
+- Host 不再保存可变 actor grant。`KernelGrantHandle` 是不可变、绑定 client token 与 kernel epoch 的 scoped handle；Host-management grant 只用于启动、health、grant 管理和明确的全局维护。Rust 从 branch/pin/operation/recovery/stream/object-owner 解析 owning workspace，并在 `branch.read`、`pin.read`、`branch.diff`、selected read 与 snapshot 上检查范围。编译进 kernel 的 build identity、target/arch 与 staging manifest/SHA-256 分开于 Host application buildVersion，不能由 Host 回显伪造。
+- R1 storage 基础补上了临时 object owner 与 branch attachment、`baseRef` root/revision/pin O(1) fork、pin identity 冲突、recovery record/root identity、publish expected CAS、format v5 原子初始化、pending GC hash containment、deep relation/AVL/path/object-owner 检查。工作区 B 不能仅凭 A 的 hash 把对象挂到自己的 branch 后读取。
+- 真实 Host→Rust release 反例已覆盖：固定 revision/pin/delete/GC、finish 失败重试、scoped includeEntries/pin/diff、跨 workspace object read、queued write 在 revoke 后不提交、取消后 kernel 继续可用、重启后字节/hash 保持。验证只证明本机实现和路径；macOS/Linux 真机、断电级故障、Electron 真正 cross-target 产物和完整包内任意 cwd smoke 仍未测。
+- 一个已有 `format_version=future-99` 的 catalog 通过只读 probe 被拒绝，catalog 字节与表结构保持不变；这验证了 future-format 拒绝不会先写当前 schema。断电中断新库初始化仍未做硬件级注入。
+- 同一 release 子进程重启时注入恶意 `pending_gc_files.path` 的反例保留了 storage root 外文件，并将 cleanup 标为 `degraded`/failed；第二 Host 在 owner lock 失败时也未删除第一 Host 的 `.stream` staging 文件。
+
+当前生产接线仍是 Application Host 启动并管理 kernel；`Thread/Run` catalog 仍由 TS、未保存缓冲仍由 Document Registry、Pi session/model/credential 仍由 Pi、知识/向量仍由 TriviumDB/adapter。WorkingState/Recovery/结果/草稿/retrieval evidence/materializer 的产品消费者尚未切换到 kernel adapter，因此不把 R1 记为 wired/proven/default-on，也不删除其现有 writer。R2–R6 保持未完成。
+
+本轮同一 Windows release 子进程的生产 `KernelClient → Rust → SQLite/object store` 取样（健康统计只读，不是 trie helper）：128/1024/4096 条目初建后节点数为 133/1029/4101，单路径 CoW 写后为 145/1044/4118，新增 12/15/17 个节点；node payload 增量为 2670/3545/4129 字节；初建/单路径写入耗时分别为 13.19/3.95 ms、82.35/3.73 ms、343.73/3.99 ms。该证据只说明写入没有复制整棵兄弟目录；它不是受控基线、提速倍数、硬配额或跨平台结论。对象文件、SQLite WAL 与 Host/kernel 内存的完整对照仍未测。
+
+同一路径的 4096-entry 空 `baseRef` fork 返回相同 root，节点数 4101→4101；这是 root identity/SQLite 计数证据，不是把整树展开后再比较的 helper 统计。
 
 ## 当前缺口与后续顺序
 

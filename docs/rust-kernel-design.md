@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0 is proven on the local release path and the R1 Rust storage vertical is proven with remaining consumer cutover recorded in status
+Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, but re-acceptance is still partial: Host starts the kernel while product storage consumers remain on their existing owners
 
 Last updated: 2026-09-13
 
@@ -8,6 +8,10 @@ Last updated: 2026-09-13
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
+
+本轮 D-257 只重新验收 R0/R1 基础：Host 已能管理真实 kernel 进程，Rust storage foundation 已具备
+scope/owner/CAS/pin/recovery/GC 不变量；WorkingState、Recovery、结果、草稿与 evidence 的产品消费者
+仍未切换，R2–R6 不因本轮实现而完成。
 
 ## 1. 产品与阶段目标
 
