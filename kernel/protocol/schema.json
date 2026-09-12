@@ -5,6 +5,104 @@
   "request": {"v": 1, "kind": "request", "id": "request-id", "method": "method", "params": {}},
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "event": {"v": 1, "kind": "event", "seq": 1, "event": "event", "data": {}},
+  "dto": {
+    "KernelRequest": {
+      "fields": {
+        "v": {"type": "protocolVersion"},
+        "kind": {"type": "\"request\" | \"cancel\""},
+        "id": {"type": "string"},
+        "method": {"type": "KernelMethod", "optional": true},
+        "params": {"type": "Record<string, unknown>", "optional": true},
+        "epoch": {"type": "string", "optional": true}
+      }
+    },
+    "KernelError": {
+      "fields": {
+        "code": {"type": "string"},
+        "message": {"type": "string"},
+        "retryable": {"type": "boolean"}
+      }
+    },
+    "KernelResponse": {
+      "generic": "T = unknown",
+      "fields": {
+        "v": {"type": "protocolVersion"},
+        "kind": {"type": "\"response\""},
+        "id": {"type": "string"},
+        "ok": {"type": "boolean"},
+        "result": {"type": "T", "optional": true},
+        "error": {"type": "KernelError", "optional": true}
+      }
+    },
+    "KernelHandshakeResult": {
+      "fields": {
+        "protocolVersion": {"type": "protocolVersion"},
+        "kernelVersion": {"type": "string"},
+        "kernelEpoch": {"type": "string"},
+        "hostId": {"type": "string"},
+        "storageRoot": {"type": "string"},
+        "capabilities": {"type": "string[]"}
+      }
+    },
+    "KernelBranchState": {
+      "fields": {
+        "kind": {"type": "string"},
+        "byteLength": {"type": "number", "optional": true},
+        "mode": {"type": "number", "optional": true},
+        "objectHash": {"type": "string", "optional": true},
+        "symlinkTarget": {"type": "string", "optional": true}
+      },
+      "index": "[key: string]: unknown;"
+    },
+    "KernelEntry": {
+      "fields": {
+        "path": {"type": "string"},
+        "state": {"type": "KernelBranchState"}
+      }
+    },
+    "KernelBranchReadResult": {
+      "fields": {
+        "branchId": {"type": "string"},
+        "workspaceId": {"type": "string"},
+        "root": {"type": "string"},
+        "revision": {"type": "number"},
+        "headRevision": {"type": "number"},
+        "writeRevision": {"type": "number"},
+        "entries": {"type": "KernelEntry[]"}
+      }
+    },
+    "KernelWriteResult": {
+      "fields": {
+        "status": {"type": "\"committed\" | \"conflict\""},
+        "writeRevision": {"type": "number"},
+        "root": {"type": "string"}
+      }
+    },
+    "KernelBlobResult": {
+      "fields": {
+        "hash": {"type": "string"},
+        "byteLength": {"type": "number"}
+      }
+    },
+    "KernelObjectSlice": {
+      "extends": ["KernelBlobResult"],
+      "fields": {
+        "offset": {"type": "number"},
+        "nextOffset": {"type": "number"},
+        "eof": {"type": "boolean"},
+        "bytesBase64": {"type": "string"}
+      }
+    },
+    "KernelHealthResult": {
+      "fields": {
+        "integrity": {"type": "string"},
+        "branches": {"type": "number"},
+        "nodes": {"type": "number"},
+        "blobs": {"type": "number"},
+        "storageRoot": {"type": "string"}
+      }
+    }
+  },
   "methods": {
     "kernel.handshake": "negotiate build, protocol, epoch, capabilities and storage identity",
     "kernel.ping": "health check",

@@ -5,13 +5,29 @@ const root = path.resolve(import.meta.dirname, '..');
 const schemaPath = path.join(root, 'kernel', 'protocol', 'schema.json');
 const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 const target = path.join(root, 'packages', 'web', 'application-host', 'lib', 'kernel', 'protocol.generated.ts');
-const source = fs.readFileSync(target, 'utf8');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
-const generated = source
-  .replace(/KERNEL_PROTOCOL_VERSION = \d+ as const;/u, `KERNEL_PROTOCOL_VERSION = ${schema.protocolVersion} as const;`)
-  .replace(/export type KernelMethod =[\s\S]*?;\n\nexport interface KernelRequest/u, `export type KernelMethod =\n${methods};\n\nexport interface KernelRequest`);
-if (generated === source && !source.includes(`KERNEL_PROTOCOL_VERSION = ${schema.protocolVersion} as const`)) {
-  throw new Error('Kernel protocol schema and generated DTO are out of sync');
-}
+const renderType = (type) => type === 'protocolVersion' ? 'typeof KERNEL_PROTOCOL_VERSION' : type;
+const renderDto = (name, spec) => {
+  const generic = spec.generic ? `<${spec.generic}>` : '';
+  const extendsClause = spec.extends?.length ? ` extends ${spec.extends.join(', ')}` : '';
+  const fields = Object.entries(spec.fields ?? {}).map(([field, descriptor]) => (
+    `  ${field}${descriptor.optional ? '?' : ''}: ${renderType(descriptor.type)};`
+  ));
+  if (spec.index) fields.push(`  ${spec.index}`);
+  return `export interface ${name}${generic}${extendsClause} {\n${fields.join('\n')}\n}`;
+};
+const generated = `/**
+ * Generated from \`kernel/protocol/schema.json\`.
+ * Do not hand-edit the wire shapes; run \`node scripts/generate-kernel-protocol.mjs\`.
+ */
+
+export const KERNEL_PROTOCOL_VERSION = ${schema.protocolVersion} as const;
+export const KERNEL_PROTOCOL_SCHEMA = "piarium.kernel.v${schema.protocolVersion}" as const;
+
+export type KernelMethod =
+${methods};
+
+${Object.entries(schema.dto ?? {}).map(([name, spec]) => renderDto(name, spec)).join('\n\n')}
+`;
 fs.writeFileSync(target, generated);
 console.log(`Kernel protocol ${schema.protocolVersion} is generated at ${path.relative(root, target)}`);

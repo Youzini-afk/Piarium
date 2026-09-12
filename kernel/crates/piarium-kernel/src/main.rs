@@ -556,10 +556,13 @@ impl Kernel {
     fn new() -> Self { Self { epoch: Uuid::new_v4().to_string(), host_id: None, storage_root: None, storage: None, handshaken: false } }
 
     fn handle(&mut self, request: &Value) -> Result<Option<Value>, KernelError> {
+        let version = request.get("v").and_then(Value::as_u64).unwrap_or(0);
+        if version != PROTOCOL_VERSION { return Err(KernelError::Protocol(format!("protocol version mismatch: host={version}, kernel={PROTOCOL_VERSION}"))); }
         let kind = request.get("kind").and_then(Value::as_str).unwrap_or("");
+        let id = request.get("id").and_then(Value::as_str).ok_or_else(|| KernelError::Protocol("request id is required".to_string()))?;
+        if id.is_empty() { return Err(KernelError::Protocol("request id is empty".to_string())); }
         if kind == "cancel" { return Ok(None); }
         if kind != "request" { return Err(KernelError::Protocol("expected request frame".to_string())); }
-        let id = request.get("id").and_then(Value::as_str).ok_or_else(|| KernelError::Protocol("request id is required".to_string()))?;
         let method = request.get("method").and_then(Value::as_str).ok_or_else(|| KernelError::Protocol("request method is required".to_string()))?;
         let params_value = request.get("params").cloned().unwrap_or_else(|| json!({}));
         if method == "kernel.handshake" {

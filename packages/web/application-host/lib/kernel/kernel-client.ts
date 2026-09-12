@@ -171,6 +171,10 @@ export class KernelClient {
       let response: KernelResponse;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse; }
       catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false })); return; }
+      if (response.v !== KERNEL_PROTOCOL_VERSION || response.kind !== "response" || typeof response.id !== "string" || typeof response.ok !== "boolean") {
+        this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }));
+        return;
+      }
       const pending = this.pending.get(response.id);
       if (!pending) continue;
       this.pending.delete(response.id);
