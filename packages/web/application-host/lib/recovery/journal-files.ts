@@ -170,16 +170,49 @@ const comparableMode = (kind: RecoveryStateLike['kind'], mode: number | undefine
   return (mode & 0o222) === 0 ? 0o444 : 0o666;
 };
 
+/**
+ * Platform-agnostic persistent mode identity (D-243 rework). The persistent
+ * hash must distinguish 0644 from 0755 on every platform — a capture-window
+ * mode change must trigger baseline-changed even on Windows, where the
+ * filesystem cannot express the executable bit. `comparableMode` is only for
+ * disk comparison (sameState); the persistent identity uses the full mode.
+ */
+const persistentMode = (kind: RecoveryStateLike['kind'], mode: number | undefined): number | null => {
+  if (kind === 'symlink' || mode === undefined) return null;
+  return mode;
+};
+
 export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringify({
   byteLength: state.byteLength ?? null,
   kind: state.kind,
-  mode: comparableMode(state.kind, state.mode),
+  mode: persistentMode(state.kind, state.mode),
   objectHash: state.objectHash ?? null,
   symlinkTarget: state.symlinkTarget ?? null,
 });
 
-export const sameState = (left: RecoveryStateLike, right: RecoveryStateLike): boolean =>
-  stateIdentity(left) === stateIdentity(right);
+/**
+ * Disk-surface comparison: uses the platform-comparable mode so a Git-recorded
+ * 0755 state compares equal to a Windows filesystem capture (0o666) when the
+ * writable dimension matches. The persistent identity (stateIdentity) still
+ * distinguishes them for hashes and fingerprints.
+ */
+export const sameState = (left: RecoveryStateLike, right: RecoveryStateLike): boolean => {
+  const leftId = JSON.stringify({
+    byteLength: left.byteLength ?? null,
+    kind: left.kind,
+    mode: comparableMode(left.kind, left.mode),
+    objectHash: left.objectHash ?? null,
+    symlinkTarget: left.symlinkTarget ?? null,
+  });
+  const rightId = JSON.stringify({
+    byteLength: right.byteLength ?? null,
+    kind: right.kind,
+    mode: comparableMode(right.kind, right.mode),
+    objectHash: right.objectHash ?? null,
+    symlinkTarget: right.symlinkTarget ?? null,
+  });
+  return leftId === rightId;
+};
 
 const statStable = (before: Stats, after: Stats): boolean => (
   before.dev === after.dev

@@ -59,17 +59,24 @@ export const parseCheckAttrOutput = (output: string): Map<string, GitPathAttribu
   return result;
 };
 
-/** Attributes for the given worktree-relative paths, in one git invocation. */
+/** Attributes for the given worktree-relative paths, in one git invocation.
+ * When `commit` is provided, attributes are resolved from that commit's tree
+ * (D-243 rework: base/result must each bind to their own commit's attributes,
+ * not the live worktree's `.gitattributes`). Uses `check-attr --source=<commit>`
+ * (Git 2.43+); if `--source` is unavailable the probe fails rather than
+ * silently using the wrong (live) attributes.
+ */
 export const probeGitAttributes = async (
   runGit: RunGitFn,
   cwd: string,
   paths: readonly string[],
+  commit?: string,
 ): Promise<Map<string, GitPathAttributes>> => {
   if (paths.length === 0) return new Map();
-  const { stdout } = await runGit(
-    ["check-attr", "-z", "--all", "--", ...paths.map(normalizeRepoPath)],
-    cwd,
-  );
+  const args = ["check-attr", "-z", "--all"];
+  if (commit) args.push(`--source=${commit}`);
+  args.push("--", ...paths.map(normalizeRepoPath));
+  const { stdout } = await runGit(args, cwd);
   return parseCheckAttrOutput(stdout);
 };
 
@@ -98,15 +105,20 @@ const lfsObjectPath = (gitCommonDir: string, oid: string, io: GitAdaptationIo): 
 /**
  * Bytes a Git worktree would hold for `blobHash` at `path`.
  *
- * - `filter=lfs`: the pointer blob is resolved against the local LFS object
- *   store (`<git-common-dir>/lfs/objects/…`) so import never downloads from a
- *   remote. A missing or corrupt local object degrades to the pointer bytes —
- *   exactly what `git checkout` writes when LFS content is unavailable — so
- *   `git status` stays clean either way.
- * - Any other filter, text/eol conversion, or working-tree-encoding:
- *   `git cat-file --filters --path=<path>` runs the configured smudge side,
- *   identical to checkout. If the configured filter cannot run the raw blob
- *   bytes are used — again what checkout leaves behind.
+ * - `filter=lfs`: `cat-file --filters` runs the configured smudge process,
+ *   respecting `GIT_LFS_SKIP_SMUDGE=1` exactly like checkout. When the
+ *   filter process is unavailable AND `GIT_LFS_SKIP_SMUDGE=1`, the local LFS
+ *   object store is probed directly (offline-safe, no remote download). A
+ *   missing or corrupt local object with `GIT_LFS_SKIP_SMUDGE=1` degrades to
+ *   the pointer bytes — exactly what checkout writes. A required filter that
+ *   cannot run and is not skip-smudged throws (D-243 rework: required filter
+ *   failure must fail/unavailable, not return raw blob).
+ * - text/eol conversion: done in-process from the probed attributes (D-243
+ *   rework: the conversion must bind to the commit's attributes, not the
+ *   live worktree's `.gitattributes`). LF→CRLF for `eol=crlf` or
+ *   `text=auto`+CRLF environment; CRLF→LF for `eol=lf`.
+ * - working-tree-encoding: `cat-file --filters` runs the configured smudge
+ *   side (encoding filters are less common and harder to replicate in-process).
  * - Unfiltered paths: raw blob bytes.
  */
 export const smudgeBlobForWorktree = async (
@@ -122,29 +134,55 @@ export const smudgeBlobForWorktree = async (
     return res.stdoutBuffer ?? Buffer.from(res.stdout, "utf8");
   };
   const normalized = normalizeRepoPath(path);
+  const lfsSkipSmudge = process.env.GIT_LFS_SKIP_SMUDGE === "1";
   if (attrs?.filter === "lfs") {
+    // Try the configured smudge process first (respects GIT_LFS_SKIP_SMUDGE).
+    try {
+      const res = await runGit(["cat-file", "--filters", `--path=${normalized}`, blobHash], cwd);
+      return res.stdoutBuffer ?? Buffer.from(res.stdout, "utf8");
+    } catch {
+      // The filter process failed. If GIT_LFS_SKIP_SMUDGE=1, probe the local
+      // LFS object store directly (offline-safe). Otherwise this is a
+      // required-filter failure — fail rather than return raw blob (D-243 rework).
+      if (!lfsSkipSmudge) {
+        throw new Error(`Required LFS filter failed for ${normalized} (blob ${blobHash}); set GIT_LFS_SKIP_SMUDGE=1 to probe local objects`);
+      }
+    }
+    // GIT_LFS_SKIP_SMUDGE=1: probe the local LFS object store.
     const blob = await raw();
     const pointer = parseLfsPointer(blob);
     if (!pointer) return blob;
     try {
       const commonDir = (await runGit(["rev-parse", "--git-common-dir"], cwd)).stdout.trim();
-      // --git-common-dir is relative to the work tree when it is just ".git".
       const absolute = commonDir && (io.isAbsolute ? io.isAbsolute(commonDir) : (commonDir.startsWith("/") || /^[A-Za-z]:[\\/]/.test(commonDir)));
       const base = !commonDir ? cwd : absolute ? commonDir : io.join(cwd, commonDir);
       const objectBytes = await io.readFile(lfsObjectPath(base, pointer.oid, io));
-      // Verify the local object before trusting it as the worktree view.
       if (createHash("sha256").update(objectBytes).digest("hex") === pointer.oid) return objectBytes;
       return blob;
     } catch {
       return blob;
     }
   }
-  const needsConversion = Boolean(
-    attrs?.filter
-      || attrs?.workingTreeEncoding
-      || attrs?.eol
-      || (attrs?.text !== undefined && attrs.text !== "unset"),
-  );
+  // text/eol conversion: done in-process from the probed attributes (D-243
+  // rework: bind to the commit's attributes, not the live worktree's).
+  if (attrs?.eol || (attrs?.text !== undefined && attrs.text !== "unset")) {
+    const blob = await raw();
+    const wantCrlf = attrs?.eol === "crlf"
+      || (attrs?.text === "auto" && process.platform === "win32" && attrs?.eol !== "lf")
+      || (attrs?.text === "set" && process.platform === "win32");
+    const wantLf = attrs?.eol === "lf";
+    if (wantCrlf) {
+      // LF → CRLF (do not double-convert existing CRLF)
+      return Buffer.from(blob.toString("binary").replace(/\r?\n/g, "\r\n"), "binary");
+    }
+    if (wantLf) {
+      // CRLF → LF
+      return Buffer.from(blob.toString("binary").replace(/\r\n/g, "\n"), "binary");
+    }
+    return blob;
+  }
+  // working-tree-encoding or other custom filters: use cat-file --filters.
+  const needsConversion = Boolean(attrs?.filter || attrs?.workingTreeEncoding);
   if (!needsConversion) return raw();
   try {
     const res = await runGit(["cat-file", "--filters", `--path=${normalized}`, blobHash], cwd);

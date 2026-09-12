@@ -127,7 +127,14 @@ export const importGitPathsToStore = async (
 ): Promise<Record<string, RecoveryState>> => {
   const { states, entries } = await captureGitPathStates(runGit, commit, paths);
   const result: Record<string, RecoveryState> = {};
-  const attributes = await probeGitAttributes(runGit, repoDir, paths).catch(() => new Map());
+  // probeGitAttributes failure must propagate — it must not become empty
+  // attributes and continue as if no filters apply (D-243 rework). An
+  // attribute probe failure means we cannot know whether a required filter
+  // applies, so the import must fail rather than risk storing raw blobs.
+  // Attributes are resolved from the commit's tree (--source=<commit>), not
+  // the live worktree's .gitattributes, so later live changes don't affect
+  // the fixed result (D-243 rework).
+  const attributes = await probeGitAttributes(runGit, repoDir, paths, commit);
 
   for (const [p, state] of Object.entries(states)) {
     if (state.kind === "regular-file") {

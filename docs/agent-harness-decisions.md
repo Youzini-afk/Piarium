@@ -5392,6 +5392,44 @@ objects-pending；directory 失败返回 retryable；幂等重试不重复调用
 deleteKnowledgeSession 被调用；exclusive lease 验证）；既有 58 项 thread-runtime
 套件回归通过。
 
+## D-249 — D-243 返工：Git filter/LFS/EOL 固定修订
+
+背景：D-243 接入了 git-adaptation 层，但验收发现六处缺陷——base/result 转换共用了
+当前 result worktree 的 `.gitattributes`（live 配置变化会改变固定结果）、
+`probeGitAttributes` 失败被 catch 成空属性继续成功、required filter 失败返回 raw blob
+而非 fail/unavailable、`filter=lfs` 绕过了真实 process/smudge/skip-smudge 配置、
+fingerprint 使用 `sameState` 的 Windows 比较语义使 0644/0755 确定性碰撞、
+捕获期间 `100644 ↔ 100755` 改变不触发 baseline-changed。
+
+决定（supersedes in part D-243 的属性来源、filter 失败处理、LFS smudge 路径与
+fingerprint mode 语义；D-243 的 check-attr 探测、cat-file --filters smudge、
+index mode 恢复与 win32 mode 归一比较保留）：
+
+1. **base/result 各自绑定 commit 的属性**：`probeGitAttributes` 新增 `commit` 参数，
+   使用 `check-attr --source=<commit>` 从 commit 的 tree 解析属性，而非当前 worktree
+   的 `.gitattributes`。`importGitPathsToStore` 传入 commit。text/eol 转换改为
+   in-process（基于探测到的属性做 LF↔CRLF），不再依赖 `cat-file --filters`（后者
+   用 live worktree 的 `.gitattributes`）。
+2. **probeGitAttributes 失败必须传播**：`importGitPathsToStore` 移除
+   `.catch(() => new Map())`，属性探测失败直接抛出——不能在不知道是否有 required
+   filter 的情况下继续存储 raw blob。
+3. **required filter 失败必须 fail/unavailable**：`smudgeBlobForWorktree` 对
+   `filter=lfs` 先尝试 `cat-file --filters`（尊重 `GIT_LFS_SKIP_SMUDGE`）；失败时
+   若 `GIT_LFS_SKIP_SMUDGE=1` 则探测本地 LFS 对象库，否则抛出
+   "Required LFS filter failed"——不返回 raw blob。
+4. **filter=lfs 尊重 process/smudge/skip-smudge 配置**：先走 `cat-file --filters`
+   （运行配置的 smudge process，尊重 `GIT_LFS_SKIP_SMUDGE=1`）；仅在 skip-smudge
+   模式下才直接探测本地 LFS 对象库（离线安全，不下载远端对象）。
+5. **fingerprint 使用完整 mode**：`stateIdentity` 改用 `persistentMode`（始终返回
+   完整 mode），不再用 `comparableMode`（Windows 归一为 0o444/0o666）。`sameState`
+   仍用 `comparableMode` 做盘面比较。持久哈希、trie 节点哈希和 fingerprint 在所有
+   平台上区分 0644 与 0755——捕获期间 `100644 ↔ 100755` 改变触发 baseline-changed。
+
+验证：`git-adaptation.test.ts`（base 无 eol、result 新增 eol=crlf；base/result 相反
+属性；required LFS filter 失败抛出；GIT_LFS_SKIP_SMUDGE=1 缺失对象降级为 pointer；
+check-attr 失败抛出；stateIdentity 区分 0644/0755；sameState 在 Windows 仍相等）；
+既有 git-migration、state-trie、working-state-store 套件回归通过。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5406,3 +5444,4 @@ deleteKnowledgeSession 被调用；exclusive lease 验证）；既有 58 项 thr
 | D-246 | implementation（D-240 返工：LSP 工作区根来自 initialize 而非首个文件父目录；related/explore 应用 actor scope；权威 anchor 批次重解析；partial 组合状态） | supersedes in part D-240（根推断、scope、批次重解析、组合状态） | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
 | D-247 | implementation（D-241 返工：exec/dlx/x 未知二进制走 generic；唯一 warning 保留；failure-relevant noise 不折叠；非零退出时失败解释行进 required） | supersedes in part D-241（exec 未知二进制路由、噪声折叠范围、非零退出 required） | 设计 5.2；status 3.17；output-organize |
 | D-248 | implementation（D-242 返工：exclusive lease；阶段化删除与结构化结果；幂等重试；KnowledgeStore.deleteSession 接入生产；UI 确认文案明确范围） | supersedes in part D-242（lease 模式、阶段化、knowledge 清理、UI 确认） | 设计 9.3.4；status 3.10；thread-runtime / index.ts / HarnessThreadsPanel |
+| D-249 | implementation（D-243 返工：base/result 各自绑定 commit 属性；probeGitAttributes 失败传播；required filter 失败 fail/unavailable；filter=lfs 尊重 process/smudge/skip-smudge；fingerprint 使用完整 mode） | supersedes in part D-243（属性来源、filter 失败处理、LFS smudge 路径、fingerprint mode 语义） | 设计 9.3.4；status 3.4a；git-adaptation / git-migration / journal-files |
