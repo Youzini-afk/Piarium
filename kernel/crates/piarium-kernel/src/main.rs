@@ -289,14 +289,30 @@ impl Storage {
         let hash = format!("sha256-{}", hex::encode(Sha256::digest(&decoded)));
         if let Some(expected) = params.get("expectedHash").and_then(Value::as_str) { if expected != hash { return Err(KernelError::Operation("content hash does not match expectedHash".to_string())); } }
         let target = object_path(&self.root, &hash)?;
-        if !target.exists() {
+        if target.exists() {
+            let existing = fs::read(&target)?;
+            let actual = format!("sha256-{}", hex::encode(Sha256::digest(&existing)));
+            if actual != hash {
+                return Err(KernelError::Storage(format!("content object is corrupt: {hash}")));
+            }
+            if existing.len() != decoded.len() {
+                return Err(KernelError::Storage(format!("content object length is corrupt: {hash}")));
+            }
+        } else {
             let staging = self.root.join("staging").join(format!("{}.object", Uuid::new_v4()));
             let mut file = OpenOptions::new().write(true).create_new(true).open(&staging)?;
             file.write_all(&decoded)?; file.sync_all()?; drop(file);
             fs::create_dir_all(target.parent().unwrap())?;
             fs::rename(&staging, &target).or_else(|error| if error.kind() == io::ErrorKind::AlreadyExists { fs::remove_file(&staging) } else { Err(error) })?;
         }
-        self.conn.execute("INSERT OR IGNORE INTO blobs(hash, byte_length) VALUES (?1, ?2)", params![hash, decoded.len() as i64])?;
+        let recorded: Option<i64> = self.conn.query_row("SELECT byte_length FROM blobs WHERE hash = ?1", params![hash], |row| row.get(0)).optional()?;
+        if let Some(byte_length) = recorded {
+            if byte_length != decoded.len() as i64 {
+                return Err(KernelError::Storage(format!("content object metadata is corrupt: {hash}")));
+            }
+        } else {
+            self.conn.execute("INSERT INTO blobs(hash, byte_length) VALUES (?1, ?2)", params![hash, decoded.len() as i64])?;
+        }
         Ok(json!({"hash": hash, "byteLength": decoded.len()}))
     }
 
@@ -304,6 +320,14 @@ impl Storage {
         let hash = params.get("hash").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("hash is required".to_string()))?;
         let path = object_path(&self.root, hash)?;
         let bytes = fs::read(path)?;
+        let actual = format!("sha256-{}", hex::encode(Sha256::digest(&bytes)));
+        if actual != hash {
+            return Err(KernelError::Storage(format!("content object is corrupt: {hash}")));
+        }
+        let recorded: Option<i64> = self.conn.query_row("SELECT byte_length FROM blobs WHERE hash = ?1", params![hash], |row| row.get(0)).optional()?;
+        if recorded != Some(bytes.len() as i64) {
+            return Err(KernelError::Storage(format!("content object metadata is missing or corrupt: {hash}")));
+        }
         let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         let length = params.get("length").and_then(Value::as_u64).map(|value| value as usize);
         let start = offset.min(bytes.len());
@@ -405,6 +429,26 @@ impl Storage {
         Ok(json!({"pinId": pin_id, "branchId": branch_id, "revision": revision, "root": root, "pinned": pin}))
     }
 
+    fn branch_delete(&mut self, params: &Value) -> Result<Value, KernelError> {
+        let branch_id = params.get("branchId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let deleted = self.conn.execute("DELETE FROM branches WHERE branch_id = ?1", params![branch_id])?;
+        self.conn.execute("DELETE FROM revisions WHERE branch_id = ?1", params![branch_id])?;
+        self.conn.execute("DELETE FROM pins WHERE branch_id = ?1", params![branch_id])?;
+        Ok(json!({"branchId": branch_id, "deleted": deleted > 0}))
+    }
+
+    fn snapshot(&self, params_value: &Value) -> Result<Value, KernelError> {
+        let mut branches = Vec::new();
+        let requested_workspace = params_value.get("workspaceId").and_then(Value::as_str);
+        let mut statement = self.conn.prepare("SELECT branch_id, workspace_id, base_root, head_root, head_revision, write_revision FROM branches WHERE (?1 IS NULL OR workspace_id = ?1) ORDER BY branch_id")?;
+        for row in statement.query_map(params![requested_workspace], |row| Ok((row.get::<_,String>(0)?, row.get::<_,String>(1)?, row.get::<_,String>(2)?, row.get::<_,String>(3)?, row.get::<_,i64>(4)?, row.get::<_,i64>(5)?)))? {
+            let (branch_id, workspace_id, base_root, head_root, head_revision, write_revision) = row?;
+            let revisions = self.conn.prepare("SELECT revision, root_hash FROM revisions WHERE branch_id = ?1 ORDER BY revision")?.query_map(params![branch_id], |revision| Ok(json!({"revision": revision.get::<_,i64>(0)?, "root": revision.get::<_,String>(1)?})))?.collect::<Result<Vec<_>, _>>()?;
+            branches.push(json!({"branchId": branch_id, "workspaceId": workspace_id, "baseRoot": base_root, "headRoot": head_root, "headRevision": head_revision, "writeRevision": write_revision, "revisions": revisions}));
+        }
+        Ok(json!({"workspaceId": requested_workspace, "branches": branches}))
+    }
+
     fn branch_diff(&self, params: &Value) -> Result<Value, KernelError> {
         let left = params.get("leftRoot").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("leftRoot is required".to_string()))?;
         let right = params.get("rightRoot").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("rightRoot is required".to_string()))?;
@@ -472,6 +516,25 @@ impl Storage {
         Ok(json!({"recordId": id, "operationId": operation_id, "workspaceId": workspace_id, "state": state, "data": serde_json::from_str::<Value>(&data)?}))
     }
 
+    fn operation_get(&self, params_value: &Value) -> Result<Value, KernelError> {
+        let id = params_value.get("operationId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let row: Option<(String, String, String, Option<String>, i64, i64)> = self.conn.query_row(
+            "SELECT kind, params_hash, state, result_json, created_at, updated_at FROM operations WHERE operation_id = ?1",
+            params![id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+        ).optional()?;
+        let Some((kind, params_hash, state, result, created_at, updated_at)) = row else { return Ok(Value::Null); };
+        Ok(json!({
+            "operationId": id,
+            "kind": kind,
+            "paramsHash": params_hash,
+            "state": state,
+            "result": result.map(|text| serde_json::from_str::<Value>(&text)).transpose()?,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+        }))
+    }
+
     fn health(&self) -> Result<Value, KernelError> {
         let integrity: String = self.conn.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
         let branches: i64 = self.conn.query_row("SELECT COUNT(*) FROM branches", [], |row| row.get(0))?;
@@ -518,6 +581,7 @@ impl Kernel {
         let storage = self.storage.as_mut().ok_or_else(|| KernelError::Storage("storage is not open".to_string()))?;
         let result = match method {
             "storage.health" => storage.health(),
+            "storage.snapshot" => storage.snapshot(&params_value),
             "storage.putBlob" => idempotent(storage, method, &params_value, |storage| storage.put_blob(&params_value)),
             "storage.getBlob" => storage.get_blob(&params_value),
             "branch.create" => idempotent(storage, method, &params_value, |storage| storage.create_branch(&params_value)),
@@ -527,9 +591,11 @@ impl Kernel {
             "branch.pin" => idempotent(storage, method, &params_value, |storage| storage.branch_pin(&params_value, true)),
             "branch.unpin" => idempotent(storage, method, &params_value, |storage| storage.branch_pin(&params_value, false)),
             "branch.diff" => storage.branch_diff(&params_value),
+            "branch.delete" => idempotent(storage, method, &params_value, |storage| storage.branch_delete(&params_value)),
             "storage.gc" => idempotent(storage, method, &params_value, |storage| storage.gc()),
             "recovery.operation.begin" | "recovery.operation.update" => storage.recovery_operation(method, &params_value),
             "recovery.operation.get" => storage.recovery_get(&params_value),
+            "operation.get" => storage.operation_get(&params_value),
             _ => Err(KernelError::Protocol(format!("unknown method: {method}"))),
         }?;
         Ok(Some(response_ok(id, result)))

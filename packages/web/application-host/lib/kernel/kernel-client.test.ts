@@ -60,6 +60,10 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", async 
   const published = await client.publishBranch({ operationId: "op-publish", branchId: "branch-test" });
   const pin = await client.pinBranch({ operationId: "op-pin", branchId: "branch-test", revision: Number(published.revision) });
   assert.equal(pin.pinned, true);
+  const operation = await client.getOperation("op-publish");
+  assert.equal(operation?.state, "committed");
+  const snapshot = await client.snapshot("workspace-test");
+  assert.equal((snapshot.branches as unknown[]).length, 1);
   const changed = await client.readBranch({ branchId: "branch-test", includeEntries: true });
   assert.equal(changed.entries[0]?.state.mode, 0o755);
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: changed.root });
@@ -71,4 +75,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", async 
   await reopened.start();
   const afterRestart = await reopened.readBranch({ branchId: "branch-test", includeEntries: true });
   assert.equal(afterRestart.entries[0]?.state.objectHash, second.hash);
+  const deleted = await reopened.deleteBranch({ operationId: "op-delete", branchId: "branch-test" });
+  assert.equal(deleted.deleted, true);
+  assert.equal(((await reopened.snapshot("workspace-test")).branches as unknown[]).length, 0);
 });

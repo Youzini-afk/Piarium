@@ -211,6 +211,10 @@ export class KernelClient {
 
   async health(): Promise<KernelHealthResult> { return this.request<KernelHealthResult>("storage.health"); }
 
+  async snapshot(workspaceId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("storage.snapshot", { workspaceId }, { signal });
+  }
+
   async putBlob(bytes: Uint8Array, operationId: string, signal?: AbortSignal): Promise<KernelBlobResult> {
     const bytesBase64 = Buffer.from(bytes).toString("base64");
     return this.request<KernelBlobResult>("storage.putBlob", { operationId, bytesBase64 }, { signal });
@@ -248,8 +252,16 @@ export class KernelClient {
     return this.request<Record<string, unknown>>("branch.diff", params, { signal });
   }
 
+  async deleteBranch(params: { operationId: string; branchId: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("branch.delete", params, { signal });
+  }
+
   async gc(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>("storage.gc", { operationId }, { signal });
+  }
+
+  async getOperation(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.request<Record<string, unknown> | null>("operation.get", { operationId }, { signal });
   }
 
   async close(): Promise<void> {

@@ -11,6 +11,7 @@ export type KernelMethod =
   | "kernel.ping"
   | "kernel.shutdown"
   | "storage.health"
+  | "storage.snapshot"
   | "storage.putBlob"
   | "storage.getBlob"
   | "branch.create"
@@ -20,9 +21,11 @@ export type KernelMethod =
   | "branch.pin"
   | "branch.unpin"
   | "branch.diff"
+  | "branch.delete"
   | "recovery.operation.begin"
   | "recovery.operation.update"
   | "recovery.operation.get"
+  | "operation.get"
   | "storage.gc";
 
 export interface KernelRequest {

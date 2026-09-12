@@ -10,6 +10,7 @@
     "kernel.ping": "health check",
     "kernel.shutdown": "ordered shutdown",
     "storage.health": "storage integrity and lock status",
+    "storage.snapshot": "list durable branch roots and published revisions",
     "storage.putBlob": "durably install a content object",
     "storage.getBlob": "read a content object or byte range",
     "branch.create": "batch-build an immutable branch root",
@@ -19,9 +20,11 @@
     "branch.pin": "pin an immutable root/revision",
     "branch.unpin": "release a pin",
     "branch.diff": "diff two immutable roots without flattening",
+    "branch.delete": "release a branch and its unpublished root",
     "recovery.operation.begin": "durably begin an idempotent recovery operation",
     "recovery.operation.update": "advance recovery operation state",
     "recovery.operation.get": "read a recovery operation",
+    "operation.get": "read the durable state of a persistent operation",
     "storage.gc": "collect unreferenced nodes and objects"
   }
 }
