@@ -6,6 +6,7 @@ import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from ".
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
 import { applyIndexModes } from "./git-adaptation.js";
+import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieToRecord, type StateTrie, type StateTrieNode } from "./state-trie.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
 import type {
   CommandVerificationRecord,
@@ -23,7 +24,7 @@ import { materializeWorkingState } from "./materializer.js";
 import { assertVirtualWriteTree } from "./virtual-write-tree.js";
 import { defaultNewFileMode as resolveDefaultNewFileMode } from "./workspace-baseline.js";
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
 
 interface WorkingStateDocument {
@@ -57,23 +58,9 @@ export interface WorkspaceWorkingStateAccess {
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
-export const treeIdentityFromStates = (states: Record<string, RecoveryState>): string => {
-  const hash = createHash("sha256");
-  for (const file of Object.keys(states).sort()) {
-    const state = states[file]!;
-    hash.update(file);
-    hash.update("\0");
-    hash.update(JSON.stringify([
-      state.kind,
-      "mode" in state ? state.mode ?? null : null,
-      state.kind === "regular-file" ? state.byteLength : null,
-      state.kind === "regular-file" ? state.objectHash : null,
-      state.kind === "symlink" ? state.symlinkTarget : null,
-    ]));
-    hash.update("\0");
-  }
-  return `sha256-${hash.digest("hex")}`;
-};
+/** Whole-map content identity: the Merkle root of its state trie (D-245). */
+export const treeIdentityFromStates = (states: Record<string, RecoveryState>): string =>
+  trieIdentity(trieFromEntries(Object.entries(states)));
 const normalizeRelative = (value: string): string => {
   const raw = value.replace(/\\/g, "/");
   const segments = raw.split("/").filter((segment) => segment && segment !== ".");
@@ -105,13 +92,36 @@ const parseStates = (value: unknown, label: string): Record<string, RecoveryStat
   return Object.fromEntries(Object.entries(value).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
 };
 
-type WorkingStateSchemaVersion = 1 | 2 | 3;
+type StateNodePool = Record<string, StateTrieNode>;
+
+/**
+ * Hydrate a persisted map: schema 4 stores `{trie: <root>}` references into the
+ * shared `stateNodes` pool (Merkle structure sharing, D-245); older schemas and
+ * defensive callers may carry the flat Record directly.
+ */
+const parseStateMap = (value: unknown, label: string, nodes: StateNodePool): Record<string, RecoveryState> => {
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && typeof (value as { trie?: unknown }).trie === "string") {
+    const root = (value as { trie: string }).trie;
+    try {
+      const record = trieToRecord({ root, nodes });
+      // Re-run the same validation a flat map would get.
+      return Object.fromEntries(Object.entries(record).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
+    } catch (error) {
+      throw new Error(`${label} references a missing state trie node (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
+  return parseStates(value, label);
+};
+
+type WorkingStateSchemaVersion = 1 | 2 | 3 | 4;
 
 const parseBranch = (
   value: unknown,
   key: string,
   workspaceId: string,
   schemaVersion: WorkingStateSchemaVersion,
+  nodes: StateNodePool,
 ): WorkingBranch => {
   const legacy = schemaVersion === 1;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working branch ${key} is malformed`);
@@ -120,14 +130,14 @@ const parseBranch = (
     || Number(row.headRevision) < 0 || typeof row.createdAt !== "string" || typeof row.updatedAt !== "string"
     || (row.baseRef !== undefined && typeof row.baseRef !== "string")
     || (!legacy && (!Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")))
-    || (schemaVersion === 3 && (!Array.isArray(row.captureScopes) || !row.captureScopes.every((entry) => typeof entry === "string")))) {
+    || (schemaVersion >= 3 && (!Array.isArray(row.captureScopes) || !row.captureScopes.every((entry) => typeof entry === "string")))) {
     throw new Error(`Working branch ${key} is malformed`);
   }
   const draftBasePaths = legacy ? [] : (row.draftBasePaths as string[]).map(normalizeRelative);
   if (new Set(draftBasePaths).size !== draftBasePaths.length) throw new Error(`Working branch ${key} draft baseline paths are malformed`);
-  const rawCaptureScopes = schemaVersion === 3 ? row.captureScopes as string[] : [];
+  const rawCaptureScopes = schemaVersion >= 3 ? row.captureScopes as string[] : [];
   const captureScopes = legacy ? [] : [...new Set(rawCaptureScopes.map(normalizeRelative))].sort();
-  const baseState = parseStates(row.baseState, `Working branch ${key} baseline`);
+  const baseState = parseStateMap(row.baseState, `Working branch ${key} baseline`, nodes);
   if (draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
     throw new Error(`Working branch ${key} does not contain every draft baseline path`);
   }
@@ -138,7 +148,7 @@ const parseBranch = (
     baseState,
     draftBasePaths,
     captureScopes,
-    deltas: parseStates(row.deltas, `Working branch ${key} deltas`),
+    deltas: parseStateMap(row.deltas, `Working branch ${key} deltas`, nodes),
     headRevision: row.headRevision as number,
     writeRevision: Number.isSafeInteger(row.writeRevision) && Number(row.writeRevision) >= 0
       ? Number(row.writeRevision)
@@ -164,14 +174,14 @@ const parseDraftProvenance = (value: unknown, label: string): DraftBaselinePathP
   };
 };
 
-const parseDraftBaseline = (value: unknown, key: string, workspaceId: string): DraftBaseline => {
+const parseDraftBaseline = (value: unknown, key: string, workspaceId: string, nodes: StateNodePool): DraftBaseline => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Draft baseline ${key} is malformed`);
   const row = value as Record<string, unknown>;
   if (row.id !== key || row.workspaceId !== workspaceId || typeof row.createdAt !== "string"
     || !row.provenance || typeof row.provenance !== "object" || Array.isArray(row.provenance)) {
     throw new Error(`Draft baseline ${key} is malformed`);
   }
-  const pathStates = parseStates(row.pathStates, `Draft baseline ${key} paths`);
+  const pathStates = parseStateMap(row.pathStates, `Draft baseline ${key} paths`, nodes);
   if (Object.values(pathStates).some((state) => state.kind !== "regular-file")) {
     throw new Error(`Draft baseline ${key} contains a non-file state`);
   }
@@ -186,7 +196,7 @@ const parseDraftBaseline = (value: unknown, key: string, workspaceId: string): D
   return { id: key, workspaceId, createdAt: row.createdAt, pathStates, provenance };
 };
 
-const parseResult = (value: unknown, key: string): WorkingResult => {
+const parseResult = (value: unknown, key: string, nodes: StateNodePool): WorkingResult => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working result ${key} is malformed`);
   const row = value as Record<string, unknown>;
   if (!Number.isSafeInteger(row.resultRevision) || Number(row.resultRevision) <= 0 || typeof row.branchId !== "string"
@@ -200,8 +210,8 @@ const parseResult = (value: unknown, key: string): WorkingResult => {
     throw new Error(`Working result ${key} diff stats are malformed`);
   }
   const changedPaths = (row.changedPaths as string[]).map(normalizeRelative);
-  const baseStates = parseStates(row.baseStates, `Working result ${key} baseline`);
-  const pathStates = parseStates(row.pathStates, `Working result ${key} paths`);
+  const baseStates = parseStateMap(row.baseStates, `Working result ${key} baseline`, nodes);
+  const pathStates = parseStateMap(row.pathStates, `Working result ${key} paths`, nodes);
   if (changedPaths.some((file) => !baseStates[file] || !pathStates[file])) {
     throw new Error(`Working result ${key} does not contain every changed path`);
   }
@@ -398,6 +408,12 @@ export class WorkingStateStore {
   private document: WorkingStateDocument;
   private catalogPersisted: boolean;
   private defaultNewFileModeValue: number | undefined;
+  /**
+   * Record → built trie. Branch/result maps are replaced rather than mutated
+   * in place, so identity-keyed caching is safe and serializing an unchanged
+   * map costs O(1) after the first persist (D-245).
+   */
+  private readonly trieCache = new WeakMap<Record<string, RecoveryState>, StateTrie>();
 
   private constructor(options: WorkingStateStoreOptions, document: WorkingStateDocument, persisted: boolean) {
     this.context = options;
@@ -429,7 +445,7 @@ export class WorkingStateStore {
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
     const record = raw as Record<string, unknown>;
-    if ((record.schemaVersion !== 1 && record.schemaVersion !== 2 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
+    if ((record.schemaVersion !== 1 && record.schemaVersion !== 2 && record.schemaVersion !== 3 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
       || !record.branches || typeof record.branches !== "object" || Array.isArray(record.branches)
       || !record.results || typeof record.results !== "object" || Array.isArray(record.results)
       || (record.schemaVersion !== 1
@@ -437,12 +453,15 @@ export class WorkingStateStore {
       throw new Error("Working-state catalog schema or workspace identity is malformed");
     }
     const legacy = record.schemaVersion === 1;
+    const nodes = record.stateNodes && typeof record.stateNodes === "object" && !Array.isArray(record.stateNodes)
+      ? record.stateNodes as StateNodePool
+      : {};
     const branches = Object.fromEntries(Object.entries(record.branches as Record<string, unknown>)
-      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, record.schemaVersion as WorkingStateSchemaVersion)]));
+      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, record.schemaVersion as WorkingStateSchemaVersion, nodes)]));
     const draftBaselines = legacy ? {} : Object.fromEntries(Object.entries(record.draftBaselines as Record<string, unknown>)
-      .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId)]));
+      .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId, nodes)]));
     const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
-      .map(([key, value]) => [key, parseResult(value, key)]));
+      .map(([key, value]) => [key, parseResult(value, key, nodes)]));
     const verifications = parseVerifications(record.verifications);
     return new WorkingStateStore(options, {
       schemaVersion: SCHEMA_VERSION,
@@ -488,6 +507,72 @@ export class WorkingStateStore {
     replaceObjectReferences(this.context.database, this.document.workspaceId, "thread-result", `${result.branchId}@${result.resultRevision}`, this.resultReferences(result));
   }
 
+  private trieFor(states: Record<string, RecoveryState>): StateTrie {
+    let trie = this.trieCache.get(states);
+    if (!trie) {
+      trie = trieFromEntries(Object.entries(states));
+      this.trieCache.set(states, trie);
+    }
+    return trie;
+  }
+
+  /**
+   * Serialized form: path maps become `{trie: <root>}` references into a shared
+   * `stateNodes` pool, so identical subtrees across branches, results, and
+   * draft baselines are written once. The pool is rebuilt from live roots each
+   * persist, which garbage-collects orphaned nodes without a sweep.
+   */
+  private serializeDocument(next: WorkingStateDocument): Record<string, unknown> {
+    const nodes: StateNodePool = {};
+    const refOf = (states: Record<string, RecoveryState> | undefined): { trie: string } => {
+      const trie = states ? this.trieFor(states) : EMPTY_STATE_TRIE;
+      Object.assign(nodes, trie.nodes);
+      return { trie: trie.root };
+    };
+    return {
+      schemaVersion: SCHEMA_VERSION,
+      workspaceId: next.workspaceId,
+      branches: Object.fromEntries(Object.entries(next.branches).map(([key, branch]) => [key, {
+        ...branch,
+        baseState: refOf(branch.baseState),
+        deltas: refOf(branch.deltas),
+      }])),
+      draftBaselines: Object.fromEntries(Object.entries(next.draftBaselines).map(([key, baseline]) => [key, {
+        ...baseline,
+        pathStates: refOf(baseline.pathStates),
+      }])),
+      results: Object.fromEntries(Object.entries(next.results).map(([key, result]) => [key, {
+        ...result,
+        baseStates: refOf(result.baseStates),
+        pathStates: refOf(result.pathStates),
+      }])),
+      ...(next.verifications ? { verifications: next.verifications } : {}),
+      stateNodes: nodes,
+    };
+  }
+
+  /**
+   * Structural-sharing document update (D-245): copies only the containers
+   * being replaced; unchanged branch/result/baseline objects — and their path
+   * maps — keep their references instead of a per-write deep clone.
+   */
+  private nextDocument(): WorkingStateDocument {
+    const d = this.document;
+    return {
+      ...d,
+      branches: { ...d.branches },
+      draftBaselines: { ...d.draftBaselines },
+      results: { ...d.results },
+      ...(d.verifications
+        ? { verifications: {
+            child: { ...d.verifications.child },
+            parent: { ...d.verifications.parent },
+            reviews: { ...d.verifications.reviews },
+          } }
+        : {}),
+    };
+  }
+
   private async persist(
     next: WorkingStateDocument,
     protect: () => void,
@@ -503,7 +588,7 @@ export class WorkingStateStore {
     }
     // Old owners stay intact until the atomic catalog is durable. Pending
     // ownership protects new bytes even if rename succeeds but its fsync fails.
-    await writeRecoveryJsonAtomic(this.catalogPath, next, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    await writeRecoveryJsonAtomic(this.catalogPath, this.serializeDocument(next), { fsPromises: this.fsPromises, pathModule: this.pathModule });
     this.document = next;
     this.catalogPersisted = true;
     this.context.database.transaction(() => {
@@ -514,7 +599,7 @@ export class WorkingStateStore {
 
   /** Deletion publishes metadata before releasing the content it used to own. */
   private async persistRemoval(next: WorkingStateDocument, release: () => void): Promise<void> {
-    await writeRecoveryJsonAtomic(this.catalogPath, next, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    await writeRecoveryJsonAtomic(this.catalogPath, this.serializeDocument(next), { fsPromises: this.fsPromises, pathModule: this.pathModule });
     this.document = next;
     this.catalogPersisted = true;
     this.context.database.transaction(release).immediate();
@@ -694,7 +779,7 @@ export class WorkingStateStore {
   }
 
   async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> {
-    const next = clone(this.document);
+    const next = this.nextDocument();
     const verifications = next.verifications ?? emptyVerifications();
     const current = verifications.child[threadId] ?? [];
     verifications.child[threadId] = [
@@ -706,7 +791,7 @@ export class WorkingStateStore {
   }
 
   async putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void> {
-    const next = clone(this.document);
+    const next = this.nextDocument();
     const verifications = next.verifications ?? emptyVerifications();
     const current = verifications.parent[threadId] ?? [];
     verifications.parent[threadId] = [
@@ -718,7 +803,7 @@ export class WorkingStateStore {
   }
 
   async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> {
-    const next = clone(this.document);
+    const next = this.nextDocument();
     const verifications = next.verifications ?? emptyVerifications();
     const current = verifications.reviews[threadId] ?? [];
     verifications.reviews[threadId] = [
@@ -879,7 +964,7 @@ export class WorkingStateStore {
       createdAt: now,
       updatedAt: now,
     };
-    const next = clone(this.document);
+    const next = this.nextDocument();
     next.branches[branchId] = branch;
     await this.persist(next, () => this.protectBranch(branch), this.branchReferences(branch));
     return clone(branch);
@@ -911,7 +996,7 @@ export class WorkingStateStore {
       pathStates,
       provenance,
     };
-    const next = clone(this.document);
+    const next = this.nextDocument();
     next.draftBaselines[id] = baseline;
     await this.persist(next, () => this.protectDraftBaseline(baseline), this.references(baseline.pathStates, "draft"));
     return clone(baseline);
@@ -940,11 +1025,11 @@ export class WorkingStateStore {
     )).sort();
     const baseStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
       file,
-      clone(branch.baseState[file] ?? { kind: "missing" as const }),
+      branch.baseState[file] ?? { kind: "missing" as const },
     ]));
     const pathStates: Record<string, RecoveryState> = Object.fromEntries(changedPaths.map((file) => [
       file,
-      clone(stampedState[file] ?? { kind: "missing" as const }),
+      stampedState[file] ?? { kind: "missing" as const },
     ]));
     const previous = this.document.results[`${branchId}@${branch.headRevision}`];
     if (previous && previous.changedPaths.length === changedPaths.length
@@ -964,8 +1049,10 @@ export class WorkingStateStore {
       diffStats: { files: changedPaths.length, insertions: 0, deletions: 0 },
       createdAt: new Date().toISOString(),
     };
-    const next = clone(this.document);
-    next.branches[branchId] = { ...clone(branch), deltas: clone(pathStates), headRevision: revision, updatedAt: result.createdAt };
+    const next = this.nextDocument();
+    // pathStates is shared with branch.deltas: identical maps collapse to one
+    // trie and one node-pool entry at persist time (D-245).
+    next.branches[branchId] = { ...branch, deltas: pathStates, headRevision: revision, updatedAt: result.createdAt };
     next.results[`${branchId}@${revision}`] = result;
     await this.persist(next, () => {
       this.protectBranch(next.branches[branchId]!);
@@ -998,7 +1085,7 @@ export class WorkingStateStore {
       stampedFiles[normalized] = await this.stampRegularFileState(next, live[normalized]);
     }
     assertVirtualWriteTree(live, stampedFiles);
-    const deltas = clone(branch.deltas);
+    const deltas = { ...branch.deltas };
     for (const [file, next] of Object.entries(stampedFiles)) {
       const normalized = normalizeRelative(file);
       if (next.kind === "missing" && !Object.hasOwn(branch.baseState, normalized)) {
@@ -1021,9 +1108,9 @@ export class WorkingStateStore {
       }
     }
     const writeRevision = current + 1;
-    const nextDocument = clone(this.document);
+    const nextDocument = this.nextDocument();
     nextDocument.branches[branchId] = {
-      ...clone(branch),
+      ...branch,
       deltas,
       writeRevision,
       updatedAt: new Date().toISOString(),
@@ -1122,14 +1209,14 @@ export class WorkingStateStore {
 
   async deleteBranch(branchId: string): Promise<void> {
     if (!this.document.branches[branchId]) return;
-    const next = clone(this.document);
+    const next = this.nextDocument();
     delete next.branches[branchId];
     await this.persistRemoval(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "work-branch", branchId));
   }
 
   async deleteDraftBaseline(id: string): Promise<void> {
     if (!this.document.draftBaselines[id]) return;
-    const next = clone(this.document);
+    const next = this.nextDocument();
     delete next.draftBaselines[id];
     await this.persistRemoval(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "draft-baseline", id));
   }
@@ -1144,7 +1231,7 @@ export class WorkingStateStore {
       throw new Error("Result revisions must be positive safe integers");
     }
     if (requested.length === 0) return [];
-    const next = clone(this.document);
+    const next = this.nextDocument();
     const removed = requested.filter((revision) => Object.hasOwn(next.results, `${branchId}@${revision}`));
     for (const revision of removed) delete next.results[`${branchId}@${revision}`];
     const release = () => {

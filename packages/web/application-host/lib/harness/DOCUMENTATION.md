@@ -388,6 +388,11 @@ states stay comparable. Materialization and the non-Git worktree/baseline
 copies share `workspace/reflink.ts`: a forced reflink shares extents with the
 content-addressed object file where the filesystem supports it (ReFS/APFS/
 Btrfs) and reports the real backend otherwise (`MaterializeResult.cow`).
+Persisted path maps are Merkle tries (`state-trie.ts`, schema 4): every map
+serializes as a `{trie}` root into a shared `stateNodes` pool so equal subtrees
+across branches and results are written once, the pool rebuild from live roots
+reclaims orphans, writes use structural sharing instead of a whole-document
+clone, and `treeIdentityFromStates` is the trie root.
 Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a

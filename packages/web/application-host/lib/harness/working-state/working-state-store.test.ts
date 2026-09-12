@@ -239,7 +239,7 @@ describe("WorkingStateStore", () => {
     }
   });
 
-  it("migrates a schema v1 catalog to v3 with no draft baselines or capture scopes", async () => {
+  it("migrates a schema v1 catalog to v4 with no draft baselines or capture scopes", async () => {
     const h = await harness();
     try {
       await h.store.createBranch("ws", "legacy", {});
@@ -255,7 +255,7 @@ describe("WorkingStateStore", () => {
       expect(await migrated.getDraftBaseline("missing")).toBeNull();
       await migrated.createBranch("ws", "next", {});
       const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      expect(persisted.schemaVersion).toBe(3);
+      expect(persisted.schemaVersion).toBe(4);
       expect(persisted.draftBaselines).toEqual({});
     } finally {
       h.database.close();
@@ -293,7 +293,7 @@ describe("WorkingStateStore", () => {
       expect(await migrated.getDraftBaseline(draftBaseline.id)).toEqual(draftBaseline);
       await migrated.createBranch("ws", "next-v3", base);
       const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      expect(persisted.schemaVersion).toBe(3);
+      expect(persisted.schemaVersion).toBe(4);
       delete (persisted.branches as Record<string, Record<string, unknown>>)["next-v3"]!.captureScopes;
       await fs.promises.writeFile(catalog, JSON.stringify(persisted), "utf8");
       await expect(WorkingStateStore.open(h.context)).rejects.toThrow("Working branch next-v3 is malformed");

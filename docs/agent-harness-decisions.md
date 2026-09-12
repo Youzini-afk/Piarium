@@ -5260,6 +5260,32 @@ index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。
 验证与边界：`reflink.test.ts` 覆盖真实 fs、注入失败退化、缺源不重试、材料化对象路径命中与兜底、计数准确性。
 未实测真实 ReFS/APFS 卷（环境所限）；extent 共享的正确性由 `FICLONE_FORCE` 语义与字节级结果断言保证。
 
+### D-245 · 2026-09-12 · 3.4a（WorkingState Merkle 结构共享）
+
+类型：问题与解法
+
+背景：path→state 映射在 catalog 里逐分支/逐结果完整展开，每次写都 `structuredClone` 整棵文档树再整体序列化——
+`publishStates` 产生的 `pathStates` 与 `branch.deltas` 本就是同一映射却被序列化两遍；`treeIdentityFromStates`
+每次全量重哈希。
+
+决定：
+
+1. `working-state/state-trie.ts`：按路径段的持久哈希 trie。节点 = `children` + 可选 `self`（允许 `a` 与其后代
+   `a/b` 同为映射键——删除 tombstone 与类型翻转路径真实存在）。`trieSet`/`trieRemove` 路径复制共享未变子树；
+   `trieDiff` 按哈希相等跳过共享子树；`trieIdentity` 为根哈希。
+2. Catalog schema 4：所有路径映射序列化为 `{trie: <root>}`，节点进共享 `stateNodes` 池——跨分支、结果、
+   草稿基线的相同子树只写一次；池每次 persist 由活根重建，天然回收孤儿节点。v1–v3 平铺映射照常解析，
+   下次 persist 自动升级。
+3. 写路径 `clone(this.document)`（structuredClone 整树）改为 `nextDocument()` 结构共享——只复制被替换的容器；
+   `publishStates` 让 `result.pathStates` 与 `branch.deltas` 共享同一对象，持久化坍缩为同一 trie 根。
+4. `WeakMap<Record, StateTrie>` 按映射引用缓存——映射对象在写路径上只换不改，未变映射的序列化是 O(1)。
+5. `treeIdentityFromStates` 改用 trie 根（仍是 `sha256-` 格式）；旧 verification 记录里的树哈希与新算法不可比，
+   属一次性咨询性噪声，不影响绑定判断的布尔语义。
+
+验证与边界：`state-trie.test.ts`（共存路径、子树共享、删除剪枝、diff、持久化形状与重开一致）；
+既有 working-state/store/view/draft/virtual-write 套件回归。局限：内存内 `WorkingBranch.baseState` 等仍为平铺
+Record（公开类型不动），trie 用于持久化去重与身份——跨重启的 map 级共享收益在磁盘与序列化侧。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5270,3 +5296,4 @@ index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。
 | D-242 | implementation（整条 Thread 删除：UI 两步确认 → 鉴权 DELETE → 级联停 Run/删会话/释分支/收目录/移行） | — | 设计 9.3.4；status 3.10；thread-runtime / thread-registry / thread-routes / HarnessThreadsPanel |
 | D-243 | implementation（Git filter/LFS 与执行位适配层：check-attr 探测、本地 LFS 对象解析、cat-file --filters smudge、index mode 恢复、win32 mode 归一比较） | — | 设计 9.3.4 尾部；status 3.4a；working-state/git-adaptation |
 | D-244 | implementation（CoW/reflink 材料化后端：FICLONE_FORCE+真实 backend 报告，对象库→目标与工作区复制统一走原语） | — | 设计 9.3.4；status 3.4a；workspace/reflink / materializer |
+| D-245 | implementation（WorkingState Merkle 结构共享：state-trie 持久哈希映射、catalog v4 共享 node 池、结构共享替代整树 clone、treeIdentity=trie 根） | — | 设计 9.3.4；status 3.4a；working-state/state-trie / working-state-store |

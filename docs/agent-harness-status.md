@@ -381,6 +381,17 @@ untracked/merge/rematerialize 复制（`thread-worktree.ts`）、WorkingState �
 不重试、材料化经 `objectPathFor` 命中对象文件且 readContent 不被调用、对象缺失时 readContent 兜底、cow 计数。
 未实测真实 ReFS/APFS 卷上的 extent 共享（本机与 CI 均为 NTFS）；回退路径与结果正确性已覆盖。
 
+**D-245 WorkingState Merkle 结构共享已实现（2026-09-12）。** `working-state/state-trie.ts` 把 path→RecoveryState 映射存为
+持久哈希 trie（节点 `children` + 可选 `self`，文件与祖先目录键可共存），根哈希即映射内容身份。catalog schema 4：
+`baseState`/`deltas`/`baseStates`/`pathStates`/草稿 `pathStates` 序列化为 `{trie: root}` 加共享 `stateNodes` 池——发布的
+`pathStates` 与 `branch.deltas` 是同一对象时持久化里只剩一个 trie 根；池每次 persist 由活根重建，孤儿节点自动回收，
+v1–v3 目录照常读入并在下次 persist 升级。写路径从 `structuredClone` 整树改为 `nextDocument()` 结构共享；`treeIdentityFromStates`
+改用 trie 根（哈希值格式不变，算法变更——旧持久化 verification 记录的树哈希与新算法不可比，为一次性咨询噪声）。
+
+证据：`state-trie.test.ts` 5 项——文件+祖先共存 round-trip、子树共享（docs 子树哈希两版一致）、删除剪空祖先、
+tombstone-vs-缺失的 diff 区分、持久化文件断言 `{trie}` 引用 + 共享 `stateNodes` + deltas/pathStates 同一根 +
+重开一致；既有 store/branch-view/draft-baseline/virtual-write 套件除 3 项基线环境失败外全过。
+
 ## 未完成项（来自 D-027，按来源）
 
 | 来源 | 未完成 |

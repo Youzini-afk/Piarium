@@ -1534,6 +1534,11 @@ Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非
 非 Git worktree 准备、baseline 快照、untracked/merge 复制、对象库→目标材料化与 recovery `replaceFile` 都走同一原语，
 材料化返回 `cow.{reflink,copy}` 计数）。
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
+（已实现：`working-state/state-trie.ts`，D-245——path→state 映射按路径段存为持久哈希 trie，节点带可选 `self` 状态所以
+文件与其祖先目录键可以共存；catalog schema 4 把 baseState/deltas/baseStates/pathStates 序列化为 `{trie: root}` 引用
+加共享 `stateNodes` 池，相同子树跨分支/结果/草稿基线只写一次，池每次 persist 由活根重建即自动回收孤儿节点；
+`treeIdentityFromStates` 即 trie 根哈希；文档更新改走结构共享 `nextDocument()` 而非整树 deep clone，WeakMap 按 map
+引用缓存 trie 使未变映射的序列化 O(1)。）
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
 基线采集属于创建/更新分支的工作，不进入普通消息、每轮恢复或每次查询的全仓扫描。Git 的过滤器、LFS 与换行转换由适配层处理，
 记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。（已实现：`working-state/git-adaptation.ts`，D-243——
