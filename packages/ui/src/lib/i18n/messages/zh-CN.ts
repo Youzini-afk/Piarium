@@ -108,7 +108,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': '已保留目录',
   'harness.threads.keepFailed': '无法更新目录保留',
   'harness.threads.delete': '删除',
-  'harness.threads.deleteConfirm': '确认删除该线程?',
+  'harness.threads.deleteConfirm': '确认删除该线程？这将移除所有子孙线程、Pi 对话、结果历史与受管目录。',
   'harness.threads.deleting': '正在删除…',
   'harness.threads.deleteFailed': '无法删除该线程',
   'harness.threads.showArchived': '显示已归档',

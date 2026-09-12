@@ -94,7 +94,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': 'Каталог збережено',
   'harness.threads.keepFailed': 'Не вдалося оновити збереження каталогу',
   "harness.threads.delete": "Видалити",
-  "harness.threads.deleteConfirm": "Видалити гілку?",
+  "harness.threads.deleteConfirm": "Видалити гілку? Це видалить усі дочірні гілки, розмови Pi, історію результатів та керовані каталоги.",
   "harness.threads.deleting": "Видалення…",
   "harness.threads.deleteFailed": "Не вдалося видалити гілку",
   'harness.threads.showArchived': 'Показати архівовані',

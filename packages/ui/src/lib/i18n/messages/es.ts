@@ -94,7 +94,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': 'Directorio conservado',
   'harness.threads.keepFailed': 'No se pudo actualizar la retención del directorio',
   "harness.threads.delete": "Eliminar",
-  "harness.threads.deleteConfirm": "¿Eliminar el hilo?",
+  "harness.threads.deleteConfirm": "¿Eliminar el hilo? Esto eliminará todos los hilos descendientes, conversaciones Pi, historial de resultados y directorios administrados.",
   "harness.threads.deleting": "Eliminando…",
   "harness.threads.deleteFailed": "No se pudo eliminar el hilo",
   'harness.threads.showArchived': 'Mostrar archivados',

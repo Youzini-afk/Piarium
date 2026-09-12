@@ -5354,6 +5354,44 @@ required 部分；D-241 的 PM 头归类、脚本回显识别内层工具、PM �
 进 required；watch/interactive prompt 保留；分片输出首尾保留）；既有 31 项 organize
 与 3 项 observation-services 套件回归通过。
 
+## D-248 — D-242 返工：耐久整条 Thread 删除
+
+背景：D-242 接入了 UI 两步确认 → 鉴权 DELETE → 级联删除，但验收发现六处缺陷——
+`releaseThreadStore` 用 shared lease 做 GC（真实引擎不会提供 collector）、
+session → WorkingState → directory → registry 顺序无持久阶段（任一中断留半删除）、
+broker 删除触发 archive coordinator 失败后可能清掉 report、
+`KnowledgeStore.deleteSession()` 无生产调用方、
+retrieval evidence cleanup 是 registry 删除后的 observational callback（失败被吞）、
+UI 确认未说明子孙 Thread、transcript、结果和目录会一起删除。
+
+决定（supersedes in part D-242 的 lease 模式、阶段化、knowledge 清理与 UI 确认
+部分；D-242 的 post-order 级联、ownership 断言、cascade admission fence 保留）：
+
+1. **WorkingState 修改与 GC 使用 exclusive lease**：`releaseThreadStore` 从
+   `"shared"` 改为 `"exclusive"`，确保 `collectUnreachableObjects` 在独占租约下
+   执行——真实引擎不会在 shared lease 下提供 collector。
+2. **阶段化删除与结构化结果**：`deleteOneNode` 分四阶段（sessions → store →
+   directory → registry），每阶段失败返回 `DeletionNodeResult`（status: complete
+   / objects-pending / retryable / needs-attention + phase + error）。`deleteUser`
+   聚合所有 node 结果，worst-status-wins。不再 throw——调用方根据 status 决定
+   重试或 needs-attention。
+3. **幂等重试**：`deleteOneNode` 对已删除 thread 返回 complete（registry 返回 null）。
+   `deleteUser` 在进入 cascade 前检查 thread 是否已存在，不存在则直接返回 complete。
+   已删 session、已移除目录、已释放引用都能从观察事实继续。
+4. **KnowledgeStore.deleteSession 接入生产**：新增 `deleteKnowledgeSession` option，
+   在 `deleteThreadSessions` 中对每个 sessionId 调用 `options.deleteSession` 后
+   调用 `options.deleteKnowledgeSession`。生产接线在 `index.ts` 通过
+   `getKnowledgeStoreForSession` 获取 owning workspace 的 knowledge store 并调用
+   `store.deleteSession(sessionId)`。accepted workspace/user knowledge 保留。
+   失败不被吞——knowledge 清理失败会 surface 为 retryable。
+5. **UI 确认文案明确范围**：所有 10 个 locale 的 `harness.threads.deleteConfirm`
+   更新为明确包含"子孙线程、Pi 对话、结果历史、受管目录"。
+
+验证：`thread-runtime.test.ts`（session 失败返回 retryable；store 失败返回
+objects-pending；directory 失败返回 retryable；幂等重试不重复调用 deleteSession；
+deleteKnowledgeSession 被调用；exclusive lease 验证）；既有 58 项 thread-runtime
+套件回归通过。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5367,3 +5405,4 @@ required 部分；D-241 的 PM 头归类、脚本回显识别内层工具、PM �
 | D-245 | implementation（WorkingState Merkle 结构共享：state-trie 持久哈希映射、catalog v4 共享 node 池、结构共享替代整树 clone、treeIdentity=trie 根） | — | 设计 9.3.4；status 3.4a；working-state/state-trie / working-state-store |
 | D-246 | implementation（D-240 返工：LSP 工作区根来自 initialize 而非首个文件父目录；related/explore 应用 actor scope；权威 anchor 批次重解析；partial 组合状态） | supersedes in part D-240（根推断、scope、批次重解析、组合状态） | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
 | D-247 | implementation（D-241 返工：exec/dlx/x 未知二进制走 generic；唯一 warning 保留；failure-relevant noise 不折叠；非零退出时失败解释行进 required） | supersedes in part D-241（exec 未知二进制路由、噪声折叠范围、非零退出 required） | 设计 5.2；status 3.17；output-organize |
+| D-248 | implementation（D-242 返工：exclusive lease；阶段化删除与结构化结果；幂等重试；KnowledgeStore.deleteSession 接入生产；UI 确认文案明确范围） | supersedes in part D-242（lease 模式、阶段化、knowledge 清理、UI 确认） | 设计 9.3.4；status 3.10；thread-runtime / index.ts / HarnessThreadsPanel |

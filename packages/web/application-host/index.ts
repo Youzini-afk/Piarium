@@ -1430,6 +1430,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     deleteSession: (sessionId) => piRuntimeBroker.deleteSession(sessionId),
+    deleteKnowledgeSession: async (sessionId) => {
+      // Delete the session's event/block/session knowledge nodes through the
+      // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
+      // workspace/user knowledge is retained.
+      const store = await getKnowledgeStoreForSession(sessionId);
+      if (store) await store.deleteSession(sessionId);
+    },
     onThreadSessionBound: (sessionId, owningWorkspaceId) => bindThreadKnowledgeSession(sessionId, owningWorkspaceId),
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,

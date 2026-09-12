@@ -110,7 +110,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': '디렉터리 유지 중',
   'harness.threads.keepFailed': '디렉터리 유지를 업데이트하지 못했습니다',
   'harness.threads.delete': '삭제',
-  'harness.threads.deleteConfirm': '스레드를 삭제할까요?',
+  'harness.threads.deleteConfirm': '스레드를 삭제할까요? 모든 하위 스레드, Pi 대화, 결과 기록, 관리 디렉터리가 제거됩니다.',
   'harness.threads.deleting': '삭제 중…',
   'harness.threads.deleteFailed': '스레드를 삭제하지 못했습니다',
   'harness.threads.showArchived': '보관 항목 표시',

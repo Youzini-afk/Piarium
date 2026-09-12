@@ -111,7 +111,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': 'Katalog zachowany',
   'harness.threads.keepFailed': 'Nie udało się zaktualizować zachowania katalogu',
   'harness.threads.delete': 'Usuń',
-  'harness.threads.deleteConfirm': 'Usunąć wątek?',
+  'harness.threads.deleteConfirm': 'Usunąć wątek? Spowoduje to usunięcie wszystkich wątków potomnych, konwersacji Pi, historii wyników i zarządzanych katalogów.',
   'harness.threads.deleting': 'Usuwanie…',
   'harness.threads.deleteFailed': 'Nie udało się usunąć wątku',
   'harness.threads.showArchived': 'Pokaż zarchiwizowane',

@@ -105,6 +105,12 @@ export interface ThreadRuntimeOptions {
   sessions: ThreadSessionAdapter;
   /** Deletes a Pi session's worker, file, and metadata (thread deletion, D-242). */
   deleteSession?(sessionId: string): Promise<unknown>;
+  /**
+   * Deletes a session's event/block/session knowledge nodes through
+   * `KnowledgeStore.deleteSession` (D-242 rework). Accepted workspace/user
+   * knowledge is retained — only the thread's own session knowledge is removed.
+   */
+  deleteKnowledgeSession?(sessionId: string): Promise<unknown>;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
     Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectIndexModes" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
@@ -3733,6 +3739,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     for (const sessionId of sessionIds) {
       await options.deleteSession(sessionId);
+      // Delete the session's event/block/session knowledge nodes through the
+      // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
+      // workspace/user knowledge is retained. Failure is not swallowed — a
+      // knowledge cleanup failure must surface, not silently succeed.
+      if (options.deleteKnowledgeSession) {
+        await options.deleteKnowledgeSession(sessionId);
+      }
     }
     return [...sessionIds];
   };
@@ -3764,7 +3777,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         // collection is opportunistic and retryable by the next cleanup pass.
         reportError(error);
       }
-    }, "shared");
+    }, "exclusive");
   };
 
   /**
@@ -3798,22 +3811,61 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  type DeletionPhase = "sessions" | "store" | "directory" | "registry";
+  type DeletionNodeResult = {
+    threadId: string;
+    status: "complete" | "objects-pending" | "retryable" | "needs-attention";
+    phase?: DeletionPhase;
+    error?: string;
+  };
+
   const deleteOneNode = async (
     workspaceId: string,
     parent: ThreadParent,
     threadId: string,
-  ): Promise<void> => {
+  ): Promise<DeletionNodeResult> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
-    if (!thread) return;
+    // Already removed — idempotent retry continues from observed facts (D-242 rework).
+    if (!thread) return { threadId, status: "complete" };
     if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
       // Deletion must not mint a partial result revision that the cascade is
       // about to release; the Run still settles as cancelled first.
       await stopRunForArchive(workspaceId, parent, threadId, { capturePartial: false, reason: "deleted by user" });
     }
-    await deleteThreadSessions(workspaceId, threadId);
-    await releaseThreadStore(workspaceId, thread);
-    await deleteThreadDirectory(workspaceId, thread);
-    await options.registry.removeThread(workspaceId, parent, threadId);
+    // Phase 1: delete sessions. Idempotent — already-deleted sessions are
+    // observed as empty by the registry, and the broker/deleteKnowledgeSession
+    // tolerate re-deletion (D-242 rework).
+    try {
+      await deleteThreadSessions(workspaceId, threadId);
+    } catch (error) {
+      return { threadId, status: "retryable", phase: "sessions", error: error instanceof Error ? error.message : String(error) };
+    }
+    // Phase 2: release working-state objects. Idempotent — if the branch/draft
+    // was already released, the store operations are no-ops on missing rows.
+    try {
+      await releaseThreadStore(workspaceId, thread);
+    } catch (error) {
+      // Sessions are gone but objects remain — logically deleted, object
+      // cleanup is retryable (D-242 rework).
+      return { threadId, status: "objects-pending", phase: "store", error: error instanceof Error ? error.message : String(error) };
+    }
+    // Phase 3: delete the managed directory. Idempotent — if the directory was
+    // already removed, reclaim reports it and we continue.
+    try {
+      await deleteThreadDirectory(workspaceId, thread);
+    } catch (error) {
+      // Objects are released but the directory remains — retryable, but the
+      // thread record is still intact for a retry (D-242 rework).
+      return { threadId, status: "retryable", phase: "directory", error: error instanceof Error ? error.message : String(error) };
+    }
+    // Phase 4: remove the thread row from the catalog. This is the
+    // irreversible commit point — after this, the thread is logically gone.
+    try {
+      await options.registry.removeThread(workspaceId, parent, threadId);
+    } catch (error) {
+      return { threadId, status: "needs-attention", phase: "registry", error: error instanceof Error ? error.message : String(error) };
+    }
+    return { threadId, status: "complete" };
   };
 
   const deleteUser = async (
@@ -3821,29 +3873,58 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     parent: ThreadParent,
     threadId: string,
   ) => {
+    // Idempotent retry: if the thread is already gone, complete without
+    // entering the cascade (D-242 rework). beginCascade would throw "Unknown
+    // thread" for a missing target.
+    const existing = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!existing) {
+      return {
+        workspaceId,
+        parent,
+        deletedThreadIds: [threadId],
+        status: "complete" as const,
+        nodeResults: [{ threadId, status: "complete" as const }],
+        space: await inspectSpace(workspaceId, parent),
+      };
+    }
     // Same cascade shape as archive: abort preparations first, delete each
     // descendant on its own lifecycle turn in post-order, then the target.
     preparations.get(threadId)?.controller.abort();
     const releaseCascade = await beginCascade(workspaceId, threadId);
     try {
       const descendants = await collectDescendantsPostOrder(workspaceId, threadId);
+      const nodeResults: DeletionNodeResult[] = [];
       for (const child of descendants) {
         preparations.get(child.id)?.controller.abort();
         await withThreadLifecycle(workspaceId, child.id, async () => {
           preparations.get(child.id)?.controller.abort();
-          return deleteOneNode(workspaceId, child.parent, child.id);
+          const result = await deleteOneNode(workspaceId, child.parent, child.id);
+          nodeResults.push(result);
+          return result;
         });
       }
-      return await withThreadLifecycle(workspaceId, threadId, async () => {
+      const targetResult = await withThreadLifecycle(workspaceId, threadId, async () => {
         preparations.get(threadId)?.controller.abort();
-        await deleteOneNode(workspaceId, parent, threadId);
-        return {
-          workspaceId,
-          parent,
-          deletedThreadIds: [...descendants.map((thread) => thread.id), threadId],
-          space: await inspectSpace(workspaceId, parent),
-        };
+        return deleteOneNode(workspaceId, parent, threadId);
       });
+      nodeResults.push(targetResult);
+      // Aggregate status: complete only if every node completed; otherwise
+      // the worst status wins (D-242 rework).
+      const hasNeedsAttention = nodeResults.some((r) => r.status === "needs-attention");
+      const hasRetryable = nodeResults.some((r) => r.status === "retryable");
+      const hasObjectsPending = nodeResults.some((r) => r.status === "objects-pending");
+      const aggregateStatus = hasNeedsAttention ? "needs-attention"
+        : hasRetryable ? "retryable"
+        : hasObjectsPending ? "objects-pending"
+        : "complete";
+      return {
+        workspaceId,
+        parent,
+        deletedThreadIds: [...descendants.map((thread) => thread.id), threadId],
+        status: aggregateStatus,
+        nodeResults,
+        space: await inspectSpace(workspaceId, parent),
+      };
     } finally {
       releaseCascade();
     }

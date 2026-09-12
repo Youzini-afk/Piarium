@@ -108,7 +108,7 @@ export const dict = {
   'harness.threads.keepWorktreeOn': 'Répertoire conservé',
   'harness.threads.keepFailed': 'Impossible de mettre à jour la conservation du répertoire',
   'harness.threads.delete': 'Supprimer',
-  'harness.threads.deleteConfirm': 'Supprimer le fil ?',
+  'harness.threads.deleteConfirm': 'Supprimer le fil ? Cela supprime tous les fils descendants, conversations Pi, historique des résultats et répertoires gérés.',
   'harness.threads.deleting': 'Suppression…',
   'harness.threads.deleteFailed': 'Impossible de supprimer le fil',
   'harness.threads.showArchived': 'Afficher les archives',

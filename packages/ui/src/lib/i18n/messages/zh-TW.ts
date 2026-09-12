@@ -110,7 +110,7 @@ export const dict: Record<I18nKey, string> = {
   'harness.threads.keepWorktreeOn': '已保留目錄',
   'harness.threads.keepFailed': '無法更新目錄保留',
   'harness.threads.delete': '刪除',
-  'harness.threads.deleteConfirm': '確認刪除該執行緒?',
+  'harness.threads.deleteConfirm': '確認刪除該執行緒？這將移除所有子孫執行緒、Pi 對話、結果歷史與受管目錄。',
   'harness.threads.deleting': '正在刪除…',
   'harness.threads.deleteFailed': '無法刪除該執行緒',
   'harness.threads.showArchived': '顯示已封存',

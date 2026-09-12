@@ -104,7 +104,7 @@ export const dict = {
   'harness.threads.keepWorktreeOn': 'Directory kept',
   'harness.threads.keepFailed': 'Could not update directory retention',
   'harness.threads.delete': 'Delete',
-  'harness.threads.deleteConfirm': 'Delete thread?',
+  'harness.threads.deleteConfirm': 'Delete thread? This removes all descendant threads, Pi conversations, result history, and managed directories.',
   'harness.threads.deleting': 'Deleting…',
   'harness.threads.deleteFailed': 'Could not delete the thread',
   'harness.threads.showArchived': 'Show archived',
