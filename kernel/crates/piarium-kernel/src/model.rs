@@ -92,4 +92,5 @@ pub(crate) struct BlobStream {
     pub(crate) expected_hash: Option<String>,
     pub(crate) staging: PathBuf,
     pub(crate) grant_id: String,
+    pub(crate) workspace_id: Option<String>,
 }

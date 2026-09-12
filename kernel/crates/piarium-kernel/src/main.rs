@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use fs2::FileExt;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -16,10 +16,27 @@ mod error;
 mod model;
 mod protocol;
 mod runtime;
-use authority::{path_allowed, require_capability};
+mod storage_schema;
+use authority::{path_allowed, path_allowed_scopes, require_capability};
 use error::KernelError;
 use model::{BlobStream, BranchRow, BuildTree, Grant, PathState, TrieNode};
 use protocol::*;
+use storage_schema::CATALOG_SCHEMA;
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        File::open(path)?.sync_all()
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        // Windows does not expose a portable directory fsync primitive. The
+        // file itself is synced before rename and the limitation is recorded
+        // in the release evidence rather than pretending otherwise.
+        Ok(())
+    }
+}
 
 struct StorageLock {
     _file: File,
@@ -42,16 +59,6 @@ struct Storage {
 impl Storage {
     fn open(root: &Path, host_id: &str) -> Result<Self, KernelError> {
         fs::create_dir_all(root)?;
-        for directory in ["objects", "staging"] {
-            fs::create_dir_all(root.join(directory))?;
-        }
-        if let Ok(entries) = fs::read_dir(root.join("staging")) {
-            for entry in entries.flatten() {
-                if entry.path().extension().and_then(|value| value.to_str()) == Some("stream") {
-                    let _ = fs::remove_file(entry.path());
-                }
-            }
-        }
         let lock_path = root.join("kernel.lock");
         let mut file = OpenOptions::new()
             .read(true)
@@ -69,56 +76,83 @@ impl Storage {
             json!({"hostId": host_id, "pid": std::process::id(), "createdAt": now_ms()});
         file.write_all(lock_record.to_string().as_bytes())?;
         file.sync_all()?;
+        for directory in ["objects", "staging"] {
+            fs::create_dir_all(root.join(directory))?;
+        }
+        // No staging scan or directory mutation is allowed before the OS lock
+        // is held. A second Host must not clean files owned by the first Host.
+        if let Ok(entries) = fs::read_dir(root.join("staging")) {
+            for entry in entries.flatten() {
+                if entry.path().extension().and_then(|value| value.to_str()) == Some("stream") {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
         let catalog_path = root.join("catalog.sqlite");
         let catalog_existed = catalog_path.exists();
+        let (format, catalog_empty): (Option<String>, bool) = if catalog_existed {
+            let probe =
+                Connection::open_with_flags(&catalog_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+            let format = match probe
+                .query_row(
+                    "SELECT value FROM metadata WHERE key = 'format_version'",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+            {
+                Ok(format) => format,
+                Err(rusqlite::Error::SqliteFailure(_, Some(message)))
+                    if message.contains("no such table") =>
+                {
+                    None
+                }
+                Err(error) => return Err(error.into()),
+            };
+            let empty = probe.query_row(
+                "SELECT COUNT(*) = 0 FROM sqlite_master WHERE type = 'table'",
+                [],
+                |row| row.get(0),
+            )?;
+            (format, empty)
+        } else {
+            (None, true)
+        };
+        let initialize_catalog = !catalog_existed || (format.is_none() && catalog_empty);
+        if !initialize_catalog {
+            match format {
+                Some(value) if value == STORAGE_FORMAT_VERSION => {}
+                Some(value) => {
+                    return Err(KernelError::Storage(format!(
+                        "unsupported catalog format version: {value}"
+                    )))
+                }
+                None => {
+                    return Err(KernelError::Storage(
+                        "catalog format version is missing".to_string(),
+                    ))
+                }
+            }
+        }
         let conn = Connection::open(catalog_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, byte_length INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS trie_nodes (hash TEXT PRIMARY KEY, children_json TEXT NOT NULL, state_json TEXT);
-             CREATE TABLE IF NOT EXISTS branches (branch_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, create_params_hash TEXT NOT NULL, base_root TEXT NOT NULL, head_root TEXT NOT NULL, head_revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS revisions (branch_id TEXT NOT NULL, revision INTEGER NOT NULL, root_hash TEXT NOT NULL, parent_revision INTEGER, operation_id TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(branch_id, revision));
-             CREATE TABLE IF NOT EXISTS pins (pin_id TEXT PRIMARY KEY, branch_id TEXT NOT NULL, workspace_id TEXT NOT NULL, revision INTEGER NOT NULL, root_hash TEXT NOT NULL, created_at INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS root_blobs (root_hash TEXT NOT NULL, blob_hash TEXT NOT NULL, PRIMARY KEY(root_hash, blob_hash));
-             CREATE TABLE IF NOT EXISTS root_parents (root_hash TEXT PRIMARY KEY, parent_root TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS recovery_roots (record_id TEXT NOT NULL, root_hash TEXT NOT NULL, PRIMARY KEY(record_id, root_hash));
-             CREATE TABLE IF NOT EXISTS grants (grant_id TEXT PRIMARY KEY, host_id TEXT NOT NULL, grant_json TEXT NOT NULL, params_hash TEXT NOT NULL, revoked INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS operations (operation_id TEXT PRIMARY KEY, kind TEXT NOT NULL, params_hash TEXT NOT NULL, state TEXT NOT NULL, result_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS recovery_records (record_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, state TEXT NOT NULL, data_json TEXT NOT NULL, initial_data_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-             CREATE TABLE IF NOT EXISTS pending_gc_files (hash TEXT PRIMARY KEY, path TEXT NOT NULL, state TEXT NOT NULL, last_error TEXT, queued_at INTEGER NOT NULL, cleaned_at INTEGER);
-             CREATE INDEX IF NOT EXISTS revisions_root ON revisions(root_hash);
-             CREATE INDEX IF NOT EXISTS pins_root ON pins(root_hash);
-             CREATE INDEX IF NOT EXISTS root_blobs_blob ON root_blobs(blob_hash);
-             CREATE INDEX IF NOT EXISTS recovery_operation ON recovery_records(operation_id);",
-        )?;
-        let format: Option<String> = conn
-            .query_row(
-                "SELECT value FROM metadata WHERE key = 'format_version'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?;
-        match (catalog_existed, format) {
-            (false, None) => {
+        if initialize_catalog {
+            conn.execute_batch("BEGIN IMMEDIATE")?;
+            if let Err(error) = conn.execute_batch(CATALOG_SCHEMA).and_then(|_| {
                 conn.execute(
                     "INSERT INTO metadata(key, value) VALUES ('format_version', ?1)",
                     params![STORAGE_FORMAT_VERSION],
                 )?;
+                conn.execute_batch("PRAGMA user_version = 5")
+            }) {
+                let _ = conn.execute_batch("ROLLBACK");
+                return Err(error.into());
             }
-            (_, Some(value)) if value == STORAGE_FORMAT_VERSION => {}
-            (_, Some(value)) => {
-                return Err(KernelError::Storage(format!(
-                    "unsupported catalog format version: {value}"
-                )))
-            }
-            (true, None) => {
-                return Err(KernelError::Storage(
-                    "catalog format version is missing".to_string(),
-                ))
-            }
+            conn.execute_batch("COMMIT")?;
+        } else {
+            conn.execute_batch(CATALOG_SCHEMA)?;
         }
         let mut storage = Self {
             root: PathBuf::from(root),
@@ -131,7 +165,7 @@ impl Storage {
         // object unlink. Retry durable cleanup on the next owner start; a
         // failure remains visible through health instead of being swallowed.
         storage.sweep_orphan_objects()?;
-        let _ = storage.drain_gc_files();
+        storage.drain_gc_files()?;
         Ok(storage)
     }
 
@@ -218,6 +252,20 @@ impl Storage {
         Ok(())
     }
 
+    fn record_operation_workspace(
+        &mut self,
+        operation_id: &str,
+        workspace_id: Option<&str>,
+    ) -> Result<(), KernelError> {
+        if let Some(workspace_id) = workspace_id {
+            self.conn.execute(
+                "INSERT OR IGNORE INTO operation_owners(operation_id, workspace_id, created_at) VALUES (?1, ?2, ?3)",
+                params![operation_id, workspace_id, now_ms()],
+            )?;
+        }
+        Ok(())
+    }
+
     fn record_root_blobs(&mut self, root: &str) -> Result<(), KernelError> {
         let mut nodes = BTreeSet::new();
         let mut blobs = BTreeSet::new();
@@ -250,6 +298,61 @@ impl Storage {
             self.conn.execute(
                 "INSERT OR IGNORE INTO root_blobs(root_hash, blob_hash) VALUES (?1, ?2)",
                 params![root, hash],
+            )?;
+        }
+        Ok(())
+    }
+
+    fn record_object_owner(
+        &mut self,
+        owner_id: &str,
+        hash: &str,
+        workspace_id: Option<&str>,
+        operation_id: Option<&str>,
+        owner_kind: &str,
+    ) -> Result<(), KernelError> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO object_owners(owner_id, blob_hash, workspace_id, operation_id, owner_kind, state, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)",
+            params![owner_id, hash, workspace_id, operation_id, owner_kind, now_ms()],
+        )?;
+        Ok(())
+    }
+
+    fn release_object_owner(
+        &mut self,
+        params_value: &Value,
+        workspace_id: Option<&str>,
+    ) -> Result<Value, KernelError> {
+        let owner_id = params_value
+            .get("ownerId")
+            .or_else(|| params_value.get("operationId"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                KernelError::Operation("ownerId or operationId is required".to_string())
+            })?;
+        let released = if let Some(workspace_id) = workspace_id {
+            self.conn.execute(
+                "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2",
+                params![owner_id, workspace_id],
+            )?
+        } else {
+            self.conn.execute(
+                "DELETE FROM object_owners WHERE owner_id = ?1",
+                params![owner_id],
+            )?
+        };
+        Ok(json!({"ownerId": owner_id, "released": released > 0}))
+    }
+
+    fn attach_object_owners(
+        &mut self,
+        workspace_id: &str,
+        hashes: impl IntoIterator<Item = String>,
+    ) -> Result<(), KernelError> {
+        for hash in hashes {
+            self.conn.execute(
+                "UPDATE object_owners SET state = 'attached' WHERE blob_hash = ?1 AND workspace_id = ?2 AND owner_kind = 'operation' AND state = 'active'",
+                params![hash, workspace_id],
             )?;
         }
         Ok(())
@@ -380,7 +483,16 @@ impl Storage {
                     "grantId was reused with different parameters".to_string(),
                 ));
             }
-            return Ok(serde_json::from_str(&stored_json)?);
+            let mut stored_grant: Grant = serde_json::from_str(&stored_json)?;
+            if stored_grant.kernel_epoch != epoch || stored_grant.revoked {
+                stored_grant.kernel_epoch = epoch.to_string();
+                stored_grant.revoked = false;
+                self.conn.execute(
+                    "UPDATE grants SET revoked = 0, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                    params![grant_id, now_ms(), serde_json::to_string(&stored_grant)?],
+                )?;
+            }
+            return Ok(serde_json::to_value(stored_grant)?);
         }
         self.conn.execute("INSERT INTO grants(grant_id, host_id, grant_json, params_hash, revoked, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 0, ?5, ?5)", params![grant_id, host_id, serde_json::to_string(&grant)?, params_hash, now_ms()])?;
         Ok(serde_json::to_value(grant)?)
@@ -408,9 +520,9 @@ impl Storage {
 
     fn blob_owned(&self, hash: &str, workspace: Option<&str>) -> Result<bool, KernelError> {
         let query = if workspace.is_some() {
-            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches WHERE workspace_id = ?2 UNION SELECT head_root FROM branches WHERE workspace_id = ?2 UNION SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE b.workspace_id = ?2 UNION SELECT p.root_hash FROM pins p WHERE p.workspace_id = ?2 UNION SELECT rr.root_hash FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rec.workspace_id = ?2 UNION SELECT parent.root_hash FROM root_parents parent JOIN roots ON parent.parent_root = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 LIMIT 1"
+            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches WHERE workspace_id = ?2 UNION SELECT head_root FROM branches WHERE workspace_id = ?2 UNION SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE b.workspace_id = ?2 UNION SELECT p.root_hash FROM pins p WHERE p.workspace_id = ?2 UNION SELECT rr.root_hash FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rec.workspace_id = ?2 UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 UNION SELECT 1 FROM object_owners oo WHERE oo.blob_hash = ?1 AND oo.workspace_id = ?2 AND oo.state = 'active' LIMIT 1"
         } else {
-            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches UNION SELECT head_root FROM branches UNION SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT root_hash FROM recovery_roots UNION SELECT parent.root_hash FROM root_parents parent JOIN roots ON parent.parent_root = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 LIMIT 1"
+            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches UNION SELECT head_root FROM branches UNION SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT root_hash FROM recovery_roots UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 UNION SELECT 1 FROM object_owners oo WHERE oo.blob_hash = ?1 AND oo.state = 'active' LIMIT 1"
         };
         let row: Option<i64> = if let Some(workspace) = workspace {
             self.conn
@@ -482,20 +594,128 @@ impl Storage {
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?
+        } else if method == "storage.putBlob.chunk" {
+            params
+                .get("streamId")
+                .and_then(Value::as_str)
+                .and_then(|stream_id| {
+                    self.streams
+                        .get(stream_id)
+                        .and_then(|stream| stream.workspace_id.clone())
+                })
+        } else if let Some(owner_id) = params.get("ownerId").and_then(Value::as_str) {
+            self.conn
+                .query_row(
+                    "SELECT workspace_id FROM object_owners WHERE owner_id = ?1",
+                    params![owner_id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten()
+        } else if let Some(operation_id) = params.get("operationId").and_then(Value::as_str) {
+            let operation_workspace: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT workspace_id FROM operation_owners WHERE operation_id = ?1",
+                    params![operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if operation_workspace.is_some() {
+                operation_workspace
+            } else {
+                self.conn
+                    .query_row(
+                        "SELECT workspace_id FROM recovery_records WHERE operation_id = ?1",
+                        params![operation_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+            }
+        } else if let Some(record_id) = params.get("recordId").and_then(Value::as_str) {
+            self.conn
+                .query_row(
+                    "SELECT workspace_id FROM recovery_records WHERE record_id = ?1",
+                    params![record_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+        } else if method == "branch.diff" {
+            let left = params.get("leftRoot").and_then(Value::as_str);
+            let right = params.get("rightRoot").and_then(Value::as_str);
+            if let (Some(left), Some(right)) = (left, right) {
+                if let Some(owning) = &grant.owning_workspace {
+                    if self.root_owned_by_workspace(left, owning)?
+                        && self.root_owned_by_workspace(right, owning)?
+                    {
+                        Some(owning.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    let left_workspace = self.root_workspace(left)?;
+                    let right_workspace = self.root_workspace(right)?;
+                    if left_workspace.is_some() && left_workspace == right_workspace {
+                        left_workspace
+                    } else {
+                        None
+                    }
+                }
+            } else {
+                None
+            }
         } else {
             None
         };
+        let workspace = if workspace.is_none()
+            && matches!(
+                method,
+                "operation.get"
+                    | "recovery.operation.get"
+                    | "recovery.operation.begin"
+                    | "recovery.operation.update"
+            ) {
+            grant.owning_workspace.clone()
+        } else {
+            workspace
+        };
         if let Some(owning) = &grant.owning_workspace {
-            if workspace.as_deref() != Some(owning.as_str()) {
+            if workspace
+                .as_deref()
+                .is_some_and(|workspace| workspace != owning.as_str())
+            {
                 return Err(KernelError::Authorization(
                     "grant workspace does not match resource".to_string(),
                 ));
             }
+        }
+        if let Some(workspace) = workspace.as_deref() {
             if params.get("workspaceId").is_none() {
                 if let Some(object) = authorized.as_object_mut() {
-                    object.insert("workspaceId".to_string(), Value::String(owning.clone()));
+                    object.insert(
+                        "workspaceId".to_string(),
+                        Value::String(workspace.to_string()),
+                    );
                 }
             }
+        }
+        if let Some(object) = authorized.as_object_mut() {
+            object.insert(
+                "__pathScopes".to_string(),
+                Value::Array(
+                    grant
+                        .path_scopes
+                        .iter()
+                        .cloned()
+                        .map(Value::String)
+                        .collect(),
+                ),
+            );
+        }
+        if method == "storage.snapshot" && !grant.path_scopes.iter().any(String::is_empty) {
+            return Err(KernelError::Authorization(
+                "snapshot requires an unbounded path grant".to_string(),
+            ));
         }
         for field in ["paths", "entries", "changes"] {
             if let Some(values) = params.get(field).and_then(Value::as_array) {
@@ -523,7 +743,10 @@ impl Storage {
                 .get("hash")
                 .and_then(Value::as_str)
                 .ok_or_else(|| KernelError::Authorization("hash is required".to_string()))?;
-            if !self.blob_owned(hash, grant.owning_workspace.as_deref())? {
+            if !self.blob_owned(
+                hash,
+                workspace.as_deref().or(grant.owning_workspace.as_deref()),
+            )? {
                 return Err(KernelError::Authorization(
                     "content object is not owned by the grant".to_string(),
                 ));
@@ -939,6 +1162,75 @@ impl Storage {
         ).map_err(|error| match error { rusqlite::Error::QueryReturnedNoRows => KernelError::Operation(format!("branch not found: {branch_id}")), other => other.into() })
     }
 
+    fn root_owned_by_workspace(&self, root: &str, workspace_id: &str) -> Result<bool, KernelError> {
+        let found: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM branches WHERE workspace_id = ?2 AND (base_root = ?1 OR head_root = ?1) UNION SELECT 1 FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE b.workspace_id = ?2 AND r.root_hash = ?1 UNION SELECT 1 FROM pins WHERE workspace_id = ?2 AND root_hash = ?1 UNION SELECT 1 FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rec.workspace_id = ?2 AND rr.root_hash = ?1 LIMIT 1",
+                params![root, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(found.is_some())
+    }
+
+    fn root_workspace(&self, root: &str) -> Result<Option<String>, KernelError> {
+        self.conn
+            .query_row(
+                "SELECT workspace_id FROM branches WHERE base_root = ?1 OR head_root = ?1 UNION SELECT b.workspace_id FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE r.root_hash = ?1 UNION SELECT workspace_id FROM pins WHERE root_hash = ?1 UNION SELECT rec.workspace_id FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rr.root_hash = ?1 LIMIT 1",
+                params![root],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
+    fn resolve_base_ref(&self, base_ref: &str, workspace_id: &str) -> Result<String, KernelError> {
+        let root = if base_ref.starts_with("sha256-") {
+            base_ref.to_string()
+        } else if let Some(pin_id) = base_ref.strip_prefix("pin:") {
+            self.conn
+                .query_row(
+                    "SELECT root_hash FROM pins WHERE pin_id = ?1 AND workspace_id = ?2",
+                    params![pin_id, workspace_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => KernelError::Authorization(
+                        "baseRef pin is not owned by workspace".to_string(),
+                    ),
+                    other => other.into(),
+                })?
+        } else if let Some((branch_id, revision)) = base_ref.split_once('@') {
+            let revision = revision
+                .parse::<i64>()
+                .map_err(|_| KernelError::Operation("baseRef revision is malformed".to_string()))?;
+            self.conn
+                .query_row(
+                    "SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE r.branch_id = ?1 AND r.revision = ?2 AND b.workspace_id = ?3",
+                    params![branch_id, revision, workspace_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => {
+                        KernelError::Authorization("baseRef revision is not owned by workspace".to_string())
+                    }
+                    other => other.into(),
+                })?
+        } else {
+            return Err(KernelError::Operation(
+                "baseRef must be a root hash, pin:<pinId>, or branchId@revision".to_string(),
+            ));
+        };
+        if !self.root_owned_by_workspace(&root, workspace_id)? {
+            return Err(KernelError::Authorization(
+                "baseRef root is not owned by workspace".to_string(),
+            ));
+        }
+        self.load_node(&root)?;
+        Ok(root)
+    }
+
     fn validate_path(path: &str) -> Result<Vec<String>, KernelError> {
         if path.is_empty()
             || path.contains('\0')
@@ -1006,80 +1298,6 @@ impl Storage {
         Ok(parsed)
     }
 
-    fn put_blob(&mut self, params: &Value) -> Result<Value, KernelError> {
-        let bytes = params
-            .get("bytesBase64")
-            .and_then(Value::as_str)
-            .ok_or_else(|| KernelError::Operation("bytesBase64 is required".to_string()))?;
-        let decoded = BASE64
-            .decode(bytes)
-            .map_err(|error| KernelError::Operation(format!("invalid bytesBase64: {error}")))?;
-        let hash = format!("sha256-{}", hex::encode(Sha256::digest(&decoded)));
-        if let Some(expected) = params.get("expectedHash").and_then(Value::as_str) {
-            if expected != hash {
-                return Err(KernelError::Operation(
-                    "content hash does not match expectedHash".to_string(),
-                ));
-            }
-        }
-        let target = object_path(&self.root, &hash)?;
-        if target.exists() {
-            let existing = fs::read(&target)?;
-            let actual = format!("sha256-{}", hex::encode(Sha256::digest(&existing)));
-            if actual != hash {
-                return Err(KernelError::Storage(format!(
-                    "content object is corrupt: {hash}"
-                )));
-            }
-            if existing.len() != decoded.len() {
-                return Err(KernelError::Storage(format!(
-                    "content object length is corrupt: {hash}"
-                )));
-            }
-        } else {
-            let staging = self
-                .root
-                .join("staging")
-                .join(format!("{}.object", Uuid::new_v4()));
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&staging)?;
-            file.write_all(&decoded)?;
-            file.sync_all()?;
-            drop(file);
-            fs::create_dir_all(target.parent().unwrap())?;
-            fs::rename(&staging, &target).or_else(|error| {
-                if error.kind() == io::ErrorKind::AlreadyExists {
-                    fs::remove_file(&staging)
-                } else {
-                    Err(error)
-                }
-            })?;
-        }
-        let recorded: Option<i64> = self
-            .conn
-            .query_row(
-                "SELECT byte_length FROM blobs WHERE hash = ?1",
-                params![hash],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if let Some(byte_length) = recorded {
-            if byte_length != decoded.len() as i64 {
-                return Err(KernelError::Storage(format!(
-                    "content object metadata is corrupt: {hash}"
-                )));
-            }
-        } else {
-            self.conn.execute(
-                "INSERT INTO blobs(hash, byte_length) VALUES (?1, ?2)",
-                params![hash, decoded.len() as i64],
-            )?;
-        }
-        Ok(json!({"hash": hash, "byteLength": decoded.len()}))
-    }
-
     fn begin_blob_stream(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let operation_id = params
             .get("operationId")
@@ -1129,6 +1347,10 @@ impl Storage {
                 expected_hash,
                 staging,
                 grant_id: grant_id.to_string(),
+                workspace_id: params
+                    .get("workspaceId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
             },
         );
         Ok(
@@ -1239,9 +1461,17 @@ impl Storage {
             fs::create_dir_all(target.parent().unwrap())?;
             fs::rename(&stream.staging, &target)?;
         }
+        sync_directory(target.parent().unwrap())?;
         self.conn.execute(
             "INSERT OR IGNORE INTO blobs(hash, byte_length) VALUES (?1, ?2)",
             params![hash, decoded.len() as i64],
+        )?;
+        self.record_object_owner(
+            &format!("operation:{}", stream.operation_id),
+            &hash,
+            params.get("workspaceId").and_then(Value::as_str),
+            Some(&stream.operation_id),
+            "operation",
         )?;
         Ok(json!({"hash": hash, "byteLength": decoded.len()}))
     }
@@ -1262,6 +1492,20 @@ impl Storage {
         }
         let _ = fs::remove_file(&stream.staging);
         Ok(json!({"streamId": stream_id, "aborted": true}))
+    }
+
+    fn abort_streams_for_grant(&mut self, grant_id: &str) {
+        let stream_ids = self
+            .streams
+            .iter()
+            .filter(|(_, stream)| stream.grant_id == grant_id)
+            .map(|(stream_id, _)| stream_id.clone())
+            .collect::<Vec<_>>();
+        for stream_id in stream_ids {
+            if let Some(stream) = self.streams.remove(&stream_id) {
+                let _ = fs::remove_file(stream.staging);
+            }
+        }
     }
 
     fn get_blob(&self, params: &Value) -> Result<Value, KernelError> {
@@ -1295,6 +1539,17 @@ impl Storage {
             .get("length")
             .and_then(Value::as_u64)
             .map(|value| value as usize);
+        if bytes.len() > MAX_BLOB_RESPONSE_BYTES && length.is_none() {
+            return Err(KernelError::Operation(
+                "content object is larger than one response frame; request a byte range"
+                    .to_string(),
+            ));
+        }
+        if length.is_some_and(|length| length > MAX_BLOB_RESPONSE_BYTES) {
+            return Err(KernelError::Operation(
+                "requested byte range is larger than one response frame".to_string(),
+            ));
+        }
         let start = offset.min(bytes.len());
         let end = length
             .map(|value| start.saturating_add(value).min(bytes.len()))
@@ -1324,6 +1579,23 @@ impl Storage {
                 if seen.get(&parent).is_some_and(|state| !state.is_directory()) {
                     return Err(KernelError::Operation(format!(
                         "a non-directory path cannot have descendants: {parent}"
+                    )));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn validate_state_ownership(
+        &self,
+        entries: &[(Vec<String>, PathState)],
+        workspace_id: &str,
+    ) -> Result<(), KernelError> {
+        for (_, state) in entries {
+            if let Some(hash) = state.object_hash() {
+                if !self.blob_owned(hash, Some(workspace_id))? {
+                    return Err(KernelError::Authorization(format!(
+                        "content object is not owned by workspace: {hash}"
                     )));
                 }
             }
@@ -1372,7 +1644,8 @@ impl Storage {
         let entries = params
             .get("entries")
             .and_then(Value::as_array)
-            .ok_or_else(|| KernelError::Operation("entries is required".to_string()))?;
+            .cloned()
+            .unwrap_or_default();
         let mut entries_to_write = Vec::with_capacity(entries.len());
         for entry in entries {
             self.check_cancelled()?;
@@ -1388,10 +1661,37 @@ impl Storage {
             entries_to_write.push((segments, self.parse_state(&state)?));
         }
         Self::validate_batch_paths(&entries_to_write)?;
-        let root = self.build_root(&entries_to_write)?;
-        self.record_root_blobs(&root)?;
+        self.validate_state_ownership(&entries_to_write, workspace_id)?;
+        let entry_blob_hashes = entries_to_write
+            .iter()
+            .filter_map(|(_, state)| state.object_hash().map(str::to_string))
+            .collect::<Vec<_>>();
+        let base_root = if let Some(base_ref) = params.get("baseRef").and_then(Value::as_str) {
+            self.resolve_base_ref(base_ref, workspace_id)?
+        } else {
+            self.empty_root()?
+        };
+        let mut root = base_root.clone();
+        if !entries_to_write.is_empty() {
+            if params.get("baseRef").is_none() {
+                root = self.build_root(&entries_to_write)?;
+            } else {
+                for (segments, state) in entries_to_write {
+                    let refs = segments.iter().map(String::as_str).collect::<Vec<_>>();
+                    root = self.root_set(&root, &refs, state)?;
+                }
+            }
+            if params.get("baseRef").is_some() {
+                self.record_root_blob_hashes(&root, entry_blob_hashes.clone())?;
+            }
+        }
+        if params.get("baseRef").is_none() {
+            self.record_root_blobs(&root)?;
+        }
+        self.attach_object_owners(workspace_id, entry_blob_hashes)?;
+        self.record_root_parent(&root, &base_root)?;
         let now = now_ms();
-        self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?5)", params![branch_id, workspace_id, create_params_hash, root, now])?;
+        self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?6)", params![branch_id, workspace_id, create_params_hash, base_root, root, now])?;
         self.conn.execute("INSERT OR IGNORE INTO revisions(branch_id, revision, root_hash, created_at) VALUES (?1, 0, ?2, ?3)", params![branch_id, root, now])?;
         Ok(
             json!({"branchId": branch_id, "root": root, "writeRevision": 0, "headRevision": 0, "created": true}),
@@ -1429,6 +1729,16 @@ impl Storage {
             (branch.head_revision, branch.head_root.clone(), "current")
         };
         let requested = params.get("paths").and_then(Value::as_array);
+        let scopes = params
+            .get("__pathScopes")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            });
         let entries = if let Some(paths) = requested {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
@@ -1445,6 +1755,11 @@ impl Storage {
         {
             self.root_entries(&root)?
                 .into_iter()
+                .filter(|(path, _)| {
+                    scopes
+                        .as_ref()
+                        .is_none_or(|scopes| path_allowed_scopes(scopes, path))
+                })
                 .map(|(path, state)| json!({"path": path, "state": state}))
                 .collect()
         } else {
@@ -1491,6 +1806,7 @@ impl Storage {
             changes_to_write.push((segments, self.parse_state(&state)?));
         }
         Self::validate_batch_paths(&changes_to_write)?;
+        self.validate_state_ownership(&changes_to_write, &branch.workspace_id)?;
         let previous_root = branch.head_root.clone();
         let changed_blobs = changes_to_write
             .iter()
@@ -1509,7 +1825,8 @@ impl Storage {
             );
         }
         self.record_root_parent(&root, &previous_root)?;
-        self.record_root_blob_hashes(&root, changed_blobs)?;
+        self.record_root_blob_hashes(&root, changed_blobs.clone())?;
+        self.attach_object_owners(&branch.workspace_id, changed_blobs)?;
         Ok(json!({"status": "committed", "writeRevision": next, "root": root}))
     }
 
@@ -1519,6 +1836,20 @@ impl Storage {
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
         let branch = self.branch(branch_id)?;
+        if let Some(expected) = params.get("expectedWriteRevision").and_then(Value::as_i64) {
+            if expected != branch.write_revision {
+                return Ok(
+                    json!({"status": "conflict", "branchId": branch_id, "writeRevision": branch.write_revision, "root": branch.head_root}),
+                );
+            }
+        }
+        if let Some(expected_root) = params.get("expectedRoot").and_then(Value::as_str) {
+            if expected_root != branch.head_root {
+                return Ok(
+                    json!({"status": "conflict", "branchId": branch_id, "writeRevision": branch.write_revision, "root": branch.head_root}),
+                );
+            }
+        }
         let revision = branch.head_revision + 1;
         self.conn.execute("INSERT INTO revisions(branch_id, revision, root_hash, operation_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)", params![branch_id, revision, branch.head_root, params.get("operationId").and_then(Value::as_str), now_ms()])?;
         self.conn.execute(
@@ -1526,7 +1857,7 @@ impl Storage {
             params![branch_id, revision, now_ms()],
         )?;
         Ok(
-            json!({"branchId": branch_id, "revision": revision, "root": branch.head_root, "writeRevision": branch.write_revision}),
+            json!({"status": "committed", "branchId": branch_id, "revision": revision, "root": branch.head_root, "writeRevision": branch.write_revision}),
         )
     }
 
@@ -1572,11 +1903,53 @@ impl Storage {
                 })?;
             (revision, root)
         } else {
-            (branch.head_revision, branch.head_root.clone())
+            let root = self
+                .conn
+                .query_row(
+                    "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                    params![branch_id, branch.head_revision],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => KernelError::Operation(
+                        "cannot pin a branch without a published revision".to_string(),
+                    ),
+                    other => other.into(),
+                })?;
+            (branch.head_revision, root)
         };
-        self.conn.execute("INSERT OR REPLACE INTO pins(pin_id, branch_id, workspace_id, revision, root_hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![pin_id, branch_id, branch.workspace_id, revision, root, now_ms()])?;
+        if let Some((existing_branch, existing_workspace, existing_revision, existing_root)) = self
+            .conn
+            .query_row(
+                "SELECT branch_id, workspace_id, revision, root_hash FROM pins WHERE pin_id = ?1",
+                params![pin_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+        {
+            if existing_branch != branch_id
+                || existing_workspace != branch.workspace_id
+                || existing_revision != revision
+                || existing_root != root
+            {
+                return Err(KernelError::Authorization(
+                    "pinId is already bound to another identity".to_string(),
+                ));
+            }
+            return Ok(
+                json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": branch.workspace_id, "revision": revision, "root": root, "pinned": true, "created": false}),
+            );
+        }
+        self.conn.execute("INSERT INTO pins(pin_id, branch_id, workspace_id, revision, root_hash, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)", params![pin_id, branch_id, branch.workspace_id, revision, root, now_ms()])?;
         Ok(
-            json!({"pinId": pin_id, "branchId": branch_id, "revision": revision, "root": root, "pinned": true}),
+            json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": branch.workspace_id, "revision": revision, "root": root, "pinned": true, "created": true}),
         )
     }
 
@@ -1606,12 +1979,12 @@ impl Storage {
             .get("pinId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("pinId is required".to_string()))?;
-        let (branch_id, revision, root): (String, i64, String) = self
+        let (branch_id, workspace_id, revision, root): (String, String, i64, String) = self
             .conn
             .query_row(
-                "SELECT branch_id, revision, root_hash FROM pins WHERE pin_id = ?1",
+                "SELECT branch_id, workspace_id, revision, root_hash FROM pins WHERE pin_id = ?1",
                 params![pin_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|error| match error {
                 rusqlite::Error::QueryReturnedNoRows => {
@@ -1626,13 +1999,26 @@ impl Storage {
         {
             self.root_entries(&root)?
                 .into_iter()
+                .filter(|(path, _)| {
+                    params
+                        .get("__pathScopes")
+                        .and_then(Value::as_array)
+                        .is_none_or(|scopes| {
+                            let scopes = scopes
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_string)
+                                .collect::<Vec<_>>();
+                            path_allowed_scopes(&scopes, path)
+                        })
+                })
                 .map(|(path, state)| json!({"path": path, "state": state}))
                 .collect()
         } else {
             Vec::new()
         };
         Ok(
-            json!({"pinId": pin_id, "branchId": branch_id, "revision": revision, "root": root, "entries": entries}),
+            json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": workspace_id, "revision": revision, "root": root, "entries": entries}),
         )
     }
 
@@ -1671,6 +2057,21 @@ impl Storage {
         let mut removed = Vec::new();
         let mut changed = Vec::new();
         self.diff_nodes(left, right, "", &mut added, &mut removed, &mut changed)?;
+        if let Some(scopes) = params
+            .get("__pathScopes")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            })
+        {
+            added.retain(|path| path_allowed_scopes(&scopes, path));
+            removed.retain(|path| path_allowed_scopes(&scopes, path));
+            changed.retain(|path| path_allowed_scopes(&scopes, path));
+        }
         Ok(
             json!({"leftRoot": left, "rightRoot": right, "added": added, "removed": removed, "changed": changed}),
         )
@@ -1757,6 +2158,81 @@ impl Storage {
         self.check_cancelled()?;
         if left == right {
             return Ok(());
+        }
+        if left.is_none() {
+            if let Some(right) = right {
+                let mut entries = Vec::new();
+                self.index_entries(right, &mut entries)?;
+                for (key, child) in entries {
+                    let path = if prefix.is_empty() {
+                        key
+                    } else {
+                        format!("{prefix}/{key}")
+                    };
+                    self.collect_paths(&child, &path, added)?;
+                }
+            }
+            return Ok(());
+        }
+        if right.is_none() {
+            if let Some(left) = left {
+                let mut entries = Vec::new();
+                self.index_entries(left, &mut entries)?;
+                for (key, child) in entries {
+                    let path = if prefix.is_empty() {
+                        key
+                    } else {
+                        format!("{prefix}/{key}")
+                    };
+                    self.collect_paths(&child, &path, removed)?;
+                }
+            }
+            return Ok(());
+        }
+        let left_node = self.load_node(left.expect("checked above"))?;
+        let right_node = self.load_node(right.expect("checked above"))?;
+        if let (
+            TrieNode::Index {
+                key: left_key,
+                child: left_child,
+                left: left_left,
+                right: left_right,
+                ..
+            },
+            TrieNode::Index {
+                key: right_key,
+                child: right_child,
+                left: right_left,
+                right: right_right,
+                ..
+            },
+        ) = (&left_node, &right_node)
+        {
+            if left_key == right_key {
+                self.diff_indices(
+                    left_left.as_ref(),
+                    right_left.as_ref(),
+                    prefix,
+                    added,
+                    removed,
+                    changed,
+                )?;
+                let path = if prefix.is_empty() {
+                    left_key.clone()
+                } else {
+                    format!("{prefix}/{left_key}")
+                };
+                self.diff_nodes(left_child, right_child, &path, added, removed, changed)?;
+                self.diff_indices(
+                    left_right.as_ref(),
+                    right_right.as_ref(),
+                    prefix,
+                    added,
+                    removed,
+                    changed,
+                )?;
+                return Ok(());
+            }
         }
         let mut left_entries = Vec::new();
         let mut right_entries = Vec::new();
@@ -1862,6 +2338,28 @@ impl Storage {
         let mut deleted = Vec::new();
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
+            let derived = match object_path(&self.root, &hash) {
+                Ok(path) => path,
+                Err(error) => {
+                    let message = format!("{hash}: invalid pending object identity: {error}");
+                    self.conn.execute(
+                        "UPDATE pending_gc_files SET state = 'failed', last_error = ?2 WHERE hash = ?1",
+                        params![hash, message],
+                    )?;
+                    failures.push(message);
+                    continue;
+                }
+            };
+            let objects_root = self.root.join("objects");
+            if !derived.starts_with(&objects_root) {
+                let message = format!("{hash}: pending object path escaped storage root");
+                self.conn.execute(
+                    "UPDATE pending_gc_files SET state = 'failed', last_error = ?2 WHERE hash = ?1",
+                    params![hash, message],
+                )?;
+                failures.push(message);
+                continue;
+            }
             if std::env::var_os("PIARIUM_KERNEL_FAIL_GC_DELETE").is_some() {
                 let message = format!("{hash}: injected GC cleanup failure");
                 self.conn.execute(
@@ -1871,7 +2369,16 @@ impl Storage {
                 failures.push(message);
                 continue;
             }
-            match fs::remove_file(&raw_path) {
+            if Path::new(&raw_path) != derived {
+                let message = format!("{hash}: ignored untrusted pending path");
+                self.conn.execute(
+                    "UPDATE pending_gc_files SET state = 'failed', last_error = ?2 WHERE hash = ?1",
+                    params![hash, message],
+                )?;
+                failures.push(message);
+                continue;
+            }
+            match fs::remove_file(&derived) {
                 Ok(()) => deleted.push(hash.clone()),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => deleted.push(hash.clone()),
                 Err(error) => {
@@ -1975,6 +2482,47 @@ impl Storage {
             self.check_cancelled()?;
             self.collect_reachable(&root, &mut nodes, &mut blobs)?;
         }
+        for row in self
+            .conn
+            .prepare("SELECT blob_hash FROM object_owners WHERE state = 'active'")?
+            .query_map([], |row| row.get::<_, String>(0))?
+        {
+            blobs.insert(row?);
+        }
+        let stale_root_blobs: Vec<(String, String)> = self
+            .conn
+            .prepare("SELECT root_hash, blob_hash FROM root_blobs")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (root_hash, blob_hash) in stale_root_blobs {
+            if !nodes.contains(&root_hash) {
+                self.conn.execute(
+                    "DELETE FROM root_blobs WHERE root_hash = ?1 AND blob_hash = ?2",
+                    params![root_hash, blob_hash],
+                )?;
+            }
+        }
+        let stale_parents: Vec<(String, String)> = self
+            .conn
+            .prepare("SELECT root_hash, parent_root FROM root_parents")?
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        for (root_hash, parent_root) in stale_parents {
+            if !nodes.contains(&root_hash) || !nodes.contains(&parent_root) {
+                self.conn.execute(
+                    "DELETE FROM root_parents WHERE root_hash = ?1 AND parent_root = ?2",
+                    params![root_hash, parent_root],
+                )?;
+            }
+        }
+        self.conn.execute(
+            "DELETE FROM operation_owners WHERE operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
+            [],
+        )?;
+        self.conn.execute(
+            "DELETE FROM object_owners WHERE owner_kind = 'operation' AND operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
+            [],
+        )?;
         let all_nodes: Vec<String> = self
             .conn
             .prepare("SELECT hash FROM trie_nodes")?
@@ -2079,15 +2627,20 @@ impl Storage {
             .cloned()
             .unwrap_or_else(|| json!({}));
         let data_json = serde_json::to_string(&data)?;
-        let existing = self
+        let existing: Option<(String, String)> = self
             .conn
             .query_row(
-                "SELECT 1 FROM recovery_records WHERE record_id = ?1",
+                "SELECT operation_id, workspace_id FROM recovery_records WHERE record_id = ?1",
                 params![record_id],
-                |row| row.get::<_, i64>(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if existing.is_some() {
+        if let Some((existing_operation, existing_workspace)) = &existing {
+            if existing_operation != operation_id || existing_workspace != workspace_id {
+                return Err(KernelError::Authorization(
+                    "recovery record identity cannot be changed".to_string(),
+                ));
+            }
             self.conn.execute(
                 "UPDATE recovery_records SET state = ?2, data_json = ?3, updated_at = ?4 WHERE record_id = ?1",
                 params![record_id, state, data_json, now_ms()],
@@ -2100,11 +2653,23 @@ impl Storage {
         }
         for key in ["root", "rootHash"] {
             if let Some(root) = data.get(key).and_then(Value::as_str) {
+                self.load_node(root)?;
+                if !self.root_owned_by_workspace(root, workspace_id)? {
+                    return Err(KernelError::Authorization(
+                        "recovery root is not owned by workspace".to_string(),
+                    ));
+                }
                 self.conn.execute(
                     "INSERT OR IGNORE INTO recovery_roots(record_id, root_hash) VALUES (?1, ?2)",
                     params![record_id, root],
                 )?;
             }
+        }
+        if matches!(state, "released" | "abandoned") {
+            self.conn.execute(
+                "DELETE FROM recovery_roots WHERE record_id = ?1",
+                params![record_id],
+            )?;
         }
         Ok(
             json!({"recordId": record_id, "operationId": operation_id, "state": state, "data": data}),
@@ -2119,13 +2684,238 @@ impl Storage {
             .ok_or_else(|| {
                 KernelError::Operation("recordId or operationId is required".to_string())
             })?;
-        let row: Option<(String, String, String, String, String)> = self.conn.query_row("SELECT operation_id, workspace_id, state, data_json, initial_data_json FROM recovery_records WHERE record_id = ?1", params![id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?))).optional()?;
-        let Some((operation_id, workspace_id, state, data, initial_data)) = row else {
+        let row: Option<(String, String, String, String, String, String)> = self.conn.query_row("SELECT record_id, operation_id, workspace_id, state, data_json, initial_data_json FROM recovery_records WHERE record_id = ?1 OR operation_id = ?1 ORDER BY record_id LIMIT 1", params![id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional()?;
+        let Some((record_id, operation_id, workspace_id, state, data, initial_data)) = row else {
             return Ok(Value::Null);
         };
         Ok(
-            json!({"recordId": id, "operationId": operation_id, "workspaceId": workspace_id, "state": state, "data": serde_json::from_str::<Value>(&data)?, "initialData": serde_json::from_str::<Value>(&initial_data)?}),
+            json!({"recordId": record_id, "operationId": operation_id, "workspaceId": workspace_id, "state": state, "data": serde_json::from_str::<Value>(&data)?, "initialData": serde_json::from_str::<Value>(&initial_data)?}),
         )
+    }
+
+    fn validate_node_integrity(
+        &self,
+        hash: &str,
+        lower: Option<&str>,
+        upper: Option<&str>,
+        active: &mut BTreeSet<String>,
+        cached: &mut HashMap<String, (i32, Option<String>, Option<String>)>,
+        errors: &mut Vec<String>,
+    ) -> Result<(i32, Option<String>, Option<String>), KernelError> {
+        if !active.insert(hash.to_string()) {
+            errors.push(format!("trie cycle detected at {hash}"));
+            return Ok((0, None, None));
+        }
+        let node = self.load_node(hash)?;
+        let result = match node {
+            TrieNode::Path { state, children } => {
+                if state.as_ref().is_some_and(|state| !state.is_directory()) && children.is_some() {
+                    errors.push(format!("non-directory path node has children: {hash}"));
+                }
+                if let Some(children) = children {
+                    let _ = self
+                        .validate_node_integrity(&children, None, None, active, cached, errors)?;
+                }
+                (0, None, None)
+            }
+            TrieNode::Index {
+                key,
+                child,
+                left,
+                right,
+                height,
+            } => {
+                if lower.is_some_and(|lower| key.as_str() <= lower)
+                    || upper.is_some_and(|upper| key.as_str() >= upper)
+                {
+                    errors.push(format!("AVL key order violation at {hash}"));
+                }
+                let _ = self.validate_node_integrity(&child, None, None, active, cached, errors)?;
+                let left_info = if let Some(left) = left {
+                    self.validate_node_integrity(
+                        &left,
+                        lower,
+                        Some(key.as_str()),
+                        active,
+                        cached,
+                        errors,
+                    )?
+                } else {
+                    (0, None, None)
+                };
+                let right_info = if let Some(right) = right {
+                    self.validate_node_integrity(
+                        &right,
+                        Some(key.as_str()),
+                        upper,
+                        active,
+                        cached,
+                        errors,
+                    )?
+                } else {
+                    (0, None, None)
+                };
+                let expected_height = left_info.0.max(right_info.0) + 1;
+                if i32::from(height) != expected_height || (left_info.0 - right_info.0).abs() > 1 {
+                    errors.push(format!("AVL height/balance violation at {hash}"));
+                }
+                let min = left_info.1.unwrap_or_else(|| key.clone());
+                let max = right_info.2.unwrap_or_else(|| key.clone());
+                (expected_height, Some(min), Some(max))
+            }
+        };
+        active.remove(hash);
+        cached.insert(hash.to_string(), result.clone());
+        Ok(result)
+    }
+
+    fn deep_relationship_errors(&self) -> Result<Vec<String>, KernelError> {
+        let mut errors = Vec::new();
+        let mut cached = HashMap::new();
+        let mut validate_root = |root: &str, errors: &mut Vec<String>| -> Result<(), KernelError> {
+            let node = match self.load_node(root) {
+                Ok(node) => node,
+                Err(error) => {
+                    errors.push(format!("{root}: {error}"));
+                    return Ok(());
+                }
+            };
+            if !matches!(node, TrieNode::Path { .. }) {
+                errors.push(format!("root is not a path node: {root}"));
+            }
+            let mut active = BTreeSet::new();
+            if let Err(error) =
+                self.validate_node_integrity(root, None, None, &mut active, &mut cached, errors)
+            {
+                errors.push(format!("{root}: {error}"));
+            }
+            Ok(())
+        };
+        let mut branches = self.conn.prepare(
+            "SELECT branch_id, workspace_id, base_root, head_root, head_revision FROM branches",
+        )?;
+        for row in branches.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })? {
+            let (branch_id, _workspace, base_root, head_root, head_revision) = row?;
+            if self
+                .conn
+                .query_row(
+                    "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                    params![branch_id, head_revision],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?
+                .as_deref()
+                != Some(head_root.as_str())
+            {
+                errors.push(format!(
+                    "branch head revision does not match root: {branch_id}"
+                ));
+            }
+            if let Err(error) = validate_root(&head_root, &mut errors) {
+                errors.push(format!("{branch_id}: {error}"));
+            }
+            if let Err(error) = validate_root(&base_root, &mut errors) {
+                errors.push(format!("{branch_id} base: {error}"));
+            }
+        }
+        let mut pins = self.conn.prepare(
+            "SELECT p.pin_id, p.branch_id, p.workspace_id, p.revision, p.root_hash, b.workspace_id FROM pins p LEFT JOIN branches b ON b.branch_id = p.branch_id",
+        )?;
+        for row in pins.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })? {
+            let (pin_id, branch_id, workspace, revision, root, branch_workspace) = row?;
+            let revision_root = self
+                .conn
+                .query_row(
+                    "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                    params![branch_id, revision],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            let branch_identity_invalid = branch_workspace
+                .as_deref()
+                .is_some_and(|branch_workspace| branch_workspace != workspace);
+            let revision_invalid =
+                branch_workspace.is_some() && revision_root.as_deref() != Some(root.as_str());
+            if branch_identity_invalid || revision_invalid {
+                errors.push(format!("pin identity is inconsistent: {pin_id}"));
+            }
+            if let Err(error) = validate_root(&root, &mut errors) {
+                errors.push(format!("pin {pin_id}: {error}"));
+            }
+        }
+        let mut recovery_roots = self.conn.prepare(
+            "SELECT rr.record_id, rr.root_hash, rec.workspace_id FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id",
+        )?;
+        for row in recovery_roots.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })? {
+            let (record_id, root, workspace) = row?;
+            if !self.root_owned_by_workspace(&root, &workspace)? {
+                errors.push(format!("recovery root is not owned: {record_id}"));
+            }
+            if let Err(error) = validate_root(&root, &mut errors) {
+                errors.push(format!("recovery {record_id}: {error}"));
+            }
+        }
+        let mut owners = self
+            .conn
+            .prepare("SELECT owner_id, blob_hash FROM object_owners WHERE state = 'active'")?;
+        for row in owners.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (owner_id, hash) = row?;
+            let blob = self
+                .conn
+                .query_row(
+                    "SELECT byte_length FROM blobs WHERE hash = ?1",
+                    params![hash],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?;
+            if blob.is_none() {
+                errors.push(format!("owner points to missing blob: {owner_id}"));
+            }
+        }
+        let mut pending = self.conn.prepare(
+            "SELECT hash, path FROM pending_gc_files WHERE state IN ('pending', 'failed')",
+        )?;
+        for row in pending.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (hash, raw_path) = row?;
+            match object_path(&self.root, &hash) {
+                Ok(derived)
+                    if derived.starts_with(self.root.join("objects"))
+                        && Path::new(&raw_path) == derived => {}
+                Ok(_) | Err(_) => {
+                    errors.push(format!(
+                        "pending cleanup path is outside derived object path: {hash}"
+                    ));
+                }
+            }
+        }
+        Ok(errors)
     }
 
     fn operation_get(&self, params_value: &Value) -> Result<Value, KernelError> {
@@ -2215,10 +3005,12 @@ impl Storage {
                 _ => corrupt_objects.push(hash),
             }
         }
+        let relationship_errors = self.deep_relationship_errors()?;
         let status = if integrity == "ok"
             && missing_nodes.is_empty()
             && missing_objects.is_empty()
             && corrupt_objects.is_empty()
+            && relationship_errors.is_empty()
             && cleanup_failures.is_empty()
         {
             "ok"
@@ -2226,7 +3018,7 @@ impl Storage {
             "degraded"
         };
         Ok(
-            json!({"integrity": status, "sqliteIntegrity": integrity, "branches": branches, "nodes": nodes, "nodePayloadBytes": node_payload_bytes, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": true, "missingNodes": missing_nodes, "missingObjects": missing_objects, "corruptObjects": corrupt_objects}),
+            json!({"integrity": status, "sqliteIntegrity": integrity, "branches": branches, "nodes": nodes, "nodePayloadBytes": node_payload_bytes, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": true, "missingNodes": missing_nodes, "missingObjects": missing_objects, "corruptObjects": corrupt_objects, "relationshipErrors": relationship_errors}),
         )
     }
 }
@@ -2262,6 +3054,10 @@ fn idempotent(
     storage.conn.execute_batch("BEGIN IMMEDIATE")?;
     let outcome = (|| {
         storage.operation_begin(operation_id, kind, &params_hash)?;
+        storage.record_operation_workspace(
+            operation_id,
+            params_value.get("workspaceId").and_then(Value::as_str),
+        )?;
         let result = action(storage)?;
         storage.operation_finish(operation_id, &result)?;
         Ok::<Value, KernelError>(result)
@@ -2366,6 +3162,7 @@ fn recovery_idempotent(
         } else {
             storage.operation_begin(operation_id, "recovery.operation", &identity_hash)?;
         }
+        storage.record_operation_workspace(operation_id, Some(workspace_id))?;
         let result = action(storage)?;
         storage.operation_finish(operation_id, &result)?;
         Ok::<Value, KernelError>(result)

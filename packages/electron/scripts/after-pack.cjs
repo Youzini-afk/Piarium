@@ -29,11 +29,25 @@ module.exports = (context) => {
     throw new Error(`Unable to read packaged Rust kernel manifest at ${kernelManifestPath}: ${error.message}`);
   }
   const kernelDigest = crypto.createHash('sha256').update(fs.readFileSync(packagedKernelPath)).digest('hex');
-  if (kernelManifest.schema !== 1 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest) {
+  const targetArchitecture = process.env.PIARIUM_TARGET_ARCH || process.arch;
+  const defaultTargetTriple = (platform, architecture) => {
+    if (platform === 'win32' && architecture === 'x64') return 'x86_64-pc-windows-msvc';
+    if (platform === 'win32' && architecture === 'arm64') return 'aarch64-pc-windows-msvc';
+    if (platform === 'linux' && architecture === 'x64') return 'x86_64-unknown-linux-gnu';
+    if (platform === 'linux' && architecture === 'arm64') return 'aarch64-unknown-linux-gnu';
+    if (platform === 'darwin' && architecture === 'x64') return 'x86_64-apple-darwin';
+    if (platform === 'darwin' && architecture === 'arm64') return 'aarch64-apple-darwin';
+    return `${platform}-${architecture}`;
+  };
+  const expectedTargetTriple = process.env.PIARIUM_TARGET_TRIPLE || defaultTargetTriple(context.electronPlatformName, targetArchitecture);
+  if (kernelManifest.schema !== 2 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest
+    || kernelManifest.protocolVersion !== 1 || kernelManifest.platform !== context.electronPlatformName
+    || kernelManifest.arch !== targetArchitecture || kernelManifest.targetTriple !== expectedTargetTriple
+    || typeof kernelManifest.buildIdentity !== 'string' || !kernelManifest.buildIdentity
+    || kernelManifest.kernelVersion !== '0.1.0') {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
   const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
-  const targetArchitecture = process.env.PIARIUM_TARGET_ARCH || process.arch;
   const betterSqlitePrebuildName = `${context.electronPlatformName}-${targetArchitecture}.node`;
   const betterSqliteBinary = path.join(betterSqliteDir, 'prebuilds', betterSqlitePrebuildName);
   if (!fs.existsSync(betterSqliteBinary)) {

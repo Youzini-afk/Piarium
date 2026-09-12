@@ -8,7 +8,23 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) const PROTOCOL_VERSION: u64 = 1;
 pub(crate) const KERNEL_VERSION: &str = "0.1.0";
+pub(crate) const KERNEL_BUILD_IDENTITY: &str = match option_env!("PIARIUM_KERNEL_BUILD_IDENTITY") {
+    Some(value) => value,
+    None => env!("CARGO_PKG_VERSION"),
+};
+pub(crate) const KERNEL_TARGET: &str = match option_env!("PIARIUM_KERNEL_TARGET") {
+    Some(value) => value,
+    None => "unknown-target",
+};
+pub(crate) const KERNEL_ARCH: &str = match option_env!("PIARIUM_KERNEL_ARCH") {
+    Some(value) => value,
+    None => "unknown-arch",
+};
 pub(crate) const STORAGE_FORMAT_VERSION: &str = "5";
+// Control frames are deliberately bounded. Content bytes travel through the
+// begin/data/finish stream and therefore do not need a giant JSON envelope.
+pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
 pub(crate) const KERNEL_CAPABILITIES: [&str; 6] = [
     "storage",
     "workingState",
@@ -71,10 +87,10 @@ pub(crate) fn validate_method_params(method: &str, params: &Value) -> Result<(),
         "storage.health" => &["deep"],
         "storage.snapshot" => &["workspaceId"],
         "authority.grant.revoke" => &["grantId"],
-        "storage.putBlob" => &["operationId", "bytesBase64", "expectedHash", "workspaceId"],
         "storage.putBlob.begin" => &["operationId", "byteLength", "expectedHash", "workspaceId"],
         "storage.putBlob.finish" => &["operationId", "streamId", "expectedHash", "workspaceId"],
         "storage.putBlob.abort" => &["operationId", "streamId", "workspaceId"],
+        "storage.blob.release" => &["ownerId", "operationId", "workspaceId"],
         "storage.getBlob" => &["hash", "offset", "length"],
         "branch.create" => &[
             "operationId",
@@ -90,7 +106,12 @@ pub(crate) fn validate_method_params(method: &str, params: &Value) -> Result<(),
             "expectedWriteRevision",
             "changes",
         ],
-        "branch.publish" => &["operationId", "branchId"],
+        "branch.publish" => &[
+            "operationId",
+            "branchId",
+            "expectedWriteRevision",
+            "expectedRoot",
+        ],
         "branch.pin" => &["operationId", "branchId", "revision", "pinId"],
         "branch.unpin" => &["operationId", "branchId", "pinId"],
         "branch.diff" => &["leftRoot", "rightRoot"],
@@ -126,6 +147,12 @@ pub(crate) fn read_frame(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
         Err(error) => return Err(error),
     }
     let length = u32::from_be_bytes(header) as usize;
+    if length > MAX_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("kernel frame exceeds {} bytes", MAX_FRAME_BYTES),
+        ));
+    }
     let mut payload = vec![0u8; length];
     input.read_exact(&mut payload)?;
     Ok(Some(payload))
@@ -133,6 +160,12 @@ pub(crate) fn read_frame(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
 pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<()> {
     let payload = serde_json::to_vec(value)
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    if payload.len() > MAX_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("kernel frame exceeds {} bytes", MAX_FRAME_BYTES),
+        ));
+    }
     let length = u32::try_from(payload.len())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "kernel frame is too large"))?;
     output.write_all(&length.to_be_bytes())?;

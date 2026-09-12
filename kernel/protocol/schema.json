@@ -2,24 +2,110 @@
   "protocolVersion": 1,
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
+  "maxFrameBytes": 16777216,
+  "contentTransport": "putBlob.begin + bounded data frames + putBlob.finish",
   "request": {"v": 1, "kind": "request", "id": "request-id", "method": "method", "params": {}},
   "data": {"v": 1, "kind": "data", "id": "stream-id", "streamId": "stream-id", "sequence": 0, "bytesBase64": "..."},
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
+  "requestUnion": true,
+  "methodParams": {
+    "kernel.handshake": "KernelHandshakeParams",
+    "kernel.ping": "KernelEmptyParams",
+    "kernel.shutdown": "KernelEmptyParams",
+    "storage.health": "KernelHealthParams",
+    "authority.grant.issue": "KernelGrantIssueParams",
+    "authority.grant.revoke": "KernelGrantRevokeParams",
+    "storage.snapshot": "KernelSnapshotParams",
+    "storage.putBlob.begin": "KernelPutBlobBeginParams",
+    "storage.putBlob.finish": "KernelPutBlobFinishParams",
+    "storage.putBlob.abort": "KernelPutBlobAbortParams",
+    "storage.blob.release": "KernelBlobReleaseParams",
+    "storage.getBlob": "KernelGetBlobParams",
+    "branch.create": "KernelCreateBranchParams",
+    "branch.read": "KernelBranchReadParams",
+    "branch.write": "KernelBranchWriteParams",
+    "branch.publish": "KernelBranchPublishParams",
+    "branch.pin": "KernelBranchPinParams",
+    "branch.unpin": "KernelBranchUnpinParams",
+    "branch.diff": "KernelBranchDiffParams",
+    "branch.delete": "KernelBranchDeleteParams",
+    "pin.read": "KernelPinReadParams",
+    "recovery.operation.begin": "KernelRecoveryParams",
+    "recovery.operation.update": "KernelRecoveryParams",
+    "recovery.operation.get": "KernelRecoveryGetParams",
+    "operation.get": "KernelOperationGetParams",
+    "storage.gc": "KernelGcParams"
+  },
   "dto": {
-    "KernelRequest": {
-      "fields": {
-        "v": {"type": "protocolVersion"},
-        "kind": {"type": "\"request\" | \"cancel\" | \"data\""},
-        "id": {"type": "string"},
-        "method": {"type": "KernelMethod", "optional": true},
-        "params": {"type": "unknown", "optional": true},
-        "epoch": {"type": "string", "optional": true},
-        "grantId": {"type": "string", "optional": true},
-        "streamId": {"type": "string", "optional": true},
-        "sequence": {"type": "number", "optional": true},
-        "bytesBase64": {"type": "string", "optional": true}
-      }
-    },
+    "KernelEmptyParams": {"fields": {}},
+    "KernelHandshakeParams": {"fields": {
+      "protocolVersion": {"type": "number"},
+      "buildVersion": {"type": "string"},
+      "hostId": {"type": "string"},
+      "hostGeneration": {"type": "string"},
+      "storageRoot": {"type": "string"},
+      "capabilities": {"type": "string[]"}
+    }},
+    "KernelHealthParams": {"fields": {"deep": {"type": "boolean", "optional": true}}},
+    "KernelGrantIssueParams": {"fields": {
+      "grantId": {"type": "string"},
+      "hostGeneration": {"type": "string"},
+      "sessionId": {"type": "string | null"},
+      "threadId": {"type": "string | null"},
+      "runId": {"type": "string | null"},
+      "owningWorkspace": {"type": "string | null"},
+      "executionWorkspace": {"type": "string | null"},
+      "storageIdentity": {"type": "string"},
+      "capabilities": {"type": "string[]"},
+      "pathScopes": {"type": "string[]"}
+    }},
+    "KernelGrantRevokeParams": {"fields": {"grantId": {"type": "string"}}},
+    "KernelSnapshotParams": {"fields": {"workspaceId": {"type": "string"}}},
+    "KernelPutBlobBeginParams": {"fields": {
+      "operationId": {"type": "string"}, "byteLength": {"type": "number"},
+      "expectedHash": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
+    }},
+    "KernelPutBlobFinishParams": {"fields": {
+      "operationId": {"type": "string"}, "streamId": {"type": "string"},
+      "expectedHash": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
+    }},
+    "KernelPutBlobAbortParams": {"fields": {
+      "operationId": {"type": "string"}, "streamId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}
+    }},
+    "KernelBlobReleaseParams": {"fields": {
+      "ownerId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
+    }},
+    "KernelGetBlobParams": {"fields": {
+      "hash": {"type": "string"}, "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
+    }},
+    "KernelCreateBranchParams": {"fields": {
+      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "workspaceId": {"type": "string"},
+      "entries": {"type": "KernelCreateEntry[]"}, "baseRef": {"type": "string", "optional": true}
+    }},
+    "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}}},
+    "KernelBranchReadParams": {"fields": {
+      "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}
+    }},
+    "KernelBranchWriteParams": {"fields": {
+      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}
+    }},
+    "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}}},
+    "KernelBranchPublishParams": {"fields": {
+      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number", "optional": true}, "expectedRoot": {"type": "string", "optional": true}
+    }},
+    "KernelBranchPinParams": {"fields": {
+      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "pinId": {"type": "string", "optional": true}
+    }},
+    "KernelBranchUnpinParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}, "pinId": {"type": "string"}}},
+    "KernelBranchDiffParams": {"fields": {"leftRoot": {"type": "string"}, "rightRoot": {"type": "string"}}},
+    "KernelBranchDeleteParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}}},
+    "KernelPinReadParams": {"fields": {"pinId": {"type": "string"}, "includeEntries": {"type": "boolean", "optional": true}}},
+    "KernelRecoveryParams": {"fields": {
+      "operationId": {"type": "string"}, "recordId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}, "state": {"type": "string", "optional": true}, "data": {"type": "unknown", "optional": true}
+    }},
+    "KernelRecoveryGetParams": {"fields": {"recordId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}}},
+    "KernelOperationGetParams": {"fields": {"operationId": {"type": "string"}}},
+    "KernelGcParams": {"fields": {"operationId": {"type": "string"}}},
     "KernelError": {
       "fields": {
         "code": {"type": "string"},
@@ -42,7 +128,11 @@
       "fields": {
         "protocolVersion": {"type": "protocolVersion"},
         "buildVersion": {"type": "string"},
+        "applicationBuildVersion": {"type": "string"},
         "kernelVersion": {"type": "string"},
+        "kernelBuildIdentity": {"type": "string"},
+        "targetTriple": {"type": "string"},
+        "arch": {"type": "string"},
         "kernelEpoch": {"type": "string"},
         "hostId": {"type": "string"},
         "hostGeneration": {"type": "string"},
@@ -50,16 +140,7 @@
         "capabilities": {"type": "string[]"}
       }
     },
-    "KernelBranchState": {
-      "fields": {
-        "kind": {"type": "string"},
-        "byteLength": {"type": "number", "optional": true},
-        "mode": {"type": "number", "optional": true},
-        "objectHash": {"type": "string", "optional": true},
-        "symlinkTarget": {"type": "string", "optional": true}
-      },
-      "index": "[key: string]: unknown;"
-    },
+    "KernelBranchState": {"raw": "export type KernelBranchState =\n  | { kind: \"regular-file\"; objectHash: string; byteLength: number; mode: number }\n  | { kind: \"directory\"; mode?: number }\n  | { kind: \"symlink\"; symlinkTarget: string; mode?: number }\n  | { kind: \"missing\" }\n  | { kind: \"unsupported\" };"},
     "KernelEntry": {
       "fields": {
         "path": {"type": "string"},
@@ -115,6 +196,7 @@
         "missingNodes": {"type": "string[]", "optional": true},
         "missingObjects": {"type": "string[]", "optional": true},
         "corruptObjects": {"type": "string[]", "optional": true}
+        ,"relationshipErrors": {"type": "string[]", "optional": true}
       }
     }
   },
@@ -126,10 +208,10 @@
     "authority.grant.issue": "register a Host actor grant",
     "authority.grant.revoke": "revoke a Host actor grant",
     "storage.snapshot": "list durable branch roots and published revisions",
-    "storage.putBlob": "durably install a content object",
     "storage.putBlob.begin": "open a backpressured content upload stream",
     "storage.putBlob.finish": "commit a content upload stream",
     "storage.putBlob.abort": "discard a content upload stream",
+    "storage.blob.release": "release a temporary content owner",
     "storage.getBlob": "read a content object or byte range",
     "branch.create": "batch-build an immutable branch root",
     "branch.read": "read a root or selected paths",

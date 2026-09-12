@@ -5,10 +5,10 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
     match method {
         "storage.health" | "storage.snapshot" | "storage.getBlob" | "branch.read"
         | "branch.diff" | "pin.read" | "operation.get" => "storage.read",
-        "storage.putBlob"
-        | "storage.putBlob.begin"
+        "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
+        | "storage.blob.release"
         | "storage.putBlob.chunk"
         | "branch.create"
         | "branch.write"
@@ -35,8 +35,11 @@ pub(crate) fn require_capability(grant: &Grant, method: &str) -> Result<(), Kern
 }
 
 pub(crate) fn path_allowed(grant: &Grant, path: &str) -> bool {
-    grant
-        .path_scopes
+    path_allowed_scopes(&grant.path_scopes, path)
+}
+
+pub(crate) fn path_allowed_scopes(scopes: &[String], path: &str) -> bool {
+    scopes
         .iter()
         .any(|scope| scope.is_empty() || path == scope || path.starts_with(&format!("{scope}/")))
 }

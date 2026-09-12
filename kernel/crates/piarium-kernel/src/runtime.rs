@@ -3,7 +3,7 @@ use crate::authority::require_capability;
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -11,6 +11,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use uuid::Uuid;
+
+struct ActiveRequest {
+    token: Arc<AtomicBool>,
+    epoch: Option<String>,
+    grant_id: Option<String>,
+}
+
+fn mark_grant_revoked(
+    revoked_grants: &Arc<Mutex<HashSet<String>>>,
+    active: &Arc<Mutex<HashMap<String, ActiveRequest>>>,
+    grant_id: &str,
+) {
+    if grant_id.is_empty() {
+        return;
+    }
+    if let Ok(mut revoked) = revoked_grants.lock() {
+        revoked.insert(grant_id.to_string());
+    }
+    if let Ok(active) = active.lock() {
+        for request in active.values() {
+            if request.grant_id.as_deref() == Some(grant_id) {
+                request.token.store(true, Ordering::Release);
+            }
+        }
+    }
+}
 
 struct Kernel {
     epoch: String,
@@ -212,7 +238,7 @@ impl Kernel {
             self.handshaken = true;
             return Ok(Some(response_ok(
                 id,
-                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "buildVersion": build_version, "kernelEpoch": self.epoch, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
+                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
             )));
         }
         if !self.handshaken {
@@ -301,9 +327,6 @@ impl Kernel {
         let result = match method {
             "storage.health" => storage.health(&authorized_params),
             "storage.snapshot" => storage.snapshot(&authorized_params),
-            "storage.putBlob" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.put_blob(&authorized_params)
-            }),
             "storage.putBlob.begin" => {
                 storage.begin_blob_stream(&authorized_params, grant_id.unwrap_or(""))
             }
@@ -315,6 +338,12 @@ impl Kernel {
             "storage.putBlob.abort" => {
                 storage.abort_blob_stream(&authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.blob.release" => idempotent(storage, method, &authorized_params, |storage| {
+                storage.release_object_owner(
+                    &authorized_params,
+                    authorized_params.get("workspaceId").and_then(Value::as_str),
+                )
+            }),
             "storage.getBlob" => storage.get_blob(&authorized_params),
             "branch.create" => idempotent(storage, method, &authorized_params, |storage| {
                 storage.create_branch(&authorized_params)
@@ -353,10 +382,20 @@ impl Kernel {
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let (request_tx, request_rx) = mpsc::channel::<(Value, Arc<AtomicBool>)>();
-    let (response_tx, response_rx) = mpsc::channel::<Value>();
-    let cancellations = Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new()));
+    // A bounded queue is part of the protocol's backpressure contract. The
+    // reader blocks once the worker has 64 frames queued instead of allowing
+    // an untrusted Host to grow process memory without bound.
+    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(64);
+    let (response_tx, response_rx) = mpsc::sync_channel::<Value>(64);
+    let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
+    let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
+    let admission_epoch = Arc::new(Mutex::new(None::<String>));
+    let writer_failed = Arc::new(AtomicBool::new(false));
     let worker_cancellations = cancellations.clone();
+    let worker_revoked_grants = revoked_grants.clone();
+    let worker_admission_epoch = admission_epoch.clone();
+    let worker_response_tx = response_tx.clone();
+    let worker_writer_failed = writer_failed.clone();
     let worker = thread::spawn(move || {
         let mut kernel = Kernel::new();
         for (request, cancellation) in request_rx {
@@ -369,13 +408,80 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .get("method")
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            let response = match kernel.handle(&request, cancellation) {
+            let grant_id = request
+                .get("grantId")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let revoked = grant_id.as_deref().is_some_and(|grant_id| {
+                worker_revoked_grants
+                    .lock()
+                    .ok()
+                    .is_some_and(|revoked| revoked.contains(grant_id))
+            });
+            let handled = if revoked {
+                Err(KernelError::Authorization("grant is revoked".to_string()))
+            } else {
+                kernel.handle(&request, cancellation)
+            };
+            let response = match handled {
                 Ok(Some(response)) => response,
-                Ok(None) => continue,
+                Ok(None) => {
+                    worker_cancellations
+                        .lock()
+                        .ok()
+                        .map(|mut active| active.remove(&id));
+                    continue;
+                }
                 Err(error) => response_error(&id, &error),
             };
+            if method.as_deref() == Some("kernel.handshake")
+                && response.get("ok") == Some(&Value::Bool(true))
+            {
+                if let Some(epoch) = response
+                    .get("result")
+                    .and_then(Value::as_object)
+                    .and_then(|result| result.get("kernelEpoch"))
+                    .and_then(Value::as_str)
+                {
+                    if let Ok(mut current) = worker_admission_epoch.lock() {
+                        *current = Some(epoch.to_string());
+                    }
+                }
+            }
+            if method.as_deref() == Some("authority.grant.revoke") {
+                let target = request
+                    .get("params")
+                    .and_then(Value::as_object)
+                    .and_then(|params| params.get("grantId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if response.get("ok") == Some(&Value::Bool(true)) {
+                    mark_grant_revoked(&worker_revoked_grants, &worker_cancellations, target);
+                    if let Some(storage) = kernel.storage.as_mut() {
+                        storage.abort_streams_for_grant(target);
+                    }
+                } else if let Ok(mut revoked) = worker_revoked_grants.lock() {
+                    revoked.remove(target);
+                }
+            }
+            if method.as_deref() == Some("authority.grant.issue") {
+                let target = request
+                    .get("params")
+                    .and_then(Value::as_object)
+                    .and_then(|params| params.get("grantId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if response.get("ok") == Some(&Value::Bool(true)) {
+                    if let Ok(mut revoked) = worker_revoked_grants.lock() {
+                        revoked.remove(target);
+                    }
+                }
+            }
             let stopping = method.as_deref() == Some("kernel.shutdown");
-            let _ = response_tx.send(response);
+            if worker_response_tx.send(response).is_err() {
+                worker_writer_failed.store(true, Ordering::Release);
+                break;
+            }
             worker_cancellations
                 .lock()
                 .ok()
@@ -385,18 +491,27 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    let writer_failed_for_thread = writer_failed.clone();
     let writer = thread::spawn(move || {
         let stdout = io::stdout();
         let mut output = stdout.lock();
         for response in response_rx {
             if write_frame(&mut output, &response).is_err() {
-                break;
+                writer_failed_for_thread.store(true, Ordering::Release);
+                // There is no safe way to drain stdin after stdout is gone:
+                // the Host cannot receive any pending response. Exit the
+                // process so it observes a real disconnect and can rebuild
+                // the epoch instead of waiting forever.
+                std::process::exit(1);
             }
         }
     });
     let stdin = io::stdin();
     let mut input = stdin.lock();
     while let Some(payload) = read_frame(&mut input)? {
+        if writer_failed.load(Ordering::Acquire) {
+            break;
+        }
         let request: Value = match serde_json::from_slice(&payload) {
             Ok(value) => value,
             Err(error) => {
@@ -410,19 +525,68 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or("")
             .to_string();
         if request.get("kind").and_then(Value::as_str) == Some("cancel") {
-            if let Some(token) = cancellations
-                .lock()
-                .ok()
-                .and_then(|active| active.get(&id).cloned())
-            {
-                token.store(true, Ordering::Release);
+            let valid_envelope = request
+                .as_object()
+                .map(|fields| {
+                    fields.keys().all(|field| {
+                        matches!(field.as_str(), "v" | "kind" | "id" | "epoch" | "grantId")
+                    })
+                })
+                .unwrap_or(false)
+                && request.get("v").and_then(Value::as_u64) == Some(PROTOCOL_VERSION)
+                && !id.is_empty();
+            if !valid_envelope {
+                continue;
+            }
+            let cancel_epoch = request.get("epoch").and_then(Value::as_str);
+            let cancel_grant = request.get("grantId").and_then(Value::as_str);
+            if let Ok(active) = cancellations.lock() {
+                if let Some(request) = active.get(&id) {
+                    if request.epoch.as_deref() == cancel_epoch
+                        && request.grant_id.as_deref() == cancel_grant
+                    {
+                        request.token.store(true, Ordering::Release);
+                    }
+                }
             }
             continue;
         }
         let token = Arc::new(AtomicBool::new(false));
+        let request_epoch = request
+            .get("epoch")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let request_grant = request
+            .get("grantId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if request.get("method").and_then(Value::as_str) == Some("authority.grant.revoke") {
+            let target = request
+                .get("params")
+                .and_then(Value::as_object)
+                .and_then(|params| params.get("grantId"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let epoch_matches = admission_epoch
+                .lock()
+                .ok()
+                .and_then(|epoch| epoch.clone())
+                .as_deref()
+                == request_epoch.as_deref();
+            if epoch_matches {
+                mark_grant_revoked(&revoked_grants, &cancellations, target);
+            }
+        }
         if !id.is_empty() {
             if let Ok(mut active) = cancellations.lock() {
-                active.insert(id, token.clone());
+                active.insert(
+                    id,
+                    ActiveRequest {
+                        token: token.clone(),
+                        epoch: request_epoch,
+                        grant_id: request_grant,
+                    },
+                );
             }
         }
         if request_tx.send((request, token)).is_err() {
