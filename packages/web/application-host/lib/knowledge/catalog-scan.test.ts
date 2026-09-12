@@ -103,7 +103,10 @@ describe("cold workspace catalog scan", () => {
     });
     disposes.push(() => runtime.dispose());
 
-    await runtime.scanWorkspace(documents.identity.workspaceId);
+    const firstScan = runtime.scanWorkspace(documents.identity.workspaceId);
+    const duplicateScan = runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(duplicateScan).toBe(firstScan);
+    await firstScan;
     expect(readAgentInputSnapshot).not.toHaveBeenCalled();
     expect((await store.searchSymbols("coldSymbol", 5)).map((entry) => entry.name)).toEqual(["coldSymbol"]);
     expect((await store.searchSymbols("dirtySymbol", 5))).toEqual([]);
@@ -129,6 +132,212 @@ describe("cold workspace catalog scan", () => {
     expect(await store.getFileRelations("notes.md")).toBeNull();
     expect(await store.getFileRelations("pkg.json")).toBeNull();
     expect(relations?.extractor).toBe(CATALOG_EXTRACTOR_VERSION);
+  });
+
+  it("resolves a late association from persisted facts without a source re-collect", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    writeFileSync(join(documents.workspaceRoot, "a-consumer.ts"), [
+      "export function consumer() {",
+      "  console.log(\"late.channel\");",
+      "}",
+    ].join("\n"), "utf8");
+    writeFileSync(join(documents.workspaceRoot, "z-producer.ts"), [
+      "export function producer() {",
+      "  router.register(\"late.channel\");",
+      "}",
+    ].join("\n"), "utf8");
+
+    const baseSource = parsingSource();
+    const sourceCalls = { outline: 0, imports: 0, literalCalls: 0 };
+    const structureSource = {
+      outline: (request: Parameters<typeof baseSource.outline>[0]) => {
+        sourceCalls.outline += 1;
+        return baseSource.outline(request);
+      },
+      classifyHits: (request: Parameters<typeof baseSource.classifyHits>[0]) => baseSource.classifyHits(request),
+      imports: (request: Parameters<typeof baseSource.imports>[0]) => {
+        sourceCalls.imports += 1;
+        return baseSource.imports(request);
+      },
+      literalCalls: (request: Parameters<typeof baseSource.literalCalls>[0]) => {
+        sourceCalls.literalCalls += 1;
+        return baseSource.literalCalls(request);
+      },
+    };
+    const searchFilesystemFiles = vi.fn(async () => [
+      {
+        name: "a-consumer.ts",
+        path: join(documents.workspaceRoot, "a-consumer.ts"),
+        relativePath: "a-consumer.ts",
+      },
+      {
+        name: "z-producer.ts",
+        path: join(documents.workspaceRoot, "z-producer.ts"),
+        relativePath: "z-producer.ts",
+      },
+    ]);
+    const read = vi.spyOn(documents.authority, "read");
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource,
+      searchFilesystemFiles,
+    });
+    disposes.push(() => runtime.dispose());
+
+    const firstScan = runtime.scanWorkspace(documents.identity.workspaceId);
+    const duplicateScan = runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(duplicateScan).toBe(firstScan);
+    await firstScan;
+    expect(await store.getFileRelations("a-consumer.ts")).toMatchObject({
+      associations: [{ callee: "log", literal: "late.channel" }],
+    });
+    expect(await store.getFileRelations("z-producer.ts")).toMatchObject({
+      connections: [{ callee: "register", literal: "late.channel" }],
+    });
+    // Two file rows + two symbol rows + two active link rows; the retained
+    // unresolved candidate metadata is part of the file row, not a placeholder
+    // graph node.
+    expect(await store.catalogStats()).toMatchObject({ linkCount: 2, nodeCount: 6 });
+    // Each file is read once for the scan revision check and once for actual
+    // extraction. Association resolution does not add another read or source
+    // call. A concurrent duplicate scan shares the in-flight task.
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(sourceCalls).toEqual({ outline: 2, imports: 2, literalCalls: 2 });
+
+    // An external disk write does not emit Documents' mutation callback. An
+    // explicit scan still re-checks revisions and refreshes only the changed
+    // file, while reusing the unchanged producer's graph facts.
+    writeFileSync(join(documents.workspaceRoot, "a-consumer.ts"), [
+      "export function consumerRenamed() {",
+      "  console.log(\"late.channel\");",
+      "}",
+    ].join("\n"), "utf8");
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(searchFilesystemFiles).toHaveBeenCalledTimes(2);
+    expect(read).toHaveBeenCalledTimes(7);
+    expect(sourceCalls).toEqual({ outline: 3, imports: 3, literalCalls: 3 });
+    expect((await store.searchSymbols("consumer", 5)).map((entry) => entry.name)).not.toContain("consumer");
+    expect(await store.searchSymbols("consumerRenamed", 5)).toHaveLength(1);
+
+    // Removing the last producer connection withdraws the relation while
+    // retaining the consumer's compact candidate fact. Restoring the producer
+    // activates it again without collecting the consumer a second time.
+    writeFileSync(join(documents.workspaceRoot, "z-producer.ts"), [
+      "export function producer() {",
+      "  return 1;",
+      "}",
+    ].join("\n"), "utf8");
+    runtime.observeDocumentMutation({
+      workspaceId: documents.identity.workspaceId,
+      resourceId: "z-producer.ts",
+      kind: "modified",
+      owner: { kind: "web-route", id: "editor" },
+    });
+    await runtime.drain();
+    expect((await store.getFileRelations("z-producer.ts"))?.connections).toEqual([]);
+    expect((await store.getFileRelations("a-consumer.ts"))?.associations).toEqual([]);
+
+    writeFileSync(join(documents.workspaceRoot, "z-producer.ts"), [
+      "export function producer() {",
+      "  router.register(\"late.channel\");",
+      "}",
+    ].join("\n"), "utf8");
+    runtime.observeDocumentMutation({
+      workspaceId: documents.identity.workspaceId,
+      resourceId: "z-producer.ts",
+      kind: "modified",
+      owner: { kind: "web-route", id: "editor" },
+    });
+    await runtime.drain();
+    expect((await store.getFileRelations("a-consumer.ts"))?.associations).toEqual([
+      expect.objectContaining({ callee: "log", literal: "late.channel" }),
+    ]);
+    expect(read).toHaveBeenCalledTimes(9);
+    expect(sourceCalls).toEqual({ outline: 5, imports: 5, literalCalls: 5 });
+  });
+
+  it("leaves the prior graph intact when a structure collection is cancelled", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    const path = "cancelled.ts";
+    writeFileSync(join(documents.workspaceRoot, path), "export function oldSymbol() {}\n", "utf8");
+    let block = false;
+    let enteredResolve: (() => void) | undefined;
+    const entered = new Promise<void>((resolve) => { enteredResolve = resolve; });
+    const structureSource = {
+      outline: async (request: { signal?: AbortSignal; revision: string }) => {
+        if (block) {
+          enteredResolve?.();
+          await new Promise<void>((resolve) => {
+            if (request.signal?.aborted) resolve();
+            else request.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          return { status: "cancelled" as const, provider: "tree-sitter" as const, revision: request.revision, symbols: [] };
+        }
+        return {
+          status: "ready" as const,
+          provider: "tree-sitter" as const,
+          revision: request.revision,
+          symbols: [{ name: "oldSymbol", kind: "function", range: { startLine: 1, endLine: 1 }, signature: { startLine: 1, endLine: 1 } }],
+        };
+      },
+      imports: async (request: { revision: string }) => ({
+        status: "empty" as const, provider: "tree-sitter" as const, revision: request.revision, imports: [],
+      }),
+      literalCalls: async (request: { revision: string }) => ({
+        status: "empty" as const, provider: "tree-sitter" as const, revision: request.revision, calls: [],
+      }),
+      classifyHits: async (request: { revision: string }) => ({
+        status: "unsupported" as const, provider: null, revision: request.revision, hits: [],
+      }),
+    };
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "cancel test must not start a language server" }),
+      } as never,
+      structureSource,
+      searchFilesystemFiles: async () => [{
+        name: path,
+        path: join(documents.workspaceRoot, path),
+        relativePath: path,
+      }],
+    });
+    disposes.push(() => runtime.dispose());
+
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.searchSymbols("oldSymbol", 5)).toHaveLength(1);
+    writeFileSync(join(documents.workspaceRoot, path), "export function newSymbol() {}\n", "utf8");
+    block = true;
+    const controller = new AbortController();
+    const scan = runtime.scanWorkspace(documents.identity.workspaceId, { signal: controller.signal });
+    await entered;
+    controller.abort();
+    await scan;
+    expect(await store.searchSymbols("oldSymbol", 5)).toHaveLength(1);
+    expect(await store.searchSymbols("newSymbol", 5)).toEqual([]);
   });
 
   /**

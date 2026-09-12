@@ -51,22 +51,11 @@ import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.j
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
-import { workspaceScope } from './lib/knowledge/semantic/identity.js';
-import { createSemanticIndexRuntime } from './lib/knowledge/semantic/runtime.js';
-import { createSemanticBackend } from './lib/knowledge/semantic/backend.js';
+import { createWorkspaceSemanticRuntime } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime, recallWorkspaceAndUser } from './lib/knowledge/vectors/index.js';
 import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
-import { requestWorkspaceInference, resolveInferenceBinding } from './lib/knowledge/semantic/workspace-inference.js';
-import { pinSemanticQueryView } from './lib/knowledge/semantic/query-view.js';
-import {
-  type HarnessEmbedParams,
-  type HarnessInferenceBindingSnapshot,
-  type HarnessRerankParams,
-  type HarnessResolvedRerankBinding,
-  type PiSettingsSnapshot,
-} from '@piarium/protocol';
 import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
 import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
@@ -1809,193 +1798,37 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const localEmbedder = createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR });
   const semanticScheduler = createEmbedScheduler();
   const semanticVectorCache = createVectorCache();
-  type SemanticWorkspaceState = {
-    backend: ReturnType<typeof createSemanticBackend>;
-    binding: HarnessInferenceBindingSnapshot;
-    bindingKey: string;
-    cwd: string;
-    runtime: ReturnType<typeof createSemanticIndexRuntime>;
-    snapshot: PiSettingsSnapshot | null;
-    needsRefresh: boolean;
-    refreshTail: Promise<void>;
-    watchIds: string[];
-    watching: Promise<void> | null;
-    workspaceId: string;
-  };
-  const semanticWorkspaceStates = new Map<string, SemanticWorkspaceState>();
-  const semanticWorkspaceLoads = new Map<string, Promise<SemanticWorkspaceState>>();
-  const inferenceWatchWorkspaces = new Map<string, string>();
-  let inferenceWatchEpoch = 0;
-
-  const bindingKeyOf = (binding: HarnessInferenceBindingSnapshot): string => JSON.stringify(binding.embedding);
-
-  const refreshSemanticWorkspaceNow = async (
-    state: SemanticWorkspaceState,
-    scanWhenChanged = false,
-  ): Promise<SemanticWorkspaceState> => {
-    const retrying = state.needsRefresh;
-    const epoch = inferenceWatchEpoch;
-    const broker = getReadyPiRuntimeBroker();
-    if (!broker) {
-      state.binding = { embedding: { status: 'unavailable' }, rerank: { status: 'unavailable' } };
-      state.backend.unavailable(new Error('Pi workspace binding is unavailable'));
-      state.runtime.cancelScans();
-      state.needsRefresh = true;
-      return state;
-    }
-    const [settingsResult, bindingResult] = await Promise.allSettled([
-      broker.requestForWorkspace(state.cwd, 'settings.get', {}),
-      broker.requestForWorkspace(state.cwd, 'harness.inference.describe', {}),
-    ]);
-    state.snapshot = settingsResult.status === 'fulfilled' ? settingsResult.value : null;
-    state.needsRefresh = settingsResult.status !== 'fulfilled' || bindingResult.status !== 'fulfilled' || epoch !== inferenceWatchEpoch;
-    const nextBinding = resolveInferenceBinding(settingsResult, bindingResult);
-    const nextKey = bindingKeyOf(nextBinding);
-    const changed = nextKey !== state.bindingKey;
-    state.binding = nextBinding;
-    state.bindingKey = nextKey;
-    if (changed) state.runtime.cancelScans();
-    if (nextBinding.embedding.status === 'ready') state.backend.bind(nextBinding.embedding.binding);
-    else if (nextBinding.embedding.status === 'unconfigured') state.backend.bind(undefined);
-    else state.backend.unavailable(new Error(nextBinding.embedding.message ?? 'Embedding binding is unavailable'));
-    if (changed) queueMicrotask(() => knowledgeVectors?.refreshWorkspace(state.workspaceId));
-    if (scanWhenChanged && (changed || retrying)) {
-      queueMicrotask(() => void state.runtime.scanWorkspace(state.workspaceId));
-    }
-    return state;
-  };
-
-  const refreshSemanticWorkspace = (state: SemanticWorkspaceState, scanWhenChanged = false): Promise<SemanticWorkspaceState> => {
-    const refresh = state.refreshTail.then(() => refreshSemanticWorkspaceNow(state, scanWhenChanged));
-    state.refreshTail = refresh.then(() => undefined, () => undefined);
-    return refresh;
-  };
-
-  const watchSemanticWorkspace = async (state: SemanticWorkspaceState): Promise<void> => {
-    if (state.watching) return state.watching;
-    if (state.watchIds.length > 0) return;
-    const broker = getReadyPiRuntimeBroker();
-    if (!broker) return;
-    const epoch = inferenceWatchEpoch;
-    state.watching = (async () => {
-      const watches = await Promise.allSettled([
-        broker.watchConfig({ cwd: state.cwd }, { kind: 'settings', scope: 'global' }),
-        broker.watchConfig({ cwd: state.cwd }, { kind: 'document', path: 'models.json', scope: 'global' }),
-      ]);
-      for (const result of watches) {
-        if (result.status !== 'fulfilled') continue;
-        if (epoch !== inferenceWatchEpoch) {
-          void broker.unwatchConfig(result.value.watchId).catch(() => undefined);
-          continue;
-        }
-        state.watchIds.push(result.value.watchId);
-        inferenceWatchWorkspaces.set(result.value.watchId, state.workspaceId);
-      }
-      // A failed watch is retried with the next explicit use of this workspace.
-      if (state.watchIds.length !== watches.length) {
-        state.needsRefresh = true;
-        for (const watchId of state.watchIds.splice(0)) {
-          inferenceWatchWorkspaces.delete(watchId);
-          void broker.unwatchConfig(watchId).catch(() => undefined);
-        }
-      }
-    })();
-    try { await state.watching; } finally { state.watching = null; }
-  };
-
-  const getSemanticWorkspace = async (workspaceId: string): Promise<SemanticWorkspaceState> => {
-    const pending = semanticWorkspaceLoads.get(workspaceId);
-    if (pending) return pending;
-    const existing = semanticWorkspaceStates.get(workspaceId);
-    if (existing) {
-      if (existing.needsRefresh) await refreshSemanticWorkspace(existing, true);
-      await watchSemanticWorkspace(existing);
-      return existing;
-    }
-    const loading = (async () => {
-      const cwd = (await documentsAuthority.inspectWorkspace(workspaceId)).root;
-      const backend = createSemanticBackend({
-        local: localEmbedder,
-        embedClient: {
-          embed: async (params) => {
-            const request: HarnessEmbedParams = {
-              purpose: params.purpose,
-              providerId: params.providerId,
-              modelId: params.modelId,
-              protocol: 'openai-compatible',
-              configurationId: params.configurationId,
-              items: params.items,
-              batchId: params.batchId,
-              ...(params.dimensions === undefined ? {} : { dimensions: params.dimensions }),
-              maxTokens: params.maxTokens,
-            };
-            const broker = getReadyPiRuntimeBroker();
-            if (!broker) throw new Error('Pi workspace binding is unavailable');
-            return requestWorkspaceInference(broker, cwd, 'harness.embed', request, params.signal);
-          },
-        },
-      });
-      const runtime = createSemanticIndexRuntime({
-        dataDir: PIARIUM_DATA_DIR,
-        hostId,
-        documents: documentsAuthority,
-        structureSource,
-        searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-        isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
-          (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal,
-        ),
-        embedder: localEmbedder,
-        getEmbedder: () => backend.embedder,
-        vectorCache: semanticVectorCache,
-        scheduler: semanticScheduler,
-        onError: (error) => console.error(`[HarnessKnowledge] Semantic index failed (${workspaceId}):`, errorMessage(error)),
-      });
-      const state: SemanticWorkspaceState = {
-        backend,
-        binding: { embedding: { status: 'unconfigured' }, rerank: { status: 'unconfigured' } },
-        bindingKey: '',
-        cwd,
-        runtime,
-        snapshot: null,
-        needsRefresh: true,
-        refreshTail: Promise.resolve(),
-        watchIds: [],
-        watching: null,
-        workspaceId,
-      };
-      semanticWorkspaceStates.set(workspaceId, state);
-      await refreshSemanticWorkspace(state);
-      queueMicrotask(() => void state.runtime.scanWorkspace(workspaceId));
-      await watchSemanticWorkspace(state);
-      return state;
-    })();
-    semanticWorkspaceLoads.set(workspaceId, loading);
-    try { return await loading; } finally { semanticWorkspaceLoads.delete(workspaceId); }
-  };
+  const semanticRuntime = createWorkspaceSemanticRuntime({
+    dataDir: PIARIUM_DATA_DIR,
+    hostId,
+    documents: documentsAuthority,
+    structureSource,
+    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
+    isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
+      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal,
+    ),
+    embedder: localEmbedder,
+    vectorCache: semanticVectorCache,
+    scheduler: semanticScheduler,
+    getBroker: getReadyPiRuntimeBroker,
+    executionViews: threadExecutionViews,
+    workingBranches: workingBranchLookups,
+    onBindingChanged: (workspaceId) => queueMicrotask(() => knowledgeVectors?.refreshWorkspace(workspaceId)),
+    onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
+  });
   knowledgeVectors = createKnowledgeVectorRuntime({
     dataDir: PIARIUM_DATA_DIR,
     hostId,
     scheduler: semanticScheduler,
     cache: semanticVectorCache,
-    resolveEmbedder: async (workspaceId) => {
-      const state = await getSemanticWorkspace(workspaceId);
-      if (state.binding.embedding.status === 'ready') {
-        return { status: 'ready', embedder: state.backend.embedder };
-      }
-      if (state.binding.embedding.status === 'unconfigured') return { status: 'unconfigured' };
-      return {
-        status: state.binding.embedding.status === 'invalid' ? 'invalid' : 'unavailable',
-        ...(state.binding.embedding.message === undefined ? {} : { message: state.binding.embedding.message }),
-      };
-    },
+    resolveEmbedder: semanticRuntime.resolveKnowledgeEmbedder,
   });
   catalogScan.start = (workspaceId: string): void => {
     queueMicrotask(() => {
       void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
         console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
       });
-      void getSemanticWorkspace(workspaceId)
-        .then((state) => state.runtime.scanWorkspace(workspaceId))
+      void semanticRuntime.scanWorkspace(workspaceId)
         .catch((error) => {
           console.error('[HarnessKnowledge] Semantic scan failed:', errorMessage(error));
         });
@@ -2014,11 +1847,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   observeKnowledgeDocumentMutation = (event) => {
     knowledgeContextRuntime.observeDocumentMutation(event);
     symbolGraphRuntime.observeDocumentMutation(event);
-    void getSemanticWorkspace(event.workspaceId).then((state) => {
-      state.runtime.observeDocumentMutation(event);
-    }).catch((error) => {
-      console.error('[HarnessKnowledge] Semantic bind failed:', errorMessage(error));
-    });
+    semanticRuntime.observeDocumentMutation(event);
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
   const bindKnowledgeSession = (sessionId: string, workspaceId: string): void => {
@@ -2235,132 +2064,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
-    semanticRecall: async (workspaceId, question, limit, searchOptions) => {
-      const semanticState = await getSemanticWorkspace(workspaceId);
-      const sessionId = searchOptions?.sessionId;
-      // Isolated child sessions are registered against their materialized cwd's
-      // own Documents workspace. Query that live scope directly. Treating the
-      // parent's WorkingState object table as an overlay both misses live child
-      // writes and can expose copyIgnored execution inputs to remote inference.
-      // A still-virtual Run is the opposite case: its authoritative files live
-      // only in the pinned WorkingState view, so this query overlays that view.
-      const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
-      const execution = sessionId ? threadExecutionViews.get(sessionId) : undefined;
-      const pinnedDocuments = searchOptions?.threadDocuments;
-      const threadDocuments = pinnedDocuments
-        ? pinnedDocuments
-        : execution?.mode === 'virtual' && sessionId
-        ? (await workingBranchLookups.pinQuery(sessionId, {
-          ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
-          ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-        }))?.files.map((file) => ({
-          path: file.path,
-          content: file.text,
-          revision: file.revision,
-        }))
-        : undefined;
-      const draftPaths = sessionId
-        ? documentsAuthority.agentInputDraftPaths(sessionId, inputContext)
-        : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
-      const view = await pinSemanticQueryView({
-        inputContext,
-        ...(draftPaths === undefined ? {} : { draftPaths }),
-        ...(threadDocuments
-          ? {
-            threadDocuments: threadDocuments.map((file) => ({
-              path: file.path,
-              content: file.content,
-              revision: file.revision,
-            })),
-          }
-          : sessionId
-          ? {
-            readDraft: (resourceId: string) => {
-              const snapshot = documentsAuthority.readAgentInputSnapshot(sessionId, inputContext, resourceId);
-              if (snapshot.status === 'ready') {
-                return { status: 'ready', content: snapshot.content, revision: snapshot.revision };
-              }
-              if (snapshot.status === 'unavailable') return { status: 'unavailable' };
-              if (snapshot.status === 'disk' && snapshot.superseded) return { status: 'disk', superseded: true };
-              return { status: 'disk' };
-            },
-          }
-          : {}),
-      });
-      const result = await semanticState.runtime.search(
-        workspaceScope(workspaceId),
-        question,
-        limit,
-        {
-          ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-          ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
-          overlays: view.overlays,
-          view: view.view,
-        },
-      );
-      return {
-        status: result.status.status,
-        coverage: result.status.coverage,
-        ...(result.status.generation ? { generation: result.status.generation } : {}),
-        ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
-        scope: result.status.scope,
-        lifecycle: result.status.lifecycle,
-        hits: result.hits,
-        ...(result.gaps.length > 0 ? { gaps: result.gaps } : {}),
-      };
-    },
-    harnessSettings: async (workspaceId) => (
-      (await getSemanticWorkspace(workspaceId)).snapshot
-    ),
-    rerankExploreViews: async (input) => {
-      const broker = getReadyPiRuntimeBroker();
-      if (!broker) throw new Error('Pi workspace binding is unavailable');
-      const state = semanticWorkspaceStates.get(input.workspaceId)
-        ?? await getSemanticWorkspace(input.workspaceId);
-      const configured: HarnessResolvedRerankBinding | undefined = state.binding.rerank.status === 'ready'
-        ? state.binding.rerank.binding
-        : undefined;
-      if (!configured) throw new Error('Rerank is not configured');
-      if (
-        configured.protocol !== input.settings.protocol
-        || configured.providerId !== input.settings.providerId
-        || configured.modelId !== input.settings.modelId
-        || configured.endpoint !== input.settings.endpoint
-        || configured.maxDocumentTokens !== input.settings.maxDocumentTokens
-      ) throw new Error('Rerank settings changed after the query view was frozen');
-      const batchId = crypto.randomUUID();
-      const request: HarnessRerankParams = {
-        providerId: configured.providerId,
-        modelId: configured.modelId,
-        protocol: 'http-rerank',
-        configurationId: configured.configurationId,
-        query: input.query,
-        documents: input.documents,
-        batchId,
-        ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
-        ...(configured.maxDocumentTokens ? { maxDocumentTokens: configured.maxDocumentTokens } : {}),
-      };
-      const result = await requestWorkspaceInference(broker, state.cwd, 'harness.rerank', request, input.signal);
-      if (
-        result.batchId !== batchId
-        || result.providerId !== configured.providerId
-        || result.modelId !== configured.modelId
-      ) throw new Error('Rerank response does not match the submitted batch binding');
-      const seen = new Set<number>();
-      for (const score of result.scores) {
-        if (
-          !Number.isInteger(score.index)
-          || score.index < 0
-          || score.index >= input.documents.length
-          || seen.has(score.index)
-          || score.id !== input.documents[score.index]?.id
-          || !Number.isFinite(score.score)
-        ) throw new Error('Rerank response contains an invalid score identity');
-        seen.add(score.index);
-      }
-      if (seen.size === 0) throw new Error('Rerank response did not score any submitted document');
-      return result;
-    },
+    semanticRecall: semanticRuntime.semanticRecall,
+    harnessSettings: semanticRuntime.harnessSettings,
+    rerankExploreViews: semanticRuntime.rerankExploreViews,
     fileRelations: async (workspaceId, resourceId) => {
       const store = knowledgeStores.get(workspaceId);
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
@@ -2508,9 +2214,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         { accepted, requestId: request.requestId, sessionId: request.sessionId },
       );
     },
-    observeToolWrite: (workspaceId, absolutePath) => (
-      documentsAuthority.observeAgentWrite(workspaceId, absolutePath)
-    ),
+    observeToolWrite: async (workspaceId, absolutePath) => {
+      await documentsAuthority.observeAgentWrite(workspaceId, absolutePath);
+      await semanticRuntime.observeToolWrite(workspaceId, absolutePath);
+    },
     writerTracker: piWriterTracker,
   });
   // ── Harness router ─────────────────────────────────────────────────
@@ -2576,20 +2283,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const brokerUnsubscribe = piRuntimeBroker.subscribe((event) => {
-    if (event.kind === 'host' && event.envelope.event === 'config.changed') {
-      const workspaceId = inferenceWatchWorkspaces.get(event.envelope.data.watchId);
-      const state = workspaceId ? semanticWorkspaceStates.get(workspaceId) : undefined;
-      if (state) void refreshSemanticWorkspace(state, true).catch((error) => {
-        console.error(`[HarnessKnowledge] Inference configuration refresh failed (${workspaceId}):`, errorMessage(error));
-      });
-    }
-    if (event.kind === 'host' && event.envelope.event === 'provider.config.changed') {
-      for (const state of semanticWorkspaceStates.values()) {
-        void refreshSemanticWorkspace(state, true).catch((error) => {
-          console.error(`[HarnessKnowledge] Provider configuration refresh failed (${state.workspaceId}):`, errorMessage(error));
-        });
-      }
-    }
+    semanticRuntime.processEvent(event);
     piSessionAutomation.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
     void piWriterTracker.processEvent(event);
@@ -2597,16 +2291,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     void harnessRouter.processEvent(event);
     threadRuntime.processEvent(event);
     if (event?.kind === 'worker.exit') {
-      if (event.role === 'workspace') {
-        inferenceWatchEpoch++;
-        for (const state of semanticWorkspaceStates.values()) {
-          state.needsRefresh = true;
-          for (const watchId of state.watchIds.splice(0)) {
-            inferenceWatchWorkspaces.delete(watchId);
-            void piRuntimeBroker.unwatchConfig(watchId).catch(() => undefined);
-          }
-        }
-      }
       if (event.sessionId) {
         const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
         harnessSessionRegistration.dropSession(event.sessionId, event.actor);
@@ -2884,13 +2568,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await runRuntime.dispose();
       await threadRuntime.dispose();
       await piRuntimeGateway.stop();
-      await Promise.allSettled([...inferenceWatchWorkspaces.keys()].map((watchId) => (
-        piRuntimeBroker.unwatchConfig(watchId)
-      )));
-      inferenceWatchWorkspaces.clear();
       await knowledgeVectors?.close();
-      await Promise.allSettled([...semanticWorkspaceStates.values()].map((state) => state.runtime.dispose()));
-      semanticWorkspaceStates.clear();
+      await semanticRuntime.dispose();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();

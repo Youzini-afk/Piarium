@@ -9,10 +9,13 @@
  * speedup. Uses `git ls-files` plus the same tree-sitter queries,
  * `replaceFileSymbols` path, associate gate and `CATALOG_SCAN_BATCH` write
  * burst as the collector, so the numbers describe the shape the product runs.
+ * Gated association candidates are stored as compact file facts and resolved
+ * from committed connects after the first pass; the old source re-collect pass
+ * is deliberately not part of this measurement.
  *
- * Enumeration is still `git ls-files` rather than `searchFilesystemFiles`: the
- * two now agree on which files are catalog candidates, and going straight to
- * git keeps this script independent of the workspace-root plumbing.
+ * Enumeration is still `git ls-files`; the resulting list is supplied through
+ * the runtime's `searchFilesystemFiles` boundary so this script measures the
+ * production scan path without depending on workspace-root plumbing.
  */
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -21,40 +24,14 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { languageIdForPath } from "../application-host/lib/harness/language-id.js";
-import { openWorkspaceKnowledge, type SymbolGraphLinkInput } from "../application-host/lib/knowledge/store.js";
-import { CATALOG_SCAN_BATCH } from "../application-host/lib/knowledge/symbol-runtime.js";
-import { CATALOG_EXTRACTOR_VERSION } from "../application-host/lib/knowledge/symbols.js";
-import { classifyLiteralCall } from "../application-host/lib/structure/connections.js";
+import { openWorkspaceKnowledge } from "../application-host/lib/knowledge/store.js";
+import { CATALOG_SCAN_BATCH, createSymbolGraphRuntime } from "../application-host/lib/knowledge/symbol-runtime.js";
 import { CATALOG_SCAN_LANGUAGES } from "../application-host/lib/structure/languages.js";
 import { createStructureSource } from "../application-host/lib/structure/source.js";
 import { createTreeSitterStructureProvider } from "../application-host/lib/structure/tree-sitter-provider.js";
-import type { StructureSymbol } from "../application-host/lib/structure/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, "../../..");
-
-const flattenOutline = (symbols: readonly StructureSymbol[], lineLengths: readonly number[]) => {
-  const result: Array<{ name: string; kind: string; range: { startLine: number; startCharacter: number; endLine: number; endCharacter: number } }> = [];
-  const visit = (symbol: StructureSymbol): void => {
-    if (symbol.name.trim()) {
-      const startLine = Math.max(0, symbol.range.startLine - 1);
-      const endLine = Math.max(startLine, symbol.range.endLine - 1);
-      result.push({
-        name: symbol.name,
-        kind: symbol.kind,
-        range: {
-          startLine,
-          startCharacter: 0,
-          endLine,
-          endCharacter: lineLengths[endLine] ?? 0,
-        },
-      });
-    }
-    for (const child of symbol.children ?? []) visit(child);
-  };
-  for (const symbol of symbols) visit(symbol);
-  return result;
-};
 
 const catalogFiles = (): string[] => {
   const listed = spawnSync("git", ["ls-files", "--", "*.ts", "*.tsx", "*.js", "*.jsx", "*.mts", "*.cts", "*.mjs", "*.cjs"], {
@@ -80,98 +57,82 @@ const main = async (): Promise<void> => {
     embedding: null,
   });
   const source = createStructureSource([createTreeSitterStructureProvider()]);
+  const sourceCalls = { outline: 0, imports: 0, literalCalls: 0 };
+  const instrumentedSource = {
+    outline: (request: Parameters<typeof source.outline>[0]) => {
+      sourceCalls.outline += 1;
+      return source.outline(request);
+    },
+    classifyHits: (request: Parameters<typeof source.classifyHits>[0]) => source.classifyHits(request),
+    imports: (request: Parameters<typeof source.imports>[0]) => {
+      sourceCalls.imports += 1;
+      return source.imports(request);
+    },
+    literalCalls: (request: Parameters<typeof source.literalCalls>[0]) => {
+      sourceCalls.literalCalls += 1;
+      return source.literalCalls(request);
+    },
+  };
   const files = catalogFiles();
   process.stderr.write(`catalog files (git ls-files ∩ CATALOG_SCAN_LANGUAGES): ${files.length}\n`);
+  const fileItems = files.map((relativePath) => ({
+    name: path.basename(relativePath),
+    path: path.join(repoRoot, relativePath),
+    relativePath,
+  }));
+  let readCount = 0;
+  let readFailed = 0;
+  let searchCount = 0;
+  let runtimeErrors = 0;
+  const runtimeErrorMessages = new Set<string>();
+  const runtime = createSymbolGraphRuntime({
+    getStore: async () => store,
+    documents: {
+      inspectWorkspace: async () => ({ root: repoRoot }),
+      read: async ({ resourceId }: { resourceId: string }) => {
+        readCount += 1;
+        const absolute = path.join(repoRoot, resourceId);
+        try {
+          const content = await fs.readFile(absolute, "utf8");
+          const revision = createHash("sha256").update(content).digest("hex").slice(0, 16);
+          return {
+            status: "ready",
+            resource: { workspaceId: "measurement", resourceId },
+            content,
+            revision,
+            encoding: "utf-8",
+            bom: false,
+            byteLength: Buffer.byteLength(content, "utf8"),
+            epoch: 1,
+          };
+        } catch {
+          readFailed += 1;
+          return { status: "missing", resource: { workspaceId: "measurement", resourceId } };
+        }
+      },
+      readAgentInputSnapshot: () => ({ status: "disk" }),
+    } as never,
+    supervisor: {
+      syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+      documentSymbols: async () => ({ status: "failed", message: "catalog measurement must not start a language server" }),
+    } as never,
+    structureSource: instrumentedSource,
+    searchFilesystemFiles: async () => {
+      searchCount += 1;
+      return fileItems;
+    },
+    onError: (error) => {
+      runtimeErrors += 1;
+      runtimeErrorMessages.add(error instanceof Error ? error.message : String(error));
+    },
+  });
   const scanStarted = performance.now();
-  let parsed = 0;
-  let parseFailed = 0;
-  const revisit: string[] = [];
-  const collect = async (relativePath: string, pass: "first" | "revisit"): Promise<void> => {
-    const languageId = languageIdForPath(relativePath);
-    if (!languageId) return;
-    const absolute = path.join(repoRoot, relativePath);
-    let text: string;
-    try {
-      text = await fs.readFile(absolute, "utf8");
-    } catch {
-      parseFailed += 1;
-      return;
-    }
-    const revision = createHash("sha256").update(text).digest("hex").slice(0, 16);
-    const request = { path: relativePath, languageId, text, revision };
-    const [outline, importsResult, callsResult] = await Promise.all([
-      source.outline(request),
-      source.imports(request),
-      source.literalCalls(request),
-    ]);
-    if (outline.status !== "ready" && outline.status !== "empty") {
-      parseFailed += 1;
-      return;
-    }
-    const lineLengths = text.split(/\r\n|\n|\r/).map((line) => line.length);
-    const symbols = flattenOutline(outline.symbols, lineLengths);
-    const links: SymbolGraphLinkInput[] = [];
-    if (importsResult.status === "ready") {
-      for (const item of importsResult.imports) {
-        if (item.source.trim() && Number.isSafeInteger(item.line) && item.line >= 1) {
-          links.push({ kind: "import", value: item.source, line: item.line });
-        }
-      }
-    }
-    let suppressed = false;
-    if (callsResult.status === "ready") {
-      const usable = callsResult.calls.filter((call) => (
-        classifyLiteralCall(call) !== null && Number.isSafeInteger(call.line) && call.line >= 1
-      ));
-      const localConnections = new Set(usable
-        .filter((call) => classifyLiteralCall(call) === "connects")
-        .map((call) => call.literal));
-      const unresolved = [...new Set(usable
-        .filter((call) => classifyLiteralCall(call) === "associates")
-        .map((call) => call.literal)
-        .filter((literal) => !localConnections.has(literal)))];
-      const known = unresolved.length > 0 ? await store.connectionLiterals(unresolved) : new Set<string>();
-      for (const call of usable) {
-        const classified = classifyLiteralCall(call)!;
-        if (classified === "associates" && !localConnections.has(call.literal) && !known.has(call.literal)) {
-          suppressed = true;
-          continue;
-        }
-        links.push({ kind: classified, value: call.literal, line: call.line, callee: call.name });
-      }
-    }
-    if (suppressed && pass === "first") revisit.push(relativePath);
-    const linksIncomplete = !(
-      (importsResult.status === "ready" || importsResult.status === "empty" || importsResult.status === "unsupported")
-      && (callsResult.status === "ready" || callsResult.status === "empty" || callsResult.status === "unsupported")
-    );
-    await store.replaceFileSymbols(
-      relativePath,
-      languageId,
-      symbols,
-      revision,
-      links,
-      { ...(linksIncomplete ? { linksIncomplete: true } : {}), extractor: CATALOG_EXTRACTOR_VERSION },
-    );
-    parsed += 1;
-    if (parsed % 50 === 0) {
-      process.stderr.write(`parsed ${parsed}/${files.length} (failed ${parseFailed}, revisit ${revisit.length})\n`);
-    }
-  };
-  // The collector serializes per path but lets a batch of distinct paths run
-  // concurrently, so the store sees one burst per batch and flushes once for it.
-  // Collecting one file at a time here measured a shape the product does not
-  // run: it cost one whole-store flush per file (D-140).
-  const collectInBatches = async (paths: readonly string[], pass: "first" | "revisit"): Promise<void> => {
-    for (let offset = 0; offset < paths.length; offset += CATALOG_SCAN_BATCH) {
-      await Promise.all(paths.slice(offset, offset + CATALOG_SCAN_BATCH).map((item) => collect(item, pass)));
-    }
-  };
-  await collectInBatches(files, "first");
-  const uniqueRevisit = [...new Set(revisit)];
-  process.stderr.write(`first pass done; revisiting ${uniqueRevisit.length} gated files\n`);
-  await collectInBatches(uniqueRevisit, "revisit");
+  await runtime.scanWorkspace("measurement");
   const catalogBuildMs = performance.now() - scanStarted;
+  const coldReadCount = readCount;
+  const hotStarted = performance.now();
+  await runtime.scanWorkspace("measurement");
+  const hotRescanMs = performance.now() - hotStarted;
   const stats = await store.catalogStats();
   const searchStarted = performance.now();
   const symbols = await store.searchSymbols("explore", 20);
@@ -183,18 +144,25 @@ const main = async (): Promise<void> => {
   const importersStarted = performance.now();
   const importers = explorePath ? await store.findImporters(explorePath) : { resolved: [] };
   const findImportersMs = performance.now() - importersStarted;
+  await runtime.dispose();
   process.stdout.write(`${JSON.stringify({
     catalogBuildMs: Number(catalogBuildMs.toFixed(1)),
+    hotRescanMs: Number(hotRescanMs.toFixed(3)),
     searchSymbolsMs: Number(searchSymbolsMs.toFixed(3)),
     findLinksMs: Number(findLinksMs.toFixed(3)),
     findImportersMs: Number(findImportersMs.toFixed(3)),
     catalogFileCount: files.length,
-    parsedFileCount: parsed,
-    parseFailed,
-    revisitCount: uniqueRevisit.length,
+    readCount,
+    reads: { cold: coldReadCount, hot: readCount - coldReadCount },
+    readFailed,
+    searchCount,
+    sourceCalls,
+    runtimeErrors,
+    runtimeErrorMessages: [...runtimeErrorMessages],
     symbolCount: stats.symbolCount,
     fileCount: stats.fileCount,
     linkCount: stats.linkCount,
+    nodeCount: stats.nodeCount,
     languages: stats.languages,
     searchHitCount: symbols.length,
     searchMatchTiers: Object.fromEntries(
@@ -211,7 +179,7 @@ const main = async (): Promise<void> => {
       totalmemMiB: Math.round(os.totalmem() / (1024 * 1024)),
       node: process.version,
     },
-    method: `git ls-files of this repository ∩ CATALOG_SCAN_LANGUAGES, then tree-sitter outline/imports/literalCalls + replaceFileSymbols, with the collector's associate gate, one revisit pass, and writes issued in bursts of CATALOG_SCAN_BATCH=${CATALOG_SCAN_BATCH} as the collector does. Queries: one searchSymbols('explore', 20), one findLinks('explore.search'), one findImporters of harness explore.ts. Clock is process performance.now(). Not a speedup claim. Enumeration is git ls-files, not searchFilesystemFiles.`,
+    method: `git ls-files of this repository ∩ CATALOG_SCAN_LANGUAGES, then createSymbolGraphRuntime.scanWorkspace with tree-sitter outline/imports/literalCalls, compact association facts, one relation-only resolution pass, and writes issued in bursts of CATALOG_SCAN_BATCH=${CATALOG_SCAN_BATCH} as the collector does. A second unchanged scan measures hotRescanMs while still rechecking document revisions; external file writes are picked up on that explicit rescan. Queries: one searchSymbols('explore', 20), one findLinks('explore.search'), one findImporters of harness explore.ts. Clock is process performance.now(). Not a speedup claim. Enumeration is git ls-files, supplied to the runtime's searchFilesystemFiles boundary.`,
   }, null, 2)}\n`);
   await store.close();
   await fs.rm(dataDir, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 }).catch(() => undefined);

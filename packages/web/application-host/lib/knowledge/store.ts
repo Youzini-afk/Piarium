@@ -7,7 +7,9 @@
  * Node types: event, session, block, knowledge, file, symbol, link.
  * Edges: supersedes (knowledge → knowledge), defines (file → symbol),
  * imports / connects / associates (file → link). Additive link kinds share the
- * file generation; there is no schema version or migration runner (D-105).
+ * file generation; gated association candidates are compact metadata on the
+ * current file row until a connects row confirms their literal. There is no
+ * schema version or migration runner (D-105).
  * `associates` is gated on the literal already being a confirmed connection
  * value elsewhere, so `connectionLiterals` must track the connects set (D-109).
  *
@@ -226,6 +228,8 @@ export interface SymbolGraphCatalogStats {
   symbolCount: number;
   fileCount: number;
   linkCount: number;
+  /** Live TriviumDB node count across all node types, not just graph rows. */
+  nodeCount: number;
   languages: string[];
   paths: string[];
 }
@@ -380,8 +384,18 @@ export interface KnowledgeStore {
     symbols: SymbolGraphSymbolInput[],
     documentRevision: string,
     links?: readonly SymbolGraphLinkInput[],
-    options?: { linksIncomplete?: boolean; extractor?: number },
+    options?: {
+      linksIncomplete?: boolean;
+      extractor?: number;
+      /** Compact association calls held until a confirmed connect exists. */
+      associationCandidates?: readonly SymbolGraphLinkInput[];
+    },
   ): Promise<{ fileId: NodeId; symbols: number; edges: number }>;
+  /**
+   * Reconcile generation-bound association candidates with current connections.
+   * This creates or removes link rows without re-publishing the file's symbols.
+   */
+  resolveAssociationCandidates(): Promise<{ activated: number }>;
   removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
@@ -533,6 +547,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("nameLower");
   db.createNgramIndex("nameLower");
   db.createNgramIndex("pathLower");
+  db.createIndex("hasAssociationCandidates");
 
   const placeholderVec = zeroVector(dim);
   const publishBlocksChanged = (sessionId: string, change: BlockChange): void => {
@@ -1404,6 +1419,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           ...(typeof previous["generation"] === "string" ? { generation: previous["generation"] } : {}),
           ...(typeof previous["documentRevision"] === "string" ? { documentRevision: previous["documentRevision"] } : {}),
           ...(previous["linksIncomplete"] === true ? { linksIncomplete: true } : {}),
+          ...(Array.isArray(previous["associationCandidates"])
+            ? { associationCandidates: previous["associationCandidates"] }
+            : {}),
+          ...(previous["hasAssociationCandidates"] === true ? { hasAssociationCandidates: true } : {}),
           ...(Number.isSafeInteger(previous["extractor"]) ? { extractor: previous["extractor"] } : {}),
         };
         const fileId = existing[0]?.id ?? db.insert(placeholderVec, payload);
@@ -1425,6 +1444,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const normalizedPath = assertGraphText(path, "File path");
         const normalizedLanguage = assertGraphText(language, "File language");
         const normalizedRevision = assertGraphText(documentRevision, "Document revision");
+        const associationCandidates = options.associationCandidates ?? [];
         for (const symbol of symbols) {
           assertGraphText(symbol.name, "Symbol name");
           assertGraphText(symbol.kind, "Symbol kind");
@@ -1436,6 +1456,20 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           if (!validLinkLine(link.line)) throw new KnowledgeMutationError("invalid", `Invalid line for link ${link.value}`);
           if (link.kind !== "import") assertGraphText(link.callee ?? "", "Link callee");
         }
+        for (const link of associationCandidates) {
+          if (link.kind !== "associates") {
+            throw new KnowledgeMutationError("invalid", "Association candidates must use the associates link kind");
+          }
+          assertGraphText(link.value, "Association candidate value");
+          if (!validLinkLine(link.line)) {
+            throw new KnowledgeMutationError("invalid", `Invalid line for association candidate ${link.value}`);
+          }
+          assertGraphText(link.callee ?? "", "Association candidate callee");
+        }
+        const associationFacts = [...new Map(
+          [...associationCandidates, ...links.filter((link) => link.kind === "associates")]
+            .map((link) => [JSON.stringify([link.value, link.line, link.callee]), link] as const),
+        ).values()];
         const generation = randomUUID();
         const previousFiles = fileNodes(normalizedPath);
         const previousSymbols = symbolNodes(normalizedPath);
@@ -1493,6 +1527,17 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           active: true,
           generation,
           documentRevision: normalizedRevision,
+          ...(associationFacts.length > 0
+            ? {
+                associationCandidates: associationFacts.map((link) => ({
+                  kind: "associates" as const,
+                  value: link.value,
+                  line: link.line,
+                  callee: link.callee,
+                })),
+                hasAssociationCandidates: true,
+              }
+            : { hasAssociationCandidates: false }),
           ...(options.linksIncomplete ? { linksIncomplete: true } : {}),
           ...(Number.isSafeInteger(options.extractor) ? { extractor: options.extractor } : {}),
         };
@@ -1524,7 +1569,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         bumpCounters({
           files: previousFiles.length === 0 ? 1 : 1 - previousFiles.length,
           symbols: symbolIds.length - previousSymbols.filter(({ payload }) => payload["active"] === true).length,
-          links: linkIds.length - previousLinks.filter(({ payload }) => payload["active"] === true).length,
+          links: links.length - previousLinks.filter(({ payload }) => payload["active"] === true).length,
         });
         invalidateGraphShape();
         db.indexText(fileId, normalizedPath);
@@ -1541,7 +1586,126 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           db.indexKeyword(id, link.value);
         }
         scheduleGraphFlush();
-        return { fileId, symbols: symbolIds.length, edges: symbolIds.length + linkIds.length };
+        return { fileId, symbols: symbolIds.length, edges: symbolIds.length + links.length };
+      });
+    },
+
+    async resolveAssociationCandidates(): Promise<{ activated: number }> {
+      return enqueueWrite(() => {
+        const files = lookup({ type: "file", active: true, hasAssociationCandidates: true });
+        if (files.length === 0) return { activated: 0 };
+
+        type AssociationCandidate = { value: string; line: number; callee: string };
+        const candidatesByFile = new Map<number, AssociationCandidate[]>();
+        const values = new Set<string>();
+        for (const file of files) {
+          const raw = file.payload["associationCandidates"];
+          if (!Array.isArray(raw)) continue;
+          const candidates: AssociationCandidate[] = [];
+          for (const value of raw) {
+            if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+            const candidate = value as Record<string, unknown>;
+            if (
+              typeof candidate["value"] !== "string"
+              || candidate["value"].trim().length === 0
+              || !validLinkLine(Number(candidate["line"]))
+              || typeof candidate["callee"] !== "string"
+              || candidate["callee"].trim().length === 0
+            ) continue;
+            const normalized = {
+              value: candidate["value"],
+              line: Number(candidate["line"]),
+              callee: candidate["callee"],
+            };
+            candidates.push(normalized);
+            values.add(normalized.value);
+          }
+          if (candidates.length > 0) candidatesByFile.set(file.id, candidates);
+        }
+        if (values.size === 0) return { activated: 0 };
+
+        const confirmed = new Set<string>();
+        for (const value of values) {
+          if (db.indexedLookup({ type: "link", kind: "connects", value, active: true }, GRAPH_RESULT_CEILING).length > 0) {
+            confirmed.add(value);
+          }
+        }
+
+        const operations: TransactionOperation[] = [];
+        const newLinkRows: Array<{ file: GraphNode; candidate: AssociationCandidate; id: NodeId }> = [];
+        let activated = 0;
+        let deactivated = 0;
+        for (const file of files) {
+          const candidates = candidatesByFile.get(file.id);
+          if (!candidates) continue;
+          const generation = typeof file.payload["generation"] === "string" ? file.payload["generation"] : undefined;
+          const revision = typeof file.payload["documentRevision"] === "string" ? file.payload["documentRevision"] : undefined;
+          const candidateKeys = new Set(candidates.map((candidate) => (
+            `${candidate.value}\u0000${candidate.line}\u0000${candidate.callee}`
+          )));
+          const activeAssociations = linkNodes(String(file.payload["path"]))
+            .filter(({ payload }) => (
+              payload["active"] === true
+              && payload["kind"] === "associates"
+              && payload["generation"] === generation
+              && payload["documentRevision"] === revision
+              && candidateKeys.has(`${String(payload["value"])}\u0000${Number(payload["line"])}\u0000${String(payload["callee"] ?? "")}`)
+            ));
+          const activeKeys = new Set(activeAssociations.map(({ payload }) => (
+            `${String(payload["value"])}\u0000${Number(payload["line"])}\u0000${String(payload["callee"] ?? "")}`
+          )));
+          const toActivate = candidates.filter((candidate) => (
+            confirmed.has(candidate.value)
+            && !activeKeys.has(`${candidate.value}\u0000${candidate.line}\u0000${candidate.callee}`)
+          ));
+          const toDeactivate = activeAssociations.filter(({ payload }) => !confirmed.has(String(payload["value"])));
+          if (toActivate.length === 0 && toDeactivate.length === 0) continue;
+
+          const path = file.payload["path"];
+          const language = file.payload["language"];
+          if (typeof path !== "string" || typeof language !== "string") continue;
+          const pendingPayloads = toActivate.map((candidate) => ({
+            type: "link" as const,
+            path,
+            language,
+            kind: "associates" as const,
+            value: candidate.value,
+            line: candidate.line,
+            callee: candidate.callee,
+            ...(generation ? { generation } : {}),
+            ...(revision ? { documentRevision: revision } : {}),
+            active: false,
+          }));
+          const linkIds = pendingPayloads.length > 0
+            ? db.batchInsert(pendingPayloads.map(() => placeholderVec), pendingPayloads)
+            : [];
+          const activePayloads = pendingPayloads.map((payload) => ({ ...payload, active: true }));
+          for (const [index, id] of linkIds.entries()) {
+            const candidate = toActivate[index]!;
+            newLinkRows.push({ file, candidate, id });
+            operations.push(
+              { type: "updatePayload", id, payload: activePayloads[index] },
+              { type: "upsertEdge", src: file.id, dst: id, label: "associates", weight: 1 },
+            );
+          }
+          for (const link of toDeactivate) {
+            operations.push(
+              { type: "unlinkLabel", src: file.id, dst: link.id, label: "associates" },
+              { type: "delete", id: link.id },
+            );
+          }
+          activated += toActivate.length;
+          deactivated += toDeactivate.length;
+        }
+        if (operations.length === 0) return { activated: 0 };
+        db.commitTransaction(operations);
+        bumpCounters({ links: activated - deactivated });
+        for (const row of newLinkRows) {
+          db.indexText(row.id, `${row.candidate.value} ${String(row.file.payload["path"])}`);
+          db.indexKeyword(row.id, row.candidate.value);
+        }
+        scheduleGraphFlush();
+        return { activated };
       });
     },
 
@@ -1737,6 +1901,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         symbolCount: counts.symbols,
         fileCount: counts.files,
         linkCount: counts.links,
+        nodeCount: db.nodeCount(),
         languages: files.languages,
         paths: files.sortedPaths,
       };

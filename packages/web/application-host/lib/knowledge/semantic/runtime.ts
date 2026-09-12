@@ -299,7 +299,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     }
   };
 
-  const observeDocumentMutation = (event: DocumentMutationObservation): void => {
+  const observeDocumentMutation = (event: Omit<DocumentMutationObservation, 'owner'> & Partial<Pick<DocumentMutationObservation, 'owner'>>): void => {
     if (disposed) return;
     const languageId = languageIdForPath(event.resourceId);
     if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) return;

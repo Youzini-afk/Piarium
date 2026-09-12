@@ -643,6 +643,38 @@ describe("KnowledgeStore", () => {
       expect((await store.searchSymbols("dbp", 10)).map((row) => row.name)).toEqual(["dbPath"]);
     });
 
+    it("reopens compact association facts and resolves them without recollecting the consumer", async () => {
+      const dir = join(TEST_DIR, "association-reopen");
+      mkdirSync(dir, { recursive: true });
+      const open = () => openWorkspaceKnowledge({
+        dataDir: dir,
+        hostId: "test-host",
+        workspaceId: "ws-association-reopen",
+        embedding: null,
+      });
+      const first = await open();
+      await first.replaceFileSymbols("lib/consumer.ts", "typescript", [
+        { name: "consumer", kind: "function", range },
+      ], "disk-consumer", [], {
+        associationCandidates: [{ kind: "associates", value: "wire.late", line: 4, callee: "log" }],
+      });
+      await first.close();
+
+      const second = await open();
+      await second.replaceFileSymbols("lib/producer.ts", "typescript", [
+        { name: "producer", kind: "function", range },
+      ], "disk-producer", [
+        { kind: "connects", value: "wire.late", line: 2, callee: "register" },
+      ]);
+      expect((await second.catalogStats()).nodeCount).toBe(5);
+      expect(await second.resolveAssociationCandidates()).toEqual({ activated: 1 });
+      expect(await second.getFileRelations("lib/consumer.ts")).toMatchObject({
+        documentRevision: "disk-consumer",
+        associations: [{ callee: "log", literal: "wire.late" }],
+      });
+      await second.close();
+    });
+
     it("answers catalog queries after a reopen without rebuilding anything in memory", async () => {
       const dir = join(TEST_DIR, "graph-reopen-indexes");
       mkdirSync(dir, { recursive: true });
@@ -671,6 +703,7 @@ describe("KnowledgeStore", () => {
         symbolCount: 2,
         fileCount: 2,
         linkCount: 3,
+        nodeCount: 7,
         languages: ["javascript", "typescript"],
         paths: ["lib/a.ts", "lib/b.ts"],
       });

@@ -498,7 +498,8 @@ session 继续，讨论转实现新分支/Run 保留 transcript。子消息不�
    （冷扫描火忘 + `graph: empty`）。枚举一次问 git（`git ls-files -z --cached --others --exclude-standard`），
    不是每目录 spawn 一次 `check-ignore`；派生图写入按安静期去抖 flush，用户数据仍在各自写入里即时 flush；
    测量脚本按 `CATALOG_SCAN_BATCH` 成批并发，量产品真会跑的形状。数字进 status。
-   同名闸门再访仍会重新解析（解析缓存 32 条），未修。
+   D-236 把同名闸门再访改为 file 行内的修订/代际绑定抽取记录；只更新确认后的关系，不重读源码或重发 symbols。
+   未确认候选不建图节点，显式重扫仍核对文件修订；输入语料、结构请求次数、节点数与耗时记入 status。
 
 不做：PageRank、多跳、`references`/`calls` 边、embedding、词法索引、BM25、语法包/设置页、记忆/压缩/线程/权限、
 explore 模型增强。不声称检索质量或速度提升；量到的数字进 status，标明是对照数字。
@@ -640,6 +641,10 @@ details 标明 rerank 状态。输入是 3.15B 当前 view；没有 provider tok
 公开 Runtime surface 移除并增加显式 batch cancel。远程空间在实际维度解析后才稳定命名，并包含去凭据 endpoint/API 配置身份；
 设置变化启动新空间扫描。扫描核对当前 revision 后才解除旧行 mask，读失败保持 gap/incomplete。活跃 isolated child 直接查询自身
 Documents workspace。rerank 超预算 view 不截断冒充原 ID，finish 冻结配置且终态无二次 HTTP。
+
+**生产装配与原生写入（D-235）。** Application Host 与公开工具纵切共用 `WorkspaceSemanticRuntime`，统一 Settings/describe、
+workspace 推理传输、固定查询视图、配置订阅和关闭。成功的 Pi 原生 journal after 在工具答复前通知执行工作区语义索引；后台
+重建不等待本回合 settle。验证覆盖真实 SessionHost 的 embedding/rerank HTTP 适配与 Documents，具体证据范围记入 status。
 
 工作区仍是包含陌生文件的范围，注意力只改变建设顺序。真实 provider 延迟、质量、成本和完整冷扫时间未观察。扩散模型/
 后训练、全仓生成式摘要与零样本路由仍留后续。知识库语义召回已按 2.8 / D-196 单独接线，不与代码语义 MiniLM 回退混写。

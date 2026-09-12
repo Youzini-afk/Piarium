@@ -728,6 +728,11 @@ index.lifecycle 与查询结果状态独立，部分索引可查，查询空结�
 `copyIgnored` 是执行与结果捕获配置，不自动将文件纳入语义索引。已捕获草稿的建设任务由 workspace runtime 持有，重复正文合并；
 查询结束只结束该查询的等待，后台建设继续，runtime 关闭时取消。待建草稿先报告 gap，后续查询使用已完成向量（D-195）。
 
+工作区设置、后台推理绑定、配置订阅、查询视图与关闭清理由同一 `WorkspaceSemanticRuntime` 装配（D-235）。Documents 写入
+与 Pi 原生工具的成功 journal after 都通知这一实例；原生工具答复前标记旧向量失效，正文读取与嵌入在后台进行，不等待 settle。
+仍为虚拟分支时必须取得固定 WorkingState 视图，缺视图报告不可用。物化后按执行目录对应的 Documents workspace 选择 Pi 推理
+worker；配置刷新未完成时查询等待或取消，已退出 worker 的迟到绑定不能发布，新订阅建立后重读未观察期间可能变化的设置。
+
 **输出与验证。** 来源结果沿已有 not-requested / ready / empty / unavailable / failed / stale 等状态，超时/取消分别表达；
 输出以原文、引用和影响下一步的缺口为主。OutputStore 是经鉴权的会话局部临时存储，保存实际打包材料和未展示候选引用；
 不暗示所有未读文件正文都已在其中。只有能证明同一 revision 的相关 span 仍在主模型实际输入中时才可用指针省略正文，未知就返回原文。
@@ -758,6 +763,10 @@ index.lifecycle 与查询结果状态独立，部分索引可查，查询空结�
 确认连接与同名字符串关联候选分开，候选必须真是同名（D-106/D-109）。冷目录覆盖带 `importQuery` 的语言
 （TS/TSX/JS/JSX，D-115）；纯 Python 仓库对目录来说是 `empty`，不是坏了。轮廓收录模块级/类级值绑定（D-113）；
 边查询被阻塞时照写 defines 并记 `linksIncomplete`（D-111）。
+
+关联候选的 value/line/callee 与 file 的修订、generation 一起保存为紧凑抽取记录；未确认者不建 link 节点、不进文本索引。
+同名确认和撤销只更新当前代际的关系，不再在扫描末尾重读、重解析并重发整份符号。显式重扫仍读取枚举文件的真实修订，
+相同 revision 与 extractor 才跳过解析；没有收到 Documents 事件不能证明外部磁盘未变（D-236）。
 
 **读者。** `explore.search` 把图当第二路路径候选（定义 / 连线另一端 / 反向 import，D-136，取代 D-108 的「不扩候选池」），
 并继续用 `details.relations` 注解已经选中的摘录（D-112）。`related` 是真实注册的工具：对一个路径或符号名回答它定义了什么、

@@ -16,13 +16,17 @@ import type {
  * of waiting for every affected file to be edited (D-143).
  *
  * History: 1 = D-105/D-106 first link extraction; 2 = literal-call query pins
- * the string to the first argument and matches awaited generic calls.
+ * the string to the first argument and matches awaited generic calls; 3 =
+ * preserve gated association candidates as compact file metadata so the gate
+ * can be resolved without re-reading the source.
  */
-export const CATALOG_EXTRACTOR_VERSION = 2;
+export const CATALOG_EXTRACTOR_VERSION = 3;
 
 export interface CollectedSymbols {
   symbols: SymbolGraphSymbolInput[];
   links?: SymbolGraphLinkInput[];
+  /** Association call facts retained compactly for connect-gate re-evaluation. */
+  associationCandidates?: SymbolGraphLinkInput[];
   /** Link extraction was blocked, so `links` is a floor rather than the set. */
   linksIncomplete?: boolean;
   /** Disk revision the ranges were computed from. */
@@ -31,7 +35,7 @@ export interface CollectedSymbols {
 
 export interface SymbolCollectorDeps {
   store: Pick<KnowledgeStore, "touchFile" | "replaceFileSymbols" | "removeFileSymbols">;
-  getDocumentSymbols(path: string, language: string): Promise<CollectedSymbols | null>;
+  getDocumentSymbols(path: string, language: string, signal?: AbortSignal): Promise<CollectedSymbols | null>;
   getLanguage(path: string): string | null;
   onError?: (error: unknown) => void;
 }
@@ -39,6 +43,7 @@ export interface SymbolCollectorDeps {
 export interface SymbolDocumentChange {
   path: string;
   kind: "created" | "modified" | "deleted";
+  signal?: AbortSignal;
 }
 
 /**
@@ -62,7 +67,8 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
       await deps.store.touchFile(change.path, language);
       return;
     }
-    const collected = await deps.getDocumentSymbols(change.path, language);
+    const collected = await deps.getDocumentSymbols(change.path, language, change.signal);
+    if (change.signal?.aborted) return;
     if (collected === null) await deps.store.touchFile(change.path, language);
     else await deps.store.replaceFileSymbols(
       change.path,
@@ -72,6 +78,7 @@ export function createSymbolCollector(deps: SymbolCollectorDeps) {
       collected.links,
       {
         ...(collected.linksIncomplete ? { linksIncomplete: true } : {}),
+        ...(collected.associationCandidates ? { associationCandidates: collected.associationCandidates } : {}),
         extractor: CATALOG_EXTRACTOR_VERSION,
       },
     );

@@ -4995,3 +4995,51 @@ ModelRuntime 纵切继续通过。
 | D-232 | implementation（agent-mutation WAL、条件补偿与恢复 UI） | — | 设计 5.4/6.1；plan/status 3.2；Documents/recovery |
 | D-233 | implementation（终端 per-session 投影、持久幂等与退出事实） | — | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 |
 | D-234 | implementation（Run-bound receipt、artifact 引用与字节分页） | — | 设计 5.1/9.3.5；plan/status 3.6；architecture 4.4 |
+
+### D-235 · 2026-09-12 · 3.16（语义生产装配与原生写入通知）
+
+类型：问题与解法
+
+背景：3.16 的远程 adapter、索引和公开工具各有测试，但 Application Host 的 workspace Settings、binding、watch、查询视图和 rerank 装配仍散落在 `index.ts`。原生 Pi 工具的 journal after 只使旧 surface snapshot 失效，没有通知语义索引；物化 child 在 settle 前可能继续检索旧向量。
+
+决定：
+
+1. `createWorkspaceSemanticRuntime` 承担现有 workspace 装配，Application Host 直接使用它的 `semanticRecall`、`harnessSettings`、`rerankExploreViews`、配置事件和关闭方法。索引、对象、凭据仍沿原权威；测试与生产不再各自拼装这些 callbacks。
+2. 成功的原生工具 journal after 在确认给 worker 前，把该 execution workspace 内的路径变化通知同一语义运行时。已打开索引立即遮蔽旧向量，重读 Documents、过滤和嵌入在后台完成，不等待模型才确认编辑。普通 Documents 写入也沿同一路径。未知外部 shell 写入不因此冒充已有精确观察。
+3. virtual child 使用查询 pin 的 WorkingBranch 正文；materialized child 使用自身 Documents workspace。虚拟 pin 不可用时明确失败，不换成父 live 或空 scratch。远程配置有效时文档与查询共享 space，失败不改绑本地模型。
+4. 新查询等待已入队的配置刷新；workspace worker 退出使旧 binding 不可用，迟到旧响应不得发布。查询取消包括 Settings/describe 等待；关闭后迟到注册的 watch 要释放，不能复活状态。
+
+原因：这次缺的是实际消费者连接及其生命周期。提取同一生产装配单元后，公开工具测试可以覆盖 Settings→远程调用→索引→检索，而原生写入通知修复了单独 adapter 测试无法发现的陈旧结果。
+
+验证与边界：证据在 status 3.16。公开工具与实际 Host 装配模块、Documents、Pi 后台 inference、HTTP/向量存储的本地调用链，不等于完整桌面启动或真实外部 provider 的速度/质量。既有有效配置即启用，不新增实验开关或数值配额。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-194 / D-195 | superseded in part（workspace 装配生命周期与原生写入通知由 D-235 补齐；配置和空间权威保留） | D-235 | 设计 6.1；plan/status 3.16；semantic workspace runtime |
+| D-235 | implementation（共用生产语义装配与 native journal after 通知） | — | 设计 6.1；plan/status 3.16；architecture 4.4 |
+
+### D-236 · 2026-09-12 · 3.1 / 3.11 / 3.12（符号目录复用关联抽取事实）
+
+类型：问题与解法
+
+背景：D-109 把未确认的关联候选留到冷扫描末尾再访，但保存的只有路径。超过 32 条解析缓存后，再访会重新读文件、解析和替换整份符号图；D-140/D-141 的历史全仓观察中，一次扫描产生约 4,100 次解析，明显超过约 2,360 个输入文件。
+
+决定：
+
+1. 第一次抽取时，把关联候选的 value/line/callee 紧凑保存在当前 file 行，和 document revision、generation、extractor 一起发布。候选不建 link 节点，不进全文/关键词索引，也不保留源码或 AST。
+2. 确认连接的同名闸门继续保留。补关系时在 store 写队列里使用当前文件代际和当前 connects 集合；只为已确认候选建立 associates 节点/边。连接被观察到移除时撤销关联，重新出现时可从保存的候选恢复，不重发旧符号。
+3. extractor 升到 3，旧目录在下次扫描时重新采集。并发扫描只合并在飞工作；再次显式扫描仍枚举并读取文件修订，不能用“没收到 Documents 事件”推断磁盘没变。外部写入的可见范围仍沿现有目录观察契约。
+4. 复用现有目录观察脚本，记录输入文件、结构采集请求、节点/边数量和墙钟。结构 API 请求数与实际 parser 缓存命中分别解释；历史不同语料不能充当受控速度对照。符号目录的改进不代表向量推理或完整语义索引的性能，不扩大解析缓存，也不新增索引开关或工作量硬限制。
+
+原因：昂贵的步骤是重复获取已经抽取过的事实。同名确认只需要字面量和来源身份；保存这些事实比重读源码或为所有候选建图节点更直接。
+
+验证与边界：具体反例和同口径观察记在 status 3.1/3.12。references/calls、外部文件系统的完整事件日志和真实 embedding 性能均不在本次实现范围。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-109 | superseded in part（同名确认规则保留；末尾重读/重解析改为代际绑定的紧凑候选对账） | D-236 | 设计 6.2；plan/status 3.1/3.11/3.12 |
+| D-236 | implementation（符号目录复用关联抽取事实） | — | 设计 6.2；plan/status 3.1/3.11/3.12；structure DOCUMENTATION |

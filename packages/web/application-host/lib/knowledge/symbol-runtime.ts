@@ -121,7 +121,10 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const pending = new Set<Promise<void>>();
   const binder = createLanguageViewBinder({ documents: options.documents, supervisor: options.supervisor });
   const catalogControllers = new Map<string, AbortController>();
-  const suppressedCandidates = new Map<string, Set<string>>();
+  interface CatalogScanState {
+    running: Promise<void> | null;
+  }
+  const catalogScans = new Map<string, CatalogScanState>();
   let disposed = false;
 
   /**
@@ -130,22 +133,35 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
    * returned with that revision, or null so the last known graph survives
    * (D-087).
    */
-  const loadSymbolsFromLsp = async (workspaceId: string, path: string, languageId: string): Promise<CollectedSymbols | null> => {
+  const loadSymbolsFromLsp = async (
+    workspaceId: string,
+    path: string,
+    languageId: string,
+    signal?: AbortSignal,
+  ): Promise<CollectedSymbols | null> => {
+    if (signal?.aborted) return null;
     const bound = await binder.bind({ workspaceId, resourceId: path, languageId, text: "disk" });
     if (bound.status !== "bound") return null;
+    if (signal?.aborted) return null;
     const response = await options.supervisor.documentSymbols({
       view: AGENT_LANGUAGE_VIEW,
       resource: { workspaceId, resourceId: path },
       languageId,
       expectedRevision: bound.revision,
     });
+    if (signal?.aborted) return null;
     const result = recordOf(response);
     if (result.status !== "ready") return null;
     return { symbols: flattenSymbols(result.value), documentRevision: bound.revision };
   };
 
-  const loadGraphFacts = async (workspaceId: string, path: string, languageId: string): Promise<CollectedSymbols | null> => {
-    if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId);
+  const loadGraphFacts = async (
+    workspaceId: string,
+    path: string,
+    languageId: string,
+    signal?: AbortSignal,
+  ): Promise<CollectedSymbols | null> => {
+    if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
     let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
     try {
       snapshot = await options.documents.read({ workspaceId, resourceId: path });
@@ -153,18 +169,21 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       return null;
     }
     if (snapshot.status !== "ready") return null;
+    if (signal?.aborted) return null;
     const request = {
       path,
       languageId,
       text: snapshot.content,
       revision: snapshot.revision,
       workspaceId,
+      ...(signal ? { signal } : {}),
     };
     const [outline, importsResult, callsResult] = await Promise.all([
       options.structureSource.outline(request),
       options.structureSource.imports(request),
       options.structureSource.literalCalls(request),
     ]);
+    if (signal?.aborted) return null;
     if (outline.status === "cancelled" || importsResult.status === "cancelled" || callsResult.status === "cancelled") {
       return null;
     }
@@ -175,12 +194,14 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
      * must degrade to defines-only, not freeze the file forever (D-111).
      */
     if (outline.status !== "ready" && outline.status !== "empty") {
-      if (outline.status === "unsupported") return loadSymbolsFromLsp(workspaceId, path, languageId);
+      if (outline.status === "unsupported") return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
       return null;
     }
     const answered = (status: string): boolean => status === "ready" || status === "empty" || status === "unsupported";
     const linksIncomplete = !answered(importsResult.status) || !answered(callsResult.status);
+    const lineLengths = snapshot.content.split("\n").map((line) => line.replace(/\r$/u, "").length);
     const links: SymbolGraphLinkInput[] = [];
+    const associationCandidates: SymbolGraphLinkInput[] = [];
     if (importsResult.status === "ready") {
       for (const item of importsResult.imports) {
         if (item.source.trim() && Number.isSafeInteger(item.line) && item.line >= 1) {
@@ -190,7 +211,10 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     }
     if (callsResult.status === "ready") {
       const usable = callsResult.calls.filter((call) => (
-        classifyLiteralCall(call) !== null && Number.isSafeInteger(call.line) && call.line >= 1
+        call.literal.trim().length > 0
+        && classifyLiteralCall(call) !== null
+        && Number.isSafeInteger(call.line)
+        && call.line >= 1
       ));
       const candidates = usable.filter((call) => classifyLiteralCall(call) === "associates");
       /**
@@ -210,28 +234,19 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         .filter((literal) => !localConnections.has(literal)))];
       const store = unresolved.length > 0 ? await options.getStore(workspaceId) : null;
       const knownLiterals = store ? await store.connectionLiterals(unresolved) : new Set<string>();
-      let suppressed = false;
       for (const call of usable) {
         const classified = classifyLiteralCall(call)!;
-        if (classified === "associates" && !localConnections.has(call.literal) && !knownLiterals.has(call.literal)) {
-          suppressed = true;
-          continue;
+        if (classified === "associates") {
+          associationCandidates.push({ kind: classified, value: call.literal, line: call.line, callee: call.name });
+          if (!localConnections.has(call.literal) && !knownLiterals.has(call.literal)) continue;
         }
         links.push({ kind: classified, value: call.literal, line: call.line, callee: call.name });
       }
-      // The gate only sees connections collected so far, so a file visited
-      // before the file that registers its literal loses the candidate. Record
-      // it and let the cold scan make one more pass (D-109).
-      if (suppressed) {
-        const paths = suppressedCandidates.get(workspaceId) ?? new Set<string>();
-        paths.add(path);
-        suppressedCandidates.set(workspaceId, paths);
-      }
     }
-    const lineLengths = snapshot.content.split("\n").map((line) => line.replace(/\r$/u, "").length);
     return {
       symbols: flattenOutlineSymbols(outline.symbols, lineLengths),
       links,
+      ...(associationCandidates.length > 0 ? { associationCandidates } : {}),
       ...(linksIncomplete ? { linksIncomplete: true } : {}),
       documentRevision: snapshot.revision,
     };
@@ -243,7 +258,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     const loading = options.getStore(workspaceId).then((store) => store ? createSymbolCollector({
       store,
       getLanguage: languageIdForPath,
-      getDocumentSymbols: (path, language) => loadGraphFacts(workspaceId, path, language),
+      getDocumentSymbols: (path, language, signal) => loadGraphFacts(workspaceId, path, language, signal),
       ...(options.onError ? { onError: options.onError } : {}),
     }) : null);
     collectors.set(workspaceId, loading);
@@ -266,77 +281,87 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   const observeDocumentMutation = (event: DocumentMutationObservation): void => {
     if (disposed) return;
     track(collectorFor(event.workspaceId).then((collector) => {
-      collector?.observe({ path: event.resourceId, kind: event.kind });
+      if (!collector) return;
+      collector.observe({ path: event.resourceId, kind: event.kind });
+      return collector.drain().then(async () => {
+        const store = await options.getStore(event.workspaceId);
+        if (store) await store.resolveAssociationCandidates();
+      });
     }));
   };
 
-  const scanWorkspace = async (workspaceId: string, optionsForScan?: { signal?: AbortSignal }): Promise<void> => {
-    if (disposed || !options.searchFilesystemFiles || !options.documents.inspectWorkspace) return;
-    catalogControllers.get(workspaceId)?.abort();
+  const scanWorkspace = (workspaceId: string, optionsForScan?: { signal?: AbortSignal }): Promise<void> => {
+    if (disposed || !options.searchFilesystemFiles || !options.documents.inspectWorkspace) return Promise.resolve();
+    if (optionsForScan?.signal?.aborted) return Promise.resolve();
+    const state = catalogScans.get(workspaceId) ?? {
+      running: null,
+    };
+    catalogScans.set(workspaceId, state);
+    if (state.running) return state.running;
+
     const controller = new AbortController();
     catalogControllers.set(workspaceId, controller);
     const signal = optionsForScan?.signal
       ? AbortSignal.any([controller.signal, optionsForScan.signal])
       : controller.signal;
-    try {
-      if (signal.aborted) return;
-      let root: string;
+    const task = Promise.resolve().then(async () => {
       try {
-        root = (await options.documents.inspectWorkspace!(workspaceId)).root;
-      } catch {
-        return;
-      }
-      const files = await options.searchFilesystemFiles(root, {
-        query: "",
-        respectGitignore: true,
-        signal,
-      });
-      if (signal.aborted) return;
-      const store = await options.getStore(workspaceId);
-      const collector = await collectorFor(workspaceId);
-      if (!store || !collector) return;
-      const catalogFiles = files.filter((file) => CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
-      for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
-        if (disposed || signal.aborted) return;
-        const batch = catalogFiles.slice(offset, offset + CATALOG_SCAN_BATCH);
-        for (const file of batch) {
+        if (signal.aborted) return;
+        let root: string;
+        try {
+          root = (await options.documents.inspectWorkspace!(workspaceId)).root;
+        } catch {
+          return;
+        }
+        const files = await options.searchFilesystemFiles!(root, {
+          query: "",
+          respectGitignore: true,
+          signal,
+        });
+        if (signal.aborted) return;
+        const store = await options.getStore(workspaceId);
+        const collector = await collectorFor(workspaceId);
+        if (!store || !collector) return;
+        const catalogFiles = files.filter((file) => CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
+        for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
           if (disposed || signal.aborted) return;
-          let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
-          try {
-            snapshot = await options.documents.read({ workspaceId, resourceId: file.relativePath });
-          } catch {
-            continue;
+          const batch = catalogFiles.slice(offset, offset + CATALOG_SCAN_BATCH);
+          for (const file of batch) {
+            if (disposed || signal.aborted) return;
+            let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
+            try {
+              snapshot = await options.documents.read({ workspaceId, resourceId: file.relativePath });
+            } catch {
+              continue;
+            }
+            if (snapshot.status !== "ready") {
+              continue;
+            }
+            const existing = await store.getFileRelations(file.relativePath);
+            // Current only if both the source and the extractor that read it are
+            // unchanged; rows from an older extractor are recomputed (D-143).
+            if (existing?.documentRevision === snapshot.revision && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
+            collector.observe({ path: file.relativePath, kind: "modified", signal });
           }
-          if (snapshot.status !== "ready") continue;
-          const existing = await store.getFileRelations(file.relativePath);
-          // Current only if both the source and the extractor that read it are
-          // unchanged; rows from an older extractor are recomputed (D-143).
-          if (existing?.documentRevision === snapshot.revision && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
-          collector.observe({ path: file.relativePath, kind: "modified" });
+          await collector.drain();
+          await yieldToEventLoop();
         }
-        await collector.drain();
-        await yieldToEventLoop();
-      }
-      // One more pass over the files whose association candidates were gated
-      // before their connection literal existed. Parses are content-hashed, so
-      // this re-collect is cheap, and it does not recurse (D-109).
-      const revisit = [...(suppressedCandidates.get(workspaceId) ?? [])];
-      suppressedCandidates.delete(workspaceId);
-      for (let offset = 0; offset < revisit.length; offset += CATALOG_SCAN_BATCH) {
         if (disposed || signal.aborted) return;
-        for (const revisitPath of revisit.slice(offset, offset + CATALOG_SCAN_BATCH)) {
-          collector.observe({ path: revisitPath, kind: "modified" });
-        }
-        await collector.drain();
-        await yieldToEventLoop();
+        // Gated calls were already extracted and persisted as compact metadata
+        // on the current file row by replaceFileSymbols. Resolving them only
+        // updates matching relation rows, so no source read or symbol
+        // republish is needed here (D-109).
+        await store.resolveAssociationCandidates();
+      } catch (error) {
+        if (signal.aborted || disposed) return;
+        try { options.onError?.(error); } catch { /* catalog failures stay observational */ }
+      } finally {
+        if (catalogControllers.get(workspaceId) === controller) catalogControllers.delete(workspaceId);
+        if (state.running === task) state.running = null;
       }
-      suppressedCandidates.delete(workspaceId);
-    } catch (error) {
-      if (signal.aborted || disposed) return;
-      try { options.onError?.(error); } catch { /* catalog failures stay observational */ }
-    } finally {
-      if (catalogControllers.get(workspaceId) === controller) catalogControllers.delete(workspaceId);
-    }
+    });
+    state.running = task;
+    return task;
   };
 
   const drain = async (): Promise<void> => {
@@ -350,9 +375,12 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     for (const controller of catalogControllers.values()) controller.abort();
     catalogControllers.clear();
     await drain();
+    await Promise.allSettled([...catalogScans.values()]
+      .flatMap((state) => state.running ? [state.running] : []));
     const loaded = await Promise.allSettled(collectors.values());
     await Promise.allSettled(loaded.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value.dispose()] : []));
     collectors.clear();
+    catalogScans.clear();
   };
 
   return { observeDocumentMutation, scanWorkspace, drain, dispose };

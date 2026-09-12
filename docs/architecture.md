@@ -300,6 +300,13 @@ MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and 
 mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and
 is skipped when `models.explore` already selected candidates. See harness sections 6.1, 7.5, and 8.5.
 
+`WorkspaceSemanticRuntime` is the production assembly for workspace settings, inference transport,
+query views, configuration subscriptions, and shutdown (D-235). Materialized sessions use their
+execution Documents workspace; virtual sessions require a pinned WorkingState view. Documents
+mutations and successful native Pi journal after events invalidate the same index before the tool
+response; embedding proceeds asynchronously. Configuration refreshes precede subsequent queries,
+and responses from retired workspace workers cannot replace current bindings.
+
 Session memory blocks remain in the Host store. The renderer reads and edits them only through
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block
 content. The same UI-auth boundary protects the thread metadata route.

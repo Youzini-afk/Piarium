@@ -56,6 +56,11 @@ string as a candidate: the classifier in `connections.ts` splits allowlisted
 callees from the rest, and the knowledge runtime then drops any non-connection
 literal that is not already a confirmed connection value somewhere (D-109).
 Without that second gate every `it("…")` and `join("…")` becomes a graph node.
+The calls are retained as compact metadata on the current file row, bound to
+its generation and revision. Once the scan has committed all extracted
+`connects`, the store can create or remove matching relation rows from that
+metadata alone; it does not re-read or re-parse the source, and a newer file
+generation replaces the metadata automatically.
 
 ## Slice
 
