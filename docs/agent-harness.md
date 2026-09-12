@@ -828,6 +828,9 @@ worker；配置刷新未完成时查询等待或取消，已退出 worker 的迟
 references + 一次 definition + 一条 callHierarchy 链——lsp 导航也把已拿到的结果写回。两处都只持久化磁盘绑定的答案：
 锚点文件按绑定 revision 固定，跨文件站点是语言服务器自己的读盘结果、一律 `pinned: false`；目标文件 revision 移动后
 行报 `staleTarget`，目标被删除时指向它的行随文件删除一起移除，站点文件重新采集时旧 relation 行随 generation 消亡。
+图库由 owning workspace 持有，Documents/LSP/路径由 execution workspace 持有（D-254）。`explore` 只把 owning 图当候选并在
+固定 execution 正文中重新定位；`related` 会直接陈述图中位置，所以 owning≠execution 或本轮含未保存草稿时明确 unavailable。
+公开 LSP 的文本、raw value 与图写后行都先按 actor scope 过滤；权威空结果按 anchor + relation kind 清掉旧行。
 绝不对每个 symbol 无界请求 references 来伪装完成；PageRank 仍未接。仓库级词法索引仍等观察到「找不到入口」再定。
 
 图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
@@ -1561,18 +1564,15 @@ Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非
 非 Git worktree 准备、baseline 快照、untracked/merge 复制、对象库→目标材料化与 recovery `replaceFile` 都走同一原语，
 材料化返回 `cow.{reflink,copy}` 计数）。
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
-（已实现：`working-state/state-trie.ts`，D-245——path→state 映射按路径段存为持久哈希 trie，节点带可选 `self` 状态所以
-文件与其祖先目录键可以共存；catalog schema 4 把 baseState/deltas/baseStates/pathStates 序列化为 `{trie: root}` 引用
-加共享 `stateNodes` 池，相同子树跨分支/结果/草稿基线只写一次，池每次 persist 由活根重建即自动回收孤儿节点；
-`treeIdentityFromStates` 即 trie 根哈希；文档更新改走结构共享 `nextDocument()` 而非整树 deep clone，WeakMap 按 map
-引用缓存 trie 使未变映射的序列化 O(1)。）
+（当前实现：`working-state/state-trie.ts`，D-245/D-251/D-254——catalog schema 4 把平面内存映射序列化为
+`{trie: root}` 与共享 `stateNodes`，tree identity 使用根哈希；加载核验内容寻址 DAG，持久化按 root 收集全部可达节点。
+当前 TS 的 Branch/Result 读写权威仍是平表，catalog 仍整体写入，所以这里只宣称持久去重与 identity。生产 root 读写、增量
+节点事务和取消 whole-pool rewrite 由阶段 R1 一次接管，不再在 TS 中建设第二套过渡内核。旧 schema/平表持久形状直接拒绝。）
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
 基线采集属于创建/更新分支的工作，不进入普通消息、每轮恢复或每次查询的全仓扫描。Git 的过滤器、LFS 与换行转换由适配层处理，
-记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。（已实现：`working-state/git-adaptation.ts`，D-243——
-`check-attr` 探测路径属性；`filter=lfs` 的指针 blob 解析到本地 `lfs/objects` 对象、缺失或校验失败时保留指针字节即 checkout
-缺对象时的真实工作区视图；其他 filter、`text`/`eol`、`working-tree-encoding` 经 `git cat-file --filters --path` 取得
-smudge 字节，过滤器不可运行时回退原始 blob；导入与基线采集按 index mode 恢复执行位——Windows 文件系统表达不了 exec，
-状态保存 Git 真值 `0o755`，同平台状态比较只比较可观察的写权限维。）
+记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。（D-254：不再从 commit blob 重放 filter/LFS。
+dispatch 捕获已物化给工具的实际 base 字节；settle 先固定 snapshot，再从其真实文件字节发布并在提交 catalog 前复核身份，
+因此不会执行自定义 filter 或访问 LFS 网络。Git index mode 只补 Windows 无法观察的 100644/100755，并进入捕获指纹。）
 
 **受控工具与真实执行。** 无目录分支让同名 read/grep/find/ls/edit/write/apply_patch 通过 Host 分支视图工作，保持 schema 与真实
 路径授权；不在 live 父目录上搜完只覆盖 child delta。Pi 原生工具、LSP、第三方扩展或 shell 需要真实路径时先物化，所有参与该 Run
@@ -1789,7 +1789,8 @@ ThreadRun {
   后代。每个节点先停活 Run（不铸 partial result），再删除该线程拥有的全部 Pi 会话（worker、转录文件、metadata 经
   `piRuntimeBroker.deleteSession`），随后释放工作分支上的全部结果修订、分支头与草稿基线并回收无主对象，然后删除受管目录
   （跳过结果快照 diff，仍过 ownership 断言与 user/writer guard；keep_worktree 对删除不生效，否则目录成无记录占用），
-  最后原子移除 Thread+Run 行并解绑 session binding。目录移除失败保留记录供重试，不删除仍由线程引用的对象。
+  最后原子移除 Thread+Run 行并解绑 session binding。删除 intent 与下一 phase 先持久化到 Thread catalog；Host 重启可续跑。
+  任一后代未完成时父节点不得移除，knowledge/evidence 引用清理属于提交前必需阶段，返回值只列真实删除项（D-254）。
 
 #### 9.3.5 活性与失败分类
 

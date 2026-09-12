@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "../knowledge/store.js";
 import { executeRelated } from "./related-tool.js";
 import { pathInRoots } from "./explore-graph.js";
+import { createRelatedQueryService } from "./related-service.js";
+import type { HarnessServiceContext } from "./router.js";
 
 const TEST_DIR = join(tmpdir(), "piarium-related-scope");
 const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 5 };
@@ -28,6 +30,28 @@ describe("related scope and authoritative reparse (D-240 rework)", () => {
     if (existsSync(TEST_DIR)) rmSync(TEST_DIR, { recursive: true, force: true });
   });
 
+  it("does not present owning-workspace graph positions as facts in an isolated execution view", async () => {
+    const graphRecall = async () => ({ workspaceId: "owning-ws", store, directFactsCompatible: false });
+    const service = createRelatedQueryService({ graphRecall, relationCollector: null } as never);
+    const context = {
+      actor: {
+        authorityInstanceId: "host",
+        sessionId: "child-session",
+        workerId: "worker",
+        workerGeneration: 1,
+        workspaceId: "execution-ws",
+        grantedCapabilities: ["read.search"],
+      },
+      sessionId: "child-session",
+      workspaceId: "execution-ws",
+      authorizedPaths: [],
+      signal: new AbortController().signal,
+    } satisfies HarnessServiceContext;
+    const result = await service.handle({ anchor: "shared" }, context);
+    expect(result.status).toBe("unavailable");
+    expect(result.text).toContain("not pinned to this isolated execution view");
+  });
+
   it("applies the actor workspace scope: out-of-scope same-name symbols are absent from definitions, references, and final body", async () => {
     // Two files define the same symbol name; only src/a is in scope.
     await store.replaceFileSymbols("src/a/target.ts", "typescript", [
@@ -39,7 +63,7 @@ describe("related scope and authoritative reparse (D-240 rework)", () => {
 
     // Persist a reference site in src/b (out of scope) and src/a (in scope).
     await store.recordResolvedRelations("src/a/caller.ts", "typescript", [
-      { kind: "references", value: "shared", line: 3, anchorPath: "src/a/target.ts", anchorLine: 1, resolvedBy: "lsp.references", siteRevision: null },
+      { kind: "references", value: "shared", line: 3, targetPath: "src/b/secret.ts", anchorPath: "src/a/target.ts", anchorLine: 1, resolvedBy: "lsp.references", siteRevision: null },
     ]);
     await store.recordResolvedRelations("src/b/caller.ts", "typescript", [
       { kind: "references", value: "shared", line: 5, anchorPath: "src/b/out.ts", anchorLine: 1, resolvedBy: "lsp.references", siteRevision: null },
@@ -59,6 +83,7 @@ describe("related scope and authoritative reparse (D-240 rework)", () => {
     expect(scoped.references.items).toEqual([
       expect.objectContaining({ path: "src/a/caller.ts" }),
     ]);
+    expect(scoped.references.items[0]?.targetPath).toBeUndefined();
     expect(scoped.references.items.some((r) => r.path === "src/b/caller.ts")).toBe(false);
   });
 

@@ -293,12 +293,14 @@ describe("thread worktree runtime", () => {
 
       const snapshotted = await runtime.snapshot(prepared.worktree!);
       expect(snapshotted.resultCommit).toBeDefined();
+      expect(await runtime.verifyFixedResult(snapshotted)).toBe(true);
 
       // Post-snapshot live modifications: dirty changes, new files, binary alterations
       writeFileSync(join(childPath, "tracked.txt"), "DIRTY LIVE TRACKED\n");
       writeFileSync(join(childPath, "new.txt"), "DIRTY LIVE NEW\n");
       writeFileSync(join(childPath, "leak.txt"), "SHOULD NEVER LEAK\n");
       fs.writeFileSync(join(childPath, "binary.bin"), Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+      expect(await runtime.verifyFixedResult(snapshotted)).toBe(false);
 
       const inspected = await runtime.inspect(snapshotted);
       expect(inspected.changedFiles.toSorted()).toEqual(["binary.bin", "new.txt", "tracked.txt"]);
@@ -340,6 +342,7 @@ describe("thread worktree runtime", () => {
 
       const snapshotted = await runtime.snapshot(prepared.worktree!);
       expect(snapshotted.resultCommit).toBeDefined();
+      expect(await runtime.verifyFixedResult(snapshotted)).toBe(true);
 
       // Measure disk usage
       const bytes = await runtime.measureDiskUsage(snapshotted);
@@ -595,10 +598,12 @@ describe("thread worktree runtime", () => {
       // Snapshot to freeze result
       const snapshotted = await runtime.snapshot(prepared.worktree!);
       expect(snapshotted.resultCommit).toBeDefined();
+      expect(await runtime.verifyFixedResult(snapshotted)).toBe(true);
 
       // Child makes a later live modification (not snapshotted)
       writeFileSync(join(prepared.cwd, "file.txt"), "later-live\n");
       writeFileSync(join(prepared.cwd, "later-file.txt"), "later live file\n");
+      expect(await runtime.verifyFixedResult(snapshotted)).toBe(true);
 
       // Inspect should see "published", not "later-live"
       const inspected = await runtime.inspect(snapshotted);

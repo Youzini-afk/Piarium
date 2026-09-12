@@ -46,31 +46,25 @@ import {
 type ExploreParams = HarnessServiceMap["explore.search"]["params"];
 
 export function bindExploreGraphRecall(
-  getStore: NonNullable<HarnessServiceHost["graphRecall"]>,
-  workspaceId: string,
+  store: import("../knowledge/store.js").KnowledgeStore,
   roots?: readonly string[],
 ): ExploreGraphRecall {
-  const requireStore = (): NonNullable<ReturnType<typeof getStore>> => {
-    const store = getStore(workspaceId);
-    if (!store) throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
-    return store;
-  };
   const toSite = (record: import("../knowledge/store.js").SymbolGraphRelationRecord) => ({
     path: record.path,
     line: record.line,
     ...(record.caller !== undefined ? { caller: record.caller } : {}),
-    ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+    ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
     ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
     pinned: record.pinned,
     ...(record.staleTarget ? { staleTarget: true } : {}),
     resolvedBy: record.resolvedBy,
   });
   return {
-    catalogStats: async () => requireStore().catalogStats(),
-    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
-    findLinks: (value) => requireStore().findLinks(value),
+    catalogStats: async () => store.catalogStats(),
+    searchDefinitions: (query, k) => store.searchSymbols(query, k, roots),
+    findLinks: (value) => store.findLinks(value),
     fileRelations: async (path) => {
-      const relations = await requireStore().getFileRelations(path);
+      const relations = await store.getFileRelations(path);
       if (!relations) return null;
       return {
         connections: relations.connections.map(({ callee, literal }) => ({ callee, literal })),
@@ -79,7 +73,7 @@ export function bindExploreGraphRecall(
           path: record.path,
           line: record.line,
           ...(record.caller !== undefined ? { caller: record.caller } : {}),
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
           ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
           pinned: record.pinned,
           ...(record.staleTarget ? { staleTarget: true } : {}),
@@ -90,7 +84,7 @@ export function bindExploreGraphRecall(
           line: record.line,
           ...(record.caller !== undefined ? { caller: record.caller } : {}),
           callee: record.targetName ?? record.value,
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
           ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
           pinned: record.pinned,
           ...(record.staleTarget ? { staleTarget: true } : {}),
@@ -98,12 +92,12 @@ export function bindExploreGraphRecall(
         })),
       };
     },
-    findImporters: (path) => requireStore().findImporters(path),
+    findImporters: (path) => store.findImporters(path),
     // Wire resolved reference/call edges into the public explore.query chain,
     // not only the low-level explore() unit tests (D-240 rework).
-    findReferences: async (name) => (await requireStore().findReferences(name, roots)).map(toSite),
-    findCallers: async (name) => (await requireStore().findCallers(name, roots)).map(toSite),
-    findCalls: async (caller) => (await requireStore().findCalls(caller, roots)).map(toSite),
+    findReferences: async (name) => (await store.findReferences(name, roots)).map(toSite),
+    findCallers: async (name) => (await store.findCallers(name, roots)).map(toSite),
+    findCalls: async (caller) => (await store.findCalls(caller, roots)).map(toSite),
   };
 }
 
@@ -114,6 +108,7 @@ export function createExploreDeps(
   signal: AbortSignal = ctx.signal,
   roots?: readonly string[],
   snapshot: WorkingBranchQuerySnapshot | null = null,
+  graphStore: import("../knowledge/store.js").KnowledgeStore | null = null,
 ): ExploreDeps {
   const workspaceId = ctx.actor.workspaceId;
   const readFile = host.readExploreFile;
@@ -187,7 +182,7 @@ export function createExploreDeps(
         }),
       },
     } : {}),
-    ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId, roots) } : {}),
+    ...(graphStore ? { graph: bindExploreGraphRecall(graphStore, roots) } : {}),
     ...(host.semanticRecall ? {
       semantic: {
         search: async (question: string, limit?: number, searchSignal?: AbortSignal) => {
@@ -373,6 +368,18 @@ export function createExploreQueryStartService(
             rerankConfigured = false;
           }
         }
+        const [snapshot, graph] = await Promise.all([
+          host.pinWorkingBranchQuery
+            ? host.pinWorkingBranchQuery(ctx.sessionId, {
+              ...(effectivePaths ? { roots: effectivePaths } : {}),
+              signal: queryController.signal,
+              deadlineAt,
+            })
+            : Promise.resolve(null),
+          host.graphRecall && ctx.actor.workspaceId
+            ? host.graphRecall(ctx.sessionId, ctx.actor.workspaceId).catch(() => null)
+            : Promise.resolve(null),
+        ]);
         stored = host.exploreQueryStore.start({
           actor: actorFromHarness(ctx.actor),
           inputContext,
@@ -388,13 +395,8 @@ export function createExploreQueryStartService(
             inputContext,
             queryController.signal,
             effectivePaths,
-            host.pinWorkingBranchQuery
-              ? await host.pinWorkingBranchQuery(ctx.sessionId, {
-                ...(effectivePaths ? { roots: effectivePaths } : {}),
-                signal: queryController.signal,
-                deadlineAt,
-              })
-              : null,
+            snapshot,
+            graph?.store ?? null,
           ),
           deadlineAt,
           reserveForJudgeMs: params.reserveForJudge || rerankConfigured ? DEFAULT_JUDGE_RESERVE_MS : 0,

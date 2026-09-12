@@ -74,6 +74,9 @@ export const gitBaselineFingerprint = (inventory: GitBaselineInventory): string 
   unborn: inventory.unborn,
   paths: [...inventory.paths].sort(),
   gitlinks: [...inventory.gitlinks].sort(),
+  indexModes: Object.fromEntries(
+    Object.entries(inventory.indexModes ?? {}).sort(([left], [right]) => left.localeCompare(right)),
+  ),
   contentIdentities: Object.fromEntries(
     Object.entries(inventory.contentIdentities ?? {}).sort(([left], [right]) => left.localeCompare(right)),
   ),

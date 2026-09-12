@@ -32,11 +32,19 @@ export function createRelatedQueryService(
         return unavailable(params.anchor.trim(), "related unavailable: the symbol graph is not wired.");
       }
       ctx.signal.throwIfAborted();
-      const store = host.graphRecall(workspaceId);
-      if (!store) {
+      const graph = await host.graphRecall(ctx.sessionId, workspaceId).catch(() => null);
+      if (!graph) {
         return unavailable(
           params.anchor.trim(),
           "related unavailable: the symbol graph is not open for this workspace. related does not open a database on the read path.",
+        );
+      }
+      const hasUnsavedFixedView = ctx.inputContext?.source === "surface"
+        && ctx.inputContext.dirtyPaths.length > 0;
+      if (!graph.directFactsCompatible || hasUnsavedFixedView) {
+        return unavailable(
+          params.anchor.trim(),
+          "related unavailable: stored graph positions belong to the owning workspace and are not pinned to this isolated execution view.",
         );
       }
       try {
@@ -49,7 +57,7 @@ export function createRelatedQueryService(
         // (D-240 rework).
         return await executeRelated(
           { anchor: params.anchor },
-          store,
+          graph.store,
           {
             workspaceId,
             ...(host.relationCollector ? { collector: host.relationCollector } : {}),

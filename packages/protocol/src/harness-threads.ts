@@ -15,6 +15,17 @@ export type ThreadAttention = "none" | "user" | "permission" | "thread" | "stall
 export type ThreadIntegration = "none" | "dirty" | "merge-ready" | "conflict" | "merged";
 export type ThreadRunWorkerState = "starting" | "running" | "lost" | "exited";
 export type ThreadRunOutcome = "success" | "failure" | "cancelled" | "lost";
+export type ThreadDeletionPhase = "sessions" | "store" | "directory" | "registry";
+
+/** Durable user intent for whole-Thread deletion. The phase is the next step. */
+export interface ThreadDeletionState {
+  operationId: string;
+  rootThreadId: string;
+  phase: ThreadDeletionPhase;
+  requestedAt: string;
+  updatedAt: string;
+  error?: string;
+}
 
 export type ThreadParent =
   | { kind: "session"; id: string }
@@ -391,6 +402,8 @@ export interface Thread {
   hidden: boolean;
   /** User-requested keep of the materialized directory across archive/reclaim. */
   keepWorktree?: boolean;
+  /** Present until the durable post-order deletion reaches its commit point. */
+  deletion?: ThreadDeletionState;
 }
 
 export interface ThreadSpaceMeasurement {

@@ -220,11 +220,34 @@ describe("LSP navigation services", () => {
     await vi.waitFor(() => expect(recordRelations).toHaveBeenCalledOnce());
     expect(recordRelations).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: "workspace-1",
+      sessionId: "session-1",
       anchor: { path: "src/a.ts", line: 1, character: 14 },
       anchorRevision: "r1",
       name: "value",
       resolvedBy: "lsp.references",
       sites: [{ path: "src/c.ts", line: 9, character: 2 }],
+    }));
+  });
+
+  it("filters LSP locations and write-behind rows to the actor workspace scope", async () => {
+    const deps = createDeps();
+    deps.supervisor.references.mockResolvedValueOnce({
+      status: "ready",
+      value: [
+        { resource: { workspaceId: "workspace-1", resourceId: "src/c.ts" }, range: { start: { line: 1, character: 0 }, end: { line: 1, character: 5 } } },
+        { resource: { workspaceId: "workspace-1", resourceId: "secret/c.ts" }, range: { start: { line: 2, character: 0 }, end: { line: 2, character: 5 } } },
+      ],
+    });
+    const recordRelations = vi.fn(async () => ({ recorded: 1 }));
+    const services = createLspNavigationServices({ ...deps, recordRelations } as never);
+    const scopedContext = { ...context, actor: { ...context.actor, workspaceScope: ["src"] } };
+    const result = await services.references.handle({ path: "src/a.ts", line: 1, character: 14 }, scopedContext);
+    expect(result.text).toContain("src/c.ts");
+    expect(result.text).not.toContain("secret/c.ts");
+    expect(JSON.stringify(result.value)).not.toContain("secret/c.ts");
+    await vi.waitFor(() => expect(recordRelations).toHaveBeenCalledOnce());
+    expect(recordRelations).toHaveBeenCalledWith(expect.objectContaining({
+      sites: [{ path: "src/c.ts", line: 2, character: 1 }],
     }));
   });
 

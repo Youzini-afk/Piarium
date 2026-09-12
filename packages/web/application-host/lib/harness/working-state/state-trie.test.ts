@@ -14,6 +14,7 @@ import {
   trieGet,
   trieIdentity,
   trieRemove,
+  trieReachableNodes,
   trieSet,
   trieToRecord,
   verifyTrie,
@@ -135,6 +136,31 @@ describe("D-251 rework: node integrity verification", () => {
     const trie = trieFromRecord({ "a.txt": file("a"), "b/c.txt": file("c") });
     expect(() => verifyTrie(trie)).not.toThrow();
   });
+
+  it("accepts a valid DAG when identical subtrees share one content hash", () => {
+    const shared = file("same");
+    const trie = trieFromRecord({ "a/value.txt": shared, "b/value.txt": shared });
+    expect(trie.nodes[trie.root]?.children.a).toBe(trie.nodes[trie.root]?.children.b);
+    expect(() => verifyTrie(trie)).not.toThrow();
+  });
+
+  it("checks the empty-root node content instead of trusting its reserved hash", () => {
+    const corrupt = {
+      root: EMPTY_STATE_TRIE.root,
+      nodes: {
+        [EMPTY_STATE_TRIE.root]: { children: {}, self: file("not-empty") },
+      },
+    };
+    expect(() => verifyTrie(corrupt)).toThrow(/corrupt/);
+  });
+
+  it("flattens inherited nodes before an incrementally updated trie is persisted", () => {
+    const base = trieFromRecord({ "a/value.txt": file("a"), "b/value.txt": file("b") });
+    const updated = trieSet(base, "a/value.txt", file("changed"));
+    const persisted = { root: updated.root, nodes: trieReachableNodes(updated) };
+    expect(() => verifyTrie(persisted)).not.toThrow();
+    expect(trieToRecord(persisted)).toEqual({ "a/value.txt": file("changed"), "b/value.txt": file("b") });
+  });
 });
 
 describe("D-251 rework: structural sharing", () => {
@@ -185,28 +211,6 @@ describe("D-251 rework: single-path update scales with depth, not pool size", ()
     expect(newNodes).toBeGreaterThan(0);
   });
 
-  it("trieFromEntries builds in O(n·depth), not O(n²) — 500→1000→2000 scaling", () => {
-    const build = (n: number): number => {
-      const entries: Record<string, RecoveryState> = {};
-      for (let i = 0; i < n; i++) {
-        entries[`dir${i % 10}/sub${i % 5}/file${i}.txt`] = file(`c${i}`);
-      }
-      const start = performance.now();
-      const trie = trieFromRecord(entries);
-      const elapsed = performance.now() - start;
-      // Verify correctness.
-      expect(Object.keys(trie.nodes).length).toBeGreaterThan(0);
-      return elapsed;
-    };
-    const t500 = build(500);
-    const t1000 = build(1000);
-    const t2000 = build(2000);
-    // O(n·depth) should scale roughly linearly (depth is bounded by path
-    // structure, not n). The old O(n²) would show ~4x from 500→1000.
-    // Allow generous slack for CI jitter, but reject ~4x growth.
-    const ratio = t2000 / t500;
-    expect(ratio).toBeLessThan(8); // O(n·depth) with depth=3 should be ~4x; O(n²) would be ~16x
-  });
 });
 
 describe("persisted Merkle map sharing", () => {
@@ -259,6 +263,12 @@ describe("persisted Merkle map sharing", () => {
       expect(reopened.getBranch("thread-1")?.baseState).toEqual(base);
       const result = reopened.getResult("thread-1", published.resultRevision);
       expect(result?.pathStates["a.txt"]).toEqual(published.pathStates["a.txt"]);
+
+      database.prepare("DELETE FROM object_references WHERE owner_kind = 'work-branch'").run();
+      await reopened.reconcileObjectReferences();
+      const reconciled = JSON.parse(await fs.readFile(catalog, "utf8")) as typeof persisted;
+      expect(typeof reconciled.branches["thread-1"]!.baseState.trie).toBe("string");
+      expect(reconciled.stateNodes[reconciled.branches["thread-1"]!.baseState.trie]).toBeTruthy();
     } finally {
       database.close();
     }

@@ -4,7 +4,7 @@ import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { languageIdForPath } from "../harness/language-id.js";
 import { pathInRoots } from "../harness/explore-graph.js";
-import type { KnowledgeStore, SymbolGraphRelationInput } from "./store.js";
+import type { KnowledgeStore, SymbolGraphRelationInput, SymbolGraphRelationKind } from "./store.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   | "getStatus"
@@ -190,17 +190,6 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
     }
   };
 
-  const persistRows = async (
-    workspaceId: string,
-    rows: Map<string, { language: string; relations: SymbolGraphRelationInput[] }>,
-  ): Promise<void> => {
-    const store = deps.getStore(workspaceId);
-    if (!store) return;
-    for (const [path, entry] of rows) {
-      await store.recordResolvedRelations(path, entry.language, entry.relations);
-    }
-  };
-
   const addRow = (
     rows: Map<string, { language: string; relations: SymbolGraphRelationInput[] }>,
     path: string,
@@ -249,7 +238,11 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
           if (caller) relation.caller = caller;
         }
       }
-      await persistRows(workspaceId, rows);
+      await store.replaceResolvedRelationsForAnchor(
+        { path: input.anchor.path, line: input.anchor.line },
+        [...rows.entries()].map(([path, entry]) => ({ path, language: entry.language, relations: entry.relations })),
+        ["references"],
+      );
       return { recorded: rows.size };
     },
 
@@ -264,7 +257,7 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
       anchor: RelationAnchor,
       options: { kinds?: readonly ("references" | "calls")[]; roots?: readonly string[]; signal?: AbortSignal } = {},
     ): Promise<RelationCollectOutcome> {
-      const kinds = new Set(options.kinds ?? ["references", "calls"]);
+      const kinds = new Set<SymbolGraphRelationKind>(options.kinds ?? ["references", "calls"]);
       const roots = options.roots;
       const empty = (status: RelationSourceStatus): RelationCollectOutcome => ({
         status,
@@ -316,7 +309,7 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
         if (defs.status === "ready") {
           const first = (defs.value as MappedLocation[] | undefined)?.[0];
           const defRange = first?.targetSelectionRange ?? first?.targetRange;
-          if (first && defRange) {
+          if (first && defRange && pathInRoots(first.resource.resourceId, roots)) {
             target = { path: first.resource.resourceId, line: defRange.start.line + 1, name };
           }
         }
@@ -464,6 +457,7 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
         await store.replaceResolvedRelationsForAnchor(
           { path: anchor.path, line: anchor.line },
           [...rows.entries()].map(([path, entry]) => ({ path, language: entry.language, relations: entry.relations })),
+          [...kinds],
         );
       }
 

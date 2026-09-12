@@ -7,9 +7,7 @@ import type { WorktreeBootstrapState } from "../git/types.js";
 import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
 import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
-import type { WorkingStateStore } from "./working-state/working-state-store.js";
-import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
-import { gitIndexModes } from "./working-state/git-adaptation.js";
+import { gitIndexModes } from "./working-state/git-index-mode.js";
 import { copyFilePreferReflink } from "../workspace/reflink.js";
 import { assertManagedWorktreeOwnership } from "./worktree-ownership.js";
 import {
@@ -41,7 +39,7 @@ export interface ThreadWorktreeRuntimeOptions {
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
-  fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "cp" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
+  fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
   interpreter?: ShellInterpreter | undefined;
@@ -773,6 +771,20 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
   };
 
+  const copySnapshotIdentity = async (directory: string): Promise<string> => {
+    const files = await listAllFilesRelative(directory);
+    const hash = createHash("sha256");
+    for (const file of files.sort()) {
+      hash.update(file);
+      const target = pathModule.join(directory, file);
+      const stat = await fsPromises.lstat(target);
+      hash.update(String(stat.mode & 0o7777));
+      if (stat.isSymbolicLink()) hash.update(await fsPromises.readlink(target));
+      else hash.update(await fsPromises.readFile(target));
+    }
+    return hash.digest("hex").slice(0, 40);
+  };
+
   const snapshot = async (worktree: ThreadWorktree): Promise<ThreadWorktree> => {
     const ownedPaths = [
       `${worktree.path}.results`,
@@ -785,17 +797,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       try {
         await fsPromises.mkdir(resultsRoot, { recursive: true });
         await copyDirRecursive(worktree.path, staging);
-        const files = await listAllFilesRelative(staging);
-        const hash = createHash("sha256");
-        for (const f of files.sort()) {
-          hash.update(f);
-          const target = pathModule.join(staging, f);
-          const stat = await fsPromises.lstat(target);
-          hash.update(String(stat.mode & 0o7777));
-          if (stat.isSymbolicLink()) hash.update(await fsPromises.readlink(target));
-          else hash.update(await fsPromises.readFile(target));
-        }
-        const resultCommit = hash.digest("hex").slice(0, 40);
+        const resultCommit = await copySnapshotIdentity(staging);
         const resultPath = pathModule.join(resultsRoot, resultCommit);
         try {
           await fsPromises.stat(resultPath);
@@ -835,46 +837,17 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return { ...worktree, branch, resultCommit };
   };
 
-  const importFixedResult = async (
-    workspaceId: string,
-    threadId: string,
-    worktree: ThreadWorktree,
-    store: WorkingStateStore,
-  ) => {
-    if (!worktree.resultCommit) throw new Error("Legacy thread result has no fixed result reference");
-    const branchId = `thread-${threadId}`;
-    if (worktree.base !== "zero-commit") {
-      const gitBase = executionGitRef(worktree);
-      const git = (args: string[]) => runGit(worktree.path, args).then((result) => ({ ...result, exitCode: 0 }));
-      const changedPaths = await captureGitChangedPaths(git, gitBase, worktree.resultCommit);
-      const [baseState, resultState] = await Promise.all([
-        importGitPathsToStore(store, git, gitBase, changedPaths, worktree.path),
-        importGitPathsToStore(store, git, worktree.resultCommit, changedPaths, worktree.path),
-      ]);
-      return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
+  const verifyFixedResult = async (worktree: ThreadWorktree): Promise<boolean> => {
+    if (!worktree.resultCommit) return false;
+    if (worktree.base === "zero-commit") {
+      const resultPath = fixedCopyResultPath(worktree);
+      return Boolean(resultPath) && await copySnapshotIdentity(resultPath!) === worktree.resultCommit;
     }
-
-    const baselineDir = `${worktree.path}.baseline`;
-    const resultDir = fixedCopyResultPath(worktree)!;
-    await fsPromises.stat(resultDir);
-    if (!worktree.resultPath) {
-      const files = await listAllFilesRelative(resultDir);
-      const hash = createHash("sha256");
-      for (const file of files.sort()) {
-        hash.update(file);
-        hash.update(await fsPromises.readFile(pathModule.join(resultDir, file)));
-      }
-      if (hash.digest("hex").slice(0, 40) !== worktree.resultCommit) {
-        throw new Error("Legacy copy result no longer matches its recorded snapshot id");
-      }
-    }
-    const diff = await diffDirectories(baselineDir, resultDir);
-    const changedPaths = [...diff.added, ...diff.changed, ...diff.removed];
-    const [baseState, resultState] = await Promise.all([
-      store.captureDirectory(baselineDir, changedPaths),
-      store.captureDirectory(resultDir, changedPaths),
+    const [head, status] = await Promise.all([
+      runGit(worktree.path, ["rev-parse", "HEAD"]),
+      runGit(worktree.path, ["status", "--porcelain", "-z"]),
     ]);
-    return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
+    return head.stdout.trim() === worktree.resultCommit && status.stdout.length === 0;
   };
 
   const merge = async (parentRoot: string, worktree: ThreadWorktree): Promise<MergeThreadWorktreeResult> => {
@@ -1389,8 +1362,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         await fsPromises.rm(dst, { recursive: true, force: true }).catch(() => undefined);
         await fsPromises.symlink(await fsPromises.readlink(src), dst);
       } else if (stat.isDirectory()) {
-        const cpFn = (fsPromises as typeof fs.promises).cp ?? fs.promises.cp;
-        await cpFn(src, dst, { recursive: true, force: true });
+        await copyDirRecursive(src, dst);
       } else if (stat.isFile()) {
         await copyFilePreferReflink(src, dst, fsPromises);
         await fsPromises.chmod(dst, stat.mode & 0o7777);
@@ -1552,7 +1524,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     inspectIndexModes,
     inspectWorkspaceIdentity,
     snapshot,
-    importFixedResult,
+    verifyFixedResult,
     merge,
     reclaim,
     materialize,

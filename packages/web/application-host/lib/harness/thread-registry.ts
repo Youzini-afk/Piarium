@@ -534,6 +534,16 @@ const isReport = (value: unknown): value is ThreadReport | null => (
     && (value.evidence === undefined || isEvidence(value.evidence)))
 );
 
+const isDeletionState = (value: unknown): boolean => (
+  isRecord(value)
+  && isString(value.operationId)
+  && isString(value.rootThreadId)
+  && (value.phase === "sessions" || value.phase === "store" || value.phase === "directory" || value.phase === "registry")
+  && isString(value.requestedAt)
+  && isString(value.updatedAt)
+  && (value.error === undefined || isString(value.error))
+);
+
 const isLegacyReport = (value: unknown): value is LegacyThreadReport | null => (
   value === null
   || (isRecord(value)
@@ -594,7 +604,8 @@ const isThread = (value: unknown): value is Thread => {
     && isString(value.updatedAt)
     && Number.isSafeInteger(value.eventSeq)
     && typeof value.hidden === "boolean"
-    && (value.keepWorktree === undefined || typeof value.keepWorktree === "boolean");
+    && (value.keepWorktree === undefined || typeof value.keepWorktree === "boolean")
+    && (value.deletion === undefined || isDeletionState(value.deletion));
 };
 
 const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManifest => {
@@ -1528,7 +1539,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       if (cascadingThreads.has(scopeKey(workspaceId, current))) return true;
       const ancestor = findThread(catalog, current.id);
       if (!ancestor) return false;
-      if (ancestor.lifecycle === "archived") return true;
+      if (ancestor.lifecycle === "archived" || ancestor.deletion) return true;
       current = ancestor.parent;
     }
     return false;
@@ -1536,6 +1547,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
 
   const cascadeBlocksThread = (workspaceId: string, catalog: ThreadCatalogDocument, thread: Thread): boolean => (
     cascadingThreads.has(scopeKey(workspaceId, { kind: "thread", id: thread.id }))
+      || thread.deletion !== undefined
       || cascadeBlocksParent(workspaceId, catalog, thread.parent)
   );
 
@@ -1546,6 +1558,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     // own catalog mutation.
     await mutateWorkspace(workspaceId, (catalog) => {
       if (!findThread(catalog, threadId)) throw new Error(`Unknown thread: ${threadId}`);
+      if (cascadingThreads.has(key)) throw new Error(`Thread cascade is already active: ${threadId}`);
       cascadingThreads.add(key);
       return { value: undefined, changed: [], write: false };
     });
@@ -2192,6 +2205,70 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     })
   );
 
+  const markDeletionCascade = async (
+    workspaceId: string,
+    threadIds: readonly string[],
+    rootThreadId: string,
+    operationId: string,
+  ): Promise<Thread[]> => mutateWorkspace(workspaceId, (catalog) => {
+    const timestamp = nowISO();
+    const changed: Thread[] = [];
+    for (const threadId of threadIds) {
+      const thread = findThread(catalog, threadId);
+      if (!thread) continue;
+      if (thread.deletion && (
+        thread.deletion.rootThreadId !== rootThreadId
+        || thread.deletion.operationId !== operationId
+      )) {
+        throw new Error(`Thread already belongs to another deletion operation: ${threadId}`);
+      }
+      thread.deletion = thread.deletion ?? {
+        operationId,
+        rootThreadId,
+        phase: "sessions",
+        requestedAt: timestamp,
+        updatedAt: timestamp,
+      };
+      delete thread.deletion.error;
+      touchThread(catalog, thread);
+      changed.push(thread);
+    }
+    return { value: changed, changed };
+  });
+
+  const setDeletionPhase = async (
+    workspaceId: string,
+    threadId: string,
+    operationId: string,
+    phase: NonNullable<Thread["deletion"]>["phase"],
+    error?: string,
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    if (!thread.deletion || thread.deletion.operationId !== operationId) {
+      throw new Error(`Thread deletion operation changed: ${threadId}`);
+    }
+    thread.deletion.phase = phase;
+    thread.deletion.updatedAt = nowISO();
+    if (error) thread.deletion.error = error;
+    else delete thread.deletion.error;
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
+
+  const listDeletionRoots = async (): Promise<Array<{ workspaceId: string; parent: ThreadParent; threadId: string }>> => {
+    const roots: Array<{ workspaceId: string; parent: ThreadParent; threadId: string }> = [];
+    for (const workspaceId of await listWorkspaceIds()) {
+      const catalog = await loadWorkspace(workspaceId);
+      for (const thread of catalog.threads) {
+        if (thread.deletion?.rootThreadId === thread.id) {
+          roots.push({ workspaceId, parent: structuredClone(thread.parent), threadId: thread.id });
+        }
+      }
+    }
+    return roots;
+  };
+
   const archiveThreadsForDeletedSession = async (
     workspaceId: string,
     sessionId: string,
@@ -2597,6 +2674,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     archiveThread,
     restoreThread,
     setKeepWorktree,
+    markDeletionCascade,
+    setDeletionPhase,
+    listDeletionRoots,
     archiveThreadsForDeletedSession,
     archiveThreadsForDeletedSessionAcrossWorkspaces,
     convertThread,

@@ -133,6 +133,7 @@ async function fixture() {
       entries: async (sessionId) => ({ sessionId, scope: "branch", leafId: null, entries: [] }),
     } as ThreadSessionAdapter,
     worktrees: {
+      assertOwnership: async () => undefined,
       prepare: async () => ({ cwd: scratchA, worktree: { path: scratchA, base: "base", viewMode: "virtual" } }),
       snapshot: async (worktree) => worktree,
       inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),

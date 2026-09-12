@@ -6,6 +6,7 @@ import { createLanguageViewBinder, type LanguageTextSource } from "../lsp/langua
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { languageIdForPath } from "./language-id.js";
 import { identifierAt } from "../knowledge/relations.js";
+import { pathInRoots } from "./explore-graph.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
@@ -20,6 +21,7 @@ interface LspNavigationDeps {
    */
   recordRelations?: (input: {
     workspaceId: string;
+    sessionId: string;
     anchor: { path: string; line: number; character?: number };
     anchorRevision: string;
     name: string;
@@ -108,6 +110,27 @@ const locationEntries = (value: unknown): Array<{ path: string; text: string }> 
     return path && start ? [{ path, text: `${path}:${start.line}:${start.character}` }] : [];
   }) : []
 );
+
+const scopedLocations = (value: unknown, roots: readonly string[] | undefined): unknown[] => (
+  Array.isArray(value) ? value.filter((entry) => {
+    const path = resourcePath(entry);
+    return path !== null && pathInRoots(path, roots);
+  }) : []
+);
+
+const scopedSymbols = (value: unknown, roots: readonly string[] | undefined): unknown[] => {
+  if (!Array.isArray(value)) return [];
+  const visit = (entry: unknown, inheritedPath?: string): unknown[] => {
+    const symbol = recordOf(entry);
+    const path = resourcePath(symbol) ?? inheritedPath;
+    const children = Array.isArray(symbol.children)
+      ? symbol.children.flatMap((child) => visit(child, path))
+      : [];
+    if (!path || !pathInRoots(path, roots)) return children;
+    return [{ ...symbol, children }];
+  };
+  return value.flatMap((entry) => visit(entry));
+};
 
 const hoverText = (value: unknown): string => {
   const contents = recordOf(value).contents;
@@ -205,6 +228,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
    */
   const persistResolved = (
     prepared: PreparedDocument,
+    ctx: HarnessServiceContext,
     params: { path: string; line: number; character?: number },
     resolvedBy: "lsp.references" | "lsp.definition",
     value: unknown,
@@ -223,8 +247,9 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
         return path && start ? [{ path, line: start.line, character: start.character }] : [];
       });
       if (resolvedBy === "lsp.references") {
-        await deps.recordRelations!({
+      await deps.recordRelations!({
           workspaceId,
+          sessionId: ctx.sessionId,
           anchor: { path: anchorPath, line: params.line, ...(params.character !== undefined ? { character: params.character } : {}) },
           anchorRevision: prepared.revision,
           name,
@@ -236,6 +261,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
       const target = locations[0];
       await deps.recordRelations!({
         workspaceId,
+        sessionId: ctx.sessionId,
         anchor: { path: anchorPath, line: params.line, ...(params.character !== undefined ? { character: params.character } : {}) },
         anchorRevision: prepared.revision,
         name,
@@ -257,12 +283,13 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
           query: params.query,
         }));
         if ("status" in outcome) return outcome;
-        const { lines, unpinnedPaths } = annotate(symbolEntries(outcome.value, params.path), outcome.prepared);
+        const scoped = scopedSymbols(outcome.value, ctx.actor.workspaceScope);
+        const { lines, unpinnedPaths } = annotate(symbolEntries(scoped, params.path), outcome.prepared);
         if (lines.length === 0) return empty("No symbols found");
         return ready(
           outcome.prepared,
           `${lines.length} symbols · queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
-          outcome.value,
+          scoped,
           unpinnedPaths,
         );
       },
@@ -274,13 +301,14 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
         if ("status" in outcome) return outcome;
-        persistResolved(outcome.prepared, params, "lsp.definition", outcome.value);
-        const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
+        const scoped = scopedLocations(outcome.value, ctx.actor.workspaceScope);
+        persistResolved(outcome.prepared, ctx, params, "lsp.definition", scoped);
+        const { lines, unpinnedPaths } = annotate(locationEntries(scoped), outcome.prepared);
         if (lines.length === 0) return empty("No definition found");
         return ready(
           outcome.prepared,
           `queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
-          outcome.value,
+          scoped,
           unpinnedPaths,
         );
       },
@@ -292,13 +320,14 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
         if ("status" in outcome) return outcome;
-        persistResolved(outcome.prepared, params, "lsp.references", outcome.value);
-        const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
+        const scoped = scopedLocations(outcome.value, ctx.actor.workspaceScope);
+        persistResolved(outcome.prepared, ctx, params, "lsp.references", scoped);
+        const { lines, unpinnedPaths } = annotate(locationEntries(scoped), outcome.prepared);
         if (lines.length === 0) return empty("No references found");
         return ready(
           outcome.prepared,
           `${lines.length} references · queried ${boundTo(outcome.prepared)}\n${lines.join("\n")}`,
-          outcome.value,
+          scoped,
           unpinnedPaths,
         );
       },

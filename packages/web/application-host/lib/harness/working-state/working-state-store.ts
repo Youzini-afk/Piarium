@@ -5,8 +5,8 @@ import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
 import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
-import { applyIndexModes } from "./git-adaptation.js";
-import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieToRecord, verifyTrie, type StateTrie, type StateTrieNode } from "./state-trie.js";
+import { applyIndexModes } from "./git-index-mode.js";
+import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieReachableNodes, trieToRecord, verifyTrie, type StateTrie, type StateTrieNode } from "./state-trie.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
 import type {
   CommandVerificationRecord,
@@ -87,17 +87,13 @@ const assertNoDraftPathConflicts = (paths: readonly string[]): void => {
   }
 };
 
-const parseStates = (value: unknown, label: string): Record<string, RecoveryState> => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
-  return Object.fromEntries(Object.entries(value).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
-};
-
 type StateNodePool = Record<string, StateTrieNode>;
 
 /**
- * Hydrate a persisted map: schema 4 stores `{trie: <root>}` references into the
- * shared `stateNodes` pool (Merkle structure sharing, D-245); older schemas and
- * defensive callers may carry the flat Record directly.
+ * Hydrate the current persisted map shape: `{trie: <root>}` references into
+ * the shared `stateNodes` pool. Piarium has no users who need internal-format
+ * compatibility, so a flat map under schema 4 is malformed rather than a
+ * hidden second representation (D-253).
  */
 const parseStateMap = (value: unknown, label: string, nodes: StateNodePool): Record<string, RecoveryState> => {
   if (value && typeof value === "object" && !Array.isArray(value)
@@ -114,32 +110,27 @@ const parseStateMap = (value: unknown, label: string, nodes: StateNodePool): Rec
       throw new Error(`${label} references a corrupt or missing state trie node (${error instanceof Error ? error.message : String(error)})`);
     }
   }
-  return parseStates(value, label);
+  throw new Error(`${label} must reference a state trie root`);
 };
-
-type WorkingStateSchemaVersion = 1 | 2 | 3 | 4;
 
 const parseBranch = (
   value: unknown,
   key: string,
   workspaceId: string,
-  schemaVersion: WorkingStateSchemaVersion,
   nodes: StateNodePool,
 ): WorkingBranch => {
-  const legacy = schemaVersion === 1;
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`Working branch ${key} is malformed`);
   const row = value as Record<string, unknown>;
   if (row.branchId !== key || row.workspaceId !== workspaceId || !Number.isSafeInteger(row.headRevision)
     || Number(row.headRevision) < 0 || typeof row.createdAt !== "string" || typeof row.updatedAt !== "string"
     || (row.baseRef !== undefined && typeof row.baseRef !== "string")
-    || (!legacy && (!Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")))
-    || (schemaVersion >= 3 && (!Array.isArray(row.captureScopes) || !row.captureScopes.every((entry) => typeof entry === "string")))) {
+    || !Array.isArray(row.draftBasePaths) || !row.draftBasePaths.every((entry) => typeof entry === "string")
+    || !Array.isArray(row.captureScopes) || !row.captureScopes.every((entry) => typeof entry === "string")) {
     throw new Error(`Working branch ${key} is malformed`);
   }
-  const draftBasePaths = legacy ? [] : (row.draftBasePaths as string[]).map(normalizeRelative);
+  const draftBasePaths = (row.draftBasePaths as string[]).map(normalizeRelative);
   if (new Set(draftBasePaths).size !== draftBasePaths.length) throw new Error(`Working branch ${key} draft baseline paths are malformed`);
-  const rawCaptureScopes = schemaVersion >= 3 ? row.captureScopes as string[] : [];
-  const captureScopes = legacy ? [] : [...new Set(rawCaptureScopes.map(normalizeRelative))].sort();
+  const captureScopes = [...new Set((row.captureScopes as string[]).map(normalizeRelative))].sort();
   const baseState = parseStateMap(row.baseState, `Working branch ${key} baseline`, nodes);
   if (draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
     throw new Error(`Working branch ${key} does not contain every draft baseline path`);
@@ -448,20 +439,17 @@ export class WorkingStateStore {
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
     const record = raw as Record<string, unknown>;
-    if ((record.schemaVersion !== 1 && record.schemaVersion !== 2 && record.schemaVersion !== 3 && record.schemaVersion !== SCHEMA_VERSION) || record.workspaceId !== options.identity.workspaceId
+    if (record.schemaVersion !== SCHEMA_VERSION || record.workspaceId !== options.identity.workspaceId
       || !record.branches || typeof record.branches !== "object" || Array.isArray(record.branches)
       || !record.results || typeof record.results !== "object" || Array.isArray(record.results)
-      || (record.schemaVersion !== 1
-        && (!record.draftBaselines || typeof record.draftBaselines !== "object" || Array.isArray(record.draftBaselines)))) {
+      || !record.draftBaselines || typeof record.draftBaselines !== "object" || Array.isArray(record.draftBaselines)
+      || !record.stateNodes || typeof record.stateNodes !== "object" || Array.isArray(record.stateNodes)) {
       throw new Error("Working-state catalog schema or workspace identity is malformed");
     }
-    const legacy = record.schemaVersion === 1;
-    const nodes = record.stateNodes && typeof record.stateNodes === "object" && !Array.isArray(record.stateNodes)
-      ? record.stateNodes as StateNodePool
-      : {};
+    const nodes = record.stateNodes as StateNodePool;
     const branches = Object.fromEntries(Object.entries(record.branches as Record<string, unknown>)
-      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, record.schemaVersion as WorkingStateSchemaVersion, nodes)]));
-    const draftBaselines = legacy ? {} : Object.fromEntries(Object.entries(record.draftBaselines as Record<string, unknown>)
+      .map(([key, value]) => [key, parseBranch(value, key, options.identity.workspaceId, nodes)]));
+    const draftBaselines = Object.fromEntries(Object.entries(record.draftBaselines as Record<string, unknown>)
       .map(([key, value]) => [key, parseDraftBaseline(value, key, options.identity.workspaceId, nodes)]));
     const results = Object.fromEntries(Object.entries(record.results as Record<string, unknown>)
       .map(([key, value]) => [key, parseResult(value, key, nodes)]));
@@ -529,7 +517,7 @@ export class WorkingStateStore {
     const nodes: StateNodePool = {};
     const refOf = (states: Record<string, RecoveryState> | undefined): { trie: string } => {
       const trie = states ? this.trieFor(states) : EMPTY_STATE_TRIE;
-      Object.assign(nodes, trie.nodes);
+      Object.assign(nodes, trieReachableNodes(trie));
       return { trie: trie.root };
     };
     return {
@@ -633,7 +621,7 @@ export class WorkingStateStore {
       expected.get(JSON.stringify([ref.owner_kind, ref.owner_id, ref.slot])) === ref.object_hash)) return;
     // A previous atomic rename may have succeeded while fsync reported failure.
     // Make the observed catalog durable before discarding either side's refs.
-    await writeRecoveryJsonAtomic(this.catalogPath, this.document, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    await writeRecoveryJsonAtomic(this.catalogPath, this.serializeDocument(this.document), { fsPromises: this.fsPromises, pathModule: this.pathModule });
     database.transaction(() => {
       database.prepare(`DELETE FROM object_references
         WHERE workspace_id = ? AND owner_kind IN ('work-branch', 'draft-baseline', 'thread-result', 'working-state-write')`).run(workspaceId);
@@ -1005,12 +993,6 @@ export class WorkingStateStore {
     return clone(baseline);
   }
 
-  async importFixedResult(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, resultState: Record<string, RecoveryState>, changedPaths: string[], parentRef?: string): Promise<WorkingResult> {
-    let branch = this.document.branches[branchId];
-    if (!branch) branch = await this.createBranch(workspaceId, branchId, baseState, parentRef);
-    return this.publishStates(branchId, resultState, changedPaths);
-  }
-
   async publishStates(branchId: string, capturedState: Record<string, RecoveryState>, knownChangedPaths?: string[]): Promise<WorkingResult> {
     const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
@@ -1135,15 +1117,26 @@ export class WorkingStateStore {
     branchId: string,
     directory: string,
     changedPaths?: string[],
-    options?: { indexModes?: Map<string, string> | Record<string, string> | undefined },
+    options?: {
+      indexModes?: Map<string, string> | Record<string, string> | undefined;
+      validateFixedSource?: () => Promise<boolean>;
+    },
   ): Promise<WorkingResult> {
     if (!changedPaths) {
-      return this.publishStates(branchId, await this.captureDirectory(directory, undefined, options));
+      const captured = await this.captureDirectory(directory, undefined, options);
+      if (options?.validateFixedSource && !await options.validateFixedSource()) {
+        throw new Error("Working-state source changed while it was being captured");
+      }
+      return this.publishStates(branchId, captured);
     }
     const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
     const candidates = await this.branchCaptureCandidates(branch, directory, changedPaths);
-    return this.publishStates(branchId, await this.captureDirectory(directory, candidates, options), candidates);
+    const captured = await this.captureDirectory(directory, candidates, options);
+    if (options?.validateFixedSource && !await options.validateFixedSource()) {
+      throw new Error("Working-state source changed while it was being captured");
+    }
+    return this.publishStates(branchId, captured, candidates);
   }
 
   private async branchCaptureCandidates(branch: WorkingBranch, directory: string, changedPaths: string[]): Promise<string[]> {

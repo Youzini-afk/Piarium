@@ -158,7 +158,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3b.2** Smart fallback | pi-host | ✓ | ✓ | `session-e2e.test.ts`（配置槽位后真实模型调用）；`permission-gate-extension.test.ts`（普通 ask 可放行、高风险不调用 judge） | 用户选择后 | 无槽位时不可选、判断失败时 ask | 插件活跃时应使用其显式 `authorizerChain`，原生 Smart 不参与裁决 |
 | **3b.3** foundational 权限插件 | protocol / pi-host | ✓ | ✓ | `permission-gate-extension.test.ts`；插件 v27 公共 service 契约复审（D-044） | ✓ | 插件缺席时原生 fallback | 保留 provisioning；未来替换须单独证明完整能力等价 |
 | **T4** 可选配对回放记录器 | evaluation / scripts | ✓ | ✗（尚无真实模型配对结果） | `evaluation/harness/cases.json`（6 个历史任务）；`scripts/harness-replay.test.mjs`（commit/ancestor、记录、配对与失败分类） | — | 不运行不产生模型请求/设置变化 | 自动执行尚缺单会话配置；只有实际安排配对时才需要，不再阻塞其他功能或默认启用（D-078） |
-| **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol / pi-host | ✓ | Partial（D-216–D-224 已接线 owning/execution、执行 Git baseline、查询级固定视图、dispatch 内容身份、branch Integration 锁顺序/WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle serialization 与 scope 完整 `..` 段；D-231 又补受管 retrieval scratch、managedRoot 与只读 settle。旧记录缺 managedRoot 时拒绝自动动作，真实付费嵌套 Pi / 完整桌面重启未测） | `working-state/working-state-store.test.ts`（schema 1/2→3、draft objects/ref、固定多修订、窄路径与 captureScopes、effectiveState/origin、writeRevision CAS、新文件 mode 不写 `.piarium-mode-probe-*`）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`working-state/branch-view.test.ts`；`working-state/working-branch-view.test.ts`（Host router 上的 read/grep/find/ls，lease 后正文与 provenance 一致，explore start pin 后词法/原文/语义不读后写）；`working-state/working-branch-writes.test.ts`（虚拟 write 不碰父盘、兄弟隔离、迟到修订冲突、物化后 publishDirectoryResult）；`working-state/execution-baseline.test.ts`（isolated init 虚拟写+shell 写 settle/merge，无 bad object；reclaim/rematerialize；crash recovery baseline）；`working-state/virtual-write-invariants.test.ts` / `virtual-write-tree.test.ts` / `materialization-switch.test.ts`（失败物化并发写、孙 merge 后再写再物化、writeRevision 标签、树拒绝、semantic pin、abort/crash 恢复）；`working-state/workspace-baseline.test.ts`（Git 变化集与 ignored/captureScopes、unborn/非 Git、字节诚实、取消不建分支、listing 失败不发明完整 inventory、gitlink 列出）；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope、虚拟 spawn 绑定、scratch 回收、bash 预算预占、prepare 后父漂移隔离、Git 失败/捕获窗口变化/writer/gitlink/dirty 内容替换不建完整分支、setWorkingState 失败清理未绑定 branch）；`thread-services.test.ts`（dispatch 必准备、失败删除、baseline-changed 可重试）；`nested-threads.test.ts`（父虚拟分支作孙基线、嵌套 merge 不写根盘、父结果再入工作区、captureScopes 继承父冻结范围）；`working-state/integration-coordinator.test.ts`（虚拟新文件省略 mode 仍可应用到工作区；物化父 directory 不把 recovery objects 写入父目录且 live/reconcile 走 execution Documents gate；无法解析 execution directory 则 needs-attention；branch 集成对账/撤销）；`dequeue-permissions.test.ts`；`knowledge-owning.test.ts`；`thread-registry.test.ts`（binding 重建与 stale 拒绝）；`thread-worktree.test.ts`（fixed/live、virtual scratch、detached Git 上下文、`executionBaseline`）；`workspace-identity.test.ts`；`working-state/path-requirement.test.ts`；pi-host `read-tool.test.ts` / `find-ls-tool.test.ts`（working-branch provenance）；`workspace-mutation-journal.test.ts` / `apply-patch-tool.test.ts`（`document.branchWrite` 优先，disk 才落盘） | — | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路；shared/none 仍读 live 父目录 | D-239 已接旧结果引用释放 UI、Host 依赖重查与中断对账；当前分支/结果和仍在使用的版本保持保护。Merkle 优化、跨平台 CoW 与整个 Thread/当前分支删除 UI 未交付。D-220–D-223 已关执行 baseline / 固定视图 / dispatch 内容身份、branch Integration WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle 与 scope segment 反例；D-231 补受管 retrieval 目录和只读 settle。旧记录缺 managedRoot 会拒绝自动动作；真实付费嵌套 Pi 与完整桌面重启未测。物化预算与占用治理见 D-204；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除；基线读工作目录字节，不把 Git blob 冒充转换后正文 |
+| **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol / pi-host | ✓ | Partial（D-216–D-224 已接线 owning/execution、执行 Git baseline、查询级固定视图、dispatch 内容身份、branch Integration 锁顺序/WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle serialization 与 scope 完整 `..` 段；D-231 又补受管 retrieval scratch、managedRoot 与只读 settle。旧记录缺 managedRoot 时拒绝自动动作，真实付费嵌套 Pi / 完整桌面重启未测） | `working-state/working-state-store.test.ts`（schema 4 trie-only、拒绝旧 schema/平表、draft objects/ref、固定多修订、窄路径与 captureScopes、effectiveState/origin、writeRevision CAS、新文件 mode 不写 `.piarium-mode-probe-*`）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`working-state/branch-view.test.ts`；`working-state/working-branch-view.test.ts`（Host router 上的 read/grep/find/ls，lease 后正文与 provenance 一致，explore start pin 后词法/原文/语义不读后写）；`working-state/working-branch-writes.test.ts`（虚拟 write 不碰父盘、兄弟隔离、迟到修订冲突、物化后 publishDirectoryResult）；`working-state/execution-baseline.test.ts`（isolated init 虚拟写+shell 写 settle/merge，无 bad object；reclaim/rematerialize；crash recovery baseline）；`working-state/virtual-write-invariants.test.ts` / `virtual-write-tree.test.ts` / `materialization-switch.test.ts`（失败物化并发写、孙 merge 后再写再物化、writeRevision 标签、树拒绝、semantic pin、abort/crash 恢复）；`working-state/workspace-baseline.test.ts`（Git 变化集与 ignored/captureScopes、unborn/非 Git、字节诚实、取消不建分支、listing 失败不发明完整 inventory、gitlink 列出）；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope、虚拟 spawn 绑定、scratch 回收、bash 预算预占、prepare 后父漂移隔离、Git 失败/捕获窗口变化/writer/gitlink/dirty 内容替换不建完整分支、setWorkingState 失败清理未绑定 branch）；`thread-services.test.ts`（dispatch 必准备、失败删除、baseline-changed 可重试）；`nested-threads.test.ts`（父虚拟分支作孙基线、嵌套 merge 不写根盘、父结果再入工作区、captureScopes 继承父冻结范围）；`working-state/integration-coordinator.test.ts`（虚拟新文件省略 mode 仍可应用到工作区；物化父 directory 不把 recovery objects 写入父目录且 live/reconcile 走 execution Documents gate；无法解析 execution directory 则 needs-attention；branch 集成对账/撤销）；`dequeue-permissions.test.ts`；`knowledge-owning.test.ts`；`thread-registry.test.ts`（binding 重建与 stale 拒绝）；`thread-worktree.test.ts`（fixed/live、virtual scratch、detached Git 上下文、`executionBaseline`）；`workspace-identity.test.ts`；`working-state/path-requirement.test.ts`；pi-host `read-tool.test.ts` / `find-ls-tool.test.ts`（working-branch provenance）；`workspace-mutation-journal.test.ts` / `apply-patch-tool.test.ts`（`document.branchWrite` 优先，disk 才落盘） | — | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路；shared/none 仍读 live 父目录 | D-239 已接旧结果引用释放 UI、Host 依赖重查与中断对账；当前分支/结果和仍在使用的版本保持保护。Merkle 优化、跨平台 CoW 与整个 Thread/当前分支删除 UI 未交付。D-220–D-223 已关执行 baseline / 固定视图 / dispatch 内容身份、branch Integration WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle 与 scope segment 反例；D-231 补受管 retrieval 目录和只读 settle。旧记录缺 managedRoot 会拒绝自动动作；真实付费嵌套 Pi 与完整桌面重启未测。物化预算与占用治理见 D-204；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除；基线读工作目录字节，不把 Git blob 冒充转换后正文 |
 | **3.5a** 固定修订 Integration、草稿写回与绑定预览（D-203） | host / protocol / ui | ✓ | ✓ | `integration-coordinator.test.ts`（旧预览拒绝、持久 intent/回执、故障与条件补偿）；`integration-surface-vertical.test.js`（真实 Documents barrier + Registry + Coordinator，磁盘/草稿同一操作合并及撤销，草稿变 clean）；`documents/authority.test.ts`（定向注册、取消与固定来源更新）；UI `documents/registry.test.ts`（实例替换、观察者异常、重试/撤销）；`HarnessThreadIntegrationPanel.behavior.test.tsx`（真实 React 挂载、无请求循环、迟到丢弃、提交审阅绑定）；`thread-routes.test.ts`、Pi `phase3-e2e.test.ts` | ✓（UI 与 agent 共用 Host 定向执行；缓冲不保存） | 不明执行状态保留 needs-attention；不可用缓冲不写盘；失败不等于未写入；旧输入来源不冒充新正文 | 草稿目标支持文本；缓冲无法表达的类型/权限位变化明确 unavailable。完整浏览器点击链未跑；可应用性不代表测试或行为兼容 |
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
@@ -176,7 +176,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | R5 文件与结构计算 | 未实现 | 固定视图检索和结构输入、scope/取消、前台与后台负载；保留 TriviumDB/Pi 原归属 |
 | R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
 
-下一步先验收已提交的 D-246–D-251 返工，再以健康生产行为和已确认反例推进 R。
+D-246–D-251 已由 D-254 完成独立验收与重要错误收口；下一步可从健康 TS 基线进入 R0。
 目前没有 Rust 性能、跨平台发行或故障恢复的实测结论；绝对性能目标在实施时定标，不预填提升倍数。
 
 ## 当前缺口与后续顺序
@@ -368,6 +368,15 @@ Host 路由重查当前结果、Run 输入、review 与未结束 Integration。�
 转录及其他线程的共享内容保留。清理失败可用原请求重试，返回实际清理结果。整个 Thread 的删除由 D-242 提供（线程卡片 → 鉴权
 `DELETE` 路由 → 生命周期级联），当前分支的删除也随该级联发生。
 
+**D-240 / D-246 图关系验收收口（D-254，2026-09-12）。** LSP workspace root、公开 phased explore 的
+references/calls、anchor 批次替换与 partial 组合保持；图库现在由 session binding 解析到 owning workspace，execution workspace
+只承担 Documents/LSP/路径。`related` 不再把 owning 图的行号直接用于隔离分支或脏缓冲；公开 LSP 的文本、raw value、targetPath
+与写后行统一按 actor scope 过滤。navigation 空结果会按 anchor + relation kind 删除旧 references，不误删同 anchor 的 calls。
+`lsp-nav.test.ts`、`related-scope.test.ts`、`relations.test.ts` 与 explore query 定向组覆盖越权位置、隔离视图和空结果清理。
+
+**D-241 / D-247 复验结论。** 未知 exec/dlx/x、唯一 warning、failure-relevant 进度与非零退出 required 行均符合当前决定；
+本轮没有发现新的阻塞错误，代码不变。
+
 **D-242 整个 Thread 删除已接线（2026-09-12）。** 线程卡片的两步确认按钮走鉴权 `DELETE /api/harness/sessions/:sessionId/threads/:threadId`；
 Host 按归档同一级联形状后序处理子线程：每个节点先停活 Run（abort+close 绑定会话、`endRun(cancelled)`，但不铸 partial
 result——删除正要释放它），再经 `piRuntimeBroker.deleteSession` 删除该线程全部 Pi 会话（worker、转录文件、metadata），
@@ -375,17 +384,15 @@ result——删除正要释放它），再经 `piRuntimeBroker.deleteSession` �
 仍过 ownership 断言与 writer guard，keep_worktree 不生效——记录已删，留下的目录会变成无记录占用）并原子移除 Thread+Run
 行与 session binding。目录删除失败保留记录供重试；无 `deleteSession` 接线且线程有会话时拒绝而不是留下孤儿转录。
 
-**D-248 返工（2026-09-12）。** `releaseThreadStore` 改用 exclusive lease（真实引擎不会在
-shared lease 下提供 collector）；`deleteOneNode` 分四阶段（sessions → store → directory →
-registry），每阶段失败返回结构化 `DeletionNodeResult`（complete/objects-pending/
-retryable/needs-attention + phase + error），`deleteUser` 聚合 worst-status-wins；
-幂等重试——已删 thread 返回 complete，已删 session/目录/引用从观察事实继续；
-`KnowledgeStore.deleteSession` 接入生产（`deleteKnowledgeSession` option，在
-`deleteThreadSessions` 中对每个 session 调用，accepted workspace/user knowledge 保留，
-失败不被吞）；UI 确认文案（10 个 locale）明确包含"子孙线程、Pi 对话、结果历史、受管目录"。
-证据：`thread-runtime.test.ts` 63 项（session 失败 retryable、store 失败 objects-pending、
-directory 失败 retryable、幂等重试不重复调用、deleteKnowledgeSession 被调用、exclusive
-lease 验证）。
+**D-248 / D-254 删除收口（2026-09-12）。** WorkingState 修改与 GC 使用 exclusive lease；Thread catalog
+现在持久化 `deletion.{operationId,rootThreadId,phase,requestedAt,updatedAt,error}`，其中 phase 表示下一步。整棵待删树先写
+intent，再后序执行 sessions → store → directory → registry；每步完成后才推进 phase，Host 启动会续跑未完成根。后代任何一步
+失败时父不进入提交点，返回的 `deletedThreadIds` 只含真实删除项。knowledge 在 broker 移除 session binding 前清理；retrieval
+evidence/receipt/artifact 引用在 store 阶段同步释放，失败保留 Thread 行，不再由吞错的 `onThreadRemoved` observer 处理。UI 显示
+pending phase 并禁用 restore/merge/reclaim 等冲突动作，删除按钮仍可显式重试。
+
+证据：`thread-runtime.test.ts` 覆盖 session/store/directory/evidence 失败、exclusive lease、子失败不删父、实际 deleted ids、catalog
+重开后 `resumePendingDeletions` 续跑；原有 UI 确认仍明确包含子孙线程、Pi 对话、结果历史与受管目录。
 
 证据：`thread-history.test.ts` 6 项经真实 Registry/WorkingState/SQLite/Recovery engine 和公开路由覆盖鉴权、整批冲突、活动/未启动
 review、active/lost Run 输入、共享对象、释放源版本后 undo、引用清理失败重试及 Registry 并发；与 registry、Integration、锁顺序和
@@ -393,36 +400,21 @@ recovery engine 5 文件共 116 项通过。`working-state-retention.test.ts` + 
 `HarnessThreadResultHistory.behavior.test.tsx` 5 项覆盖确认、关闭重开后的重试、409 与迟到响应，邻近面板 9 项和 i18n parity 4 项通过。
 Host/UI 类型与相关 lint 通过。完整 Electron 点击、真实卷耗尽和进程级断电未实测；3.4/3.4a 其他 Partial 原因仍保留。
 
-**D-243 Git filter/LFS/执行位适配已实现（2026-09-12）。** `working-state/git-adaptation.ts` 是 blob↔工作区字节的唯一转换层：
-`check-attr -z --all` 批量探测 filter/text/eol/working-tree-encoding；`filter=lfs` 的指针 blob 解析后从 `<git-common-dir>/lfs/objects`
-读本地对象（sha256 校验，从不触发下载），缺失或损坏时存指针字节——与 `git checkout` 在缺 LFS 对象时写出的内容一致；
-其他 filter/text/eol/编码经 `git cat-file --filters --path` smudge，过滤器不可运行时回退原始 blob。Git 导入（`importFixedResult`）
-现在得到工作区侧字节而不是仓库 blob；`captureGitPathStates` 在 Windows 也保留 index 的 `0o755`；`captureDirectory`/结果发布接收
-indexModes 覆盖，POSIX 保持 fs 真值。`stateIdentity`/`sameState` 在 win32 把普通文件/目录 mode 归一到可观察的读写维，
-index 恢复的 `0o755` 与 fs 捕获的 `0o666` 不再互相误报漂移。
+**D-243 / D-249 已由 D-254 替换（2026-09-12）。** 验收确认原 filter/LFS 适配只服务旧 worktree 的
+`importFixedResult` 兼容入口，而且 `cat-file --filters` 仍可能执行自定义 filter 或触发 LFS 网络，不能支持“固定修订且不触网”的
+声明。当前没有旧内部格式用户，因此已删除 `importFixedResult`、`git-migration.ts` 与 commit-blob smudge/LFS 重建链。
 
-证据：`git-adaptation.test.ts` 11 项真实 Git 覆盖 LFS 本地对象命中/缺失指针降级、eol=crlf smudge、无 filter 原样、
-required filter 失败回退、`check-attr` 探测、`ls-files -s` 执行位与 win32 归一化比较；`git-migration.test.ts` 更新为
-跨平台保留 `0o755` 真值。未实测 git-lfs 客户端在场时的远端下载路径（有意不走网络）、Windows 符号链接创建、以及
-自定义 clean/smudge 命令的真实执行（已有失败回退路径覆盖）。
-
-**D-249 返工（2026-09-12）。** base/result 转换各自绑定 commit 的属性
-（`probeGitAttributes` 新增 `commit` 参数，用 `check-attr --source=<commit>`，text/eol
-转换改为 in-process）；`probeGitAttributes` 失败必须传播（移除 `.catch(() => new Map())`）；
-required LFS filter 失败抛出而非返回 raw blob（`GIT_LFS_SKIP_SMUDGE=1` 时探测本地对象库）；
-`filter=lfs` 先走 `cat-file --filters`（尊重 process/smudge/skip-smudge 配置）；
-`stateIdentity` 改用 `persistentMode`（完整 mode），`sameState` 仍用 `comparableMode`
-（盘面比较）——持久哈希在所有平台区分 0644/0755，捕获期间 mode 改变触发 baseline-changed。
-证据：`git-adaptation.test.ts` 17 项（base 无 eol/result 新增 eol=crlf、base/result 相反
-属性、required LFS filter 失败抛出、GIT_LFS_SKIP_SMUDGE=1 缺失对象降级、check-attr
-失败抛出、stateIdentity 区分 0644/0755、sameState 在 Windows 仍相等）；既有 git-migration、
-state-trie、working-state-store 套件回归通过。
+当前生产路径在 dispatch 时把工具实际看到的工作区字节捕获为 WorkingBranch base；物化线程 settle 时先建立固定 snapshot，再按
+fixed diff 从 snapshot 的真实文件字节发布结果，并在 catalog 提交前复核 snapshot 身份。CRLF、BOM、LFS pointer/本地内容、
+working-tree-encoding 与自定义 filter 的结果均以已经物化给工具的字节为准，发布过程不执行 filter、不访问网络。Windows 仍从
+Git index 恢复 100644/100755；`gitBaselineFingerprint` 也包含完整 index mode，单独的执行位变化会使捕获窗口失败重试。
 
 **D-244 CoW/reflink 材料化后端已实现（2026-09-12）。** `workspace/reflink.ts` 的 `copyFilePreferReflink` 先尝试
 `COPYFILE_FICLONE_FORCE`（真实共享 extent 或真实失败），不支持时退化普通 `copyFile` 并返回实际 backend——Node 的非 FORCE
 FICLONE 会静默降级，调用方无法分辨，故用 FORCE 保持诚实。生产接线：非 Git/zero-commit worktree 准备、`.baseline` 快照、
 untracked/merge/rematerialize 复制（`thread-worktree.ts`）、WorkingState 材料化的对象库→目标写入
 （`materializer.ts` 新 `objectPathFor` + `cow.{reflink,copy}` 计数）与 recovery `replaceFile` 的对象→临时文件复制。
+目录型 `harness.worktree.copyIgnored` 也由 D-254 改为逐文件走同一复制原语，不再通过 `fs.cp` 绕开 backend 选择。
 真实 reflink 只在 ReFS/APFS/Btrfs 卷上生效；NTFS/ext4 上如实走 copy 且 backend 报告 "copy"。
 
 证据：`reflink.test.ts` 6 项——真实 fs 复制与 backend 报告、注入 EOPNOTSUPP 验证退化路径与原样内容、ENOENT/普通错误
@@ -441,28 +433,14 @@ restore 和 materialization switch 路径捕获 cow 统计存入 `cowByThread`�
 backend 汇总、verifyObjectIntegrity）；既有 materializer、working-state-store、
 state-trie、thread-runtime 套件回归通过。
 
-**D-245 WorkingState Merkle 结构共享已实现（2026-09-12）。** `working-state/state-trie.ts` 把 path→RecoveryState 映射存为
-持久哈希 trie（节点 `children` + 可选 `self`，文件与祖先目录键可共存），根哈希即映射内容身份。catalog schema 4：
-`baseState`/`deltas`/`baseStates`/`pathStates`/草稿 `pathStates` 序列化为 `{trie: root}` 加共享 `stateNodes` 池——发布的
-`pathStates` 与 `branch.deltas` 是同一对象时持久化里只剩一个 trie 根；池每次 persist 由活根重建，孤儿节点自动回收，
-v1–v3 目录照常读入并在下次 persist 升级。写路径从 `structuredClone` 整树改为 `nextDocument()` 结构共享；`treeIdentityFromStates`
-改用 trie 根（哈希值格式不变，算法变更——旧持久化 verification 记录的树哈希与新算法不可比，为一次性咨询噪声）。
+**D-245 / D-251 持久 trie 的当前真实范围（D-254，2026-09-12）。** schema 4 在磁盘上把路径映射写成 `{trie: root}`
+和共享 `stateNodes`，tree identity 使用含完整 mode 的 Merkle root。校验现在用 recursion stack + verified set，允许内容寻址 DAG
+合法复用同一子树，同时拒绝真实循环、缺节点、节点哈希不符和伪造 empty root。prototype-chain 更新在持久化时按 root 遍历所有可达
+节点，不能因 own-property 枚举漏掉未改子树；引用对账也走同一个 serializer。schema 1–3 和 schema 4 平表均拒绝，不保留旧 reader。
 
-证据：`state-trie.test.ts` 5 项——文件+祖先共存 round-trip、子树共享（docs 子树哈希两版一致）、删除剪空祖先、
-tombstone-vs-缺失的 diff 区分、持久化文件断言 `{trie}` 引用 + 共享 `stateNodes` + deltas/pathStates 同一根 +
-重开一致；既有 store/branch-view/draft-baseline/virtual-write 套件除 3 项基线环境失败外全过。
-
-**D-251 返工（2026-09-12）。** `trieSet`/`trieRemove` 改用 prototype chain over
-input nodes——单路径更新创建 O(depth) 新节点，不复制整个池（O(1) per set，非 O(n)）。
-`trieFromEntries` 改用线性 builder——排序 entries 后一次性构建嵌套结构再 bottom-up
-哈希（O(n·depth)，非 O(n²)）。加载时 `verifyTrie` 核验每个 node 内容哈希等于其 key、
-所有子引用可解析、无循环——损坏/缺失/循环 trie 抛出而非静默当空树。node hash 使用
-`stateIdentity`（含完整 mode），不使用 `sameState`（平台比较语义）——0644/0755 同内容
-同路径产生不同 roots。
-证据：`state-trie.test.ts` 13 项（0644/0755 不同 roots、篡改 node 检测、缺失 node
-检测、自引用 cycle 检测、有效 trie 通过、兄弟分支共享未改子树、trieSet 创建
-O(depth) 新节点 <10、500→1000→2000 线性扩展 ratio <8）；既有 working-state-store、
-thread-runtime 套件回归通过。
+当前 TS 内存中的 `WorkingBranch.baseState/deltas` 与 `WorkingResult.*States` 仍是平表，更新仍会复制相关平表，catalog 也仍整体写入；
+因此这里是正确的持久去重与 identity，不是生产 root authority、增量节点事务或端到端 O(1) fork。后三项由已规划的 Rust R1 一次接管，
+不在 TS 中再建一套过渡内核。反例覆盖相同叶子 DAG、empty-root 篡改、prototype overlay 持久化、flat-schema 拒绝与引用对账的唯一形状。
 
 ## 未完成项（来自 D-027，按来源）
 

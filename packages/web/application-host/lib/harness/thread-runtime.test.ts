@@ -1098,7 +1098,7 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       lifecycle: "settled",
       integration: "dirty",
-      worktree: { branch: "piarium/thread", resultCommit: "result" },
+      worktree: { viewMode: "virtual", materialized: false },
       report: {
         conclusion: "Implemented it",
         changedFiles: ["a.ts"],
@@ -3332,6 +3332,36 @@ describe("thread runtime", () => {
     await deleting.dispose();
   });
 
+  it("keeps the Thread row until retrieval evidence references are released", async () => {
+    let failRelease = true;
+    const deleting = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      deleteSession: async () => ({}),
+      releaseThreadEvidence: async () => {
+        if (failRelease) throw new Error("evidence catalog busy");
+      },
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async () => ({ reclaimed: true }),
+      },
+    });
+    const thread = await registry.createThread({ ...createInput(), worktree: "shared" });
+    const first = await deleting.deleteUser(WORKSPACE, PARENT, thread.id);
+    expect(first).toMatchObject({ status: "objects-pending", nodeResults: [{ phase: "store" }] });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ deletion: { phase: "store" } });
+
+    failRelease = false;
+    expect((await deleting.deleteUser(WORKSPACE, PARENT, thread.id)).status).toBe("complete");
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toBeNull();
+    await deleting.dispose();
+  });
+
   it("D-242 rework: idempotent retry continues from observed facts after sessions are already deleted", async () => {
     let deleteCallCount = 0;
     const deleting = createThreadRuntime({
@@ -3369,7 +3399,7 @@ describe("thread runtime", () => {
       registry,
       sessions: sessionAdapter,
       deleteSession: async () => ({}),
-      deleteKnowledgeSession: async (sessionId) => { deletedKnowledgeSessions.push(sessionId); },
+      deleteKnowledgeSession: async (workspaceId, sessionId) => { deletedKnowledgeSessions.push(`${workspaceId}:${sessionId}`); },
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
       readBlocks: async () => null,
@@ -3387,8 +3417,91 @@ describe("thread runtime", () => {
     await deleting.spawn({ ...input, threadId: thread.id, runId: run.id });
     const result = await deleting.deleteUser(WORKSPACE, PARENT, thread.id);
     expect(result.status).toBe("complete");
-    expect(deletedKnowledgeSessions.length).toBeGreaterThan(0);
+    expect(deletedKnowledgeSessions).toContain(`${WORKSPACE}:child-1`);
     await deleting.dispose();
+  });
+
+  it("keeps a parent deletion pending when a descendant directory cannot be removed", async () => {
+    const reclaimed: string[] = [];
+    const deleting = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      deleteSession: async () => ({}),
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async (worktree) => {
+          reclaimed.push(worktree.path);
+          return worktree.path.endsWith("/child") ? { reclaimed: false, reason: "child writer remains" } : { reclaimed: true };
+        },
+      },
+    });
+    const parent = await registry.createThread({ ...createInput(), worktree: "shared" });
+    const child = await registry.createThread({
+      ...createInput(),
+      parent: { kind: "thread", id: parent.id },
+      brief: "nested child",
+      worktree: "shared",
+    });
+    await registry.setWorktree(WORKSPACE, parent.id, { path: "/managed/parent", base: "zero-commit" });
+    await registry.setWorktree(WORKSPACE, child.id, { path: "/managed/child", base: "zero-commit" });
+
+    const result = await deleting.deleteUser(WORKSPACE, PARENT, parent.id);
+    expect(result.status).toBe("retryable");
+    expect(result.deletedThreadIds).toEqual([]);
+    expect(reclaimed).toEqual(["/managed/child"]);
+    expect(await registry.getThread(WORKSPACE, PARENT, parent.id)).toMatchObject({
+      deletion: { rootThreadId: parent.id, phase: "sessions" },
+    });
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).toMatchObject({
+      deletion: { rootThreadId: parent.id, phase: "directory", error: "child writer remains" },
+    });
+    await deleting.dispose();
+  });
+
+  it("resumes a persisted deletion phase after the registry is reopened", async () => {
+    const failing = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      deleteSession: async () => ({}),
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async () => ({ reclaimed: false, reason: "volume busy" }),
+      },
+    });
+    const thread = await registry.createThread({ ...createInput(), worktree: "shared" });
+    await registry.setWorktree(WORKSPACE, thread.id, { path: "/managed/reopen", base: "zero-commit" });
+    expect((await failing.deleteUser(WORKSPACE, PARENT, thread.id)).status).toBe("retryable");
+    await failing.dispose();
+
+    const reopenedRegistry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    await reopenedRegistry.reconcileAfterHostRestart();
+    const resumed = createThreadRuntime({
+      registry: reopenedRegistry,
+      sessions: sessionAdapter,
+      deleteSession: async () => ({}),
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async () => ({ reclaimed: true }),
+      },
+    });
+    await resumed.resumePendingDeletions();
+    expect(await reopenedRegistry.getThread(WORKSPACE, PARENT, thread.id)).toBeNull();
+    await resumed.dispose();
   });
 
   it("D-242 rework: uses exclusive lease for working-state release, not shared", async () => {

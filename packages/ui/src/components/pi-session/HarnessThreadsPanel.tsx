@@ -574,6 +574,7 @@ export const HarnessThreadsPanel: React.FC<{
           const converting = convertingThreadId === entry.thread.id;
           const occupancy = space?.threads.find((item) => item.threadId === entry.thread.id);
           const busy = threadAction === entry.thread.id;
+          const deletionPending = entry.thread.deletion !== undefined;
           const label = entry.thread.role ?? (
             entry.thread.kind === 'discussion'
               ? t('harness.threads.discussion')
@@ -583,7 +584,7 @@ export const HarnessThreadsPanel: React.FC<{
             <div key={entry.thread.id} className="overflow-hidden rounded-lg border border-transparent transition-colors hover:border-border/60 hover:bg-interactive-hover">
               <button
                 type="button"
-                disabled={!sessionId || busy}
+                disabled={!sessionId || busy || deletionPending}
                 title={sessionId ? t('harness.threads.open') : undefined}
                 onClick={() => {
                   if (!sessionId) return;
@@ -607,6 +608,12 @@ export const HarnessThreadsPanel: React.FC<{
                 {entry.thread.waitingFor ? (
                   <p className="mt-1 line-clamp-2 text-[11px] leading-4 text-[var(--status-warning)]">
                     ? {entry.thread.waitingFor.text}
+                  </p>
+                ) : null}
+                {entry.thread.deletion ? (
+                  <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--status-warning)]">
+                    {t('harness.threads.deleting')} · {entry.thread.deletion.phase}
+                    {entry.thread.deletion.error ? ` · ${entry.thread.deletion.error}` : ''}
                   </p>
                 ) : null}
                 {entry.thread.verification?.childChecks ? (
@@ -677,7 +684,7 @@ export const HarnessThreadsPanel: React.FC<{
                   <p className="mt-1 line-clamp-3 text-[10px] leading-4 text-[var(--status-warning)]">{entry.thread.worktree.retentionReason}</p>
                 ) : null}
               </button>
-              {entry.thread.kind === 'implementation'
+              {!deletionPending && entry.thread.kind === 'implementation'
                 && (entry.thread.integration === 'dirty'
                   || entry.thread.integration === 'merge-ready'
                   || entry.thread.integration === 'conflict') ? (
@@ -688,16 +695,18 @@ export const HarnessThreadsPanel: React.FC<{
                   onThread={(next) => threadState.merge({ thread: next, activeRun: entry.activeRun })}
                 />
               ) : null}
-              <HarnessThreadResultHistory
-                parentSessionId={parentSessionId}
-                threadId={entry.thread.id}
-                onReleased={refreshAfterResultRelease}
-              />
+              {!deletionPending ? (
+                <HarnessThreadResultHistory
+                  parentSessionId={parentSessionId}
+                  threadId={entry.thread.id}
+                  onReleased={refreshAfterResultRelease}
+                />
+              ) : null}
               <div className="flex flex-wrap justify-end gap-1 border-t border-border/40 px-2 py-1">
                 {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
                   <button
                     type="button"
-                    disabled={convertingThreadId !== null}
+                    disabled={convertingThreadId !== null || deletionPending}
                     onClick={() => { void convertDiscussion(entry); }}
                     className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
                   >
@@ -707,7 +716,7 @@ export const HarnessThreadsPanel: React.FC<{
                 ) : null}
                 <button
                   type="button"
-                  disabled={busy}
+                  disabled={busy || deletionPending}
                   onClick={() => {
                     setThreadAction(entry.thread.id);
                     void applyThreadMutation(
@@ -725,7 +734,7 @@ export const HarnessThreadsPanel: React.FC<{
                 {occupancy?.reclaimable ? (
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || deletionPending}
                     onClick={() => {
                       setThreadAction(entry.thread.id);
                       void applyThreadMutation(
@@ -743,7 +752,7 @@ export const HarnessThreadsPanel: React.FC<{
                 {entry.thread.lifecycle === 'archived' ? (
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || deletionPending}
                     onClick={() => {
                       setThreadAction(entry.thread.id);
                       void applyThreadMutation(
@@ -760,7 +769,7 @@ export const HarnessThreadsPanel: React.FC<{
                 ) : (
                   <button
                     type="button"
-                    disabled={busy}
+                    disabled={busy || deletionPending}
                     onClick={() => {
                       setThreadAction(entry.thread.id);
                       void applyThreadMutation(
@@ -795,7 +804,7 @@ export const HarnessThreadsPanel: React.FC<{
                   }}
                   className={`inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] disabled:opacity-50 ${confirmDeleteId === entry.thread.id ? 'bg-[var(--status-error)]/15 text-[var(--status-error)] hover:bg-[var(--status-error)]/25' : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'}`}
                 >
-                  {t(busy && confirmDeleteId !== entry.thread.id
+                  {t((busy || deletionPending) && confirmDeleteId !== entry.thread.id
                     ? 'harness.threads.deleting'
                     : confirmDeleteId === entry.thread.id
                       ? 'harness.threads.deleteConfirm'

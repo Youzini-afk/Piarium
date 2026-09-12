@@ -138,4 +138,26 @@ describe('HarnessThreadsPanel projection', () => {
     expect(space.threads[0]?.keepReasons).toEqual(['User requested keep_worktree']);
     expect(() => parseHarnessThreadSpace({ workspaceId: 'workspace-1', threads: [], status: 'ready' })).toThrow(/Malformed/);
   });
+
+  test('preserves durable deletion progress in the thread projection', () => {
+    const deleting = thread({
+      lifecycle: 'archived',
+      deletion: {
+        operationId: 'delete-1',
+        rootThreadId: 'thread-1',
+        phase: 'directory',
+        requestedAt: '2026-09-12T00:00:00.000Z',
+        updatedAt: '2026-09-12T00:01:00.000Z',
+        error: 'volume busy',
+      },
+    });
+    const parsed = parseHarnessThreadList({
+      workspaceId: 'workspace-1',
+      parent: { kind: 'session', id: 'parent-1' },
+      includeArchived: true,
+      threads: [{ thread: deleting, activeRun: null }],
+    });
+    expect(parsed[0]?.thread.deletion?.phase).toBe('directory');
+    expect(parsed[0]?.thread.deletion?.error).toBe('volume busy');
+  });
 });

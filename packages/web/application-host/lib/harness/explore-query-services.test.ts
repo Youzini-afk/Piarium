@@ -243,7 +243,7 @@ describe("explore query services", () => {
         readPaths.push(path);
         return { status: "ready" as const, content: "export function NeedleSymbol() {}", revision: "rev-1", source: "disk" as const };
       },
-      graphRecall: () => graph,
+      graphRecall: async () => ({ workspaceId: "ws", store: graph, directFactsCompatible: true }),
       semanticRecall: async (
         _workspaceId: string,
         _question: string,

@@ -499,6 +499,7 @@ export interface KnowledgeStore {
   replaceResolvedRelationsForAnchor(
     anchor: { path: string; line: number },
     rows: ReadonlyArray<{ path: string; language: string; relations: readonly SymbolGraphRelationInput[] }>,
+    kinds?: readonly SymbolGraphRelationKind[],
   ): Promise<{ recorded: number; removed: number }>;
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
@@ -2096,7 +2097,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async replaceResolvedRelationsForAnchor(anchor, rows) {
+    async replaceResolvedRelationsForAnchor(anchor, rows, kinds) {
       return enqueueWrite(() => {
         const anchorPath = assertGraphText(anchor.path, "Anchor path");
         const anchorLine = anchor.line;
@@ -2125,10 +2126,12 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         // Find every existing relation row resolved from this anchor across
         // all files. The batch identity is the anchor — not individual paths.
         // anchorPath/anchorLine are not indexed, so scan in JS.
+        const replacedKinds = new Set(kinds ?? ["references", "calls"]);
         const staleIds = scanNodes((payload) => (
           payload["type"] === "link"
           && payload["active"] === true
           && RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind)
+          && replacedKinds.has(payload["kind"] as SymbolGraphRelationKind)
           && String(payload["anchorPath"] ?? "") === anchorPath
           && Number(payload["anchorLine"] ?? 0) === anchorLine
         )).map(({ id }) => id);
@@ -2194,7 +2197,11 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
                 ? { targetObservedRevision: targetRevisions.get(relation.targetPath) ?? null }
                 : {}),
               ...(generation ? { generation } : {}),
-              active: true,
+              // Batch insertion happens before the graph transaction can refer
+              // to the new numeric ids. Keep candidates invisible until the
+              // same transaction activates them, links them, and deletes the
+              // previous anchor rows.
+              active: false,
             });
           }
         }
@@ -2204,6 +2211,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         const insertOps: TransactionOperation[] = [
           ...deleteOps,
           ...linkIds.flatMap((id, index): TransactionOperation[] => [
+            { type: "updatePayload", id, payload: { ...newLinkPayloads[index]!, active: true } },
             { type: "upsertEdge", src: newLinkFileIds[index]!, dst: id, label: edgeLabelForKind(newLinkRelations[index]!.kind), weight: 1 },
           ]),
         ];

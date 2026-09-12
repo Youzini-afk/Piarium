@@ -239,7 +239,24 @@ describe("WorkingStateStore", () => {
     }
   });
 
-  it("migrates a schema v1 catalog to v4 with no draft baselines or capture scopes", async () => {
+  it("does not publish captured directory bytes when the fixed source identity moved", async () => {
+    const h = await harness();
+    try {
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base\n");
+      const base = await h.store.captureDirectory(h.workspace);
+      await h.store.createBranch("ws", "fixed-source", base);
+      await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "changed\n");
+      await expect(h.store.publishDirectoryResult("fixed-source", h.workspace, ["a.txt"], {
+        validateFixedSource: async () => false,
+      })).rejects.toThrow("source changed");
+      expect(h.store.listResults("fixed-source")).toEqual([]);
+      expect(h.store.getBranch("fixed-source")).toMatchObject({ headRevision: 0, deltas: {} });
+    } finally {
+      h.database.close();
+    }
+  });
+
+  it("rejects an obsolete schema instead of keeping an internal-format migration path", async () => {
     const h = await harness();
     try {
       await h.store.createBranch("ws", "legacy", {});
@@ -250,19 +267,13 @@ describe("WorkingStateStore", () => {
       for (const branch of Object.values(v1.branches as Record<string, Record<string, unknown>>)) delete branch.draftBasePaths;
       await fs.promises.writeFile(catalog, JSON.stringify(v1), "utf8");
 
-      const migrated = await WorkingStateStore.open(h.context);
-      expect(migrated.getBranch("legacy")?.draftBasePaths).toEqual([]);
-      expect(await migrated.getDraftBaseline("missing")).toBeNull();
-      await migrated.createBranch("ws", "next", {});
-      const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      expect(persisted.schemaVersion).toBe(4);
-      expect(persisted.draftBaselines).toEqual({});
+      await expect(WorkingStateStore.open(h.context)).rejects.toThrow("schema or workspace identity is malformed");
     } finally {
       h.database.close();
     }
   });
 
-  it("reads an older schema v2 branch without capture scopes and preserves draft baselines", async () => {
+  it("rejects schema 4 flat maps instead of accepting a hidden second representation", async () => {
     const h = await harness();
     try {
       await fs.promises.writeFile(path.join(h.workspace, "draft.ts"), "draft\n");
@@ -281,22 +292,11 @@ describe("WorkingStateStore", () => {
       await h.store.createBranch("ws", "legacy-v2", base, "base", ["draft.ts"], ["ignored"]);
       const catalog = path.join(h.root, "working-state", `${createHash("sha256").update("ws").digest("hex")}.json`);
       const v2 = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      v2.schemaVersion = 2;
-      delete (v2.branches as Record<string, Record<string, unknown>>)["legacy-v2"]!.captureScopes;
+      const branch = (v2.branches as Record<string, Record<string, unknown>>)["legacy-v2"]!;
+      branch.baseState = base;
       await fs.promises.writeFile(catalog, JSON.stringify(v2), "utf8");
-
-      const migrated = await WorkingStateStore.open(h.context);
-      expect(migrated.getBranch("legacy-v2")).toMatchObject({
-        draftBasePaths: ["draft.ts"],
-        captureScopes: [],
-      });
-      expect(await migrated.getDraftBaseline(draftBaseline.id)).toEqual(draftBaseline);
-      await migrated.createBranch("ws", "next-v3", base);
-      const persisted = JSON.parse(await fs.promises.readFile(catalog, "utf8")) as Record<string, unknown>;
-      expect(persisted.schemaVersion).toBe(4);
-      delete (persisted.branches as Record<string, Record<string, unknown>>)["next-v3"]!.captureScopes;
-      await fs.promises.writeFile(catalog, JSON.stringify(persisted), "utf8");
-      await expect(WorkingStateStore.open(h.context)).rejects.toThrow("Working branch next-v3 is malformed");
+      await expect(WorkingStateStore.open(h.context)).rejects.toThrow("must reference a state trie root");
+      expect(draftBaseline.id).toBeTruthy();
     } finally {
       h.database.close();
     }

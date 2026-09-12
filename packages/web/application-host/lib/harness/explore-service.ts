@@ -120,6 +120,9 @@ export function createExploreSearchService(
           ? [...ctx.actor.workspaceScope]
           : undefined;
       const effectiveParams: ExploreParams = effectivePaths ? { ...params, paths: effectivePaths } : params;
+      const graph = host.graphRecall
+        ? await host.graphRecall(ctx.sessionId, workspaceId).catch(() => null)
+        : null;
       let searchPartial = false;
       const result = await explore(effectiveParams, {
         rgSearch: async (pattern, options) => {
@@ -198,7 +201,7 @@ export function createExploreSearchService(
             }),
           },
         } : {}),
-        ...(host.graphRecall ? { graph: bindExploreGraphRecall(host.graphRecall, workspaceId, effectiveParams.paths) } : {}),
+        ...(graph ? { graph: bindExploreGraphRecall(graph.store, effectiveParams.paths) } : {}),
         ...(host.semanticRecall ? {
           semantic: {
             search: (question: string, limit?: number, signal?: AbortSignal) => (
@@ -268,31 +271,25 @@ export function createExploreSearchService(
 }
 
 function bindExploreGraphRecall(
-  getStore: NonNullable<HarnessServiceHost["graphRecall"]>,
-  workspaceId: string,
+  store: import("../knowledge/store.js").KnowledgeStore,
   roots?: readonly string[],
 ): ExploreGraphRecall {
-  const requireStore = (): NonNullable<ReturnType<typeof getStore>> => {
-    const store = getStore(workspaceId);
-    if (!store) throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
-    return store;
-  };
   const toSite = (record: import("../knowledge/store.js").SymbolGraphRelationRecord) => ({
     path: record.path,
     line: record.line,
     ...(record.caller !== undefined ? { caller: record.caller } : {}),
-    ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+    ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
     ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
     pinned: record.pinned,
     ...(record.staleTarget ? { staleTarget: true } : {}),
     resolvedBy: record.resolvedBy,
   });
   return {
-    catalogStats: async () => requireStore().catalogStats(),
-    searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
-    findLinks: (value) => requireStore().findLinks(value),
+    catalogStats: async () => store.catalogStats(),
+    searchDefinitions: (query, k) => store.searchSymbols(query, k, roots),
+    findLinks: (value) => store.findLinks(value),
     fileRelations: async (path) => {
-      const relations = await requireStore().getFileRelations(path);
+      const relations = await store.getFileRelations(path);
       if (!relations) return null;
       return {
         connections: relations.connections.map(({ callee, literal }) => ({ callee, literal })),
@@ -301,7 +298,7 @@ function bindExploreGraphRecall(
           path: record.path,
           line: record.line,
           ...(record.caller !== undefined ? { caller: record.caller } : {}),
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
           ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
           pinned: record.pinned,
           ...(record.staleTarget ? { staleTarget: true } : {}),
@@ -312,7 +309,7 @@ function bindExploreGraphRecall(
           line: record.line,
           ...(record.caller !== undefined ? { caller: record.caller } : {}),
           callee: record.targetName ?? record.value,
-          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
           ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
           pinned: record.pinned,
           ...(record.staleTarget ? { staleTarget: true } : {}),
@@ -320,10 +317,10 @@ function bindExploreGraphRecall(
         })),
       };
     },
-    findImporters: (path) => requireStore().findImporters(path),
-    findReferences: async (name) => (await requireStore().findReferences(name)).map(toSite),
-    findCallers: async (name) => (await requireStore().findCallers(name)).map(toSite),
-    findCalls: async (caller) => (await requireStore().findCalls(caller)).map(toSite),
+    findImporters: (path) => store.findImporters(path),
+    findReferences: async (name) => (await store.findReferences(name, roots)).map(toSite),
+    findCallers: async (name) => (await store.findCallers(name, roots)).map(toSite),
+    findCalls: async (caller) => (await store.findCalls(caller, roots)).map(toSite),
   };
 }
 

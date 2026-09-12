@@ -376,15 +376,12 @@ capture generation and dirty-state barrier cover the whole window. Unsupported
 states cannot be silently skipped during materialization. New virtual regular
 files receive the umask-derived default mode without creating a probe file in the
 user tree, so apply and compensation compare full `sameState` identities. Git
-capture and import adapt blob bytes to the worktree view through
-`working-state/git-adaptation.ts`: `check-attr` resolves filter/text/eol/
-working-tree-encoding per path, `filter=lfs` pointers resolve to the local
-`lfs/objects` copy (never a download) or stay as pointer bytes, other filters
-and EOL/encoding conversions run through `git cat-file --filters --path`, and
-the index mode (100644/100755) restores the executable bit where the
-filesystem cannot stat it. `sameState` normalizes file modes to the
-readonly/writable dimension on Windows so index-adapted and filesystem-captured
-states stay comparable. Materialization and the non-Git worktree/baseline
+capture records the bytes already materialized for tools. Settle fixes the
+result snapshot first, captures its real files, and revalidates that source
+before publishing the catalog; it does not replay custom filters or contact
+Git LFS. The index mode (100644/100755) restores the executable bit where the
+filesystem cannot stat it and participates in the capture fingerprint.
+Materialization and the non-Git worktree/baseline
 copies share `workspace/reflink.ts`: a forced reflink shares extents with the
 content-addressed object file where the filesystem supports it (ReFS/APFS/
 Btrfs) and reports the real backend otherwise (`MaterializeResult.cow`).
@@ -392,7 +389,10 @@ Persisted path maps are Merkle tries (`state-trie.ts`, schema 4): every map
 serializes as a `{trie}` root into a shared `stateNodes` pool so equal subtrees
 across branches and results are written once, the pool rebuild from live roots
 reclaims orphans, writes use structural sharing instead of a whole-document
-clone, and `treeIdentityFromStates` is the trie root.
+clone, and `treeIdentityFromStates` is the trie root. The current TS runtime
+still uses flat maps in memory and rewrites the catalog; production root
+authority and incremental node transactions belong to Rust stage R1. Old
+WorkingState schemas and schema-4 flat maps are rejected rather than migrated.
 Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a
@@ -484,15 +484,18 @@ results, Run inputs, review and Integration users. The guard ends before object
 collection. The current branch/report/transcript remains; completed Integration
 undo keeps its own safety/target objects. Metadata removal and physical cleanup
 have separate outcomes and the same branch/revision request can retry cleanup.
-`DELETE .../threads/:threadId` (D-242) removes the whole Thread through the same
+`DELETE .../threads/:threadId` (D-242/D-254) removes the whole Thread through the same
 post-order cascade shape as archive: each node settles its active Run without
 minting a partial result, deletes every Pi session it owned (worker, transcript
 file, metadata via `piRuntimeBroker.deleteSession`), releases all result
 revisions plus the work branch and draft baseline under the storage lease,
 removes the managed directory (ownership assertion and user/writer guard still
 apply; keep_worktree does not — the record is being removed), then atomically
-removes the Thread and Run rows and unbinds session bindings. A directory
-removal failure keeps the record for retry.
+removes the Thread and Run rows and unbinds session bindings. The operation,
+root thread, next phase, and last error are durable before side effects; Host
+restart resumes them. A failed descendant prevents the parent commit point.
+Knowledge and retrieval evidence references are required cleanup steps, and a
+directory or reference failure keeps the record for retry.
 WorkingState publishes metadata before removing old references and protects new
 write candidates until durable publication; startup reconciles derived references
 without interpreting a missing catalog as empty (D-239).

@@ -59,8 +59,9 @@ const lookupNode = (nodes: Record<string, StateTrieNode>, hash: string): StateTr
  *
  * D-251 rework: the new nodes map is a prototype chain over the input —
  * lookups fall through to the original, and only new nodes are written.
- * This is O(1) per set (not O(n) from copying the entire pool), so
- * `trieFromEntries` is O(n·depth) instead of O(n²).
+ * Allocating the overlay does not copy the whole node pool. The path update
+ * creates O(depth) nodes, while each changed directory copies its child map;
+ * this helper does not claim constant-time end-to-end mutation.
  */
 export const trieSet = (trie: StateTrie, path: string, state: RecoveryState): StateTrie => {
   const segments = path.split("/").filter(Boolean);
@@ -158,9 +159,10 @@ export const trieToRecord = (trie: StateTrie): Record<string, RecoveryState> =>
   Object.fromEntries(trieEntries(trie));
 
 /**
- * Build a trie from entries in O(n·depth) using a single flat nodes map
+ * Build a trie from entries with one path sort and one bottom-up traversal
  * (D-251 rework). Entries are sorted by path so subtrees are built
- * bottom-up; shared prefixes create shared interior nodes naturally.
+ * bottom-up; shared prefixes create shared interior nodes naturally. Cost is
+ * O(n log n + total path segments), excluding hashing the serialized states.
  */
 export const trieFromEntries = (entries: Iterable<readonly [string, RecoveryState]>): StateTrie => {
   const sorted = [...entries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
@@ -219,14 +221,11 @@ export const trieIdentity = (trie: StateTrie): string => `sha256-${trie.root}`;
  * treated as an empty tree — the caller must see the verification failure.
  */
 export const verifyTrie = (trie: StateTrie): void => {
-  const visited = new Set<string>();
+  const visiting = new Set<string>();
+  const verified = new Set<string>();
   const check = (hash: string, path: string): void => {
-    if (hash === EMPTY_ROOT) {
-      if (!trie.nodes[hash]) return; // empty root may be absent
-      return;
-    }
-    if (visited.has(hash)) throw new Error(`State trie has a cycle at ${hash} (path ${path})`);
-    visited.add(hash);
+    if (verified.has(hash)) return;
+    if (visiting.has(hash)) throw new Error(`State trie has a cycle at ${hash} (path ${path})`);
     const node = trie.nodes[hash];
     if (!node) throw new Error(`State trie node is missing: ${hash} (path ${path})`);
     // Verify the node's content hashes to its key.
@@ -234,12 +233,33 @@ export const verifyTrie = (trie: StateTrie): void => {
     if (actualHash !== hash) {
       throw new Error(`State trie node ${hash} is corrupt: content hashes to ${actualHash} (path ${path})`);
     }
+    visiting.add(hash);
     // Verify all children exist (recursively).
     for (const [name, childHash] of Object.entries(node.children)) {
       check(childHash, path ? `${path}/${name}` : name);
     }
+    visiting.delete(hash);
+    verified.add(hash);
   };
   check(trie.root, "");
+};
+
+/**
+ * Materialize the reachable content-addressed DAG as an ordinary record.
+ * `StateTrie.nodes` may be an overlay whose unchanged nodes live on its
+ * prototype chain; enumerating own properties would silently omit them.
+ */
+export const trieReachableNodes = (trie: StateTrie): Record<string, StateTrieNode> => {
+  verifyTrie(trie);
+  const result: Record<string, StateTrieNode> = {};
+  const visit = (hash: string): void => {
+    if (Object.hasOwn(result, hash)) return;
+    const node = lookupNode(trie.nodes, hash);
+    result[hash] = node;
+    for (const childHash of Object.values(node.children)) visit(childHash);
+  };
+  visit(trie.root);
+  return result;
 };
 
 export interface StateTrieDiff {

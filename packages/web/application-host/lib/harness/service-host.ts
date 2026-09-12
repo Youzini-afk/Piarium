@@ -167,10 +167,16 @@ export interface HarnessServiceHost {
    */
   fileRelations: ((workspaceId: string, path: string) => Promise<Omit<import("@piarium/protocol").ExploreFileRelation, "stale"> | null>) | null;
   /**
-   * Already-open symbol graph for path-level recall. Returning null means the
-   * store is not open; the caller must degrade, not open a database (D-112).
+   * Resolve an execution session to its owning, already-open symbol graph.
+   * The graph is owned by the project workspace; the execution workspace only
+   * owns Documents/LSP/path access for an isolated Run.
    */
-  graphRecall: ((workspaceId: string) => import("../knowledge/store.js").KnowledgeStore | null) | null;
+  graphRecall: ((sessionId: string, executionWorkspaceId: string) => Promise<{
+    workspaceId: string;
+    store: import("../knowledge/store.js").KnowledgeStore;
+    /** Stored line/revision facts may be returned directly only in this view. */
+    directFactsCompatible: boolean;
+  } | null>) | null;
   /**
    * Bounded live resolution of references/calls around a queried anchor
    * (D-240). Absent when no language supervisor is wired — `related` then

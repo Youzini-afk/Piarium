@@ -151,6 +151,15 @@ describe("relation collector", () => {
         documentRevision: null,
       });
       expect(await openedStore.findCallers("uniqueTarget")).toEqual([]);
+
+      await collector.record(workspaceId, {
+        anchor: { path: "use.ts", line: 4, character: 12 },
+        anchorRevision: "disk-u2",
+        name: "uniqueTarget",
+        resolvedBy: "lsp.references",
+        sites: [],
+      });
+      expect(await openedStore.findReferences("uniqueTarget")).toEqual([]);
     } finally {
       await harness.cleanup();
     }

@@ -5576,3 +5576,48 @@ plan 0.1/0.7/3.4/阶段 R、status 阶段 R、roadmap、AGENTS 与 native recove
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-253 | accepted policy（无用户阶段直接替换旧内部格式，不建升级兼容） | —；supersedes in part D-252 第 5 项和 R1 默认转换要求 | AGENTS；rust-kernel-design 9/10；plan 0.1/R1；architecture；harness；status R |
+
+### D-254 · 2026-09-12 · D-240–D-251 独立验收收口
+
+类型：验收发现与实现纠正；supersedes in part D-246–D-251
+
+验收没有接受执行报告本身作为交付证据。实际代码仍有五组决定性问题：图存储继续按 execution workspace 查找，直接 LSP
+结果可带出 actor scope；Thread 删除阶段只存在于返回 DTO，子节点失败后仍会删除父节点，retrieval 引用清理仍是吞错 observer；
+旧 worktree 的 `importFixedResult` 才使用 Git filter 适配层，该链既是 D-253 已撤销的兼容路径，也会通过 `cat-file --filters`
+触发未知 filter/LFS 副作用，Git index mode 又没有进入捕获指纹；目录型 `copyIgnored` 仍绕过 reflink 原语；trie 校验把合法
+共享子树误判为循环，prototype-chain 节点序列化漏掉继承节点，引用对账会把 schema 4 写回平表。
+
+决定：
+
+1. 图库解析以 session binding 的 owning workspace 为准；Documents/LSP/路径仍使用 execution workspace。`related` 只有在
+   owning 与 execution 相同且没有固定脏缓冲时才能直接陈述存量图位置；隔离视图返回 unavailable。`explore` 可把 owning 图
+   当候选来源，但最终材料仍由固定 execution view 读取。公开 LSP 的正文、raw value 与写后图行统一按 actor scope 过滤；
+   navigation 的权威空结果按 anchor + relation kind 替换旧行。
+2. 整条 Thread 删除先把 operationId、rootThreadId 与“下一阶段”写入所有待删节点，再执行 sessions → store → directory →
+   registry。阶段副作用完成后才推进持久 phase；失败保留 error 并可在 Host 重启后续跑。任一后代未完成时父节点不得进入
+   删除提交点，`deletedThreadIds` 只列真实移除项。knowledge 在 session binding 消失前清理；retrieval evidence/receipt/artifact
+   引用成为 store 阶段的必需动作，不再依赖 `onThreadRemoved` observer。
+3. 删除 `importFixedResult`、`git-migration.ts` 和 commit-blob smudge/LFS 重建链。当前线程在 dispatch 已有 WorkingBranch
+   基线；物化线程 settle 时先生成固定 snapshot，再从该 snapshot 的真实工作区字节发布 native result，并在发布 catalog 前
+   复核 snapshot 身份。该路径不执行 filter，不访问 LFS 网络。Git index 100644/100755 仍覆盖 Windows 捕获并进入 capture
+   fingerprint。旧内部 worktree 记录不迁移，符合 D-253。
+4. 目录型 `copyIgnored` 逐文件走 `copyFilePreferReflink`，不再调用递归 `fs.cp`。
+5. trie 完整性校验区分 recursion stack 与已验证 DAG 节点，校验 empty root；持久化按 root 遍历所有可达节点，不能依赖
+   own-property 枚举；引用对账也必须走唯一 schema 4 serializer。schema 1–3 与 schema 4 平表均直接拒绝。当前 TS
+   `WorkingBranch` 仍是平表内存权威，Merkle 只承担当前 schema 的持久去重与 tree identity；不得把它写成生产 root authority。
+   真正的 root 读写入口、增量节点事务与取消 whole-pool rewrite 归阶段 R1，一次接管，当前不再复制建设一套 TS 内核。
+6. D-241/D-247 的未知 exec、warning 与失败块本轮复验没有发现新的阻塞错误，保持现状。
+
+状态：已实施并有定向反例；完整证据与仍未实测环境见 status。D-246–D-251 的历史正文不改，本条覆盖其上述错误声明。
+
+## D-254 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-246 | superseded in part（owning/execution 图解析、固定视图与直接 LSP scope 由 D-254 纠正） | D-254 | status 3.1/3.3/3.8 |
+| D-247 | implementation（本轮复验无新增阻塞项） | — | status 3.17 |
+| D-248 | superseded in part（持久删除 intent、后代提交屏障、evidence 必需清理由 D-254 纠正） | D-254 | status 3.10 |
+| D-249 | superseded（旧内部 Git result 迁移与 filter/LFS 重建链由 D-254 删除） | D-254 | status 3.4a；阶段 R |
+| D-250 | superseded in part（目录型 copyIgnored 的逐文件 CoW 由 D-254 补齐） | D-254 | status 3.4a |
+| D-251 | superseded in part（DAG 校验、可达节点序列化、唯一 schema 与权威表述由 D-254 纠正） | D-254 | status 3.4a；阶段 R1 |
+| D-254 | implementation | — | status 3.1/3.3/3.4a/3.8/3.10/3.17；harness 6.2/9.2.5b/9.3.4 |

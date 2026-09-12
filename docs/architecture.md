@@ -778,9 +778,12 @@ Killing or archiving a parent walks descendants in stable post-order and enters 
 lifecycle serialization before the parent; restore is refused while an ancestor is archived or the
 cascade is in progress (D-223). Role tools come from
 the child's own launch manifest.
+Whole-Thread deletion first records one operation and the next phase on every node. Descendants reach
+their registry commit point before the parent; failed cleanup leaves a durable retry state and startup
+resumes it. Session knowledge and retrieval evidence references are required phases (D-254).
 Owning workspace (Thread catalog, WorkingState, knowledge, parent/child lifecycle) is distinct from the
 execution workspace Documents assigns to a scratch or materialized cwd (D-216 / D-222). Thread services,
-Zone 2, lost resume, and knowledge/recall/suggestions read the Host session binding after catalog
+Zone 2, lost resume, symbol graph, and knowledge/recall/suggestions read the Host session binding after catalog
 reconciliation; they do not treat `ctx.workspaceId` as the catalog key or skip a thread tool allowlist
 when the owner is missing. Git materialization uses `git worktree add --detach` (writes `.git/worktrees`) or an
 independent `git init`; child Git commands must not discover or mutate the user repository.
@@ -795,8 +798,10 @@ repository's persisted `executionBaseline` after init, detach, crash recovery, o
 (D-220). Reclaim drops that SHA with the deleted child objects. Working-branch reads re-fetch the
 current view after the store lease; an explore query copies one immutable snapshot in that lease.
 Default new-file mode is computed from umask, never by writing a probe file in the user tree.
-Dispatch fingerprints include dirty-path content identities so a mid-scan replacement cannot mint a
-mixed baseline.
+Dispatch fingerprints include dirty-path content identities and Git index modes so a mid-scan replacement
+or executable-bit change cannot mint a mixed baseline. Materialized settle snapshots before native result
+publication, captures the actual worktree bytes, and rechecks the snapshot before committing; it never
+replays custom filters or contacts LFS during result publication (D-254).
 Nested merge takes parent write/switch authority first, then chooses branch or directory authority,
 then opens the store or directory (D-221). No path may hold a WorkingState exclusive lease and then
 wait on `VirtualWriteGate`. Branch integration persists an applying intent before the parent CAS and
@@ -805,10 +810,10 @@ Startup directory reconcile must resolve the execution Documents gate from the p
 directory; failure is needs-attention, not an owning-gate write (D-222). Queued dequeue passes the
 frozen manifest overlay into `session.create`.
 
-Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (catalog schema 3).
+Explicit `harness.worktree.copyIgnored` roots are frozen in WorkingBranch `captureScopes` (current catalog schema 4).
 Narrow result publication enumerates only those roots, their baseline descendants, and current descendants,
 so ignored modifications, additions, and deletions survive result publication and reclamation without a
-workspace-wide rescan. Schema 1/2 catalogs migrate with an empty capture scope.
+workspace-wide rescan. Obsolete WorkingState schemas are rejected rather than migrated (D-253/D-254).
 
 Parent-session `explore`, `grep`, and the same-name Pi `read`, `find`, and `ls` overrides consume the immutable surface input.
 An isolated Thread Run with a WorkingBranch binding instead consumes `fixed base + branch delta/tombstone` through the same

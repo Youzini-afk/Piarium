@@ -7,7 +7,7 @@ import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
 import { WorkingStateStore } from "./working-state-store.js";
-import { withAncestorDirectories } from "./workspace-baseline.js";
+import { gitBaselineFingerprint, withAncestorDirectories } from "./workspace-baseline.js";
 
 const roots: string[] = [];
 const catalogs: Array<{ close(): void }> = [];
@@ -52,6 +52,12 @@ describe("workspace baseline capture", () => {
       "src/app/main.ts",
       "src/app/util.ts",
     ]);
+  });
+
+  it("changes the capture fingerprint when only the Git index executable mode changes", () => {
+    const base = { kind: "git" as const, baseRef: "abc", unborn: false, paths: ["script.sh"], gitlinks: [] };
+    expect(gitBaselineFingerprint({ ...base, indexModes: { "script.sh": "100644" } }))
+      .not.toBe(gitBaselineFingerprint({ ...base, indexModes: { "script.sh": "100755" } }));
   });
 
   it("fixes Git clean, staged, unstaged, untracked, deleted, and captureScopes while omitting ignored files", async () => {

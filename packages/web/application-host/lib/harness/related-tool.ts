@@ -94,25 +94,25 @@ const relationStatus = (rowCount: number, outcomes: readonly string[]): RelatedR
   return "empty";
 };
 
-const referenceItem = (record: SymbolGraphRelationRecord): RelatedReferenceSite => ({
+const referenceItem = (record: SymbolGraphRelationRecord, roots?: readonly string[]): RelatedReferenceSite => ({
   path: record.path,
   line: record.line,
   ...(record.character !== undefined ? { character: record.character } : {}),
   ...(record.caller !== undefined ? { caller: record.caller } : {}),
-  ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+  ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
   ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
   pinned: record.pinned,
   ...(record.staleTarget ? { staleTarget: true } : {}),
   resolvedBy: record.resolvedBy,
 });
 
-const callEdge = (record: SymbolGraphRelationRecord): RelatedCallEdge => ({
+const callEdge = (record: SymbolGraphRelationRecord, roots?: readonly string[]): RelatedCallEdge => ({
   path: record.path,
   line: record.line,
   ...(record.character !== undefined ? { character: record.character } : {}),
   ...(record.caller !== undefined ? { caller: record.caller } : {}),
   callee: record.targetName ?? record.value,
-  ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+  ...(record.targetPath !== undefined && pathInRoots(record.targetPath, roots) ? { targetPath: record.targetPath } : {}),
   ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
   pinned: record.pinned,
   ...(record.staleTarget ? { staleTarget: true } : {}),
@@ -266,30 +266,30 @@ export async function executeRelated(
   let relationsIncomplete = focus.omitted > 0;
   if (kind === "name") {
     for (const record of await store.findReferences(anchor, roots)) {
-      if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record));
+      if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record, roots));
     }
     for (const record of await store.findCallers(anchor, roots)) {
-      if (pathInRoots(record.path, roots)) callerEdges.push(callEdge(record));
+      if (pathInRoots(record.path, roots)) callerEdges.push(callEdge(record, roots));
     }
     for (const record of await store.findCalls(anchor, roots)) {
-      if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record));
+      if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record, roots));
     }
   } else {
     const path = focusPaths[0]!;
     const relations = await store.getFileRelations(path);
     if (relations) {
       for (const record of relations.references) {
-        if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record));
+        if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record, roots));
       }
       for (const record of relations.calls) {
-        if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record));
+        if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record, roots));
       }
     }
     const definedSymbols = capped(definitions.filter((item) => item.path === path), RELATED_CALLER_SYMBOL_LIMIT);
     if (definitions.filter((item) => item.path === path).length > definedSymbols.shown.length) relationsIncomplete = true;
     for (const symbol of definedSymbols.shown) {
       for (const record of await store.findCallers(symbol.name, roots)) {
-        if (record.targetPath === path && pathInRoots(record.path, roots)) callerEdges.push(callEdge(record));
+        if (record.targetPath === path && pathInRoots(record.path, roots)) callerEdges.push(callEdge(record, roots));
       }
     }
   }

@@ -1166,7 +1166,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       receipt: import('./lib/harness/web-fetch-receipt.js').WebFetchReceiptDraft,
       markdown: string,
     ) => Promise<import('@piarium/protocol').RetrievalUrlReceipt>;
-    releaseThread?: (workspaceId: string, threadId: string) => Promise<void>;
     syncThread?: (workspaceId: string, thread: import('@piarium/protocol').Thread) => Promise<void>;
   } = {};
   const webFetchService = createWebFetch({
@@ -1217,7 +1216,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onObserverError: (error) => {
       console.error('[HarnessThreads] Observer failed:', errorMessage(error));
     },
-    onThreadRemoved: (workspaceId, threadId) => retrievalEvidenceAccess.releaseThread?.(workspaceId, threadId),
     onThreadChanged: (workspaceId, parent, thread, activeRun) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-thread-changed',
@@ -1335,7 +1333,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
-  retrievalEvidenceAccess.releaseThread = retrievalArtifacts.releaseThreadEvidence;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
     await retrievalArtifacts.reconcileWorkspaceEvidence(
@@ -1430,13 +1427,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
     deleteSession: (sessionId) => piRuntimeBroker.deleteSession(sessionId),
-    deleteKnowledgeSession: async (sessionId) => {
+    deleteKnowledgeSession: async (workspaceId, sessionId) => {
       // Delete the session's event/block/session knowledge nodes through the
       // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
       // workspace/user knowledge is retained.
-      const store = await getKnowledgeStoreForSession(sessionId);
+      const store = knowledgeStores.get(workspaceId) ?? null;
       if (store) await store.deleteSession(sessionId);
     },
+    releaseThreadEvidence: (workspaceId, threadId) => retrievalArtifacts.releaseThreadEvidence(workspaceId, threadId),
     onThreadSessionBound: (sessionId, owningWorkspaceId) => bindThreadKnowledgeSession(sessionId, owningWorkspaceId),
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,
@@ -1675,6 +1673,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       { kind: 'session', id: sessionId },
       async (thread) => { await threadRuntime!.kill(thread.id, false, workspaceId); },
     );
+  });
+  void threadRuntime.resumePendingDeletions().catch((error) => {
+    console.error('[HarnessThreads] Pending deletion recovery failed:', errorMessage(error));
   });
 
   const catalogScan = {
@@ -2116,13 +2117,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Write-behind (D-240): a disk-bound lsp.references/lsp.definition answer
       // becomes graph rows so later related/explore queries reuse the
       // resolution instead of re-asking the language view.
-      recordRelations: (input) => relationCollector.record(input.workspaceId, input),
+      recordRelations: async (input) => {
+        const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(input.sessionId, input.workspaceId);
+        // A child execution view may contain unpublished branch text. It can use
+        // LSP answers in that view, but those rows must not enter the owning
+        // workspace graph as committed facts.
+        if (!owningWorkspaceId || owningWorkspaceId !== input.workspaceId) return { recorded: 0 };
+        return relationCollector.record(owningWorkspaceId, input);
+      },
     }),
     structureSource,
     // Reading relations must not open a database or start a catalog scan, so
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
-    graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
+    graphRecall: async (sessionId, executionWorkspaceId) => {
+      const owningWorkspaceId = await owningKnowledgeWorkspaceIdForSession(sessionId, executionWorkspaceId);
+      if (!owningWorkspaceId) return null;
+      const store = knowledgeStores.get(owningWorkspaceId);
+      return store ? {
+        workspaceId: owningWorkspaceId,
+        store,
+        directFactsCompatible: owningWorkspaceId === executionWorkspaceId,
+      } : null;
+    },
     // Bounded live resolution for related.query — one references +
     // call-hierarchy pass per exact-match definition (D-240).
     relationCollector,

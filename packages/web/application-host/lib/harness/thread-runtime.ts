@@ -110,9 +110,11 @@ export interface ThreadRuntimeOptions {
    * `KnowledgeStore.deleteSession` (D-242 rework). Accepted workspace/user
    * knowledge is retained — only the thread's own session knowledge is removed.
    */
-  deleteKnowledgeSession?(sessionId: string): Promise<unknown>;
+  deleteKnowledgeSession?(workspaceId: string, sessionId: string): Promise<unknown>;
+  /** Release retrieval evidence/receipt/artifact owners before the Thread row disappears. */
+  releaseThreadEvidence?(workspaceId: string, threadId: string): Promise<void>;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
-    Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectIndexModes" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
+    Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "inspectGitBaselineInventory" | "inspectIndexModes" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage" | "verifyFixedResult">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string }>>;
@@ -1804,19 +1806,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         checkPreparation();
       }
       preparedCwd = worktree.path;
-      if (options.workingStates && options.worktrees.importFixedResult && !existing?.workBranchId && worktree.resultCommit) {
-        const imported = await options.workingStates.withStore(
-          input.workspaceId,
-          "thread-result-migrate",
-          (store) => options.worktrees.importFixedResult!(input.workspaceId, input.threadId, worktree!, store),
-        );
-        await options.registry.setWorkingState(input.workspaceId, input.threadId, {
-          branchId: imported.branchId,
-          resultRevision: imported.resultRevision,
-          worktree,
-          diffStats: imported.diffStats,
-        });
-      } else if (options.workingStates && !existing?.workBranchId) {
+      if (options.workingStates && !existing?.workBranchId) {
         needsBranchCapture = true;
       }
     }
@@ -2333,11 +2323,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let nativeResultUnavailable = Boolean(thread.workBranchId && (!options.workingStates || !currentWorktree));
     if (currentWorktree) {
       let inspected: Awaited<ReturnType<ThreadWorktreeRuntime["inspect"]>> | null = null;
+      let fixedSnapshotReady = false;
       const inspectVirtualWithoutBranch = isVirtualWorktree(currentWorktree)
         && (!options.workingStates || !thread.workBranchId);
-      if (!isVirtualWorktree(currentWorktree) || inspectVirtualWithoutBranch) {
+      if (!isVirtualWorktree(currentWorktree)) {
         try {
-          inspected = await options.worktrees.inspect(currentWorktree, "live");
+          currentWorktree = await options.worktrees.snapshot(currentWorktree);
+          if (!currentWorktree.resultPath && options.worktrees.verifyFixedResult
+            && !await options.worktrees.verifyFixedResult(currentWorktree)) {
+            throw new Error("Thread result changed after its fixed snapshot was created");
+          }
+          fixedSnapshotReady = true;
+        } catch (error) {
+          nativeResultUnavailable = Boolean(thread.workBranchId);
+          unresolved.push(`Unable to snapshot thread result: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (fixedSnapshotReady || inspectVirtualWithoutBranch) {
+        try {
+          inspected = await options.worktrees.inspect(currentWorktree, fixedSnapshotReady ? "fixed" : "live");
           changedFiles = inspected.changedFiles;
           diffStats = inspected.diffStats;
         } catch (error) {
@@ -2355,7 +2359,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             "thread-result-publish",
             (store) => isVirtualWorktree(currentWorktree)
               ? store.publishHeadResult(thread.workBranchId!)
-              : store.publishDirectoryResult(thread.workBranchId!, currentWorktree!.path, inspected!.changedFiles, { indexModes: publishedIndexModes }),
+              : store.publishDirectoryResult(
+                thread.workBranchId!,
+                currentWorktree!.resultPath ?? currentWorktree!.path,
+                inspected!.changedFiles,
+                {
+                  indexModes: publishedIndexModes,
+                  ...(options.worktrees.verifyFixedResult
+                    ? { validateFixedSource: () => options.worktrees.verifyFixedResult!(currentWorktree!) }
+                    : {}),
+                },
+              ),
           );
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;
@@ -2429,8 +2443,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(diffStats ? { diffStats } : {}),
         });
       }
-      try {
-        currentWorktree = await options.worktrees.snapshot(currentWorktree);
+      if (fixedSnapshotReady) {
+        try {
         if (thread.workBranchId) {
           await options.registry.setWorkingState(binding.workspaceId, binding.threadId, {
             branchId: thread.workBranchId,
@@ -2443,8 +2457,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         } else {
           await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
         }
-      } catch (error) {
-        unresolved.push(`Unable to snapshot thread result: ${error instanceof Error ? error.message : String(error)}`);
+        } catch (error) {
+          unresolved.push(`Unable to persist fixed thread result: ${error instanceof Error ? error.message : String(error)}`);
+        }
       }
       if (nativeResultUnavailable) {
         await options.registry.setIntegration(
@@ -3093,24 +3108,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw error;
     }
     const operation = async () => {
-      let branchId = thread.workBranchId;
-      let resultRevision = requestedRevision ?? thread.resultRevision;
-      if (coordinator && options.workingStates && options.worktrees.importFixedResult
-        && !branchId && thread.worktree?.resultCommit && requestedRevision === undefined) {
-        const imported = await options.workingStates.withStore(
-          workspaceId,
-          "thread-result-migrate",
-          (store) => options.worktrees.importFixedResult!(workspaceId, threadId, thread.worktree!, store),
-        );
-        branchId = imported.branchId;
-        resultRevision = imported.resultRevision;
-        await options.registry.setWorkingState(workspaceId, threadId, {
-          branchId,
-          resultRevision,
-          worktree: thread.worktree,
-          diffStats: imported.diffStats,
-        });
-      }
+      const branchId = thread.workBranchId;
+      const resultRevision = requestedRevision ?? thread.resultRevision;
       if (thread.manifest.draftBaselineId && (!coordinator || !options.workingStates || !branchId || !resultRevision)) {
         throw new Error("Thread draft baseline requires a published native result for integration");
       }
@@ -3206,6 +3205,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return await withThreadLifecycle(workspaceId, threadId, async () => {
         const latest = await options.registry.getThread(workspaceId, parent, threadId);
         if (!latest) throw new Error(`Thread not found: ${threadId}`);
+        if (latest.deletion) throw new Error("Cannot merge a thread while deletion is pending");
         if (latest.lifecycle === "archived") throw new Error("Cannot merge an archived thread");
         thread = latest;
         return options.withMergeWriter
@@ -3728,8 +3728,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
    * D-242: remove every Pi session a Thread owned — live or ended. Each run's
    * sessionId and the report's transcript session go through the runtime
    * broker, which settles the worker, deletes the session file, and clears
-   * metadata; the broker's delete coordinator archives-by-session is a no-op
-   * here because the cascade removes those rows right after.
+   * metadata. The durable deletion marker survives the broker's archive-by-
+   * session projection when a later cleanup phase needs retry.
    */
   const deleteThreadSessions = async (workspaceId: string, threadId: string): Promise<string[]> => {
     const sessionIds = new Set<string>();
@@ -3746,14 +3746,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw new ThreadRuntimeError("unavailable", "Session deletion is unavailable; the thread's transcripts would be left behind");
     }
     for (const sessionId of sessionIds) {
-      await options.deleteSession(sessionId);
       // Delete the session's event/block/session knowledge nodes through the
-      // existing KnowledgeStore.deleteSession (D-242 rework). Accepted
-      // workspace/user knowledge is retained. Failure is not swallowed — a
-      // knowledge cleanup failure must surface, not silently succeed.
+      // owning workspace before the runtime broker removes its session binding.
+      // A retry is idempotent; failure leaves the transcript and binding intact.
       if (options.deleteKnowledgeSession) {
-        await options.deleteKnowledgeSession(sessionId);
+        await options.deleteKnowledgeSession(workspaceId, sessionId);
       }
+      await options.deleteSession(sessionId);
     }
     return [...sessionIds];
   };
@@ -3766,26 +3765,27 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const releaseThreadStore = async (workspaceId: string, thread: Thread): Promise<void> => {
     const branchId = thread.workBranchId;
     const draftBaselineId = thread.manifest.draftBaselineId ?? null;
-    if ((!branchId && !draftBaselineId) || !options.workingStates) return;
-    await options.workingStates.withStore(workspaceId, "thread-delete", async (store, context) => {
-      if (!context.collectUnreachableObjects) {
-        throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
-      }
-      if (branchId) {
-        const revisions = store.listResults(branchId).map((result) => result.resultRevision);
-        await store.reconcileObjectReferences();
-        if (revisions.length > 0) await store.deleteResults(branchId, revisions);
-        await store.deleteBranch(branchId);
-      }
-      if (draftBaselineId) await store.deleteDraftBaseline(draftBaselineId);
-      try {
-        await context.collectUnreachableObjects();
-      } catch (error) {
-        // Metadata is the logical authority — rows are gone; unreachable-object
-        // collection is opportunistic and retryable by the next cleanup pass.
-        reportError(error);
-      }
-    }, "exclusive");
+    if (options.workingStates) {
+      await options.workingStates.withStore(workspaceId, "thread-delete", async (store, context) => {
+        if (!context.collectUnreachableObjects) {
+          throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
+        }
+        if (branchId) {
+          const revisions = store.listResults(branchId).map((result) => result.resultRevision);
+          await store.reconcileObjectReferences();
+          if (revisions.length > 0) await store.deleteResults(branchId, revisions);
+          await store.deleteBranch(branchId);
+        }
+        if (draftBaselineId) await store.deleteDraftBaseline(draftBaselineId);
+        try {
+          await context.collectUnreachableObjects();
+        } catch (error) {
+          // Metadata is the logical authority — rows are gone; unreachable-object
+          // collection is opportunistic and retryable by the next cleanup pass.
+          reportError(error);
+        }
+      }, "exclusive");
+    }
   };
 
   /**
@@ -3835,6 +3835,19 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     // Already removed — idempotent retry continues from observed facts (D-242 rework).
     if (!thread) return { threadId, status: "complete" };
+    const deletion = thread.deletion;
+    if (!deletion) {
+      return { threadId, status: "needs-attention", phase: "sessions", error: "Thread has no durable deletion intent" };
+    }
+    const fail = async (
+      status: Exclude<DeletionNodeResult["status"], "complete">,
+      phase: DeletionPhase,
+      error: unknown,
+    ): Promise<DeletionNodeResult> => {
+      const message = error instanceof Error ? error.message : String(error);
+      await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, phase, message);
+      return { threadId, status, phase, error: message };
+    };
     if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
       // Deletion must not mint a partial result revision that the cascade is
       // about to release; the Run still settles as cancelled first.
@@ -3843,35 +3856,41 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // Phase 1: delete sessions. Idempotent — already-deleted sessions are
     // observed as empty by the registry, and the broker/deleteKnowledgeSession
     // tolerate re-deletion (D-242 rework).
-    try {
-      await deleteThreadSessions(workspaceId, threadId);
-    } catch (error) {
-      return { threadId, status: "retryable", phase: "sessions", error: error instanceof Error ? error.message : String(error) };
+    if (deletion.phase === "sessions") {
+      try {
+        await deleteThreadSessions(workspaceId, threadId);
+        await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, "store");
+      } catch (error) {
+        return fail("retryable", "sessions", error);
+      }
     }
     // Phase 2: release working-state objects. Idempotent — if the branch/draft
     // was already released, the store operations are no-ops on missing rows.
-    try {
+    if (deletion.phase === "sessions" || deletion.phase === "store") try {
+      await options.releaseThreadEvidence?.(workspaceId, thread.id);
       await releaseThreadStore(workspaceId, thread);
+      await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, "directory");
     } catch (error) {
       // Sessions are gone but objects remain — logically deleted, object
       // cleanup is retryable (D-242 rework).
-      return { threadId, status: "objects-pending", phase: "store", error: error instanceof Error ? error.message : String(error) };
+      return fail("objects-pending", "store", error);
     }
     // Phase 3: delete the managed directory. Idempotent — if the directory was
     // already removed, reclaim reports it and we continue.
-    try {
+    if (deletion.phase !== "registry") try {
       await deleteThreadDirectory(workspaceId, thread);
+      await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, "registry");
     } catch (error) {
       // Objects are released but the directory remains — retryable, but the
       // thread record is still intact for a retry (D-242 rework).
-      return { threadId, status: "retryable", phase: "directory", error: error instanceof Error ? error.message : String(error) };
+      return fail("retryable", "directory", error);
     }
     // Phase 4: remove the thread row from the catalog. This is the
     // irreversible commit point — after this, the thread is logically gone.
     try {
       await options.registry.removeThread(workspaceId, parent, threadId);
     } catch (error) {
-      return { threadId, status: "needs-attention", phase: "registry", error: error instanceof Error ? error.message : String(error) };
+      return fail("needs-attention", "registry", error);
     }
     return { threadId, status: "complete" };
   };
@@ -3901,6 +3920,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const releaseCascade = await beginCascade(workspaceId, threadId);
     try {
       const descendants = await collectDescendantsPostOrder(workspaceId, threadId);
+      const operationId = existing.deletion?.operationId ?? `delete-${randomUUID()}`;
+      const rootThreadId = existing.deletion?.rootThreadId ?? threadId;
+      if (rootThreadId !== threadId) {
+        throw new ThreadRuntimeError("conflict", `Thread deletion is already owned by ancestor ${rootThreadId}`);
+      }
+      await options.registry.markDeletionCascade(
+        workspaceId,
+        [...descendants.map((thread) => thread.id), threadId],
+        threadId,
+        operationId,
+      );
       const nodeResults: DeletionNodeResult[] = [];
       for (const child of descendants) {
         preparations.get(child.id)?.controller.abort();
@@ -3911,10 +3941,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           return result;
         });
       }
-      const targetResult = await withThreadLifecycle(workspaceId, threadId, async () => {
-        preparations.get(threadId)?.controller.abort();
-        return deleteOneNode(workspaceId, parent, threadId);
-      });
+      const childFailure = nodeResults.find((result) => result.status !== "complete");
+      let targetResult: DeletionNodeResult;
+      if (childFailure) {
+        const root = await options.registry.getThread(workspaceId, parent, threadId);
+        const phase = root?.deletion?.phase ?? "sessions";
+        const error = `Descendant ${childFailure.threadId} is still pending at ${childFailure.phase ?? "unknown"}`;
+        if (root?.deletion) {
+          await options.registry.setDeletionPhase(workspaceId, threadId, root.deletion.operationId, phase, error);
+        }
+        targetResult = { threadId, status: "retryable", phase, error };
+      } else {
+        targetResult = await withThreadLifecycle(workspaceId, threadId, async () => {
+            preparations.get(threadId)?.controller.abort();
+            return deleteOneNode(workspaceId, parent, threadId);
+          });
+      }
       nodeResults.push(targetResult);
       // Aggregate status: complete only if every node completed; otherwise
       // the worst status wins (D-242 rework).
@@ -3928,13 +3970,23 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return {
         workspaceId,
         parent,
-        deletedThreadIds: [...descendants.map((thread) => thread.id), threadId],
+        deletedThreadIds: nodeResults.filter((result) => result.status === "complete").map((result) => result.threadId),
         status: aggregateStatus,
         nodeResults,
         space: await inspectSpace(workspaceId, parent),
       };
     } finally {
       releaseCascade();
+    }
+  };
+
+  const resumePendingDeletions = async (): Promise<void> => {
+    for (const pending of await options.registry.listDeletionRoots()) {
+      try {
+        await deleteUser(pending.workspaceId, pending.parent, pending.threadId);
+      } catch (error) {
+        reportError(error);
+      }
     }
   };
 
@@ -4042,6 +4094,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       };
       const existing = await options.registry.getThread(workspaceId, parent, threadId);
       if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+      if (existing.deletion) throw new ThreadRuntimeError("conflict", "Thread deletion is pending");
       const blockedAncestor = await ancestorBlocksRestore(workspaceId, existing.parent);
       if (blockedAncestor) {
         throw new ThreadRuntimeError(
@@ -4219,6 +4272,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const reclaimUserImpl = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    if (thread.deletion) throw new ThreadRuntimeError("conflict", "Thread deletion is pending");
     const result = await tryReclaimDirectory(workspaceId, parent, thread);
     return {
       ...await snapshotFor(workspaceId, parent, threadId),
@@ -4271,6 +4325,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     const initial = await options.registry.getThread(workspaceId, parent, threadId);
     if (!initial) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    if (initial.deletion) throw new ThreadRuntimeError("conflict", "Thread deletion is pending");
     if (!options.workingStates) throw new ThreadRuntimeError("unavailable", "Working-state storage is unavailable");
     const requested = [...new Set(input.resultRevisions)];
     const result = await options.workingStates.withStore(workspaceId, "thread-history-release", async (store, context): Promise<ThreadResultHistoryReleaseResult> => {
@@ -4401,6 +4456,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return await withThreadLifecycle(workspaceId, threadId, async () => {
         const thread = await options.registry.getThread(workspaceId, parent, threadId);
         if (!thread) throw new Error(`Thread not found: ${threadId}`);
+        if (thread.deletion) throw new Error("Cannot undo integration while deletion is pending");
         if (thread.lifecycle === "archived") throw new Error("Cannot undo integration for an archived thread");
         const coordinator = options.resolveIntegrationCoordinator
           ? await options.resolveIntegrationCoordinator(workspaceId)
@@ -4743,6 +4799,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     invalidateIntegrationPreviews,
     archiveUser,
     deleteUser,
+    resumePendingDeletions,
     restoreUser,
     inspectSpace,
     reclaimUser,
