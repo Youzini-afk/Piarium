@@ -189,9 +189,14 @@ export class KernelClient {
   private async requestRaw<T>(method: KernelMethod, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const id = randomUUID();
     const request: KernelRequest = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...(this.epoch ? { epoch: this.epoch } : {}) };
-    const promise = new Promise<T>((resolve, reject) => this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject }));
+    let rejectPending: ((error: unknown) => void) | undefined;
+    const promise = new Promise<T>((resolve, reject) => {
+      rejectPending = reject;
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
+    });
     const abort = () => {
-      this.pending.delete(id);
+      if (!this.pending.delete(id)) return;
+      rejectPending?.(new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }));
       void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...(this.epoch ? { epoch: this.epoch } : {}) }).catch(() => undefined);
     };
     if (signal?.aborted) { abort(); throw new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }); }
