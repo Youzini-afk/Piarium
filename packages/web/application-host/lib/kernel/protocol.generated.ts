@@ -11,8 +11,13 @@ export type KernelMethod =
   | "kernel.ping"
   | "kernel.shutdown"
   | "storage.health"
+  | "authority.grant.issue"
+  | "authority.grant.revoke"
   | "storage.snapshot"
   | "storage.putBlob"
+  | "storage.putBlob.begin"
+  | "storage.putBlob.finish"
+  | "storage.putBlob.abort"
   | "storage.getBlob"
   | "branch.create"
   | "branch.read"
@@ -22,6 +27,7 @@ export type KernelMethod =
   | "branch.unpin"
   | "branch.diff"
   | "branch.delete"
+  | "pin.read"
   | "recovery.operation.begin"
   | "recovery.operation.update"
   | "recovery.operation.get"
@@ -30,11 +36,15 @@ export type KernelMethod =
 
 export interface KernelRequest {
   v: typeof KERNEL_PROTOCOL_VERSION;
-  kind: "request" | "cancel";
+  kind: "request" | "cancel" | "data";
   id: string;
   method?: KernelMethod;
-  params?: Record<string, unknown>;
+  params?: unknown;
   epoch?: string;
+  grantId?: string;
+  streamId?: string;
+  sequence?: number;
+  bytesBase64?: string;
 }
 
 export interface KernelError {
@@ -54,9 +64,11 @@ export interface KernelResponse<T = unknown> {
 
 export interface KernelHandshakeResult {
   protocolVersion: typeof KERNEL_PROTOCOL_VERSION;
+  buildVersion: string;
   kernelVersion: string;
   kernelEpoch: string;
   hostId: string;
+  hostGeneration: string;
   storageRoot: string;
   capabilities: string[];
 }
@@ -80,6 +92,8 @@ export interface KernelBranchReadResult {
   workspaceId: string;
   root: string;
   revision: number;
+  view: "current" | "revision";
+  currentRoot: string;
   headRevision: number;
   writeRevision: number;
   entries: KernelEntry[];
@@ -107,6 +121,13 @@ export interface KernelHealthResult {
   integrity: string;
   branches: number;
   nodes: number;
+  nodePayloadBytes?: number;
   blobs: number;
   storageRoot: string;
+  pendingCleanup?: number;
+  cleanupFailures?: string[];
+  deep?: boolean;
+  missingNodes?: string[];
+  missingObjects?: string[];
+  corruptObjects?: string[];
 }

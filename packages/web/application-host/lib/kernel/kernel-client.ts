@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs";
@@ -28,6 +28,17 @@ export interface KernelClientOptions {
   /** Used by focused tests; production always uses a real child process. */
   spawnProcess?: typeof spawn;
   allowCargoDevRunner?: boolean;
+  hostGeneration?: string;
+  grant?: {
+    grantId?: string;
+    sessionId?: string;
+    threadId?: string;
+    runId?: string;
+    owningWorkspace?: string;
+    executionWorkspace?: string;
+    capabilities?: string[];
+    pathScopes?: string[];
+  };
   onExit?: (error: Error) => void;
 }
 
@@ -58,6 +69,21 @@ const frame = (payload: string): Buffer => {
 const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
+
+const normalizeStorageIdentity = (value: string): string => {
+  const withoutDevicePrefix = process.platform === "win32" && value.startsWith("\\\\?\\") ? value.slice(4) : value;
+  const normalized = path.normalize(withoutDevicePrefix);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+};
+
+const canonicalStoragePath = (value: string): string => {
+  try { return fs.realpathSync.native(value); } catch { /* the kernel creates a missing leaf */ }
+  try {
+    return path.join(fs.realpathSync.native(path.dirname(value)), path.basename(value));
+  } catch {
+    return path.resolve(value);
+  }
+};
 
 const defaultKernelCandidates = (): string[] => {
   const extension = process.platform === "win32" ? ".exe" : "";
@@ -93,6 +119,8 @@ export class KernelClient {
   private started = false;
   private closed = false;
   private epoch: string | null = null;
+  private grantId: string | null = null;
+  private grantWorkspace: string | null = null;
   private handshakeResult: KernelHandshakeResult | null = null;
   private startPromise: Promise<KernelHandshakeResult> | null = null;
 
@@ -140,10 +168,11 @@ export class KernelClient {
     });
     let result: KernelHandshakeResult;
     try {
-      result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
+    result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
         protocolVersion: KERNEL_PROTOCOL_VERSION,
         buildVersion: this.options.buildVersion,
         hostId: this.options.hostId,
+        hostGeneration: this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
         storageRoot: this.options.storageRoot,
         capabilities: ["storage", "workingState", "recovery", "branchCas", "pins", "gc"],
       });
@@ -151,13 +180,37 @@ export class KernelClient {
       await this.close().catch(() => undefined);
       throw error;
     }
-    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || !result.kernelEpoch) {
+    const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
+    const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
+    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || !result.kernelEpoch || result.buildVersion !== this.options.buildVersion
+      || result.hostId !== this.options.hostId || result.hostGeneration !== expectedHostGeneration
+      || normalizeStorageIdentity(result.storageRoot) !== normalizeStorageIdentity(canonicalStoragePath(this.options.storageRoot))
+      || !requiredCapabilities.every((capability) => result.capabilities.includes(capability))) {
       await this.close().catch(() => undefined);
       throw new KernelClientError({ code: "kernel-protocol-mismatch", message: "Rust kernel handshake returned an incompatible protocol", retryable: false });
     }
     this.epoch = result.kernelEpoch;
     this.handshakeResult = result;
     this.started = true;
+    const configuredGrant = this.options.grant ?? {};
+    const grant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
+      grantId: configuredGrant.grantId ?? randomUUID(),
+      hostGeneration: expectedHostGeneration,
+      sessionId: configuredGrant.sessionId ?? null,
+      threadId: configuredGrant.threadId ?? null,
+      runId: configuredGrant.runId ?? null,
+      owningWorkspace: configuredGrant.owningWorkspace ?? null,
+      executionWorkspace: configuredGrant.executionWorkspace ?? null,
+      storageIdentity: result.storageRoot,
+      capabilities: configuredGrant.capabilities ?? ["storage.read", "storage.write", "recovery", "storage.gc"],
+      pathScopes: configuredGrant.pathScopes ?? [""],
+    });
+    if (typeof grant.grant_id !== "string") {
+      await this.close().catch(() => undefined);
+      throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel did not return a grant identity", retryable: false });
+    }
+    this.grantId = grant.grant_id;
+    this.grantWorkspace = typeof grant.owning_workspace === "string" ? grant.owning_workspace : null;
     return result;
   }
 
@@ -170,9 +223,9 @@ export class KernelClient {
       this.buffer = this.buffer.subarray(length + 4);
       let response: KernelResponse;
       try { response = JSON.parse(body.toString("utf8")) as KernelResponse; }
-      catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false })); return; }
+      catch (error) { this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: `Invalid Rust kernel response: ${String(error)}`, retryable: false }), true); return; }
       if (response.v !== KERNEL_PROTOCOL_VERSION || response.kind !== "response" || typeof response.id !== "string" || typeof response.ok !== "boolean") {
-        this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }));
+        this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Rust kernel response envelope is malformed", retryable: false }), true);
         return;
       }
       const pending = this.pending.get(response.id);
@@ -183,10 +236,15 @@ export class KernelClient {
     }
   }
 
-  private failAll(error: Error): void {
+  private failAll(error: Error, terminate = false): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
     this.started = false;
+    this.epoch = null;
+    this.grantId = null;
+    this.grantWorkspace = null;
+    this.handshakeResult = null;
+    if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
   private async write(request: KernelRequest): Promise<void> {
@@ -198,7 +256,7 @@ export class KernelClient {
 
   private async requestRaw<T>(method: KernelMethod, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
     const id = randomUUID();
-    const request: KernelRequest = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...(this.epoch ? { epoch: this.epoch } : {}) };
+    const request: KernelRequest = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...(this.epoch ? { epoch: this.epoch } : {}), ...(this.grantId ? { grantId: this.grantId } : {}) };
     let rejectPending: ((error: unknown) => void) | undefined;
     const promise = new Promise<T>((resolve, reject) => {
       rejectPending = reject;
@@ -207,13 +265,16 @@ export class KernelClient {
     const abort = () => {
       if (!this.pending.delete(id)) return;
       rejectPending?.(new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }));
-      void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...(this.epoch ? { epoch: this.epoch } : {}) }).catch(() => undefined);
+      void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...(this.epoch ? { epoch: this.epoch } : {}), ...(this.grantId ? { grantId: this.grantId } : {}) }).catch(() => undefined);
     };
     if (signal?.aborted) { abort(); throw new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }); }
     signal?.addEventListener("abort", abort, { once: true });
     try {
       await this.write(request);
       return await promise;
+    } catch (error) {
+      this.pending.delete(id);
+      throw error;
     } finally {
       signal?.removeEventListener("abort", abort);
     }
@@ -224,15 +285,64 @@ export class KernelClient {
     return this.requestRaw<T>(method, params, options.signal);
   }
 
-  async health(): Promise<KernelHealthResult> { return this.request<KernelHealthResult>("storage.health"); }
+  async health(options: { deep?: boolean; signal?: AbortSignal } = {}): Promise<KernelHealthResult> { return this.request<KernelHealthResult>("storage.health", options.deep === undefined ? {} : { deep: options.deep }, { signal: options.signal }); }
 
   async snapshot(workspaceId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>("storage.snapshot", { workspaceId }, { signal });
   }
 
   async putBlob(bytes: Uint8Array, operationId: string, signal?: AbortSignal): Promise<KernelBlobResult> {
-    const bytesBase64 = Buffer.from(bytes).toString("base64");
-    return this.request<KernelBlobResult>("storage.putBlob", { operationId, bytesBase64 }, { signal });
+    const source = Buffer.from(bytes);
+    const expectedHash = `sha256-${createHash("sha256").update(source).digest("hex")}`;
+    const existing = await this.getOperation(operationId, signal).catch(() => null);
+    if (existing?.state === "committed" && existing.result && typeof existing.result === "object") {
+      const result = existing.result as Partial<KernelBlobResult>;
+      if (result.hash === expectedHash && result.byteLength === source.byteLength) return result as KernelBlobResult;
+    }
+    const begin = await this.request<Record<string, unknown>>("storage.putBlob.begin", {
+      operationId,
+      byteLength: source.byteLength,
+      expectedHash,
+      ...(this.grantWorkspace ? { workspaceId: this.grantWorkspace } : {}),
+    }, { signal });
+    const streamId = typeof begin.streamId === "string" ? begin.streamId : "";
+    if (!streamId) throw new KernelClientError({ code: "kernel-stream-invalid", message: "Rust kernel did not return an upload stream", retryable: false });
+    try {
+      const chunkSize = 64 * 1024;
+      let sequence = 0;
+      for (let offset = 0; offset < source.byteLength; offset += chunkSize) {
+        signal?.throwIfAborted();
+        const chunk = source.subarray(offset, Math.min(offset + chunkSize, source.byteLength));
+        await this.writeDataFrame(streamId, sequence, chunk);
+        sequence += 1;
+      }
+      return await this.request<KernelBlobResult>("storage.putBlob.finish", {
+        operationId,
+        streamId,
+        expectedHash,
+        ...(this.grantWorkspace ? { workspaceId: this.grantWorkspace } : {}),
+      }, { signal });
+    } catch (error) {
+      await this.request<Record<string, unknown>>("storage.putBlob.abort", {
+        operationId,
+        streamId,
+        ...(this.grantWorkspace ? { workspaceId: this.grantWorkspace } : {}),
+      }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async writeDataFrame(streamId: string, sequence: number, bytes: Uint8Array): Promise<void> {
+    await this.write({
+      v: KERNEL_PROTOCOL_VERSION,
+      kind: "data",
+      id: streamId,
+      streamId,
+      sequence,
+      bytesBase64: Buffer.from(bytes).toString("base64"),
+      ...(this.epoch ? { epoch: this.epoch } : {}),
+      ...(this.grantId ? { grantId: this.grantId } : {}),
+    });
   }
 
   async getBlob(hash: string, options: { offset?: number; length?: number; signal?: AbortSignal } = {}): Promise<KernelObjectSlice> {
@@ -271,12 +381,34 @@ export class KernelClient {
     return this.request<Record<string, unknown>>("branch.delete", params, { signal });
   }
 
+  async readPin(params: { pinId: string; includeEntries?: boolean }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("pin.read", params, { signal });
+  }
+
   async gc(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>("storage.gc", { operationId }, { signal });
   }
 
   async getOperation(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.request<Record<string, unknown> | null>("operation.get", { operationId }, { signal });
+  }
+
+  async issueGrant(params: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const grant = await this.request<Record<string, unknown>>("authority.grant.issue", {
+      ...params,
+      hostGeneration: params.hostGeneration ?? this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
+      ...(params.storageIdentity === undefined && this.handshake?.storageRoot
+        ? { storageIdentity: this.handshake.storageRoot }
+        : {}),
+    }, { signal });
+    if (typeof grant.grant_id !== "string") throw new KernelClientError({ code: "kernel-grant-invalid", message: "Rust kernel did not return a grant identity", retryable: false });
+    this.grantId = grant.grant_id;
+    this.grantWorkspace = typeof grant.owning_workspace === "string" ? grant.owning_workspace : null;
+    return grant;
+  }
+
+  async revokeGrant(grantId = this.grantId ?? "", signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>("authority.grant.revoke", { grantId }, { signal });
   }
 
   async close(): Promise<void> {

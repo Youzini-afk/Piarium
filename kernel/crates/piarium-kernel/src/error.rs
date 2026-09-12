@@ -1,0 +1,47 @@
+use serde_json::Value;
+use std::io;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub(crate) enum KernelError {
+    #[error("protocol error: {0}")]
+    Protocol(String),
+    #[error("storage error: {0}")]
+    Storage(String),
+    #[error("authorization error: {0}")]
+    Authorization(String),
+    #[error("operation error: {0}")]
+    Operation(String),
+    #[error("operation cancelled")]
+    Cancelled,
+}
+
+impl From<rusqlite::Error> for KernelError {
+    fn from(value: rusqlite::Error) -> Self {
+        Self::Storage(value.to_string())
+    }
+}
+impl From<io::Error> for KernelError {
+    fn from(value: io::Error) -> Self {
+        Self::Storage(value.to_string())
+    }
+}
+impl From<serde_json::Error> for KernelError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Protocol(value.to_string())
+    }
+}
+
+pub(crate) fn error_code(error: &KernelError) -> &'static str {
+    match error {
+        KernelError::Protocol(_) => "protocol-error",
+        KernelError::Storage(_) => "storage-error",
+        KernelError::Authorization(_) => "unauthorized",
+        KernelError::Operation(_) => "operation-error",
+        KernelError::Cancelled => "cancelled",
+    }
+}
+
+pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
+    serde_json::json!({"v": 1, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled)}})
+}

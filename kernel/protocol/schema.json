@@ -3,17 +3,21 @@
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
   "request": {"v": 1, "kind": "request", "id": "request-id", "method": "method", "params": {}},
+  "data": {"v": 1, "kind": "data", "id": "stream-id", "streamId": "stream-id", "sequence": 0, "bytesBase64": "..."},
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
-  "event": {"v": 1, "kind": "event", "seq": 1, "event": "event", "data": {}},
   "dto": {
     "KernelRequest": {
       "fields": {
         "v": {"type": "protocolVersion"},
-        "kind": {"type": "\"request\" | \"cancel\""},
+        "kind": {"type": "\"request\" | \"cancel\" | \"data\""},
         "id": {"type": "string"},
         "method": {"type": "KernelMethod", "optional": true},
-        "params": {"type": "Record<string, unknown>", "optional": true},
-        "epoch": {"type": "string", "optional": true}
+        "params": {"type": "unknown", "optional": true},
+        "epoch": {"type": "string", "optional": true},
+        "grantId": {"type": "string", "optional": true},
+        "streamId": {"type": "string", "optional": true},
+        "sequence": {"type": "number", "optional": true},
+        "bytesBase64": {"type": "string", "optional": true}
       }
     },
     "KernelError": {
@@ -37,9 +41,11 @@
     "KernelHandshakeResult": {
       "fields": {
         "protocolVersion": {"type": "protocolVersion"},
+        "buildVersion": {"type": "string"},
         "kernelVersion": {"type": "string"},
         "kernelEpoch": {"type": "string"},
         "hostId": {"type": "string"},
+        "hostGeneration": {"type": "string"},
         "storageRoot": {"type": "string"},
         "capabilities": {"type": "string[]"}
       }
@@ -66,6 +72,8 @@
         "workspaceId": {"type": "string"},
         "root": {"type": "string"},
         "revision": {"type": "number"},
+        "view": {"type": "\"current\" | \"revision\""},
+        "currentRoot": {"type": "string"},
         "headRevision": {"type": "number"},
         "writeRevision": {"type": "number"},
         "entries": {"type": "KernelEntry[]"}
@@ -98,8 +106,15 @@
         "integrity": {"type": "string"},
         "branches": {"type": "number"},
         "nodes": {"type": "number"},
+        "nodePayloadBytes": {"type": "number", "optional": true},
         "blobs": {"type": "number"},
-        "storageRoot": {"type": "string"}
+        "storageRoot": {"type": "string"},
+        "pendingCleanup": {"type": "number", "optional": true},
+        "cleanupFailures": {"type": "string[]", "optional": true},
+        "deep": {"type": "boolean", "optional": true},
+        "missingNodes": {"type": "string[]", "optional": true},
+        "missingObjects": {"type": "string[]", "optional": true},
+        "corruptObjects": {"type": "string[]", "optional": true}
       }
     }
   },
@@ -108,8 +123,13 @@
     "kernel.ping": "health check",
     "kernel.shutdown": "ordered shutdown",
     "storage.health": "storage integrity and lock status",
+    "authority.grant.issue": "register a Host actor grant",
+    "authority.grant.revoke": "revoke a Host actor grant",
     "storage.snapshot": "list durable branch roots and published revisions",
     "storage.putBlob": "durably install a content object",
+    "storage.putBlob.begin": "open a backpressured content upload stream",
+    "storage.putBlob.finish": "commit a content upload stream",
+    "storage.putBlob.abort": "discard a content upload stream",
     "storage.getBlob": "read a content object or byte range",
     "branch.create": "batch-build an immutable branch root",
     "branch.read": "read a root or selected paths",
@@ -119,6 +139,7 @@
     "branch.unpin": "release a pin",
     "branch.diff": "diff two immutable roots without flattening",
     "branch.delete": "release a branch and its unpublished root",
+    "pin.read": "read an immutable pinned root after branch deletion",
     "recovery.operation.begin": "durably begin an idempotent recovery operation",
     "recovery.operation.update": "advance recovery operation state",
     "recovery.operation.get": "read a recovery operation",

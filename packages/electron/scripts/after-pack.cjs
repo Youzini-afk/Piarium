@@ -1,5 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 
 const SEMANTIC_MODEL_FILES = [
@@ -15,6 +16,22 @@ module.exports = (context) => {
     ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources')
     : path.join(context.appOutDir, 'resources');
   const unpackedNodeModulesPath = path.join(resourcesPath, 'app.asar.unpacked', 'node_modules');
+  const kernelExecutable = context.electronPlatformName === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel';
+  const packagedKernelPath = path.join(resourcesPath, 'kernel', kernelExecutable);
+  const kernelManifestPath = path.join(resourcesPath, 'kernel', 'manifest.json');
+  if (!fs.existsSync(packagedKernelPath) || !fs.existsSync(kernelManifestPath)) {
+    throw new Error(`Missing packaged Rust kernel or manifest at ${path.join(resourcesPath, 'kernel')}`);
+  }
+  let kernelManifest;
+  try {
+    kernelManifest = JSON.parse(fs.readFileSync(kernelManifestPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Unable to read packaged Rust kernel manifest at ${kernelManifestPath}: ${error.message}`);
+  }
+  const kernelDigest = crypto.createHash('sha256').update(fs.readFileSync(packagedKernelPath)).digest('hex');
+  if (kernelManifest.schema !== 1 || kernelManifest.executable !== kernelExecutable || kernelManifest.sha256 !== kernelDigest) {
+    throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
+  }
   const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
   const targetArchitecture = process.env.PIARIUM_TARGET_ARCH || process.arch;
   const betterSqlitePrebuildName = `${context.electronPlatformName}-${targetArchitecture}.node`;
