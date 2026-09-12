@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -189,6 +189,12 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 
 另有一次临时 `startWebUiServer({ port: 0, requirePiRuntime: false, apiOnly: true })` smoke：真实 Web/Application Host
 打印监听端口、完成 kernel 子进程启动后按 `stop()` 正常关闭；该 smoke 的 `ready:false` 只表示刻意关闭 Pi warmup，不表示 kernel 未就绪。
+
+同一 release kernel 的结构性生产路径取样（Host `KernelClient` → 子进程 → SQLite/object store）也记录了宽目录
+单路径 CoW：128 个条目时初始 `trie_nodes=258`，改一个文件后为 261（新增 3 个节点）；1024 个条目时为
+2050→2053（同样新增 3 个节点）。两次新增对象各只有 1 个 blob，修改正文分别写入 2/8 字节；从启动到写入完成
+分别为 3991/5087 ms，单路径写入段为 23.62/113.90 ms，Bun Host RSS 约 59.9/63.8 MiB。该取样证明生产
+路径没有按兄弟数量复制节点；它不是受控性能对照，也不构成提速倍数、配额或跨平台结论。
 
 **R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation 表；
 TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
