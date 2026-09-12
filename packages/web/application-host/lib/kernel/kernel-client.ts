@@ -138,13 +138,19 @@ export class KernelClient {
       this.failAll(error);
       if (!this.closed) this.options.onExit?.(error);
     });
-    const result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
-      protocolVersion: KERNEL_PROTOCOL_VERSION,
-      buildVersion: this.options.buildVersion,
-      hostId: this.options.hostId,
-      storageRoot: this.options.storageRoot,
-      capabilities: ["storage", "workingState", "recovery", "branchCas", "pins", "gc"],
-    });
+    let result: KernelHandshakeResult;
+    try {
+      result = await this.requestRaw<KernelHandshakeResult>("kernel.handshake", {
+        protocolVersion: KERNEL_PROTOCOL_VERSION,
+        buildVersion: this.options.buildVersion,
+        hostId: this.options.hostId,
+        storageRoot: this.options.storageRoot,
+        capabilities: ["storage", "workingState", "recovery", "branchCas", "pins", "gc"],
+      });
+    } catch (error) {
+      await this.close().catch(() => undefined);
+      throw error;
+    }
     if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || !result.kernelEpoch) {
       await this.close().catch(() => undefined);
       throw new KernelClientError({ code: "kernel-protocol-mismatch", message: "Rust kernel handshake returned an incompatible protocol", retryable: false });
