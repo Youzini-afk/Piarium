@@ -18,9 +18,9 @@ Last updated: 2026-09-13
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-252 已采纳 Rust 系统内核架构，阶段 R 尚未实现。** 目标与完整范围见
-[rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
-本次文档变更不新增 Rust 可执行程序、不接管存储，也不把 D-246–D-251 的执行报告视为独立验收通过。
+**D-252 已采纳 Rust 系统内核架构；R0 与 R1 Rust storage vertical 已实现并由本机 release 子进程验证，阶段 R 整体仍未完成。**
+目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
+完整 TS consumer cutover、R2–R6 和跨平台/发行证据仍未交付，不把 D-246–D-251 的执行报告视为 Rust 验收通过。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -168,8 +168,8 @@ R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，�
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
-| R0 协议与进程 | implemented / wired / proven（本机） | `kernel/` Cargo workspace、生成 DTO、真实 framed 子进程、握手/epoch/关闭、Host 启停、Electron/Web staging；macOS/Linux 真机与签名产物未测 |
-| R1 状态与存储 | implemented / wired（kernel vertical）；生产消费者 cutover 未完成 | Rust SQLite/object store 的 immutable trie root、blob durability、writeRevision CAS、published revision、pin/GC、idempotent operation/recovery API；TS WorkingState/Recovery 全消费者尚未删除旧 JSON/SQLite writer |
+| R0 协议与进程 | implemented / wired / proven（Windows 本机 release） | `kernel/rust-toolchain.toml` 钉住 1.97.1；生成 DTO（含 request/cancel/data 帧）、真实 framed 子进程、build/protocol/epoch/grant/generation 握手、分块正文、背压、取消、关闭和 Host 启停；macOS/Linux 真机与签名产物未测 |
+| R1 状态与存储 | implemented / wired / proven（Rust storage vertical；生产消费者 cutover 未完成） | typed path state、AVL 持久索引、固定 revision、CAS/事务 operation、pin/delete/GC、durable pending cleanup、grant-owned object read、recovery root retention；TS WorkingState/Recovery 全消费者尚未删除旧 JSON/SQLite writer |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -179,22 +179,25 @@ R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，�
 D-246–D-251 已由 D-254 完成独立验收与重要错误收口；R0/R1 的本机 Rust 纵切现已补入，下一步是按 R1 consumer map 继续切换而非再建 TS 过渡内核。
 当前没有 Rust 端到端性能对照、macOS/Linux 真机发行或断电级故障注入结论；绝对性能目标仍在实施时定标，不预填提升倍数。
 
-**R0/R1 本机证据（2026-09-12，D-255）**：`packages/web/application-host/lib/kernel/kernel-client.test.ts` 通过真实
-`piarium-kernel` 子进程完成 handshake、epoch、对象安装、分支初建、immutable trie root、`writeRevision` CAS 冲突、发布
-revision、pin、root diff、SQLite integrity、关闭后重开与字节/哈希保持。`cargo check --manifest-path kernel/Cargo.toml` 与
-Windows release build 通过（本机通过 Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 SDK 会报告环境缺失）。
+**R0/R1 返工证据（2026-09-13，D-256）**：`packages/web/application-host/lib/kernel/kernel-client.test.ts` 通过真实
+release `piarium-kernel` 子进程覆盖固定 revision 不漂移、pin 保留到显式 unpin、GC、finish 失败回滚/同 operationId 重试、
+typed path/tree 不变量、grant workspace/path scope 与 revoke、8,000-entry 构建取消、200,000-byte 分块上传、deep health、
+关闭重开与字节/hash 保持；GC 的逻辑释放、实际文件删除和注入的清理失败分别可观察，失败在重启时重试。`cargo check --manifest-path kernel/Cargo.toml` 与 Windows release build 通过（本机通过
+Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 SDK 会报告环境缺失）。
 Kernel protocol 使用 `kernel/protocol/schema.json` → generated TS DTO，Host 在 `application-host/index.ts` 启动/停止同一 client；
-Electron package 将可执行文件放在 `resources/kernel`（asar 外），Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
+Electron package 将可执行文件和 SHA-256 manifest 放在 `resources/kernel`（asar 外），after-pack 会核对 manifest；Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
 macOS/Linux 真机运行或完整跨平台签名证据。
 
 另有一次临时 `startWebUiServer({ port: 0, requirePiRuntime: false, apiOnly: true })` smoke：真实 Web/Application Host
 打印监听端口、完成 kernel 子进程启动后按 `stop()` 正常关闭；该 smoke 的 `ready:false` 只表示刻意关闭 Pi warmup，不表示 kernel 未就绪。
 
-同一 release kernel 的结构性生产路径取样（Host `KernelClient` → 子进程 → SQLite/object store）也记录了宽目录
-单路径 CoW：128 个条目时初始 `trie_nodes=258`，改一个文件后为 261（新增 3 个节点）；1024 个条目时为
-2050→2053（同样新增 3 个节点）。两次新增对象各只有 1 个 blob，修改正文分别写入 2/8 字节；从启动到写入完成
-分别为 3991/5087 ms，单路径写入段为 23.62/113.90 ms，Bun Host RSS 约 59.9/63.8 MiB。该取样证明生产
-路径没有按兄弟数量复制节点；它不是受控性能对照，也不构成提速倍数、配额或跨平台结论。
+同一 release kernel 的结构性生产路径取样（Host `KernelClient` → 子进程 → SQLite/object store）记录了 AVL 宽目录
+单路径 CoW：128/1024/4096 条目时初始节点数为 132/1028/4100，单路径更新后分别为 138/1034/4106，均新增 6 个
+节点；持久节点 payload 增量为 884/885/885 字节。该次 release 取样的初建调用段为 9.12/38.65/152.62 ms，
+单路径写入段为 3.04/2.91/3.51 ms；这些数字不含受控基线，启动/缓存会影响墙钟。该取样说明写放大随索引高度/受影响页而非兄弟总数增长；
+它不是受控性能对照，也不构成提速倍数、配额或跨平台结论。另一次同机 4096 条目取样用 Host `process.memoryUsage().rss` 与
+Windows kernel child `PrivateMemorySize64` 观察到 Host 62.3→66.6→64.7 MiB、kernel 1.0→4.6→5.0 MiB
+（create 前/创建后/单路径写后）；这是单次进程快照，不是内存预算或跨平台结论。
 
 **R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation 表；
 TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有

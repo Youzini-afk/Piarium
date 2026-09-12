@@ -1,8 +1,8 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0 runtime and the R1 kernel storage vertical are delivered, with remaining consumer cutover recorded in status
+Status: accepted architecture; R0 is proven on the local release path and the R1 Rust storage vertical is proven with remaining consumer cutover recorded in status
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 本文规定 Piarium Rust 系统内核的最终职责和跨进程契约。实施顺序见
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
@@ -80,7 +80,7 @@ stderr 用于诊断，不与协议混流。文件正文不通过整树 JSON、ba
 操作按领域批量执行，例如 pin view、read ranges、apply edits、publish result、integrate、materialize、spawn/attach。
 TS 不通过通用 SQL 或“任意磁盘写”接口绕过领域不变量。
 
-握手绑定 application build、protocol version、kernel epoch 和可用能力。发行包内 client/kernel 使用匹配协议；
+握手绑定 application build、protocol version、Host generation、kernel epoch 和可用能力。发行包内 client/kernel 使用匹配协议；
 版本不匹配、二进制缺失和启动失败分别诊断，不悄悄切回旧 TS 实现。没有消费者的未来版本兼容框架不在本阶段建设。
 
 Host 从 broker/session registry 确认 actor 后，向内核注册 grant。grant 绑定 Host/worker generation、session、Thread/Run、
@@ -96,7 +96,7 @@ owning workspace、execution view 与允许的能力/路径；不适用的身份
 文本行列与 UTF-8 字节游标保持既有区别，二进制不文本化，平台路径不使用有损转换。Rust 内部以不同类型表达
 owning/execution/storage 身份以及读/写/发布能力，私有构造器限制租约来源；类型检查辅助运行时授权，不能替代它。
 
-数据流满时使用传输背压；前台读取/编辑与后台扫描分开调度。队列、磁盘和输出沿现有配置，外部能力约束如实表达，
+数据流满时使用传输背压；控制帧之外的 `data` 帧只承载有序正文块，前台读取/编辑与后台扫描分开调度。队列、磁盘和输出沿现有配置，外部能力约束如实表达，
 不为换语言新增任务数、文件数、token、大小或运行时长硬上限。需要切批由真实资源和取消响应选择，不把调度预算变成功能拒绝。
 
 ## 4. 存储、根与持久发布

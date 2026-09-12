@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R0 is wired/proven locally and R1 kernel storage is wired at the Host boundary; full legacy consumer cutover remains explicitly tracked
+Status: Pi-native workbench and harness in production; Rust kernel R0 is proven on the local release path and R1 Rust storage is proven as a kernel vertical; full legacy consumer cutover remains explicitly tracked
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 ## 1. Context
 

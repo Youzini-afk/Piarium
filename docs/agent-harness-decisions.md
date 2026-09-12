@@ -5650,3 +5650,37 @@ staging 脚本、R0/R1 文档和本机 child-process 证据。R2–R6 不因本�
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-255 | implementation（R0 runtime + R1 kernel storage vertical） | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |
+
+### D-256 · 2026-09-13 · R0/R1 首个纵切返工
+
+类型：错误修复与契约收口
+
+决定：保留 D-255 及其全部提交，在其上把内核纵切收口为当前唯一 Rust 格式与真实进程契约：(1) 显式 revision 永远从
+revisions 表解析固定 root，当前可写 head 与固定 view 分开；(2) operation begin、节点/CAS/root/revision/ref 与完成结果
+在一个 SQLite 事务内提交，失败回滚为可重试状态，完成响应丢失可用 operation 查询；恢复多阶段 update 保持同一逻辑 operation 的
+身份，并保留首阶段输入用于启动对账；(3) branch 删除不撤销独立 pin，GC 从
+branch/revision/pin/recovery root 和 root-parent/blob 引用保留正文；批量初建只在 builder 内使用有序临时表，运行时子项索引不回退到平表；GC 的逻辑释放、实际对象删除和清理失败写入 durable pending
+记录，重启重试；(4) 路径状态改为 Rust enum，AVL 子项索引做结构共享，初建
+使用批量 builder，文件/目录替换和重复/非法路径显式失败；(5) Host 握手绑定 build/protocol/epoch/storage identity，grant
+绑定 generation、workspace、能力和 scope，撤销与旧代际拒绝；(6) stdio 进程改为可接收 cancel 的 worker/writer 状态机，正文
+上传使用 data chunk，method 参数未知字段在 Rust 边界拒绝，kernel health 提供按需 deep integrity 检查。协议 DTO、runtime、authority、model、error、protocol 责任
+拆分为独立模块。
+
+明确不做：本轮不进入 R2，不接管 TS WorkingState/Recovery 的全部生产消费者，不引入旧格式 importer、shadow backend 或
+公开 TCP 端口；event envelope 在没有真实消费者时不保留。
+
+依据：D-255 的首个纵切仍把可变 head 当固定 revision、operation completion 与状态提交分裂、pin 随 branch 删除、BTreeMap
+宽目录和任意 JSON state 当权威；这些错误会让“节点恒定”证据失真，并在断线/重试/跨工作区读取时产生错误事实。D-256 的
+release child-process 反例覆盖固定 revision、事务失败重试、pin/GC、grant/revoke、取消与分块传输；结构取样记录节点与
+payload 增量，但不宣称跨平台或受控性能提升。
+
+影响：`kernel/rust-toolchain.toml`、`kernel/crates/piarium-kernel/src/{runtime,authority,error,model,protocol}.rs`、kernel protocol schema/generated DTO、
+Host KernelClient、R0/R1 status 与本模块文档。完整 consumer cutover 仍是后续 R1 工作，R2–R6 不变。
+
+状态：R0 本机 release proven；R1 Rust storage vertical proven，TS consumer cutover 未完成。
+
+## D-256 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-256 | implementation（R0/R1 首个纵切返工） | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |
