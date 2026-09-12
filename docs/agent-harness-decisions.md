@@ -5325,6 +5325,35 @@ live 父图当 child 当前事实。
 explore / explore-query-services / explore-service / knowledge/store / knowledge/relations 套件
 回归通过。局限：scope 在 Windows 上大小写不敏感（`pathInRoots` 归一），非 Windows 区分。
 
+## D-247 — D-241 返工：包管理器输出整理修正
+
+背景：D-241 接入了包管理器通配层，但验收发现四处缺陷——exec/dlx/x 后未知二进制
+被标为 package-manager 而非 generic、所有 `npm warn` 行被折叠丢失唯一 warning、
+进度行含 failed/error/checksum/permission 也被折叠、非零退出时可能解释失败的
+manager 行未进 required。
+
+决定（supersedes in part D-241 的 exec 未知二进制路由、噪声折叠范围与非零退出
+required 部分；D-241 的 PM 头归类、脚本回显识别内层工具、PM 噪声折叠主体保留）：
+
+1. **exec/dlx/x 未知二进制走 generic**：`classifySegment` 在 `WRAPPER_EXEC_SUB`
+   分支内直接判断 wrapped 二进制——受支持工具返回其 kind，未知二进制返回 `unknown`，
+   不再 fall through 到 `package-manager`。`pnpm dlx custom-tool` 的输出走 generic
+   组织，PM 噪声折叠不会隐藏未知工具自身输出。
+2. **只折叠可证明重复的噪声**：`isFoldableNoise` 区分 failure-relevant 噪声
+   （含 failed/error/checksum/permission/denied/EACCES/EPERM/ENOENT/EBADENGINE/
+   ERESOLVE）与可折叠噪声。Warning 行按内容去重——首次出现的唯一 warning 保留，
+   重复相同 warning 才折叠。进度/下载行（非 warning、非 failure-relevant）仍可折叠。
+3. **非零退出时失败解释行进 required**：`organizePackageManager` 在 `exitCode !== 0`
+   时把 failure-relevant 噪声与唯一 warning 放入 `required`（fitBlocks 不裁切），
+   而非 `optional`。成功退出时它们进 `optional`，预算压力下可裁切。
+4. **原契约不变**：原 stdout、UTF-8 byte cursor、exitCode、OutputRef、显式分页与
+   后台增量保持原契约——组织只影响 display text。
+
+验证：`organize.test.ts`（未知 `pnpm dlx custom-tool` 走 generic；唯一 warning
+保留、重复折叠；checksum failure 进度行保留；EBADENGINE 唯一 warning 在非零退出
+进 required；watch/interactive prompt 保留；分片输出首尾保留）；既有 31 项 organize
+与 3 项 observation-services 套件回归通过。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5337,3 +5366,4 @@ explore / explore-query-services / explore-service / knowledge/store / knowledge
 | D-244 | implementation（CoW/reflink 材料化后端：FICLONE_FORCE+真实 backend 报告，对象库→目标与工作区复制统一走原语） | — | 设计 9.3.4；status 3.4a；workspace/reflink / materializer |
 | D-245 | implementation（WorkingState Merkle 结构共享：state-trie 持久哈希映射、catalog v4 共享 node 池、结构共享替代整树 clone、treeIdentity=trie 根） | — | 设计 9.3.4；status 3.4a；working-state/state-trie / working-state-store |
 | D-246 | implementation（D-240 返工：LSP 工作区根来自 initialize 而非首个文件父目录；related/explore 应用 actor scope；权威 anchor 批次重解析；partial 组合状态） | supersedes in part D-240（根推断、scope、批次重解析、组合状态） | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
+| D-247 | implementation（D-241 返工：exec/dlx/x 未知二进制走 generic；唯一 warning 保留；failure-relevant noise 不折叠；非零退出时失败解释行进 required） | supersedes in part D-241（exec 未知二进制路由、噪声折叠范围、非零退出 required） | 设计 5.2；status 3.17；output-organize |

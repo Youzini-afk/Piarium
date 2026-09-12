@@ -282,7 +282,7 @@ describe("package-manager organizer", () => {
     expect(organized.text).toContain("> node ./scripts/run-tests.mjs");
   });
 
-  it("keeps install summaries and error blocks while collapsing manager noise", () => {
+  it("keeps install summaries and unique warnings while collapsing only duplicate noise", () => {
     const warns = Array.from({ length: 6 }, (_, index) => `npm warn deprecated dep-${index}@1.0.0`);
     const output = [
       ...warns,
@@ -297,9 +297,31 @@ describe("package-manager organizer", () => {
     expect(organized.kind).toBe("package-manager");
     expect(organized.text).toContain("added 234 packages in 12s");
     expect(organized.text).toContain("found 0 vulnerabilities");
-    expect(organized.text).not.toContain("npm warn deprecated dep-3");
-    expect(organized.text).toContain("collapsed 8 package-manager noise line(s)");
+    // Unique warnings are preserved (D-241 rework): each deprecation warning
+    // is distinct and carries independent information.
+    expect(organized.text).toContain("npm warn deprecated dep-0@1.0.0");
+    expect(organized.text).toContain("npm warn deprecated dep-5@1.0.0");
+    expect(organized.text).toContain("npm warn exec ok to proceed");
+    // Only truly duplicate/no-independent-info noise (download progress) is folded.
+    expect(organized.text).not.toMatch(/^Downloading /m);
+    expect(organized.text).toContain("collapsed 1 package-manager noise line(s)");
     expect(organized.omitted).toBe(true);
+  });
+
+  it("folds repeated identical warnings but keeps the first occurrence", () => {
+    const output = [
+      "npm warn deprecated foo@1.0.0",
+      "npm warn deprecated foo@1.0.0",
+      "npm warn deprecated foo@1.0.0",
+      "added 1 package in 1s",
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm install", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("package-manager");
+    // First occurrence is kept; duplicates are folded.
+    expect(organized.text).toContain("npm warn deprecated foo@1.0.0");
+    expect(organized.text).toContain("collapsed 2 package-manager noise line(s)");
+    expect(organized.text).toContain("added 1 package in 1s");
   });
 
   it("keeps a failed script's error block without an echo", () => {
@@ -333,6 +355,90 @@ describe("package-manager organizer", () => {
     const organized = organizeShellOutput({ command: "pnpm exec vitest run", output: VITEST_FAIL, complete: true, exitCode: 1 });
     expect(organized.kind).toBe("vitest");
     expect(organized.text).toContain("FAIL src/mid.test.ts");
+  });
+
+  it("routes an unknown binary behind pnpm dlx to generic, not package-manager (D-241 rework)", () => {
+    // pnpm dlx custom-tool: the inner binary is not a supported tool, so the
+    // output goes through generic organization — PM noise folding must not
+    // hide the tool's own output.
+    expect(identifyFromCommand("pnpm dlx custom-tool")?.kind).toBeUndefined();
+    const output = [
+      "custom-tool: processing files...",
+      "custom-tool: found 3 issues",
+      "Done.",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "pnpm dlx custom-tool", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("generic");
+    expect(organized.text).toContain("custom-tool: processing files...");
+    expect(organized.text).toContain("custom-tool: found 3 issues");
+  });
+
+  it("keeps a checksum failure in a download progress line (D-241 rework)", () => {
+    // A progress line mentioning checksum failure is failure-relevant noise —
+    // it must NOT be folded as duplicate noise.
+    const output = [
+      "Downloading registry.example/pkg-1.0.0.tgz",
+      "npm warn download failed: checksum mismatch for pkg-1.0.0.tgz",
+      "npm error code EINTEGRITY",
+      "npm error sha512 integrity verification failed",
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm install", output, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("package-manager");
+    // The checksum warning is failure-relevant and must be kept.
+    expect(organized.text).toContain("checksum mismatch");
+    expect(organized.text).toContain("EINTEGRITY");
+    expect(organized.text).toContain("integrity verification failed");
+  });
+
+  it("keeps a unique EBADENGINE warning on non-zero exit as required content (D-241 rework)", () => {
+    const output = [
+      "npm warn EBADENGINE Unsupported engine: wanted node >= 20",
+      "npm warn EBADENGINE Not compatible with your version of node",
+      "npm error code 1",
+      "npm error Command failed with exit code 1",
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm install", output, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("package-manager");
+    // Both EBADENGINE warnings are unique (different text) and failure-relevant.
+    expect(organized.text).toContain("EBADENGINE Unsupported engine");
+    expect(organized.text).toContain("Not compatible with your version");
+    expect(organized.text).toContain("Command failed with exit code 1");
+  });
+
+  it("preserves watch/interactive prompts in package-manager output (D-241 rework)", () => {
+    const output = [
+      "> app@1.0.0 test",
+      "> vitest run --watch",
+      "",
+      "FAIL src/mid.test.ts",
+      "  × math > adds",
+      "press h to show help, press q to quit",
+      " Test Files  1 failed (1)",
+      "   Duration  3s",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm test", output, complete: false, exitCode: 1 });
+    expect(organized.kind).toBe("vitest");
+    expect(organized.partial).toBe(true);
+    expect(organized.text).toContain("press h to show help");
+    expect(organized.text).toContain("FAIL src/mid.test.ts");
+  });
+
+  it("preserves sharded output with explicit pagination on raw bytes (D-241 rework)", () => {
+    // Sharded output: each shard's content must survive organization. The
+    // original stdout, UTF-8 byte cursor, and OutputRef remain as-is —
+    // organization only affects the display text.
+    const shard1 = Array.from({ length: 200 }, (_, i) => `shard1 line ${i}`).join("\n");
+    const shard2 = Array.from({ length: 200 }, (_, i) => `shard2 line ${i}`).join("\n");
+    const output = `${shard1}\n${shard2}`;
+    const organized = organizeShellOutput({ command: "npm run big", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("package-manager");
+    // First and last lines from each shard should be present or the omission
+    // note should explain what was cut.
+    expect(organized.text).toContain("shard1 line 0");
+    expect(organized.text).toContain("shard2 line 199");
+    expect(utf8Bytes(organized.text)).toBeLessThanOrEqual(SHELL_DISPLAY_BUDGET);
   });
 });
 

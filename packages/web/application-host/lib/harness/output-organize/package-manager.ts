@@ -58,6 +58,26 @@ const isNoise = (line: string): boolean => {
   );
 };
 
+/**
+ * A noise line that carries failure-relevant content must NOT be folded (D-241
+ * rework). Progress/download lines mentioning failed/error/checksum/permission
+ * are kept as required content, not collapsed as duplicate noise.
+ */
+const NOISE_KEEP_KEYWORDS = /\b(failed|error|checksum|permission|denied|EACCES|EPERM|ENOENT|EBADENGINE|ERESOLVE)\b/i;
+const isFailureRelevantNoise = (line: string): boolean => {
+  const trimmed = line.trim();
+  return NOISE_KEEP_KEYWORDS.test(trimmed);
+};
+
+/**
+ * Whether a noise line is safe to fold: it must be noise AND not carry
+ * failure-relevant content (D-241 rework). Unique warnings are kept — only
+ * provably duplicate noise (repeated identical lines) is collapsed.
+ */
+const isFoldableNoise = (line: string): boolean => (
+  isNoise(line) && !isFailureRelevantNoise(line)
+);
+
 const innerOrganizer = (
   kind: OrganizedCommandKind,
   subcommand: string | undefined,
@@ -153,8 +173,12 @@ export function organizePackageManager(output: string, budget: number, exitCode?
   const errors: string[] = [];
   const summaries: string[] = [];
   const kept: string[] = [];
+  const failureRelevant: string[] = [];
+  const uniqueWarnings: string[] = [];
+  const seenWarnings = new Set<string>();
   const noiseSamples = new Map<string, number>();
   let noiseCount = 0;
+  const isWarning = (line: string): boolean => /^\s*(npm (warn|timing|http|verb|sill)\b|WARN\b)/i.test(line.trim());
   for (const line of lines) {
     if (isInteractivePrompt(line)) {
       prompts.push(line.trimEnd());
@@ -169,6 +193,27 @@ export function organizePackageManager(output: string, budget: number, exitCode?
       continue;
     }
     if (isNoise(line)) {
+      // Failure-relevant noise (failed/error/checksum/permission) is never
+      // folded — it may explain a non-zero exit (D-241 rework).
+      if (isFailureRelevantNoise(line)) {
+        failureRelevant.push(line.trimEnd());
+        continue;
+      }
+      // Unique warnings carry independent information and must be preserved;
+      // only provably duplicate (repeated identical) warnings are folded
+      // (D-241 rework). Progress/download lines are inherently noise.
+      if (isWarning(line)) {
+        const key = line.trim().slice(0, 200);
+        if (seenWarnings.has(key)) {
+          noiseCount += 1;
+          noiseSamples.set(key, (noiseSamples.get(key) ?? 0) + 1);
+        } else {
+          seenWarnings.add(key);
+          uniqueWarnings.push(line.trimEnd());
+        }
+        continue;
+      }
+      // Non-warning progress/download noise is foldable.
       noiseCount += 1;
       const sample = line.trim();
       noiseSamples.set(sample.slice(0, 120), (noiseSamples.get(sample.slice(0, 120)) ?? 0) + 1);
@@ -180,9 +225,17 @@ export function organizePackageManager(output: string, budget: number, exitCode?
   const noiseNote = noiseCount > 0
     ? `[collapsed ${noiseCount} package-manager noise line(s)${noiseSamples.size > 0 ? ` — e.g. ${[...noiseSamples.keys()][0]}` : ""}]`
     : "";
+  // On non-zero exit, failure-relevant noise and unique warnings may explain
+  // the failure — they enter required content, not optional (D-241 rework).
+  const requiredExtras = exitCode !== undefined && exitCode !== 0
+    ? [...failureRelevant, ...uniqueWarnings]
+    : [];
+  const optionalExtras = exitCode !== undefined && exitCode !== 0
+    ? []
+    : [...failureRelevant, ...uniqueWarnings];
   const packed = fitBlocks({
-    required: [...prompts, ...errors, ...summaries],
-    optional: kept.length > 0 ? [joinBlocks(kept)] : [],
+    required: [...prompts, ...errors, ...summaries, ...requiredExtras],
+    optional: kept.length > 0 || optionalExtras.length > 0 ? [joinBlocks([...optionalExtras, ...kept])] : [],
     budget,
   });
   const notes = [omissionNote(packed.omitted, packed.omittedBytes), noiseNote].filter((note) => note.length > 0);

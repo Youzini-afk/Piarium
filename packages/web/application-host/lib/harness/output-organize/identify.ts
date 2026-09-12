@@ -160,8 +160,21 @@ function classifySegment(tokens: string[]): SegmentClassification {
     skipWrapperFlags();
   } else if (WRAPPER_EXEC_SUB.has(tokens[index] ?? "")) {
     // `npm exec` / `pnpm dlx` / `bun x` resolve and run a binary directly.
+    // Only a recognized inner tool gets its own organizer; an unknown binary
+    // behind exec/dlx/x is NOT package-manager context — the tool's own output
+    // is all there is, and PM noise folding must not hide it (D-241 rework).
     index += 1;
     skipWrapperFlags();
+    const wrappedExec = tokenAt(tokens, index);
+    const execKind = wrappedExec ? specificKind(wrappedExec) : undefined;
+    if (!execKind) return "unknown";
+    const execSubcommand = execKind === "git" ? gitSubcommandFromTokens(tokens, index) : undefined;
+    return {
+      kind: execKind,
+      source: "command",
+      ...(execSubcommand ? { gitSubcommand: execSubcommand } : {}),
+      ...(packageManager ? { packageManager } : {}),
+    };
   } else if (packageManager) {
     // `npm test` / `pnpm vitest` / `yarn add` / `bun install`: a builtin or an
     // implicit script/binary run — the package manager is what executed.
