@@ -396,7 +396,14 @@ export interface KnowledgeStore {
    * This creates or removes link rows without re-publishing the file's symbols.
    */
   resolveAssociationCandidates(): Promise<{ activated: number }>;
-  removeFileSymbols(path: string): Promise<{ removedFiles: number; removedSymbols: number }>;
+  removeFileSymbols(
+    path: string,
+    options?: {
+      expectedDocumentRevision?: string | null;
+      expectedGeneration?: string | null;
+      signal?: AbortSignal;
+    },
+  ): Promise<{ removedFiles: number; removedSymbols: number }>;
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
@@ -1709,10 +1716,20 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       });
     },
 
-    async removeFileSymbols(path) {
+    async removeFileSymbols(path, options) {
       return enqueueWrite(() => {
+        if (options?.signal?.aborted) return { removedFiles: 0, removedSymbols: 0 };
         const normalizedPath = assertGraphText(path, "File path");
         const files = fileNodes(normalizedPath);
+        if (options && files.length > 0) {
+          const current = files[0]!.payload;
+          const currentRevision = typeof current["documentRevision"] === "string" ? current["documentRevision"] : null;
+          const currentGeneration = typeof current["generation"] === "string" ? current["generation"] : null;
+          if (
+            (options.expectedDocumentRevision !== undefined && options.expectedDocumentRevision !== currentRevision)
+            || (options.expectedGeneration !== undefined && options.expectedGeneration !== currentGeneration)
+          ) return { removedFiles: 0, removedSymbols: 0 };
+        }
         const symbols = symbolNodes(normalizedPath);
         const links = linkNodes(normalizedPath);
         const operations: TransactionOperation[] = [

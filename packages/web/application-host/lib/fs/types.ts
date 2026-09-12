@@ -62,3 +62,14 @@ export interface FileSearchItem {
   path: string;
   relativePath: string;
 }
+
+export type FileSearchEnumerationStatus = "complete" | "incomplete" | "failed" | "cancelled";
+
+/**
+ * Search results carry an optional non-enumerable completeness fact. Existing
+ * callers can continue treating the value as a plain array, while destructive
+ * catalog reconciliation can refuse an incomplete inventory.
+ */
+export type FileSearchItems = FileSearchItem[] & {
+  enumerationStatus?: FileSearchEnumerationStatus;
+};

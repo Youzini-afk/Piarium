@@ -5043,3 +5043,23 @@ ModelRuntime 纵切继续通过。
 | --- | --- | --- | --- |
 | D-109 | superseded in part（同名确认规则保留；末尾重读/重解析改为代际绑定的紧凑候选对账） | D-236 | 设计 6.2；plan/status 3.1/3.11/3.12 |
 | D-236 | implementation（符号目录复用关联抽取事实） | — | 设计 6.2；plan/status 3.1/3.11/3.12；structure DOCUMENTATION |
+
+### D-237 · 2026-09-12 · 3.1（目录重扫的删除对账）
+
+类型：问题与解法
+
+背景：D-236 的重扫会更新仍可枚举的文件，但外部直接删除后，旧 file/symbol/link 及其连接仍保留。旧文件搜索返回数组，无法区分完整空目录、读取失败和截断结果，不能直接以列表差集执行删除。
+
+决定：
+
+1. Host 文件枚举提供 complete/incomplete/failed 事实；取消停止请求。数组以非枚举 `enumerationStatus` 保持已有读取形状，此事实只在 Host 直接调用中使用，序列化或缺该字段的来源不得被当作完整 inventory。
+2. 只有完整 inventory 才启动旧路径差集对账。Documents 确认 missing，并在读取旧图身份后再次确认；重新出现的 ready 路径交给 collector。删除在 store 写队列中核对预期 documentRevision/generation 和当前取消状态，不能用旧 inventory 删掉已发布的新图。
+3. 删除 file/symbol/link 后沿 D-236 重算关联确认，最后一个 connects 消失时撤销关联。失败、不完整、未知和取消保留旧图，不另建 watcher、定时扫描或工作区快照。
+
+验证：fs/search、catalog-scan、store、symbol-runtime 4 个文件 67 项通过，含真实外部删除、空目录、枚举失败/截断、重建竞态、写队列取消与代际条件删除；相关类型和 lint 通过。对账不锁任意外部进程，不宣称跨文件瞬时快照；它只改变可重建图，不删除用户文件。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-237 | implementation（完整枚举与 missing/代际确认驱动目录删除对账） | — | 设计 6.2；plan/status 3.1；structure DOCUMENTATION |

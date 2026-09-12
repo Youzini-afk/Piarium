@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync, promises as fsPromises } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync, promises as fsPromises } from "node:fs";
 import path, { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
@@ -338,6 +338,211 @@ describe("cold workspace catalog scan", () => {
     await scan;
     expect(await store.searchSymbols("oldSymbol", 5)).toHaveLength(1);
     expect(await store.searchSymbols("newSymbol", 5)).toEqual([]);
+  });
+
+  it("reconciles an externally deleted producer only after a complete rescan", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    const consumerPath = join(documents.workspaceRoot, "consumer.ts");
+    const producerPath = join(documents.workspaceRoot, "producer.ts");
+    writeFileSync(consumerPath, "export function consumer() { console.log(\"external.event\"); }\n", "utf8");
+    writeFileSync(producerPath, "export function producer() { router.register(\"external.event\"); }\n", "utf8");
+    const search = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: search.searchFilesystemFiles,
+    });
+    disposes.push(() => runtime.dispose());
+
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect((await store.getFileRelations("consumer.ts"))?.associations).toEqual([
+      expect.objectContaining({ callee: "log", literal: "external.event" }),
+    ]);
+
+    // Bypass Documents mutation notifications: explicit complete inventory
+    // reconciliation must notice the missing producer and withdraw its edge.
+    rmSync(producerPath, { force: true });
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.getFileRelations("producer.ts")).toBeNull();
+    expect((await store.getFileRelations("consumer.ts"))?.associations).toEqual([]);
+
+    // Recreating the producer and explicitly rescanning restores the relation
+    // from the consumer's retained candidate metadata.
+    writeFileSync(producerPath, "export function producer() { router.register(\"external.event\"); }\n", "utf8");
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect((await store.getFileRelations("producer.ts"))?.connections).toEqual([
+      expect.objectContaining({ callee: "register", literal: "external.event" }),
+    ]);
+    expect((await store.getFileRelations("consumer.ts"))?.associations).toEqual([
+      expect.objectContaining({ callee: "log", literal: "external.event" }),
+    ]);
+
+    // An actually empty workspace inventory clears both old graph files.
+    rmSync(consumerPath, { force: true });
+    rmSync(producerPath, { force: true });
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect((await store.catalogStats()).fileCount).toBe(0);
+  });
+
+  it("never treats a failed, cancelled, or incomplete inventory as an empty directory", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    const oldPath = join(documents.workspaceRoot, "old.ts");
+    writeFileSync(oldPath, "export function oldSymbol() {}\n", "utf8");
+    await store.replaceFileSymbols("old.ts", "typescript", [
+      { name: "oldSymbol", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 30 } },
+    ], "old-revision");
+    rmSync(oldPath, { force: true });
+
+    let status: "incomplete" | "failed" | "complete" = "incomplete";
+    const inventory = () => {
+      const result: Array<never> & { enumerationStatus?: typeof status } = [];
+      Object.defineProperty(result, "enumerationStatus", { value: status, enumerable: false });
+      return result;
+    };
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: async () => inventory(),
+    });
+    disposes.push(() => runtime.dispose());
+
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.getFileRelations("old.ts")).not.toBeNull();
+    status = "failed";
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.getFileRelations("old.ts")).not.toBeNull();
+    status = "complete";
+    const controller = new AbortController();
+    controller.abort();
+    await runtime.scanWorkspace(documents.identity.workspaceId, { signal: controller.signal });
+    expect(await store.getFileRelations("old.ts")).not.toBeNull();
+
+    // An actually complete empty inventory is allowed to remove the missing
+    // path.
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.getFileRelations("old.ts")).toBeNull();
+  });
+
+  it("keeps a stale path when it is recreated during reconciliation", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    const racePath = join(documents.workspaceRoot, "race.ts");
+    writeFileSync(racePath, "export function oldRace() {}\n", "utf8");
+    await store.replaceFileSymbols("race.ts", "typescript", [
+      { name: "oldRace", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 29 } },
+    ], "old-race-revision");
+    rmSync(racePath, { force: true });
+
+    let recreated = false;
+    const read = async (request: Parameters<typeof documents.authority.read>[0]) => {
+      const result = await documents.authority.read(request);
+      if (request.resourceId === "race.ts" && result.status === "missing" && !recreated) {
+        recreated = true;
+        writeFileSync(racePath, "export function newRace() {}\n", "utf8");
+      }
+      return result;
+    };
+    const inventory = [] as Array<never> & { enumerationStatus: "complete" };
+    Object.defineProperty(inventory, "enumerationStatus", { value: "complete", enumerable: false });
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: { ...documents.authority, read } as never,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: async () => inventory,
+    });
+    disposes.push(() => runtime.dispose());
+
+    await runtime.scanWorkspace(documents.identity.workspaceId);
+    expect(await store.searchSymbols("oldRace", 5)).toEqual([]);
+    expect(await store.searchSymbols("newRace", 5)).toHaveLength(1);
+  });
+
+  it("does not delete when cancellation arrives while stale removal is queued", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const store: KnowledgeStore = await openWorkspaceKnowledge({
+      dataDir: documents.dataDir,
+      hostId: "catalog-host",
+      workspaceId: documents.identity.workspaceId,
+      embedding: null,
+    });
+    disposes.push(async () => { await store.close(); });
+    const oldPath = join(documents.workspaceRoot, "queued-delete.ts");
+    writeFileSync(oldPath, "export function oldQueued() {}\n", "utf8");
+    await store.replaceFileSymbols("queued-delete.ts", "typescript", [
+      { name: "oldQueued", kind: "function", range: { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 32 } },
+    ], "queued-old-revision");
+    rmSync(oldPath, { force: true });
+
+    const completeEmptyInventory = [] as Array<never> & { enumerationStatus: "complete" };
+    Object.defineProperty(completeEmptyInventory, "enumerationStatus", { value: "complete", enumerable: false });
+    let releaseRemoval!: () => void;
+    let markRemovalStarted!: () => void;
+    const removalStarted = new Promise<void>((resolve) => { markRemovalStarted = resolve; });
+    const released = new Promise<void>((resolve) => { releaseRemoval = resolve; });
+    const originalRemove = store.removeFileSymbols.bind(store);
+    store.removeFileSymbols = async (path, options) => {
+      markRemovalStarted();
+      await released;
+      return originalRemove(path, options);
+    };
+    const runtime = createSymbolGraphRuntime({
+      getStore: async () => store,
+      documents: documents.authority,
+      supervisor: {
+        syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
+        documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
+      } as never,
+      structureSource: parsingSource(),
+      searchFilesystemFiles: async () => completeEmptyInventory,
+    });
+    disposes.push(() => runtime.dispose());
+
+    const controller = new AbortController();
+    const scan = runtime.scanWorkspace(documents.identity.workspaceId, { signal: controller.signal });
+    await removalStarted;
+    controller.abort();
+    // The wrapper queues the actual Store call until after cancellation.
+    releaseRemoval();
+    await scan;
+    expect(await store.getFileRelations("queued-delete.ts")).not.toBeNull();
   });
 
   /**

@@ -1,6 +1,6 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { DocumentAuthority } from "../documents/authority.js";
-import type { FileSearchItem } from "../fs/types.js";
+import type { FileSearchItems } from "../fs/types.js";
 import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
@@ -38,7 +38,7 @@ export interface SymbolGraphRuntimeOptions {
   searchFilesystemFiles?: (
     rootPath: string,
     options: { query: string; respectGitignore?: boolean; signal?: AbortSignal },
-  ) => Promise<FileSearchItem[]>;
+  ) => Promise<FileSearchItems>;
   onError?: (error: unknown) => void;
 }
 
@@ -323,6 +323,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         const collector = await collectorFor(workspaceId);
         if (!store || !collector) return;
         const catalogFiles = files.filter((file) => CATALOG_SCAN_LANGUAGES.has(languageIdForPath(file.relativePath) ?? ""));
+        const inventoryPaths = new Set(catalogFiles.map((file) => file.relativePath));
         for (let offset = 0; offset < catalogFiles.length; offset += CATALOG_SCAN_BATCH) {
           if (disposed || signal.aborted) return;
           const batch = catalogFiles.slice(offset, offset + CATALOG_SCAN_BATCH);
@@ -345,6 +346,62 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
           }
           await collector.drain();
           await yieldToEventLoop();
+        }
+        if (disposed || signal.aborted) return;
+        const inventoryStatus = files.enumerationStatus;
+        if (inventoryStatus === "complete") {
+          // A complete inventory is the only authority allowed to remove a
+          // path that disappeared from the current file set. Re-read a stale
+          // path immediately before deletion so a concurrent recreation is
+          // handed back to the collector instead of being removed from the
+          // graph. The store-side revision/generation guard closes the normal
+          // collector-vs-reconcile race in the write queue.
+          const existingPaths = (await store.catalogStats()).paths;
+          for (const stalePath of existingPaths) {
+            if (inventoryPaths.has(stalePath)) continue;
+            if (disposed || signal.aborted) return;
+            let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
+            try {
+              snapshot = await options.documents.read({ workspaceId, resourceId: stalePath });
+            } catch {
+              continue;
+            }
+            if (signal.aborted || disposed) return;
+            if (snapshot.status === "ready") {
+              const existing = await store.getFileRelations(stalePath);
+              if (
+                existing
+                && (existing.documentRevision !== snapshot.revision || existing.extractor !== CATALOG_EXTRACTOR_VERSION)
+              ) {
+                collector.observe({ path: stalePath, kind: "modified", signal });
+              }
+              continue;
+            }
+            if (snapshot.status !== "missing") continue;
+            const existing = await store.getFileRelations(stalePath);
+            if (!existing) continue;
+            // Confirm a second time after the store read. This keeps a newly
+            // created path visible when its mutation reaches us during the
+            // inventory reconciliation window.
+            let confirmation: Awaited<ReturnType<DocumentAuthority["read"]>>;
+            try {
+              confirmation = await options.documents.read({ workspaceId, resourceId: stalePath });
+            } catch {
+              continue;
+            }
+            if (confirmation.status === "ready") {
+              collector.observe({ path: stalePath, kind: "modified", signal });
+              continue;
+            }
+            if (confirmation.status !== "missing") continue;
+            if (signal.aborted || disposed) return;
+            await store.removeFileSymbols(stalePath, {
+              expectedDocumentRevision: existing.documentRevision,
+              expectedGeneration: existing.generation,
+              signal,
+            });
+          }
+          await collector.drain();
         }
         if (disposed || signal.aborted) return;
         // Gated calls were already extracted and persisted as compact metadata

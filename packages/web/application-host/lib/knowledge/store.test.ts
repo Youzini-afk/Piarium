@@ -734,6 +734,24 @@ describe("KnowledgeStore", () => {
       expect(await store.catalogStats()).toMatchObject({ symbolCount: 0, fileCount: 1, linkCount: 0, paths: ["lib/y.ts"] });
     });
 
+    it("does not remove a newer file generation through a stale reconcile guard", async () => {
+      await store.replaceFileSymbols("lib/race.ts", "typescript", [
+        { name: "oldRace", kind: "function", range },
+      ], "disk-r1");
+      const old = await store.getFileRelations("lib/race.ts");
+      if (!old) throw new Error("expected the old race generation");
+      await store.replaceFileSymbols("lib/race.ts", "typescript", [
+        { name: "newRace", kind: "function", range },
+      ], "disk-r2");
+
+      expect(await store.removeFileSymbols("lib/race.ts", {
+        expectedDocumentRevision: old?.documentRevision,
+        expectedGeneration: old?.generation,
+      })).toEqual({ removedFiles: 0, removedSymbols: 0 });
+      expect(await store.getFileRelations("lib/race.ts")).toMatchObject({ documentRevision: "disk-r2" });
+      expect(await store.searchSymbols("newRace", 5)).toHaveLength(1);
+    });
+
     it("resolves reverse imports at query time and leaves non-relative specifiers unresolved", async () => {
       await store.replaceFileSymbols("lib/harness/explore.ts", "typescript", [
         { name: "explore", kind: "function", range },

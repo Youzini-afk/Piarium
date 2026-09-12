@@ -61,6 +61,10 @@ its generation and revision. Once the scan has committed all extracted
 `connects`, the store can create or remove matching relation rows from that
 metadata alone; it does not re-read or re-parse the source, and a newer file
 generation replaces the metadata automatically.
+An explicit catalog rescan reconciles deleted paths only after a complete Host
+enumeration and Documents missing observations. Store deletion checks the old
+revision/generation and cancellation inside its write queue; an incomplete or
+unknown enumeration preserves the graph, and recreated paths are recollected.
 
 ## Slice
 

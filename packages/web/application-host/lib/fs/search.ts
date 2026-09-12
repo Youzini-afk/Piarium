@@ -27,11 +27,11 @@ const shouldSkipSearchDirectory = (name: string, includeHidden: boolean): boolea
   return FILE_SEARCH_EXCLUDED_DIRS.has(name.toLowerCase());
 };
 
-const listDirectoryEntries = async (dirPath: string, fsPromises: FsPromises): Promise<Dirent[]> => {
+const listDirectoryEntries = async (dirPath: string, fsPromises: FsPromises): Promise<{ entries: Dirent[]; failed: boolean }> => {
   try {
-    return await fsPromises.readdir(dirPath, { withFileTypes: true });
+    return { entries: await fsPromises.readdir(dirPath, { withFileTypes: true }), failed: false };
   } catch {
-    return [];
+    return { entries: [], failed: true };
   }
 };
 
@@ -44,6 +44,8 @@ const listDirectoryEntries = async (dirPath: string, fsPromises: FsPromises): Pr
  * `--cached --others --exclude-standard` is "tracked, plus untracked that is
  * not ignored", so a file on disk that is absent from this set is ignored.
  * Paths come out relative to the cwd, which is the search root.
+ * The returned array carries a non-enumerable `enumerationStatus`; a catalog
+ * may reconcile missing graph paths only when that status is `complete`.
  */
 interface IgnoreLookup {
   /** The file is tracked or untracked-but-not-ignored. */
@@ -52,34 +54,53 @@ interface IgnoreLookup {
   allowsDirectory(relativePath: string): boolean;
 }
 
+interface IgnoreLookupResult {
+  lookup: IgnoreLookup | null;
+  status: "complete" | "failed" | "cancelled";
+}
+
 const buildIgnoreLookup = async (
   rootPath: string,
   spawn: typeof nodeSpawn,
   resolveGitBinaryForSpawn: () => string,
   signal?: AbortSignal,
-): Promise<IgnoreLookup | null> => {
-  const listed = await new Promise<string | null>((resolve) => {
+): Promise<IgnoreLookupResult> => {
+  if (signal?.aborted) return { lookup: null, status: "cancelled" };
+  const listed = await new Promise<{ output: string | null; status: IgnoreLookupResult["status"] }>((resolve) => {
     const child = spawn(resolveGitBinaryForSpawn(), ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], {
       cwd: rootPath,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const chunks: Buffer[] = [];
+    const errors: Buffer[] = [];
     let failed = false;
     child.stdout.on('data', (data: Buffer) => { chunks.push(data); });
-    child.on('error', () => { failed = true; resolve(null); });
+    child.stderr.on('data', (data: Buffer) => { errors.push(data); });
+    child.on('error', () => { failed = true; resolve({ output: null, status: signal?.aborted ? "cancelled" : "failed" }); });
     child.on('close', (code) => {
       if (failed) return;
-      resolve(code === 0 ? Buffer.concat(chunks).toString('utf8') : null);
+      if (signal?.aborted) {
+        resolve({ output: null, status: "cancelled" });
+      } else if (code === 0) {
+        resolve({ output: Buffer.concat(chunks).toString('utf8'), status: "complete" });
+      } else if (code === 128 && /not a git repository/iu.test(Buffer.concat(errors).toString('utf8'))) {
+        // A non-Git workspace has no ignore rules to apply; the directory walk
+        // still provides a complete inventory.
+        resolve({ output: null, status: "complete" });
+      } else {
+        resolve({ output: null, status: "failed" });
+      }
     });
     signal?.addEventListener('abort', () => child.kill(), { once: true });
   });
   // Not a Git working tree, or git is unavailable: nothing declares an ignore
   // rule, which is the same answer the per-directory probe gave on failure.
-  if (listed === null) return null;
+  if (listed.status !== "complete") return { lookup: null, status: listed.status };
+  if (listed.output === null) return { lookup: null, status: "complete" };
   const files = new Set<string>();
   const directories = new Set<string>();
-  for (const entry of listed.split('\0')) {
+  for (const entry of listed.output.split('\0')) {
     if (!entry) continue;
     files.add(entry);
     let cut = entry.lastIndexOf('/');
@@ -91,8 +112,11 @@ const buildIgnoreLookup = async (
     }
   }
   return {
-    allowsFile: (relativePath) => files.has(relativePath),
-    allowsDirectory: (relativePath) => directories.has(relativePath),
+    status: "complete",
+    lookup: {
+      allowsFile: (relativePath) => files.has(relativePath),
+      allowsDirectory: (relativePath) => directories.has(relativePath),
+    },
   };
 };
 
@@ -213,7 +237,7 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
     query: string;
     respectGitignore?: boolean;
     signal?: AbortSignal;
-  }): Promise<FileSearchItem[]> => {
+  }): Promise<FileSearchItems> => {
     const { limit, query, includeHidden, respectGitignore, signal } = options;
     const includeHiddenEntries = Boolean(includeHidden);
     const normalizedQuery = query.trim().toLowerCase();
@@ -229,21 +253,28 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
       : matchAll ? requestedLimit : Math.max(requestedLimit * 3, 200);
     const candidates: Array<FileSearchItem & { score: number }> = [];
 
-    const ignore = shouldRespectGitignore
+    const ignoreResult = shouldRespectGitignore
       ? await buildIgnoreLookup(rootPath, spawn, resolveGitBinaryForSpawn, signal)
-      : null;
+      : { lookup: null, status: "complete" as const };
+    if (ignoreResult.status === "cancelled") {
+      throw signal?.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
+    }
+    const ignore = ignoreResult.lookup;
+    let enumerationStatus: FileSearchItems["enumerationStatus"] = ignoreResult.status === "failed" ? "failed" : "complete";
+    if (requestedLimit !== null && enumerationStatus === "complete") enumerationStatus = "incomplete";
 
     while (queue.length > 0 && candidates.length < collectLimit) {
       if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
       const batch = queue.splice(0, FILE_SEARCH_MAX_CONCURRENCY);
 
       const dirResults = await Promise.all(
-        batch.map(async (dir) => ({ dir, dirents: await listDirectoryEntries(dir, fsPromises) })),
+        batch.map(async (dir) => ({ dir, ...(await listDirectoryEntries(dir, fsPromises)) })),
       );
       if (signal?.aborted) throw signal.reason ?? Object.assign(new Error('File search aborted'), { name: 'AbortError' });
 
-      for (const { dir: currentDir, dirents } of dirResults) {
-        for (const dirent of dirents) {
+      for (const { dir: currentDir, entries, failed } of dirResults) {
+        if (failed && enumerationStatus === "complete") enumerationStatus = "incomplete";
+        for (const dirent of entries) {
           const entryName = dirent.name;
           if (!entryName || (!includeHiddenEntries && entryName.startsWith('.'))) {
             continue;
@@ -320,13 +351,14 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
       });
     }
 
-    const selected = requestedLimit === null ? candidates : candidates.slice(0, requestedLimit);
-    return selected.map(({ name, path: filePath, relativePath, extension }) => ({
+    const selected = (requestedLimit === null ? candidates : candidates.slice(0, requestedLimit)).map(({ name, path: filePath, relativePath, extension }) => ({
       name,
       path: filePath,
       relativePath,
       ...(extension ? { extension } : {}),
-    }));
+    })) as FileSearchItems;
+    Object.defineProperty(selected, "enumerationStatus", { value: enumerationStatus, enumerable: false });
+    return selected;
   };
 
   return {
@@ -336,4 +368,4 @@ export const createFsSearchRuntime = ({ fsPromises: rawFsPromises, path, spawn: 
 };
 import type { Dirent } from 'node:fs';
 import type { spawn as nodeSpawn } from 'node:child_process';
-import type { FileSearchItem, FsPromises, PathModule } from './types.js';
+import type { FileSearchItem, FileSearchItems, FsPromises, PathModule } from './types.js';

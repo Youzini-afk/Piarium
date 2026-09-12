@@ -251,6 +251,9 @@ RunManifest 不成为这组能力共同前置。
 
 ### 3.1 符号图
 
+D-237 已补显式重扫的外部删除对账：完整枚举 + Documents missing + store revision/generation 条件删除，排队取消保留旧图；
+失败/截断/未知 inventory 不删除，重建路径重新采集，关联随 connects 集合更新。沿现有扫描入口，不新增后台循环。
+
 已有 file/defines/symbol 以及 `imports` / `connects` / `associates`（3.11 第 4 步）。读者是 explore 的路径级候选
 （定义 / 连线另一端 / 反向 import，3.12）和 `related` 工具；摘录出边注解（D-108/D-112）仍在。
 继续按实际查询建 `references` / 解析后的跨文件 `calls`，来源/版本明确，LSP `references` 不冒充调用图，也不和 `related` 抢活。

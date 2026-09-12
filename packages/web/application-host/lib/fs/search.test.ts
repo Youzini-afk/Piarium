@@ -17,10 +17,10 @@ interface FakeGit {
   calls: Array<{ args: readonly string[]; cwd: string }>;
 }
 
-const fakeSpawn = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number }) => (
+const fakeSpawn = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number; stderr?: string }) => (
   (_binary: string, args: readonly string[], options: { cwd: string }) => {
     git.calls.push({ args, cwd: options.cwd });
-    const { stdout, code } = reply(args);
+    const { stdout, code, stderr } = reply(args);
     const listeners = new Map<string, Array<(value?: unknown) => void>>();
     const on = (event: string, handler: (value?: unknown) => void) => {
       const existing = listeners.get(event) ?? [];
@@ -31,11 +31,14 @@ const fakeSpawn = (git: FakeGit, reply: (args: readonly string[]) => { stdout: s
       if (code === 0 && stdout) {
         for (const handler of listeners.get("data") ?? []) handler(Buffer.from(stdout, "utf8"));
       }
+      if (stderr) {
+        for (const handler of listeners.get("stderr-data") ?? []) handler(Buffer.from(stderr, "utf8"));
+      }
       for (const handler of listeners.get("close") ?? []) handler(code);
     });
     return {
       stdout: { on: (event: string, handler: (value?: unknown) => void) => on(event, handler) },
-      stderr: { on: () => undefined },
+      stderr: { on: (event: string, handler: (value?: unknown) => void) => on(`stderr-${event}`, handler) },
       on: (event: string, handler: (value?: unknown) => void) => on(event, handler),
       kill: () => undefined,
     };
@@ -54,7 +57,7 @@ const workspace = (): string => {
   return root;
 };
 
-const runtimeFor = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number }) => (
+const runtimeFor = (git: FakeGit, reply: (args: readonly string[]) => { stdout: string; code: number; stderr?: string }) => (
   createFsSearchRuntime({
     fsPromises,
     path,
@@ -100,6 +103,7 @@ describe("searchFilesystemFiles", () => {
     expect(git.calls).toHaveLength(1);
     expect(git.calls[0]?.args).toEqual(["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
     expect(git.calls[0]?.cwd).toBe(root);
+    expect(files.enumerationStatus).toBe("complete");
     expect(files.map((file) => file.relativePath).toSorted()).toEqual(["src/app.ts", "src/deep/nested.ts"]);
   });
 
@@ -128,7 +132,7 @@ describe("searchFilesystemFiles", () => {
   it("falls back to an unfiltered walk when the directory is not a Git work tree", async () => {
     const root = workspace();
     const git: FakeGit = { calls: [] };
-    const runtime = runtimeFor(git, () => ({ stdout: "", code: 128 }));
+    const runtime = runtimeFor(git, () => ({ stdout: "", code: 128, stderr: "fatal: not a git repository" }));
 
     const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true });
 
@@ -140,6 +144,7 @@ describe("searchFilesystemFiles", () => {
       "src/app.ts",
       "src/deep/nested.ts",
     ]);
+    expect(files.enumerationStatus).toBe("complete");
   });
 
   it("does not run git at all when the caller does not want ignore rules", async () => {
@@ -161,6 +166,17 @@ describe("searchFilesystemFiles", () => {
     const files = await runtime.searchFilesystemFiles(root, { query: "nested", respectGitignore: true, limit: 1 });
 
     expect(files.map((file) => file.relativePath)).toEqual(["src/deep/nested.ts"]);
+    expect(files.enumerationStatus).toBe("incomplete");
+  });
+
+  it("keeps a Git inventory failure distinct from a limited complete walk", async () => {
+    const root = workspace();
+    const git: FakeGit = { calls: [] };
+    const runtime = runtimeFor(git, () => ({ stdout: "", code: 2, stderr: "fatal: repository unavailable" }));
+
+    const files = await runtime.searchFilesystemFiles(root, { query: "", respectGitignore: true, limit: 1 });
+
+    expect(files.enumerationStatus).toBe("failed");
   });
 
   it("rejects when the caller aborts", async () => {
@@ -175,5 +191,6 @@ describe("searchFilesystemFiles", () => {
       respectGitignore: true,
       signal: controller.signal,
     })).rejects.toThrow();
+    expect(git.calls).toEqual([]);
   });
 });
