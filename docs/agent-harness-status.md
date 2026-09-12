@@ -163,21 +163,38 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
 
-本阶段的 implemented / wired / proven / default-on 当前均未达到。R0–R6 是一个正式架构阶段的完整范围，
-单项完成不能替代整体交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
+R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；这不等同于阶段 R 整体完成。
+R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
-| R0 协议与进程 | 未实现 | 生成协议/client、Host 真实启动/取消/重启和发行 target 构建 |
-| R1 状态与存储 | 未实现 | 原生根/修订/引用/操作同事务域；完整消费者接管、新库启动并删除旧内部格式路径 |
+| R0 协议与进程 | implemented / wired / proven（本机） | `kernel/` Cargo workspace、生成 DTO、真实 framed 子进程、握手/epoch/关闭、Host 启停、Electron/Web staging；macOS/Linux 真机与签名产物未测 |
+| R1 状态与存储 | implemented / wired（kernel vertical）；生产消费者 cutover 未完成 | Rust SQLite/object store 的 immutable trie root、blob durability、writeRevision CAS、published revision、pin/GC、idempotent operation/recovery API；TS WorkingState/Recovery 全消费者尚未删除旧 JSON/SQLite writer |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
 | R5 文件与结构计算 | 未实现 | 固定视图检索和结构输入、scope/取消、前台与后台负载；保留 TriviumDB/Pi 原归属 |
 | R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
 
-D-246–D-251 已由 D-254 完成独立验收与重要错误收口；下一步可从健康 TS 基线进入 R0。
-目前没有 Rust 性能、跨平台发行或故障恢复的实测结论；绝对性能目标在实施时定标，不预填提升倍数。
+D-246–D-251 已由 D-254 完成独立验收与重要错误收口；R0/R1 的本机 Rust 纵切现已补入，下一步是按 R1 consumer map 继续切换而非再建 TS 过渡内核。
+当前没有 Rust 端到端性能对照、macOS/Linux 真机发行或断电级故障注入结论；绝对性能目标仍在实施时定标，不预填提升倍数。
+
+**R0/R1 本机证据（2026-09-12，D-255）**：`packages/web/application-host/lib/kernel/kernel-client.test.ts` 通过真实
+`piarium-kernel` 子进程完成 handshake、epoch、对象安装、分支初建、immutable trie root、`writeRevision` CAS 冲突、发布
+revision、pin、root diff、SQLite integrity、关闭后重开与字节/哈希保持。`cargo check --manifest-path kernel/Cargo.toml` 与
+Windows release build 通过（本机通过 Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 SDK 会报告环境缺失）。
+Kernel protocol 使用 `kernel/protocol/schema.json` → generated TS DTO，Host 在 `application-host/index.ts` 启动/停止同一 client；
+Electron package 将可执行文件放在 `resources/kernel`（asar 外），Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
+macOS/Linux 真机运行或完整跨平台签名证据。
+
+另有一次临时 `startWebUiServer({ port: 0, requirePiRuntime: false, apiOnly: true })` smoke：真实 Web/Application Host
+打印监听端口、完成 kernel 子进程启动后按 `stop()` 正常关闭；该 smoke 的 `ready:false` 只表示刻意关闭 Pi warmup，不表示 kernel 未就绪。
+
+**R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation 表；
+TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
+`working-state/working-state-store.ts`、`recovery/journal-catalog.ts` 仍是生产消费者的旧直接 writer，本轮已把它们的
+责任和 cutover seam 记录到 `packages/web/application-host/lib/kernel/DOCUMENTATION.md`，但还没有把全部 dispatch/branchWrite/
+recovery/evidence/materializer 调用替换为 kernel adapter；因此 R1 不标 `proven/default-on`，也没有声称删除了旧 writer。
 
 ## 当前缺口与后续顺序
 

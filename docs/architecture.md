@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust system-kernel stage R accepted, not implemented
+Status: Pi-native workbench and harness in production; Rust kernel R0 is wired/proven locally and R1 kernel storage is wired at the Host boundary; full legacy consumer cutover remains explicitly tracked
 
 Last updated: 2026-09-12
 

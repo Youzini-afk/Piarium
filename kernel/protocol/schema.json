@@ -1,0 +1,27 @@
+{
+  "protocolVersion": 1,
+  "kernelEpoch": "per-process",
+  "framing": "u32be-json",
+  "request": {"v": 1, "kind": "request", "id": "request-id", "method": "method", "params": {}},
+  "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
+  "event": {"v": 1, "kind": "event", "seq": 1, "event": "event", "data": {}},
+  "methods": {
+    "kernel.handshake": "negotiate build, protocol, epoch, capabilities and storage identity",
+    "kernel.ping": "health check",
+    "kernel.shutdown": "ordered shutdown",
+    "storage.health": "storage integrity and lock status",
+    "storage.putBlob": "durably install a content object",
+    "storage.getBlob": "read a content object or byte range",
+    "branch.create": "batch-build an immutable branch root",
+    "branch.read": "read a root or selected paths",
+    "branch.write": "copy-on-write path mutation with writeRevision CAS",
+    "branch.publish": "publish the current root as an immutable revision",
+    "branch.pin": "pin an immutable root/revision",
+    "branch.unpin": "release a pin",
+    "branch.diff": "diff two immutable roots without flattening",
+    "recovery.operation.begin": "durably begin an idempotent recovery operation",
+    "recovery.operation.update": "advance recovery operation state",
+    "recovery.operation.get": "read a recovery operation",
+    "storage.gc": "collect unreferenced nodes and objects"
+  }
+}

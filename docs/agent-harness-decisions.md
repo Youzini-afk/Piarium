@@ -5621,3 +5621,32 @@ plan 0.1/0.7/3.4/阶段 R、status 阶段 R、roadmap、AGENTS 与 native recove
 | D-250 | superseded in part（目录型 copyIgnored 的逐文件 CoW 由 D-254 补齐） | D-254 | status 3.4a |
 | D-251 | superseded in part（DAG 校验、可达节点序列化、唯一 schema 与权威表述由 D-254 纠正） | D-254 | status 3.4a；阶段 R1 |
 | D-254 | implementation | — | status 3.1/3.3/3.4a/3.8/3.10/3.17；harness 6.2/9.2.5b/9.3.4 |
+
+### D-255 · 2026-09-12 · 阶段 R0/R1 首个执行纵切
+
+类型：实施选择与状态纠正
+
+决定：按 D-252/D-253/D-254 建立一个 Cargo workspace 和一个 `piarium-kernel` 可执行入口，采用长度前缀 JSON
+控制帧、stderr 分离、单一 generated TS DTO；R0 由真实 Application Host client 管理子进程并在启动/关闭路径执行握手与
+epoch 校验。R1 首刀把内容对象、不可变 trie 节点、branch/revision/pin、CAS、operation/recovery record 与 GC 做成
+Rust SQLite/object store 领域 API。kernel storage root 使用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，owner file 拒绝同一
+存储位置的第二 Host；对象先 fsync+rename，再在 SQLite 事务中发布引用。
+
+原因：当前仓库没有 Rust runtime 或跨语言协议；先把真实进程、协议和 R1 根/对象语义立起来，才能从 D-254 的 TS trie
+“持久去重但仍平表/整 catalog 写”进入生产接管。协议保持领域方法，不提供任意 SQL/磁盘写接口，也不把 Thread/Pi/Registry/
+TriviumDB 的既有所有权误并入 kernel。
+
+考虑过的替代：继续在 TS 中复制一套 trie 过渡内核（会形成第二 writer）；通过公开 TCP 端口连接（扩大权限边界）；把 Rust
+编译器作为用户运行时依赖（发行包应携带可执行文件）。均未采用。
+
+影响：新增 `kernel/` Cargo workspace、`kernel/protocol/schema.json`、Host `KernelClient` 与真实启动/停止接线、Web/Electron
+staging 脚本、R0/R1 文档和本机 child-process 证据。R2–R6 不因本条提前完成；现有 TS WorkingState/Recovery 全消费者仍需后续
+按责任表切换，不能把本条写成旧 writer 已删除。
+
+状态：R0 已在本机 wired/proven；R1 kernel vertical wired，完整生产 consumer cutover 待继续
+
+## D-255 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-255 | implementation（R0 runtime + R1 kernel storage vertical） | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |

@@ -197,6 +197,11 @@ TS 保留 Thread/Run 与模型策略、公开 API、知识领域、语言协议�
 Document Registry 继续拥有未保存缓冲。混合操作在内核记录同一 operationId 的逐目标阶段，经 TS Documents adapter
 调用真实 Registry 的修订检查与 grouped undo，不隐式保存、不建第二缓冲权威。Thread/Pi/知识的跨域清理按持久操作与幂等回执协调。
 
+R0 的真实链路已是 `Application Host → 私有 KernelClient → piarium-kernel 子进程 → framed protocol → kernel SQLite/object store`；
+Electron/Web/serve 共用这一装配，kernel 不监听公共端口。R1 kernel storage vertical 已提供 immutable root/trie、blob、
+branch/revision/CAS、pin、operation/recovery 和 GC 领域方法。完整 WorkingState/Recovery/结果/草稿/evidence 消费者的 TS
+writer cutover 仍按 status 的责任表推进，不能把当前 client/vertical 误写成 R1 全部已完成。
+
 这是 plan R0–R6 的完整实施范围，不是一个原生函数或只读试验。每个职责接管同时覆盖生产消费者、数据保留、取消/重启、
 资源回收、性能与发行，并删除原写入路径。完整契约及范围见 [rust-kernel-design.md](rust-kernel-design.md)；
 当前 TS 代码和 D-246–D-251 返工独立验收，不能以 Rust 计划代替已知错误修复。

@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture and planned implementation stage R (D-252); no Rust production runtime delivered
+Status: accepted architecture; R0 runtime and the R1 kernel storage vertical are delivered, with remaining consumer cutover recorded in status
 
 Last updated: 2026-09-12
 

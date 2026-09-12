@@ -1,4 +1,5 @@
 server/prompt-templates.js
+/kernel/
 prompt-enhancer-config.json
 test-results/
 # Generated Application Host runtime output (built from application-host/)

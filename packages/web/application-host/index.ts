@@ -81,6 +81,7 @@ import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/worki
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
+import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
@@ -737,6 +738,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let piRuntimeLifecycle: PiRuntimeLifecycle | null = null;
   let relayServiceInstance: RelayService | null = null;
   let tunnelRuntimeContext: TunnelRuntimeContext | null = null;
+  let kernelClient: KernelClient | null = null;
   let realtimeProxyRuntime: Pick<ReturnType<typeof attachRealtimeProxy>, 'stop'> = { stop: () => {} };
   let dictationRuntime: ReturnType<typeof createDictationRuntime> | null = null;
   const currentPiRuntimeHandshake = () => (
@@ -803,6 +805,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           source: handshake?.runtime?.source ?? null,
           manager: piRuntimeLifecycle?.snapshot ?? null,
         },
+        kernel: kernelClient?.handshake
+          ? {
+              ready: kernelClient.isReady,
+              epoch: kernelClient.kernelEpoch,
+              version: kernelClient.handshake.kernelVersion,
+              protocolVersion: kernelClient.handshake.protocolVersion,
+            }
+          : { ready: false, epoch: null, version: null, protocolVersion: null },
       };
     },
     verboseRequestLogs: isEnvFlagEnabled(process.env.PIARIUM_VERBOSE_REQUEST_LOGS),
@@ -979,6 +989,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piariumVersion: PIARIUM_VERSION,
     });
   }
+  kernelClient = createKernelClient({
+    hostId: extensionRuntime.services.hostId,
+    storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
+    buildVersion: PIARIUM_VERSION,
+    onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
+  });
+  await kernelClient.start();
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -2672,6 +2689,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await runRuntime.dispose();
       await threadRuntime.dispose();
       await piRuntimeGateway.stop();
+      await kernelClient?.close();
       await knowledgeVectors?.close();
       await semanticRuntime.dispose();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();

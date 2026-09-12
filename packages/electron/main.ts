@@ -1756,6 +1756,9 @@ const spawnLocalServer = async () => {
   }
   process.env.PIARIUM_DIST_DIR = resolveWebDistDir();
   process.env.PIARIUM_RUNTIME = 'desktop';
+  if (!process.env.PIARIUM_KERNEL_PATH?.trim()) {
+    process.env.PIARIUM_KERNEL_PATH = path.join(process.resourcesPath, 'kernel', process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel');
+  }
   process.env.PIARIUM_DESKTOP_NOTIFY = 'true';
   if (desktopUiPassword) {
     process.env.PIARIUM_UI_PASSWORD = desktopUiPassword;
