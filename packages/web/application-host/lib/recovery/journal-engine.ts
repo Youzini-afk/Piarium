@@ -304,6 +304,8 @@ export interface WorkspaceRecoveryStorageContext {
   resourceOperationGate: HostResourceOperationGate;
   root: string;
   resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
+  /** Present only inside an exclusive storage lease; never prunes history rows. */
+  collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -2648,9 +2650,16 @@ export const createWorkspaceRecoveryEngine = (
             'needs-attention',
           );
         }
-        const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
-        const workingState = await WorkingStateStore.open(integrationContext);
-        await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
+        try {
+          const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
+          const workingState = await WorkingStateStore.open(integrationContext);
+          await workingState.reconcileObjectReferences();
+          await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
+        } catch (error) {
+          // Preserve unknown ownership and expose this workspace's failure;
+          // other workspaces still need their startup reconciliation.
+          rememberFailure(workspaceId, error, 'needs-attention');
+        }
       } finally {
         database.close();
         await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));
@@ -2843,6 +2852,9 @@ export const createWorkspaceRecoveryEngine = (
           resourceOperationGate: resourceOperationGateFor(workspaceId),
           root: storage.root,
           ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
+          ...(accessOptions.mode === "exclusive" ? {
+            collectUnreachableObjects: () => collectUnreachableObjects(storage.root, database),
+          } : {}),
         });
       } finally {
         database.close();

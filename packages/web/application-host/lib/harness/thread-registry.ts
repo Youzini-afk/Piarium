@@ -1636,6 +1636,30 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(catalog.threads);
   };
 
+  const listWorkspaceThreadSnapshots = async (workspaceId: string): Promise<Array<{ thread: Thread; activeRun: ThreadRun | null }>> => {
+    const catalog = await loadWorkspace(workspaceId);
+    return structuredClone(catalog.threads.map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) })));
+  };
+
+  /**
+   * The caller already holds the owning storage lease. Keep release validation
+   * and its metadata commit ahead of subsequent Run/review mutations. The
+   * callback must not call Registry methods or wait for another storage lease;
+   * object-file collection happens after it returns.
+   */
+  const withThreadRetentionSnapshot = async <T>(
+    workspaceId: string,
+    operation: (snapshots: Array<{ thread: Thread; activeRun: ThreadRun | null }>) => Promise<T>,
+  ): Promise<T> => {
+    const previous = mutationTails.get(workspaceId) ?? Promise.resolve();
+    const task = previous.then(async () => {
+      const catalog = await loadWorkspace(workspaceId);
+      return operation(structuredClone(catalog.threads.map((thread) => ({ thread, activeRun: activeRunFor(catalog, thread) }))));
+    });
+    mutationTails.set(workspaceId, task.then(() => undefined, () => undefined));
+    return task;
+  };
+
   const listWorkspaceIds = async (): Promise<string[]> => {
     await loadHostCatalogs();
     return [...cache.keys()].sort();
@@ -2516,6 +2540,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     getThreadSnapshot,
     listThreads,
     listWorkspaceThreads,
+    listWorkspaceThreadSnapshots,
+    withThreadRetentionSnapshot,
     listWorkspaceIds,
     listThreadSnapshots,
     getActiveRun,

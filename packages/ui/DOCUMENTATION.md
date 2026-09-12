@@ -67,3 +67,10 @@ High-frequency state should remain close to its owner and preserve unrelated ref
 surfaces drive refresh and subscriptions; hidden surfaces should not keep language, Git, PR, terminal,
 or extension work alive. The concrete store and editor lifetimes are documented by their owning
 modules rather than repeated here.
+
+`HarnessThreadResultHistory` opens on demand inside a Thread card and uses the application-client
+history DTOs. It shows retained versions and Host-provided protection reasons, freezes branch/revision
+selection before confirmation, and refreshes the existing Thread/space projection after release.
+Version sizes include shared objects; only the Host cleanup response reports removed bytes. Interrupted
+cleanup keeps the same retry request across panel refreshes. Target changes discard old responses and
+selection; this feature adds no polling or persistent browser-side history authority.

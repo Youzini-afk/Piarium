@@ -459,6 +459,16 @@ session to a new Run; a failed restore stays archived and cannot open an occupie
 path. Restore of a descendant is refused while an ancestor is archived or being
 archived. The Documents reclaim guard remains held through deletion. Thread panel routes
 `GET /space` and archive/restore/reclaim share this Host projection.
+`GET .../threads/:threadId/history` and `POST .../history/release` manage selected
+old WorkingResult versions for the authenticated parent. Release holds the Thread
+lifecycle, storage lease, then a Registry snapshot guard while validating current
+results, Run inputs, review and Integration users. The guard ends before object
+collection. The current branch/report/transcript remains; completed Integration
+undo keeps its own safety/target objects. Metadata removal and physical cleanup
+have separate outcomes and the same branch/revision request can retry cleanup.
+WorkingState publishes metadata before removing old references and protects new
+write candidates until durable publication; startup reconciles derived references
+without interpreting a missing catalog as empty (D-239).
 The session-state sidebar reads/updates blocks through authenticated context
 routes. Block writes broadcast only an invalidation identity over SSE, never
 the block body. Thread metadata routes use the same UI-auth middleware.

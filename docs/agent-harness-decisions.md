@@ -5092,3 +5092,36 @@ ModelRuntime 纵切继续通过。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-238 | implementation（steering/用户计划/本次 Run 返回携带材料进入现有 keeper） | — | 设计 8.4；plan/status 2.4；pi-host / Host harness |
+
+### D-239 · 2026-09-12 · 3.4 / 3.4a / 3.10（用户释放旧结果与引用持久顺序）
+
+类型：问题与解法
+
+背景：目录可以回收，但历次 WorkingResult 独立持有内容引用，用户没有释放旧版本的入口。直接删引用还会暴露原 persist 的问题：
+它在原子 JSON 成功前替换旧所有者，若写入失败，仍被旧目录使用的正文可能被回收。释放需要按实际依赖与耐久目录判断，而不是按年龄猜测。
+
+决定：
+
+1. 在已有线程卡片增加按需历史列表与释放确认。纯 DTO 位于 application-client，鉴权 Host 路由从 session 解析 owning workspace
+   和 parent，再核对 Thread；不增加 Agent 删除工具。选择固定 branchId/resultRevisions，过期 branch 或任一被保护版本使整批拒绝。
+2. 保护 branch head、Thread 当前结果、active/lost Run 的 inputRevision、活动/排队 review 及未结束或冲突 Integration 的输入。
+   包括 review 已创建而 Run 尚未启动的窗口。当前分支、草稿基线、报告、转录及其他所有者的引用保留；本次不删除整个 Thread。
+3. 锁顺序为该 Thread lifecycle → owning storage 独占 lease → Registry 快照队列。快照检查与版本目录移除完成后先释放 Registry
+   队列，再收集无主对象，不持有它等待文件遍历。完成 Integration 拥有独立 safety/target，undo 不重新读取源 WorkingResult。
+4. 删除先原子持久化 WorkingState JSON，再移除 thread-result 引用。普通 WorkingState 写入先保留原所有者、以临时
+   working-state-write 所有者保护新增字节；新目录耐久后才替换正式引用。中断时两边的必要正文都在，启动和显式释放按已解析目录
+   对账派生引用；先使观察到的目录耐久，再移除旧引用。缺失/损坏目录保留未知所有权并报告，不自动当成空库。
+5. API 分开返回 released/missing revisions 与 cleanup complete/failed。目录已删除而清理失败时如实报告、允许同请求重试；
+   失败不报零字节成功。列表大小是该版本唯一引用内容的逻辑字节，可能与其他版本共享；实际回收量来自对象删除结果。
+6. UI 禁选受保护版本、冻结确认、丢弃换目标后的迟到响应；清理失败的重试请求在同一面板关闭重开后保留。没有新增扫描循环、
+   保留年限、默认存储配额或 Thread 自动删除策略，WorkingState schema 保持 3。
+
+验证与边界：真实 Registry/WorkingState/SQLite/Recovery engine 经公开鉴权路由覆盖保护重查、共享对象、原子选择、条件失败与
+重试；已完成 Integration 在释放原版本后仍可撤销。JSON 写失败/rename 后失败与 SQLite 引用清理中断有定向测试，UI 有实际组件
+交互测试。完整 Electron 浏览器点击、真实卷耗尽和进程级电源故障未实测，既有 3.4/3.4a 的其他 Partial 原因不因此关闭。
+
+## 决策索引追加修订
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-239 | implementation（用户旧结果释放、独立引用及中断对账） | — | 设计 9.2.5b/9.3.4；plan/status 3.4/3.4a/3.10；recovery / Thread UI |

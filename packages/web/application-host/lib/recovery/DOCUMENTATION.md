@@ -77,3 +77,15 @@ uncompressed bytes. Checkpoints store only affected-path state references. Locat
 the destination before switching authority; cleanup removes unreachable objects.
 Working branches and every published Thread result own independent object references in this catalog,
 so deleting recovery history cannot collect result or baseline content that a Thread still retains.
+
+User Thread-history release removes selected old `WorkingResult` metadata before dropping its
+`thread-result` references. It uses the owning storage's exclusive lease and rechecks live Thread/Run,
+review and Integration users; the current branch, report and transcript are retained. Object collection
+is exposed only in that leased Host context and checks all remaining reference owners. A completed
+Integration owns its own safety/target objects, so undo does not depend on retaining the source result.
+
+WorkingState publication retains the old owners and temporarily protects new bytes as
+`working-state-write` until its atomic JSON catalog is durable. Startup and explicit release reconcile
+these derived reference rows against the parsed catalog before removing obsolete ownership. A missing
+or malformed catalog cannot authorize deletion. Metadata release and physical cleanup have separate
+outcomes; cleanup failure keeps a retryable request and does not report zero bytes as success (D-239).

@@ -8,7 +8,12 @@ This package owns the `RuntimeAPIs` aggregate interface, all 25 API interfaces (
 Files, Documents, Settings, Permissions, Notifications, Extensions, Language, LanguageSupport, Tasks, Debug, Tests,
 etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesError`,
 `LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
-`DraftStarterRef`, `FileEditorSettingsPatch`), and the single desktop IPC contract (`desktop.ts`).
+`DraftStarterRef`, `FileEditorSettingsPatch`, `ThreadResultHistory`), and the single desktop IPC contract (`desktop.ts`).
+
+`thread-history.ts` describes the user-only Thread history list and release response. The Host owns
+selection validation and object cleanup; the UI sends a frozen branch/revision selection. Logical bytes
+referenced by a version and bytes actually removed by cleanup are distinct fields. These DTOs do not
+add an Agent tool or a second state store.
 
 The desktop contract defines:
 

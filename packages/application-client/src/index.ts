@@ -1,5 +1,6 @@
 export * from "./types.js";
 export * from "./ui-dto.js";
+export * from "./thread-history.js";
 export * from "./desktop.js";
 export * from "./documents-errors.js";
 export * from "./files-errors.js";

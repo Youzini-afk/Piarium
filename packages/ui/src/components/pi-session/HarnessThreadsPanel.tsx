@@ -26,6 +26,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { HarnessSessionStateTrigger } from './HarnessSessionStateTrigger';
 import { useHarnessThreadState } from './HarnessThreadStateContext';
 import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
+import { HarnessThreadResultHistory } from './HarnessThreadResultHistory';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
@@ -89,6 +90,8 @@ export const HarnessThreadsPanel: React.FC<{
   const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
   const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
+  const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
+  spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
 
   const readError = (body: unknown, fallback: string): string => {
     if (!body || typeof body !== 'object') return fallback;
@@ -98,19 +101,26 @@ export const HarnessThreadsPanel: React.FC<{
   };
 
   const reloadSpace = React.useCallback(async (signal?: AbortSignal) => {
+    const target = `${workspaceId}\u0000${parentSessionId}`;
     const response = await runtimeFetch(`/api/harness/sessions/${encodeURIComponent(parentSessionId)}/space`, {
       cache: 'no-store',
       ...(signal ? { signal } : {}),
     });
     if (!response.ok) {
       if (response.status === 404) {
-        setSpace(null);
+        if (spaceTargetRef.current === target) setSpace(null);
         return;
       }
       throw new Error(`Unable to load thread space (${response.status})`);
     }
-    setSpace(parseHarnessThreadSpace(await response.json()));
-  }, [parentSessionId]);
+    const next = parseHarnessThreadSpace(await response.json());
+    if (spaceTargetRef.current === target) setSpace(next);
+  }, [parentSessionId, spaceTargetRef, workspaceId]);
+
+  const refreshAfterResultRelease = React.useCallback(async () => {
+    await reloadSpace();
+    await threadState.reload();
+  }, [reloadSpace, threadState]);
 
   const applyThreadMutation = React.useCallback(async (path: string, failedKey: 'harness.threads.archiveFailed' | 'harness.threads.restoreFailed' | 'harness.threads.reclaimFailed' | 'harness.threads.keepFailed', body?: unknown) => {
     const response = await runtimeFetch(
@@ -661,6 +671,11 @@ export const HarnessThreadsPanel: React.FC<{
                   onThread={(next) => threadState.merge({ thread: next, activeRun: entry.activeRun })}
                 />
               ) : null}
+              <HarnessThreadResultHistory
+                parentSessionId={parentSessionId}
+                threadId={entry.thread.id}
+                onReleased={refreshAfterResultRelease}
+              />
               <div className="flex flex-wrap justify-end gap-1 border-t border-border/40 px-2 py-1">
                 {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (
                   <button

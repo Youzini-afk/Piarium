@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResultHistoryReleaseResult } from "@piarium/application-client";
 import type {
   AgentInputContext,
   HarnessWorktreeSettings,
@@ -42,7 +43,8 @@ import {
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
-import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
 import type { RecoveryState } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
@@ -138,7 +140,7 @@ export interface ThreadRuntimeOptions {
           revision: string;
         }>;
       };
-  resolveIntegrationCoordinator?(workspaceId: string): Promise<Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null> | Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> | null;
+  resolveIntegrationCoordinator?(workspaceId: string): Promise<(Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null> | (Pick<IntegrationCoordinator, "mergeResult" | "previewResult" | "undoIntegration" | "invalidateWorkspace"> & Partial<Pick<IntegrationCoordinator, "invalidateThread">>) | null;
   canReclaimWorktree?(workspaceId: string, threadId: string, path: string): Promise<{ safe: boolean; reason?: string; release?: () => Promise<void> }>;
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
   verification?: VerificationCoordinator;
@@ -3986,6 +3988,103 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     withThreadLifecycle(workspaceId, threadId, () => reclaimUserImpl(workspaceId, parent, threadId))
   );
 
+  const historyThread = (snapshots: RetentionThreadSnapshot[], parent: ThreadParent, threadId: string): Thread => {
+    const thread = snapshots.find((snapshot) => snapshot.thread.id === threadId)?.thread;
+    if (!thread || thread.parent.kind !== parent.kind || thread.parent.id !== parent.id) {
+      throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    }
+    return thread;
+  };
+
+  const inspectResultHistory = (workspaceId: string, parent: ThreadParent, threadId: string): Promise<ThreadResultHistory> => (
+    withThreadLifecycle(workspaceId, threadId, async () => {
+      const initial = await options.registry.getThread(workspaceId, parent, threadId);
+      if (!initial) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+      if (!initial.workBranchId) return { workspaceId, threadId, branchId: null, results: [] };
+      if (!options.workingStates) throw new ThreadRuntimeError("unavailable", "Working-state storage is unavailable");
+      try {
+        return await options.workingStates.withStore(workspaceId, "thread-history-inspect", async (store, context) => {
+          const snapshots = await options.registry.listWorkspaceThreadSnapshots(workspaceId);
+          return projectThreadResultHistory({ workspaceId, thread: historyThread(snapshots, parent, threadId), snapshots, store, context });
+        }, "shared");
+      } catch (error) {
+        if (error instanceof ThreadRuntimeError) throw error;
+        throw new ThreadRuntimeError("unavailable", error instanceof Error ? error.message : "Historical results cannot be read", { cause: error });
+      }
+    })
+  );
+
+  const releaseResultHistory = (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    input: ThreadResultHistoryReleaseParams,
+  ): Promise<ThreadResultHistoryReleaseResult> => withThreadLifecycle(workspaceId, threadId, async () => {
+    if (!input || typeof input.branchId !== "string" || !input.branchId.trim() || !Array.isArray(input.resultRevisions)
+      || input.resultRevisions.some((revision) => !Number.isSafeInteger(revision) || revision < 1)) {
+      throw new ThreadRuntimeError("invalid-request", "A branch identity and positive result revisions are required");
+    }
+    const initial = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!initial) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
+    if (!options.workingStates) throw new ThreadRuntimeError("unavailable", "Working-state storage is unavailable");
+    const requested = [...new Set(input.resultRevisions)];
+    const result = await options.workingStates.withStore(workspaceId, "thread-history-release", async (store, context): Promise<ThreadResultHistoryReleaseResult> => {
+      if (!context.collectUnreachableObjects) throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
+      // Lock order: this Thread's lifecycle, storage lease, Registry snapshot.
+      // Release the Registry queue before collecting object files.
+      const released = await options.registry.withThreadRetentionSnapshot(workspaceId, async (snapshots) => {
+        const current = historyThread(snapshots, parent, threadId);
+        if (current.workBranchId !== input.branchId) throw new ThreadRuntimeError("conflict", "The Thread's working branch changed; refresh its history");
+        const history = projectThreadResultHistory({ workspaceId, thread: current, snapshots, store, context });
+        const blocked = history.results.filter((entry) => requested.includes(entry.resultRevision) && entry.protectedReasons.length > 0);
+        if (blocked.length > 0) {
+          throw new ThreadRuntimeError("conflict", `Selected versions are still in use: ${blocked.map((entry) => entry.resultRevision).join(", ")}`);
+        }
+        const present = new Set(history.results.map((entry) => entry.resultRevision));
+        const expected = requested.filter((revision) => present.has(revision));
+        const missingRevisions = requested.filter((revision) => !present.has(revision));
+        await store.reconcileObjectReferences();
+        try {
+          return { releasedRevisions: await store.deleteResults(input.branchId, requested), missingRevisions };
+        } catch (error) {
+          // Metadata is the logical authority. If removal landed but cleanup
+          // failed, report that observable state and keep all remaining refs.
+          const observed = await WorkingStateStore.open(context);
+          if (expected.some((revision) => observed.getResult(input.branchId, revision))) throw error;
+          reportError(error);
+          return {
+            releasedRevisions: expected, missingRevisions,
+            failure: error instanceof Error ? error.message : "History cleanup did not finish",
+          };
+        }
+      });
+      if (released.failure) return {
+        releasedRevisions: released.releasedRevisions, missingRevisions: released.missingRevisions,
+        cleanup: { status: "failed", message: released.failure },
+      };
+      try {
+        return { ...released, cleanup: { status: "complete", ...await context.collectUnreachableObjects() } };
+      } catch (error) {
+        reportError(error);
+        return { ...released, cleanup: { status: "failed", message: error instanceof Error ? error.message : "Object cleanup did not finish" } };
+      }
+    }).catch((error: unknown) => {
+      if (error instanceof ThreadRuntimeError) throw error;
+      throw new ThreadRuntimeError("unavailable", error instanceof Error ? error.message : "Historical results cannot be released", { cause: error });
+    });
+    // A preview of a released version is no longer actionable. Completed
+    // integration/undo records retain their independent safety/target objects.
+    try {
+      const thread = await options.registry.getThread(workspaceId, parent, threadId);
+      const binding = thread?.integrationBinding;
+      if (binding && requested.includes(binding.resultRevision)) {
+        await options.registry.invalidateIntegrationBinding(workspaceId, threadId, binding.bindingFingerprint);
+        (await options.resolveIntegrationCoordinator?.(workspaceId))?.invalidateThread?.(workspaceId, threadId);
+      }
+    } catch (error) { reportError(error); }
+    return result;
+  });
+
   const snapshotFor = async (workspaceId: string, parent: ThreadParent, threadId: string) => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
@@ -4400,6 +4499,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     restoreUser,
     inspectSpace,
     reclaimUser,
+    inspectResultHistory,
+    releaseResultHistory,
     drain,
     isThreadSession,
     getSessionBinding,

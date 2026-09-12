@@ -707,6 +707,11 @@ content-addressed working-state store: immutable file objects and path trees, a 
 plus its delta, and versioned result publication. Materialization supplies an actual directory whenever
 Pi tools, a language server, an extension, or a command needs filesystem access. Controlled virtual
 read and text-mutation tools use the same fixed branch view; live shared mode remains explicit.
+User Thread history release removes selected old result versions after rechecking active consumers
+under lifecycle/storage/Registry serialization (D-239). Current branches, reports and transcripts are
+retained. Metadata is published before reference removal, new writes hold temporary ownership until
+publication, and startup reconciles derived references against the durable catalog. Physical collection
+uses all remaining owners; completed Integration undo retains its independent safety/target objects.
 Same-name `edit` / `write` / `apply_patch` on an isolated Run commit WorkingState deltas with
 `writeRevision` CAS and do not write the parent directory. The first bash or LSP navigation tool
 freezes that revision, waits for in-flight virtual writes, materializes into staging, and atomically

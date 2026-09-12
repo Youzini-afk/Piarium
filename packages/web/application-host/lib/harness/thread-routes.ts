@@ -1,11 +1,12 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import type { ThreadConflictResolution } from "@piarium/protocol";
+import type { ThreadResultHistoryReleaseParams } from "@piarium/application-client";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">;
   requireAuth?: RequestHandler;
 }
 
@@ -98,6 +99,20 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
     return;
   }
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
+};
+
+const parseHistoryRelease = (value: unknown): ThreadResultHistoryReleaseParams => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ThreadRuntimeError("invalid-request", "History release body is malformed");
+  }
+  const body = value as Record<string, unknown>;
+  if (Object.keys(body).some((key) => key !== "branchId" && key !== "resultRevisions")
+    || typeof body.branchId !== "string" || !body.branchId.trim()
+    || !Array.isArray(body.resultRevisions)
+    || body.resultRevisions.some((revision) => !Number.isSafeInteger(revision) || Number(revision) < 1)) {
+    throw new ThreadRuntimeError("invalid-request", "A branch identity and positive result revisions are required");
+  }
+  return { branchId: body.branchId, resultRevisions: body.resultRevisions as number[] };
 };
 
 export function registerHarnessThreadRoutes(
@@ -356,6 +371,25 @@ export function registerHarnessThreadRoutes(
   app.post("/api/harness/sessions/:sessionId/threads/:threadId/archive", requireAuth, mutateThreadSpace("archive"));
   app.post("/api/harness/sessions/:sessionId/threads/:threadId/restore", requireAuth, mutateThreadSpace("restore"));
   app.post("/api/harness/sessions/:sessionId/threads/:threadId/reclaim", requireAuth, mutateThreadSpace("reclaim"));
+  app.get("/api/harness/sessions/:sessionId/threads/:threadId/history", requireAuth, async (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const { workspaceId, parent } = await runtime.scopeForSession(sessionIdOf(request));
+      response.json(await runtime.inspectResultHistory(workspaceId, parent, threadIdOf(request)));
+    } catch (error) {
+      sendError(response, error, "Unable to read thread result history");
+    }
+  });
+  app.post("/api/harness/sessions/:sessionId/threads/:threadId/history/release", requireAuth, async (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const input = parseHistoryRelease(request.body);
+      const { workspaceId, parent } = await runtime.scopeForSession(sessionIdOf(request));
+      response.json(await runtime.releaseResultHistory(workspaceId, parent, threadIdOf(request), input));
+    } catch (error) {
+      sendError(response, error, "Unable to release thread result history");
+    }
+  });
   app.post(
     "/api/harness/sessions/:sessionId/threads/:threadId/keep-worktree",
     requireAuth,

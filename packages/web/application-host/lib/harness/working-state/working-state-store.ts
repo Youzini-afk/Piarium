@@ -395,33 +395,36 @@ export class WorkingStateStore {
   private readonly pathModule: typeof path;
   private readonly catalogPath: string;
   private document: WorkingStateDocument;
+  private catalogPersisted: boolean;
   private defaultNewFileModeValue: number | undefined;
 
-  private constructor(options: WorkingStateStoreOptions, document: WorkingStateDocument) {
+  private constructor(options: WorkingStateStoreOptions, document: WorkingStateDocument, persisted: boolean) {
     this.context = options;
     this.fsPromises = options.fsPromises ?? fs.promises;
     this.pathModule = options.pathModule ?? path;
     this.catalogPath = this.pathModule.join(options.root, "working-state", catalogName(options.identity.workspaceId));
     this.document = document;
+    this.catalogPersisted = persisted;
   }
 
   static async open(options: WorkingStateStoreOptions): Promise<WorkingStateStore> {
     const catalogPath = (options.pathModule ?? path).join(options.root, "working-state", catalogName(options.identity.workspaceId));
     let raw: unknown;
+    let found = true;
     try {
       raw = await readRecoveryJsonAtomic(catalogPath, { fsPromises: options.fsPromises ?? fs.promises });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      raw = null;
+      found = false;
     }
-    if (raw === null) {
+    if (!found) {
       return new WorkingStateStore(options, {
         schemaVersion: SCHEMA_VERSION,
         workspaceId: options.identity.workspaceId,
         branches: {},
         draftBaselines: {},
         results: {},
-      });
+      }, false);
     }
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Working-state catalog is malformed");
     const record = raw as Record<string, unknown>;
@@ -447,7 +450,7 @@ export class WorkingStateStore {
       draftBaselines,
       results,
       ...(verifications ? { verifications } : {}),
-    });
+    }, true);
   }
 
   private references(states: Record<string, RecoveryState>, prefix: string) {
@@ -456,11 +459,22 @@ export class WorkingStateStore {
       : []);
   }
 
-  private protectBranch(branch: WorkingBranch): void {
-    replaceObjectReferences(this.context.database, branch.workspaceId, "work-branch", branch.branchId, [
+  private branchReferences(branch: WorkingBranch) {
+    return [
       ...this.references(branch.baseState, "base"),
       ...this.references(branch.deltas, "delta"),
-    ]);
+    ];
+  }
+
+  private resultReferences(result: WorkingResult) {
+    return [
+      ...this.references(result.baseStates, "base"),
+      ...this.references(result.pathStates, "result"),
+    ];
+  }
+
+  private protectBranch(branch: WorkingBranch): void {
+    replaceObjectReferences(this.context.database, branch.workspaceId, "work-branch", branch.branchId, this.branchReferences(branch));
   }
 
   private protectDraftBaseline(baseline: DraftBaseline): void {
@@ -470,16 +484,74 @@ export class WorkingStateStore {
   }
 
   private protectResult(result: WorkingResult): void {
-    replaceObjectReferences(this.context.database, this.document.workspaceId, "thread-result", `${result.branchId}@${result.resultRevision}`, [
-      ...this.references(result.baseStates, "base"),
-      ...this.references(result.pathStates, "result"),
-    ]);
+    replaceObjectReferences(this.context.database, this.document.workspaceId, "thread-result", `${result.branchId}@${result.resultRevision}`, this.resultReferences(result));
   }
 
-  private async persist(next: WorkingStateDocument, protect: () => void): Promise<void> {
-    this.context.database.transaction(protect).immediate();
+  private async persist(
+    next: WorkingStateDocument,
+    protect: () => void,
+    references: Array<{ objectHash: string }> = [],
+  ): Promise<void> {
+    const pendingOwner = references.length > 0 ? randomUUID() : null;
+    if (pendingOwner) {
+      const hashes = [...new Set(references.map((reference) => reference.objectHash))];
+      this.context.database.transaction(() => replaceObjectReferences(
+        this.context.database, this.document.workspaceId, "working-state-write", pendingOwner,
+        hashes.map((hash) => ({ slot: hash, objectHash: hash })),
+      )).immediate();
+    }
+    // Old owners stay intact until the atomic catalog is durable. Pending
+    // ownership protects new bytes even if rename succeeds but its fsync fails.
     await writeRecoveryJsonAtomic(this.catalogPath, next, { fsPromises: this.fsPromises, pathModule: this.pathModule });
     this.document = next;
+    this.catalogPersisted = true;
+    this.context.database.transaction(() => {
+      protect();
+      if (pendingOwner) deleteObjectReferences(this.context.database, this.document.workspaceId, "working-state-write", pendingOwner);
+    }).immediate();
+  }
+
+  /** Deletion publishes metadata before releasing the content it used to own. */
+  private async persistRemoval(next: WorkingStateDocument, release: () => void): Promise<void> {
+    await writeRecoveryJsonAtomic(this.catalogPath, next, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    this.document = next;
+    this.catalogPersisted = true;
+    this.context.database.transaction(release).immediate();
+  }
+
+  /** Repair derived references under the owning storage's exclusive lease. */
+  async reconcileObjectReferences(): Promise<void> {
+    const { database } = this.context;
+    const workspaceId = this.document.workspaceId;
+    if (!this.catalogPersisted) {
+      const retained = database.prepare(`SELECT 1 FROM object_references
+        WHERE workspace_id = ? AND owner_kind IN ('work-branch', 'draft-baseline', 'thread-result', 'working-state-write') LIMIT 1`).get(workspaceId);
+      if (retained) throw new Error("Working-state catalog is missing while its content is still retained");
+      return;
+    }
+    const expected = new Map<string, string>();
+    const add = (kind: string, id: string, refs: Array<{ slot: string; objectHash: string }>) => {
+      for (const ref of refs) expected.set(JSON.stringify([kind, id, ref.slot]), ref.objectHash);
+    };
+    for (const branch of Object.values(this.document.branches)) add("work-branch", branch.branchId, this.branchReferences(branch));
+    for (const baseline of Object.values(this.document.draftBaselines)) add("draft-baseline", baseline.id, this.references(baseline.pathStates, "draft"));
+    for (const result of Object.values(this.document.results)) add("thread-result", `${result.branchId}@${result.resultRevision}`, this.resultReferences(result));
+    const current = database.prepare(`SELECT owner_kind, owner_id, slot, object_hash FROM object_references
+      WHERE workspace_id = ? AND owner_kind IN ('work-branch', 'draft-baseline', 'thread-result', 'working-state-write')`).all(workspaceId) as Array<{
+        owner_kind: string; owner_id: string; slot: string; object_hash: string;
+      }>;
+    if (current.length === expected.size && current.every((ref) =>
+      expected.get(JSON.stringify([ref.owner_kind, ref.owner_id, ref.slot])) === ref.object_hash)) return;
+    // A previous atomic rename may have succeeded while fsync reported failure.
+    // Make the observed catalog durable before discarding either side's refs.
+    await writeRecoveryJsonAtomic(this.catalogPath, this.document, { fsPromises: this.fsPromises, pathModule: this.pathModule });
+    database.transaction(() => {
+      database.prepare(`DELETE FROM object_references
+        WHERE workspace_id = ? AND owner_kind IN ('work-branch', 'draft-baseline', 'thread-result', 'working-state-write')`).run(workspaceId);
+      for (const branch of Object.values(this.document.branches)) this.protectBranch(branch);
+      for (const baseline of Object.values(this.document.draftBaselines)) this.protectDraftBaseline(baseline);
+      for (const result of Object.values(this.document.results)) this.protectResult(result);
+    }).immediate();
   }
 
   async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
@@ -808,7 +880,7 @@ export class WorkingStateStore {
     };
     const next = clone(this.document);
     next.branches[branchId] = branch;
-    await this.persist(next, () => this.protectBranch(branch));
+    await this.persist(next, () => this.protectBranch(branch), this.branchReferences(branch));
     return clone(branch);
   }
 
@@ -840,7 +912,7 @@ export class WorkingStateStore {
     };
     const next = clone(this.document);
     next.draftBaselines[id] = baseline;
-    await this.persist(next, () => this.protectDraftBaseline(baseline));
+    await this.persist(next, () => this.protectDraftBaseline(baseline), this.references(baseline.pathStates, "draft"));
     return clone(baseline);
   }
 
@@ -897,7 +969,7 @@ export class WorkingStateStore {
     await this.persist(next, () => {
       this.protectBranch(next.branches[branchId]!);
       this.protectResult(result);
-    });
+    }, [...this.branchReferences(next.branches[branchId]!), ...this.resultReferences(result)]);
     return clone(result);
   }
 
@@ -955,7 +1027,7 @@ export class WorkingStateStore {
       writeRevision,
       updatedAt: new Date().toISOString(),
     };
-    await this.persist(nextDocument, () => this.protectBranch(nextDocument.branches[branchId]!));
+    await this.persist(nextDocument, () => this.protectBranch(nextDocument.branches[branchId]!), this.branchReferences(nextDocument.branches[branchId]!));
     return { status: "committed", writeRevision };
   }
 
@@ -1042,22 +1114,38 @@ export class WorkingStateStore {
     if (!this.document.branches[branchId]) return;
     const next = clone(this.document);
     delete next.branches[branchId];
-    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "work-branch", branchId));
+    await this.persistRemoval(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "work-branch", branchId));
   }
 
   async deleteDraftBaseline(id: string): Promise<void> {
     if (!this.document.draftBaselines[id]) return;
     const next = clone(this.document);
     delete next.draftBaselines[id];
-    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "draft-baseline", id));
+    await this.persistRemoval(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "draft-baseline", id));
   }
 
   async deleteResult(branchId: string, revision: number): Promise<void> {
-    const key = `${branchId}@${revision}`;
-    if (!this.document.results[key]) return;
+    await this.deleteResults(branchId, [revision]);
+  }
+
+  async deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]> {
+    const requested = [...new Set(revisions)];
+    if (requested.some((revision) => !Number.isSafeInteger(revision) || revision < 1)) {
+      throw new Error("Result revisions must be positive safe integers");
+    }
+    if (requested.length === 0) return [];
     const next = clone(this.document);
-    delete next.results[key];
-    await this.persist(next, () => deleteObjectReferences(this.context.database, this.document.workspaceId, "thread-result", key));
+    const removed = requested.filter((revision) => Object.hasOwn(next.results, `${branchId}@${revision}`));
+    for (const revision of removed) delete next.results[`${branchId}@${revision}`];
+    const release = () => {
+      for (const revision of requested) {
+        deleteObjectReferences(this.context.database, this.document.workspaceId, "thread-result", `${branchId}@${revision}`);
+      }
+    };
+    // Retry also re-publishes the catalog: the prior request may have completed
+    // rename but failed before durable metadata/reference cleanup was confirmed.
+    await this.persistRemoval(next, release);
+    return removed;
   }
 
   async captureDirectory(
