@@ -9,6 +9,7 @@ import { mergeText3Way } from "./working-state/three-way-merge.js";
 import type { ShellInterpreter } from "./shell-supervisor.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
+import { gitIndexModes } from "./working-state/git-adaptation.js";
 import { assertManagedWorktreeOwnership } from "./worktree-ownership.js";
 import {
   isNotGitRepositoryError,
@@ -696,6 +697,10 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         .filter((entry) => entry.mode === "160000")
         .map((entry) => entry.path),
     )].sort();
+    const indexModes: Record<string, string> = {};
+    for (const entry of parseGitStageList(stagedMeta)) {
+      if (entry.mode === "100644" || entry.mode === "100755") indexModes[entry.path] = entry.mode;
+    }
     const dirtyPaths = [...new Set([
       ...parseGitNullList(deleted),
       ...parseGitNullList(untracked),
@@ -722,8 +727,24 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         ...versusHead,
       ])].sort(),
       gitlinks,
+      indexModes,
       contentIdentities,
     };
+  };
+
+  /** Index modes for tracked paths; empty map outside a Git work tree (D-243). */
+  const inspectIndexModes = async (directory: string): Promise<Map<string, string>> => {
+    try {
+      const inside = (await runGit(directory, ["rev-parse", "--is-inside-work-tree"])).stdout.trim();
+      if (inside !== "true") return new Map();
+      return await gitIndexModes(
+        (args, cwd) => runGit(cwd ?? directory, args).then((result) => ({ ...result, exitCode: 0 })),
+        directory,
+      );
+    } catch (error) {
+      if (isNotGitRepositoryError(error)) return new Map();
+      throw error;
+    }
   };
 
   const inspectWorkspaceIdentity = async (directory: string): Promise<
@@ -826,8 +847,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       const git = (args: string[]) => runGit(worktree.path, args).then((result) => ({ ...result, exitCode: 0 }));
       const changedPaths = await captureGitChangedPaths(git, gitBase, worktree.resultCommit);
       const [baseState, resultState] = await Promise.all([
-        importGitPathsToStore(store, git, gitBase, changedPaths),
-        importGitPathsToStore(store, git, worktree.resultCommit, changedPaths),
+        importGitPathsToStore(store, git, gitBase, changedPaths, worktree.path),
+        importGitPathsToStore(store, git, worktree.resultCommit, changedPaths, worktree.path),
       ]);
       return store.importFixedResult(workspaceId, branchId, baseState, resultState, changedPaths, worktree.base);
     }
@@ -1527,6 +1548,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     estimatePrepare,
     inspect,
     inspectGitBaselineInventory,
+    inspectIndexModes,
     inspectWorkspaceIdentity,
     snapshot,
     importFixedResult,

@@ -313,12 +313,13 @@ surface 仍不可冒充磁盘验证，以及 review gate。
 `working-state-store.test.ts`、`working-branch-writes.test.ts`、`working-branch-view.test.ts`、`path-requirement.test.ts`、
 `thread-space.test.ts`、`thread-runtime.test.ts` 定向组覆盖 writeRevision CAS、父磁盘不变、兄弟隔离、scope 拒绝、首次 bash/LSP
 物化切换、虚拟 scratch 回收与 bash 预算预占；pi-host `workspace-mutation-journal.test.ts`、`apply-patch-tool.test.ts` 覆盖公开
-edit/write/apply_patch 先走 branchWrite、disk 才落盘。未跑完整桌面 bash 物化、真实 Git filter/LFS 一致性或非 Git 大目录墙钟。
+edit/write/apply_patch 先走 branchWrite、disk 才落盘。未跑完整桌面 bash 物化或非 Git 大目录墙钟；Git filter/LFS/换行/执行位
+适配已由 D-243 实现并有真实 Git 测试。
 
 **D-214 本地实施证据**：Host `workspace-baseline.test.ts`、`thread-runtime.test.ts`、`thread-services.test.ts`、
 `thread-space.test.ts` 定向组覆盖 Git 变化集与 ignored/captureScopes、unborn/非 Git、BOM/CRLF/二进制、捕获取消不建分支、
-dispatch 必准备且失败删除 Thread、prepare 后 spawn 不重扫、父漂移隔离。未测真实 Git filter/LFS 一致性、Windows 符号链接/
-执行位，以及非 Git 大目录捕获墙钟。
+dispatch 必准备且失败删除 Thread、prepare 后 spawn 不重扫、父漂移隔离。D-243 补真实 Git filter/LFS/执行位适配证据；
+未测 Windows 符号链接创建（需要提权）与非 Git 大目录捕获墙钟。
 
 **D-215 本地实施证据**：角色目录与嵌套 parent 数据模型仍在；`nested-threads.test.ts` 把 `resolveRuntimeWorkspaceId` 钉成同一个 `"ws"`，不能证明 owning/execution 拆分。身份查找已由 D-216 改走 Host session binding。
 
@@ -355,6 +356,19 @@ review、active/lost Run 输入、共享对象、释放源版本后 undo、引�
 recovery engine 5 文件共 116 项通过。`working-state-retention.test.ts` + store 共 19 项覆盖 JSON/rename 与 SQLite 中断及目录缺失；
 `HarnessThreadResultHistory.behavior.test.tsx` 5 项覆盖确认、关闭重开后的重试、409 与迟到响应，邻近面板 9 项和 i18n parity 4 项通过。
 Host/UI 类型与相关 lint 通过。完整 Electron 点击、真实卷耗尽和进程级断电未实测；3.4/3.4a 其他 Partial 原因仍保留。
+
+**D-243 Git filter/LFS/执行位适配已实现（2026-09-12）。** `working-state/git-adaptation.ts` 是 blob↔工作区字节的唯一转换层：
+`check-attr -z --all` 批量探测 filter/text/eol/working-tree-encoding；`filter=lfs` 的指针 blob 解析后从 `<git-common-dir>/lfs/objects`
+读本地对象（sha256 校验，从不触发下载），缺失或损坏时存指针字节——与 `git checkout` 在缺 LFS 对象时写出的内容一致；
+其他 filter/text/eol/编码经 `git cat-file --filters --path` smudge，过滤器不可运行时回退原始 blob。Git 导入（`importFixedResult`）
+现在得到工作区侧字节而不是仓库 blob；`captureGitPathStates` 在 Windows 也保留 index 的 `0o755`；`captureDirectory`/结果发布接收
+indexModes 覆盖，POSIX 保持 fs 真值。`stateIdentity`/`sameState` 在 win32 把普通文件/目录 mode 归一到可观察的读写维，
+index 恢复的 `0o755` 与 fs 捕获的 `0o666` 不再互相误报漂移。
+
+证据：`git-adaptation.test.ts` 11 项真实 Git 覆盖 LFS 本地对象命中/缺失指针降级、eol=crlf smudge、无 filter 原样、
+required filter 失败回退、`check-attr` 探测、`ls-files -s` 执行位与 win32 归一化比较；`git-migration.test.ts` 更新为
+跨平台保留 `0o755` 真值。未实测 git-lfs 客户端在场时的远端下载路径（有意不走网络）、Windows 符号链接创建、以及
+自定义 clean/smudge 命令的真实执行（已有失败回退路径覆盖）。
 
 ## 未完成项（来自 D-027，按来源）
 

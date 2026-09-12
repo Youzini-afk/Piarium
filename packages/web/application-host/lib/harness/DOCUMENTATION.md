@@ -375,7 +375,16 @@ Documents writer is present (`baseline-changed`, retryable). The Documents
 capture generation and dirty-state barrier cover the whole window. Unsupported
 states cannot be silently skipped during materialization. New virtual regular
 files receive the umask-derived default mode without creating a probe file in the
-user tree, so apply and compensation compare full `sameState` identities. Failed prepare deletes an
+user tree, so apply and compensation compare full `sameState` identities. Git
+capture and import adapt blob bytes to the worktree view through
+`working-state/git-adaptation.ts`: `check-attr` resolves filter/text/eol/
+working-tree-encoding per path, `filter=lfs` pointers resolve to the local
+`lfs/objects` copy (never a download) or stay as pointer bytes, other filters
+and EOL/encoding conversions run through `git cat-file --filters --path`, and
+the index mode (100644/100755) restores the executable bit where the
+filesystem cannot stat it. `sameState` normalizes file modes to the
+readonly/writable dimension on Windows so index-adapted and filesystem-captured
+states stay comparable. Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a
 virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,

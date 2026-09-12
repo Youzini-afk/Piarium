@@ -155,12 +155,24 @@ export const normalizeResourceId = (value: unknown): string => String(value || '
   .replace(/^\.\//, '')
   .replace(/\/+/g, '/');
 
+/**
+ * Mode usable for state comparison. Symlink permissions are not portably
+ * settable and commonly describe the link implementation rather than the
+ * target's recoverable state. On Windows the filesystem cannot express POSIX
+ * permission bits (lstat reports 0o666 for writable regular files), so only
+ * the readonly/writable dimension is observable there; states may still carry
+ * the full Git/recorded mode for materialization on capable platforms.
+ */
+const comparableMode = (kind: RecoveryStateLike['kind'], mode: number | undefined): number | null => {
+  if (kind === 'symlink' || mode === undefined) return null;
+  if (process.platform !== 'win32') return mode;
+  return (mode & 0o222) === 0 ? 0o444 : 0o666;
+};
+
 export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringify({
   byteLength: state.byteLength ?? null,
   kind: state.kind,
-  // Symlink permissions are not portably settable and commonly describe the
-  // link implementation rather than the target's recoverable state.
-  mode: state.kind === 'symlink' ? null : state.mode ?? null,
+  mode: comparableMode(state.kind, state.mode),
   objectHash: state.objectHash ?? null,
   symlinkTarget: state.symlinkTarget ?? null,
 });

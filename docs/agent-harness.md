@@ -1533,7 +1533,11 @@ Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
 基线采集属于创建/更新分支的工作，不进入普通消息、每轮恢复或每次查询的全仓扫描。Git 的过滤器、LFS 与换行转换由适配层处理，
-记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。
+记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。（已实现：`working-state/git-adaptation.ts`，D-243——
+`check-attr` 探测路径属性；`filter=lfs` 的指针 blob 解析到本地 `lfs/objects` 对象、缺失或校验失败时保留指针字节即 checkout
+缺对象时的真实工作区视图；其他 filter、`text`/`eol`、`working-tree-encoding` 经 `git cat-file --filters --path` 取得
+smudge 字节，过滤器不可运行时回退原始 blob；导入与基线采集按 index mode 恢复执行位——Windows 文件系统表达不了 exec，
+状态保存 Git 真值 `0o755`，同平台状态比较只比较可观察的写权限维。）
 
 **受控工具与真实执行。** 无目录分支让同名 read/grep/find/ls/edit/write/apply_patch 通过 Host 分支视图工作，保持 schema 与真实
 路径授权；不在 live 父目录上搜完只覆盖 child delta。Pi 原生工具、LSP、第三方扩展或 shell 需要真实路径时先物化，所有参与该 Run

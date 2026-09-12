@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
 import { captureGitPathStates, type RunGitFn } from "./git-migration.js";
 
-it("imports Git file permissions as the states this platform actually materializes", async () => {
+it("imports the Git executable bit as repository truth on every platform (D-243)", async () => {
   const root = await fs.mkdtemp(path.join(tmpdir(), "piarium-git-mode-"));
   const git = (args: string[]) => execFileSync("git", args, { cwd: root, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   try {
@@ -24,7 +24,10 @@ it("imports Git file permissions as the states this platform actually materializ
     expect(captured.entries.get("script.sh")?.mode).toBe("100755");
     const state = captured.states["script.sh"];
     if (state?.kind !== "regular-file") throw new Error("Git file was not imported as a regular file");
-    expect(state.mode).toBe((await fs.stat(path.join(root, "script.sh"))).mode & 0o7777);
+    // The index's executable bit is the repository truth even where the
+    // filesystem cannot express it (Windows reports 0o666); platform-aware
+    // comparison keeps it comparable to a filesystem capture.
+    expect(state.mode).toBe(0o755);
   } finally {
     expect(path.dirname(path.resolve(root))).toBe(path.resolve(tmpdir()));
     await fs.rm(root, { recursive: true, force: true });

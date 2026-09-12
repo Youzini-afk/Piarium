@@ -1,5 +1,8 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { RecoveryState } from "./types.js";
 import type { WorkingStateStore } from "./working-state-store.js";
+import { probeGitAttributes, smudgeBlobForWorktree, type GitAdaptationIo } from "./git-adaptation.js";
 
 export interface GitTreeEntry {
   mode: string;
@@ -87,9 +90,10 @@ export const captureGitPathStates = async (
         kind: "regular-file",
         objectHash: entry.objectHash,
         byteLength,
-        // Git records 0644/0755; Windows exposes both writable files as 0666.
-        // Keep the original Git mode in entryMap, and compare physical states here.
-        mode: process.platform === "win32" ? 0o666 : modeNum,
+        // Git records 0644/0755. The executable bit is repository truth even on
+        // platforms whose filesystem cannot express it; comparisons normalize
+        // per-platform (portableMode) and materialization chmods where possible.
+        mode: modeNum,
       };
     }
   }
@@ -107,21 +111,29 @@ export const captureGitPathStates = async (
   return { states, entries: entryMap };
 };
 
+/**
+ * Import Git tree paths into the object store as *worktree bytes* — the
+ * smudged view tools observe (D-243). `repoDir` must be inside the work tree
+ * the commit belongs to so attribute resolution and filter processes see the
+ * same configuration checkout would.
+ */
 export const importGitPathsToStore = async (
   store: WorkingStateStore,
   runGit: RunGitFn,
   commit: string,
   paths: string[],
+  repoDir: string,
+  io: GitAdaptationIo = { readFile: fs.promises.readFile, join: path.join },
 ): Promise<Record<string, RecoveryState>> => {
   const { states, entries } = await captureGitPathStates(runGit, commit, paths);
   const result: Record<string, RecoveryState> = {};
+  const attributes = await probeGitAttributes(runGit, repoDir, paths).catch(() => new Map());
 
   for (const [p, state] of Object.entries(states)) {
     if (state.kind === "regular-file") {
       const entry = entries.get(p);
       if (entry) {
-        const catRes = await runGit(["cat-file", "-p", entry.objectHash]);
-        const bytes = catRes.stdoutBuffer ?? Buffer.from(catRes.stdout, "utf8");
+        const bytes = await smudgeBlobForWorktree(runGit, repoDir, p, entry.objectHash, attributes.get(p), io);
         const { hash, byteLength } = await store.putObject(bytes);
         result[p] = {
           kind: "regular-file",

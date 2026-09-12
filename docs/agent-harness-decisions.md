@@ -5210,6 +5210,35 @@ WorkingState 分支/结果/草稿基线、受管目录之间没有一条能完�
 覆盖级联（后代先删、活 Run settle、会话清单删除、分支/修订/基线释放、目录回收、行移除）与目录失败保记录。
 `i18nParity` 十语言同步。未实测真实 broker 会话文件删除（`deleteSession` 是 broker 的既有生产路径）与 Electron 点击链。
 
+### D-243 · 2026-09-12 · 3.4a（Git filter/LFS 与执行位适配层）
+
+类型：问题与解法
+
+背景：设计（9.3.4 尾部）要求"Git 的过滤器、LFS 与换行转换由适配层处理，记录实际工具所见版本"，此前没有这层：
+`importGitPathsToStore` 把仓库 blob 原样塞进对象库——LFS 文件存的是指针字节、CRLF 工作区的文件存的是 LF blob、
+自定义 clean/smudge 完全不执行——材料化或比对出来的字节不是工具在真实 checkout 里看到的内容；`captureGitPathStates`
+在 Windows 把 index 的 `0o755` 折叠成 `0o666`，执行位永久丢失。
+
+决定：
+
+1. 新建 `working-state/git-adaptation.ts` 为唯一转换层。`check-attr -z --all` 一次探测所有目标路径的
+   filter/text/eol/working-tree-encoding。
+2. `filter=lfs`：解析指针 blob（`version/oid sha256/size` 三段格式），从 `git rev-parse --git-common-dir` 下的
+   `lfs/objects/aa/bb/<oid>` 读本地对象并 sha256 校验；缺失或损坏回退指针字节本身。有意不走 `git lfs smudge` 的
+   下载路径——导入是本地操作，不触网；指针字节正是 checkout 在缺对象时写出的内容，worktree `git status` 依然干净。
+3. 其他 filter、text/eol、working-tree-encoding：`git cat-file --filters --path=<p>` 跑配置好的 smudge 侧，与 checkout
+   同语义；过滤器进程失败时回退原始 blob（checkout 的同样降级）。
+4. 执行位：`captureGitPathStates` 与 `captureDirectory`/`publishDirectoryResult`（经 `indexModes` 选项）在 Windows 用
+   `ls-files -s` 的 index mode（100644/100755）恢复 0o644/0o755，POSIX 保持 lstat 真值。`stateIdentity`/`sameState`
+   在 win32 把普通文件/目录 mode 归一到只读/可写二维——这是该平台唯一可观察的维——所以 index 恢复的 0o755 与 fs
+   捕获的 0o666 不产生幻影漂移，POSIX 上两个 mode 仍然是真实的不同。
+5. `inspectGitBaselineInventory` 附带 `indexModes`（`ls-files -s` 已采集），`prepareIsolatedBranchCore` 与两条结果发布
+   路径经 `inspectIndexModes` 提供给捕获。
+
+验证与边界：`git-adaptation.test.ts` 真实 Git 仓覆盖 LFS 命中/指针降级/eol smudge/无 filter 原样/失败回退/属性探测/
+index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。有意不做：`git lfs` 远端下载、Windows symlink 提权
+创建测试、自定义 filter 的真实双向运行（失败回退已覆盖）；非 Git 目录不受影响。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5218,3 +5247,4 @@ WorkingState 分支/结果/草稿基线、受管目录之间没有一条能完�
 | D-240 | implementation（解析后 references/calls 进符号图：relation collector + lsp 导航回写 + related/explore 消费） | — | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
 | D-241 | implementation（包管理器通配层：PM 头归类、脚本回显识别内层工具、PM 噪声折叠） | — | 设计 5.2；status 3.17；output-organize |
 | D-242 | implementation（整条 Thread 删除：UI 两步确认 → 鉴权 DELETE → 级联停 Run/删会话/释分支/收目录/移行） | — | 设计 9.3.4；status 3.10；thread-runtime / thread-registry / thread-routes / HarnessThreadsPanel |
+| D-243 | implementation（Git filter/LFS 与执行位适配层：check-attr 探测、本地 LFS 对象解析、cat-file --filters smudge、index mode 恢复、win32 mode 归一比较） | — | 设计 9.3.4 尾部；status 3.4a；working-state/git-adaptation |

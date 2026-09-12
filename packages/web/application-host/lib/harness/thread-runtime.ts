@@ -106,7 +106,7 @@ export interface ThreadRuntimeOptions {
   /** Deletes a Pi session's worker, file, and metadata (thread deletion, D-242). */
   deleteSession?(sessionId: string): Promise<unknown>;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
-    Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
+    Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectIndexModes" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string }>>;
@@ -1240,10 +1240,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       )
       : await (async () => {
         const inspected = await options.worktrees.inspect(thread.worktree!, "live");
+        const indexModes = await options.worktrees.inspectIndexModes?.(thread.worktree!.path);
         return options.workingStates!.withStore(
           workspaceId,
           "thread-partial-result-publish",
-          (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles),
+          (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, { indexModes }),
         );
       })();
     let worktree = thread.worktree;
@@ -1541,6 +1542,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
         const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
           signal: preparationSignal,
+          indexModes: beforeInventory?.kind === "git" ? beforeInventory.indexModes : undefined,
           onProgress: (done, total) => {
             worktree!.retentionReason = `Capturing baseline ${done}/${total}`;
           },
@@ -1565,6 +1567,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
           const afterScopeStates = await store.captureDirectory(sourceRoot, afterScopePaths, {
             signal: preparationSignal,
+            indexModes: beforeInventory?.kind === "git" ? beforeInventory.indexModes : undefined,
             store: false,
           });
           const changedScopePaths = afterScopePaths.filter((file) => !sameState(
@@ -2333,12 +2336,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       if (options.workingStates && thread.workBranchId && (isVirtualWorktree(currentWorktree) || inspected)) {
         try {
+          const publishedIndexModes = !isVirtualWorktree(currentWorktree)
+            ? await options.worktrees.inspectIndexModes?.(currentWorktree!.path)
+            : undefined;
           const published = await options.workingStates.withStore(
             binding.workspaceId,
             "thread-result-publish",
             (store) => isVirtualWorktree(currentWorktree)
               ? store.publishHeadResult(thread.workBranchId!)
-              : store.publishDirectoryResult(thread.workBranchId!, currentWorktree!.path, inspected!.changedFiles),
+              : store.publishDirectoryResult(thread.workBranchId!, currentWorktree!.path, inspected!.changedFiles, { indexModes: publishedIndexModes }),
           );
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;

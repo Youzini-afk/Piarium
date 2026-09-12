@@ -5,6 +5,7 @@ import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
 import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
+import { applyIndexModes } from "./git-adaptation.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
 import type {
   CommandVerificationRecord,
@@ -1040,12 +1041,19 @@ export class WorkingStateStore {
     return this.commitVirtualWrites(branchId, expectedWriteRevision, { [file]: next });
   }
 
-  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[]): Promise<WorkingResult> {
-    if (!changedPaths) return this.publishStates(branchId, await this.captureDirectory(directory));
+  async publishDirectoryResult(
+    branchId: string,
+    directory: string,
+    changedPaths?: string[],
+    options?: { indexModes?: Map<string, string> | Record<string, string> | undefined },
+  ): Promise<WorkingResult> {
+    if (!changedPaths) {
+      return this.publishStates(branchId, await this.captureDirectory(directory, undefined, options));
+    }
     const branch = this.document.branches[branchId];
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
     const candidates = await this.branchCaptureCandidates(branch, directory, changedPaths);
-    return this.publishStates(branchId, await this.captureDirectory(directory, candidates), candidates);
+    return this.publishStates(branchId, await this.captureDirectory(directory, candidates, options), candidates);
   }
 
   private async branchCaptureCandidates(branch: WorkingBranch, directory: string, changedPaths: string[]): Promise<string[]> {
@@ -1151,7 +1159,13 @@ export class WorkingStateStore {
   async captureDirectory(
     directory: string,
     relativePaths?: string[],
-    options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean },
+    options?: {
+      signal?: AbortSignal;
+      onProgress?: (done: number, total: number) => void;
+      store?: boolean;
+      /** Git index modes for tracked paths; restores executable intent on platforms that cannot stat it (D-243). */
+      indexModes?: Map<string, string> | Record<string, string> | undefined;
+    },
   ): Promise<Record<string, RecoveryState>> {
     const result: Record<string, RecoveryState> = {};
     const files = relativePaths?.map(normalizeRelative) ?? await this.scanDirectoryRelative(directory);
@@ -1166,7 +1180,7 @@ export class WorkingStateStore {
       done += 1;
       options?.onProgress?.(done, files.length);
     }
-    return result;
+    return applyIndexModes(result, options?.indexModes);
   }
 
   async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {

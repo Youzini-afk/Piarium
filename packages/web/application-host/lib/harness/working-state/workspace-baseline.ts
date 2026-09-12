@@ -10,6 +10,8 @@ export type GitBaselineInventory = {
   unborn: boolean;
   paths: string[];
   gitlinks: string[];
+  /** Index modes for tracked regular files ("100644" | "100755"); restores exec intent where fs cannot (D-243). */
+  indexModes?: Record<string, string>;
   /** Workdir identity of dirty/untracked paths; detects content replacement with an unchanged path set. */
   contentIdentities?: Record<string, string>;
 };
