@@ -6,7 +6,7 @@ import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "deleteUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">;
   requireAuth?: RequestHandler;
 }
 
@@ -367,6 +367,26 @@ export function registerHarnessThreadRoutes(
       sendError(response, error, `Unable to ${action} thread`);
     }
   };
+
+  app.delete(
+    "/api/harness/sessions/:sessionId/threads/:threadId",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      try {
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        response.json(await runtime.deleteUser(workspaceId, parent, threadId));
+      } catch (error) {
+        sendError(response, error, "Unable to delete thread");
+      }
+    },
+  );
 
   app.post("/api/harness/sessions/:sessionId/threads/:threadId/archive", requireAuth, mutateThreadSpace("archive"));
   app.post("/api/harness/sessions/:sessionId/threads/:threadId/restore", requireAuth, mutateThreadSpace("restore"));

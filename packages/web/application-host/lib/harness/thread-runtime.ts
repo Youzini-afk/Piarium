@@ -103,6 +103,8 @@ export interface ThreadSessionAdapter {
 export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
+  /** Deletes a Pi session's worker, file, and metadata (thread deletion, D-242). */
+  deleteSession?(sessionId: string): Promise<unknown>;
   worktrees: Pick<ThreadWorktreeRuntime, "prepare" | "inspect" | "snapshot" | "merge"> &
     Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "importFixedResult" | "inspectGitBaselineInventory" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
@@ -3580,7 +3582,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
-  const stopRunForArchive = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
+  const stopRunForArchive = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    opts?: { capturePartial?: boolean; reason?: string },
+  ): Promise<void> => {
+    const capturePartial = opts?.capturePartial !== false;
+    const reason = opts?.reason ?? "archived by user";
     await waitForPreparation(threadId);
     const sessionId = sessionByThread.get(threadId);
     const binding = sessionId ? bindingsBySession.get(sessionId) : undefined;
@@ -3614,14 +3623,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       throw new ThreadRuntimeError("unavailable", failures.join("; "));
     }
     if (run && run.outcome === null) {
-      try {
-        await publishPartialResult(workspaceId, parent, threadId);
-      } catch (error) {
-        reportError(error);
-        throw new ThreadRuntimeError("unavailable", `Unable to capture the thread result before archive: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+      if (capturePartial) {
+        try {
+          await publishPartialResult(workspaceId, parent, threadId);
+        } catch (error) {
+          reportError(error);
+          throw new ThreadRuntimeError("unavailable", `Unable to capture the thread result before archive: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+        }
       }
       try {
-        await options.registry.endRun(workspaceId, threadId, run.id, "cancelled", "archived by user");
+        await options.registry.endRun(workspaceId, threadId, run.id, "cancelled", reason);
       } catch (error) {
         reportError(error);
         throw new ThreadRuntimeError("unavailable", `Unable to settle the thread Run before archive: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -3687,6 +3698,145 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return await withThreadLifecycle(workspaceId, threadId, async () => {
         preparations.get(threadId)?.controller.abort();
         return archiveOneNode(workspaceId, parent, threadId, keepWorktree);
+      });
+    } finally {
+      releaseCascade();
+    }
+  };
+
+  /**
+   * D-242: remove every Pi session a Thread owned — live or ended. Each run's
+   * sessionId and the report's transcript session go through the runtime
+   * broker, which settles the worker, deletes the session file, and clears
+   * metadata; the broker's delete coordinator archives-by-session is a no-op
+   * here because the cascade removes those rows right after.
+   */
+  const deleteThreadSessions = async (workspaceId: string, threadId: string): Promise<string[]> => {
+    const sessionIds = new Set<string>();
+    for (const run of await options.registry.listRuns(workspaceId, threadId)) {
+      if (run.sessionId) sessionIds.add(run.sessionId);
+    }
+    const live = sessionByThread.get(threadId);
+    if (live) sessionIds.add(live);
+    const report = (await options.registry.getThreadById(workspaceId, threadId))?.report;
+    const transcript = report?.transcriptRef.sessionId;
+    if (transcript) sessionIds.add(transcript);
+    if (sessionIds.size === 0) return [];
+    if (!options.deleteSession) {
+      throw new ThreadRuntimeError("unavailable", "Session deletion is unavailable; the thread's transcripts would be left behind");
+    }
+    for (const sessionId of sessionIds) {
+      await options.deleteSession(sessionId);
+    }
+    return [...sessionIds];
+  };
+
+  /**
+   * D-242: release the Thread's persisted working-state objects — every result
+   * revision, the work branch head, and the dispatch-time draft baseline — then
+   * collect objects that lost their last reference.
+   */
+  const releaseThreadStore = async (workspaceId: string, thread: Thread): Promise<void> => {
+    const branchId = thread.workBranchId;
+    const draftBaselineId = thread.manifest.draftBaselineId ?? null;
+    if ((!branchId && !draftBaselineId) || !options.workingStates) return;
+    await options.workingStates.withStore(workspaceId, "thread-delete", async (store, context) => {
+      if (!context.collectUnreachableObjects) {
+        throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
+      }
+      if (branchId) {
+        const revisions = store.listResults(branchId).map((result) => result.resultRevision);
+        await store.reconcileObjectReferences();
+        if (revisions.length > 0) await store.deleteResults(branchId, revisions);
+        await store.deleteBranch(branchId);
+      }
+      if (draftBaselineId) await store.deleteDraftBaseline(draftBaselineId);
+      try {
+        await context.collectUnreachableObjects();
+      } catch (error) {
+        // Metadata is the logical authority — rows are gone; unreachable-object
+        // collection is opportunistic and retryable by the next cleanup pass.
+        reportError(error);
+      }
+    }, "shared");
+  };
+
+  /**
+   * D-242: delete the Thread's managed directory. The ownership assertion and
+   * the user/writer guard still apply — a live writer blocks deletion rather
+   * than losing its directory under a removed record. keep_worktree does not
+   * apply to deletion: the Thread record is being removed, so a kept directory
+   * would become an untracked allocation.
+   */
+  const deleteThreadDirectory = async (workspaceId: string, thread: Thread): Promise<void> => {
+    if (!thread.worktree) return;
+    if (!options.worktrees.reclaim) {
+      throw new ThreadRuntimeError("unavailable", "Worktree reclamation is unavailable; the thread's managed directory cannot be removed safely");
+    }
+    const permission = options.canReclaimWorktree
+      ? await options.canReclaimWorktree(workspaceId, thread.id, thread.worktree.path)
+      : { safe: true };
+    try {
+      if (!permission.safe) {
+        throw new ThreadRuntimeError("unavailable", permission.reason ?? "The worktree still has an active user or writer");
+      }
+      // nativeVerified skips the result-snapshot diff: the snapshot itself is
+      // being released in the same cascade, so the directory is removed on the
+      // strength of managed ownership alone.
+      const result = await options.worktrees.reclaim(thread.worktree, { nativeVerified: true });
+      if (!result.reclaimed) {
+        throw new ThreadRuntimeError("unavailable", result.reason ?? "The managed directory could not be removed");
+      }
+    } finally {
+      await permission.release?.();
+    }
+  };
+
+  const deleteOneNode = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+  ): Promise<void> => {
+    const thread = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!thread) return;
+    if (thread.lifecycle !== "archived" || preparations.has(threadId) || sessionByThread.has(threadId)) {
+      // Deletion must not mint a partial result revision that the cascade is
+      // about to release; the Run still settles as cancelled first.
+      await stopRunForArchive(workspaceId, parent, threadId, { capturePartial: false, reason: "deleted by user" });
+    }
+    await deleteThreadSessions(workspaceId, threadId);
+    await releaseThreadStore(workspaceId, thread);
+    await deleteThreadDirectory(workspaceId, thread);
+    await options.registry.removeThread(workspaceId, parent, threadId);
+  };
+
+  const deleteUser = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+  ) => {
+    // Same cascade shape as archive: abort preparations first, delete each
+    // descendant on its own lifecycle turn in post-order, then the target.
+    preparations.get(threadId)?.controller.abort();
+    const releaseCascade = await beginCascade(workspaceId, threadId);
+    try {
+      const descendants = await collectDescendantsPostOrder(workspaceId, threadId);
+      for (const child of descendants) {
+        preparations.get(child.id)?.controller.abort();
+        await withThreadLifecycle(workspaceId, child.id, async () => {
+          preparations.get(child.id)?.controller.abort();
+          return deleteOneNode(workspaceId, child.parent, child.id);
+        });
+      }
+      return await withThreadLifecycle(workspaceId, threadId, async () => {
+        preparations.get(threadId)?.controller.abort();
+        await deleteOneNode(workspaceId, parent, threadId);
+        return {
+          workspaceId,
+          parent,
+          deletedThreadIds: [...descendants.map((thread) => thread.id), threadId],
+          space: await inspectSpace(workspaceId, parent),
+        };
       });
     } finally {
       releaseCascade();
@@ -4496,6 +4646,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     undoIntegration,
     invalidateIntegrationPreviews,
     archiveUser,
+    deleteUser,
     restoreUser,
     inspectSpace,
     reclaimUser,

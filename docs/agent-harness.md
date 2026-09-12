@@ -1746,6 +1746,11 @@ ThreadRun {
   删除后给可撤销提示；运行中的线程停下（`outcome: cancelled`，快照后目录按上面的规则回收）并归档，归档区提供"恢复为独立线程"
   ——这是产品决定，不是技术约束（另一种可选设计是让它们直接成为工作区级的独立线程）。每条线的花费与占用可见。
   线程报告里的原始 trace 引用是 `TranscriptRef`（第 5.1 节），指向线程自己的会话文件，与线程同寿命。
+  **用户删除整条线程（D-242，已接）**：线程卡片的两步确认 → 鉴权 `DELETE /threads/:threadId` → 与归档同一级联形状后序删除
+  后代。每个节点先停活 Run（不铸 partial result），再删除该线程拥有的全部 Pi 会话（worker、转录文件、metadata 经
+  `piRuntimeBroker.deleteSession`），随后释放工作分支上的全部结果修订、分支头与草稿基线并回收无主对象，然后删除受管目录
+  （跳过结果快照 diff，仍过 ownership 断言与 user/writer guard；keep_worktree 对删除不生效，否则目录成无记录占用），
+  最后原子移除 Thread+Run 行并解绑 session binding。目录移除失败保留记录供重试，不删除仍由线程引用的对象。
 
 #### 9.3.5 活性与失败分类
 

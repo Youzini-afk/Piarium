@@ -5183,6 +5183,33 @@ unsupported；related 覆盖 resolved 段输出与 collector 接线；explore �
 `bun run test` 的 `$` 回显、echo 指向未识别工具时的正文嗅探、install 摘要+错误块+warn 折叠，以及 `shell.exec` 生产链上
 npm 包裹 vitest 的整理结果。未实测 yarn berry（无回显，靠嗅探）与 pnpm 递归脚本；声明式规则与模型总结仍未接。
 
+### D-242 · 2026-09-12 · 3.10（整条 Thread 删除：UI → 鉴权路由 → 生命周期级联）
+
+类型：问题与解法
+
+背景：用户只能归档 Thread；D-239 提供选定旧结果释放但明确不含整条删除。Thread 行、其 Run 行、Pi 会话文件、
+WorkingState 分支/结果/草稿基线、受管目录之间没有一条能完整移除的链——删除记录而留下转录或目录会成为无记录占用。
+
+决定：
+
+1. 入口与归档对称：线程卡片两步确认按钮 → `DELETE /api/harness/sessions/:sessionId/threads/:threadId`（requireAuth）→
+   `runtime.deleteUser`。删除走与归档相同的级联形状：`beginCascade` 标记、后序后代各自在自己的 lifecycle turn 删除、
+   目标最后；祖先被级联时后代的 restore 仍被拒。
+2. 每节点顺序：停活 Run（abort+close 绑定会话、`endRun(cancelled, "deleted by user")`——不铸 partial result，因为级联随即
+   释放该修订）→ 删除线程拥有的全部 Pi 会话（`options.deleteSession` → `piRuntimeBroker.deleteSession`：worker、
+   转录文件、metadata；其 delete coordinator 的按会话归档对本级联是安全空操作）→ WorkingState 租约内释放该分支全部
+   结果修订、删 `workBranchId` 分支头与 `manifest.draftBaselineId` 草稿基线并 collect 无主对象 → 删除受管目录 →
+   `registry.removeThread` 原子移除 Thread+Run 行、清游标、解绑这些 Run 的 session binding 并通知 `onThreadRemoved`。
+3. 目录删除不适用 `keep_worktree`（记录已删，留下的目录成无记录占用）；但 ownership 断言与 user/writer guard 不变，
+   `reclaim` 失败保留 Thread 记录并报原因供重试，不删除仍由线程引用的对象。没有 `deleteSession` 接线而线程确有会话时
+   拒绝删除，不留下孤儿转录。
+4. 与 D-239 的边界：release 删选定修订保当前分支；delete 删整条线程连分支一起。会话删除路径不变（删除父会话仍归档
+   线程，不是删除线程）。
+
+验证与边界：`thread-routes.test.ts` 覆盖 DELETE 的鉴权（401 不进 runtime）、作用域解析与 404；`thread-runtime.test.ts`
+覆盖级联（后代先删、活 Run settle、会话清单删除、分支/修订/基线释放、目录回收、行移除）与目录失败保记录。
+`i18nParity` 十语言同步。未实测真实 broker 会话文件删除（`deleteSession` 是 broker 的既有生产路径）与 Electron 点击链。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5190,3 +5217,4 @@ npm 包裹 vitest 的整理结果。未实测 yarn berry（无回显，靠嗅探
 | D-239 | implementation（用户旧结果释放、独立引用及中断对账） | — | 设计 9.2.5b/9.3.4；plan/status 3.4/3.4a/3.10；recovery / Thread UI |
 | D-240 | implementation（解析后 references/calls 进符号图：relation collector + lsp 导航回写 + related/explore 消费） | — | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
 | D-241 | implementation（包管理器通配层：PM 头归类、脚本回显识别内层工具、PM 噪声折叠） | — | 设计 5.2；status 3.17；output-organize |
+| D-242 | implementation（整条 Thread 删除：UI 两步确认 → 鉴权 DELETE → 级联停 Run/删会话/释分支/收目录/移行） | — | 设计 9.3.4；status 3.10；thread-runtime / thread-registry / thread-routes / HarnessThreadsPanel |

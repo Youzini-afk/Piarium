@@ -265,4 +265,55 @@ describe("harness thread routes", () => {
     expect(space.body.status).toBe("ok");
     expect(inspectSpace).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "session-1" });
   });
+
+  it("deletes a thread through the runtime lifecycle cascade on an authenticated route", async () => {
+    const app = express();
+    app.use(express.json());
+    const deleteUser = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+      deletedThreadIds: ["child-2", "thread-1"],
+      space: { status: "ok" },
+    }));
+    registerHarnessThreadRoutes(app, {
+      registry: {} as never,
+      runtime: {
+        scopeForSession: vi.fn(async () => ({
+          workspaceId: "workspace-1",
+          parent: { kind: "session", id: "session-1" },
+        })),
+        deleteUser,
+      } as never,
+    });
+
+    const response = await request(app)
+      .delete("/api/harness/sessions/session-1/threads/thread-1")
+      .expect(200);
+    expect(response.body.deletedThreadIds).toEqual(["child-2", "thread-1"]);
+    expect(deleteUser).toHaveBeenCalledWith("workspace-1", { kind: "session", id: "session-1" }, "thread-1");
+  });
+
+  it("rejects thread deletion without authentication and maps a missing thread", async () => {
+    const app = express();
+    const deleteUser = vi.fn();
+    registerHarnessThreadRoutes(app, {
+      registry: {} as never,
+      runtime: { scopeForSession: vi.fn(), deleteUser } as never,
+      requireAuth: (_req, res) => { res.status(401).json({ error: "auth required" }); },
+    });
+    await request(app).delete("/api/harness/sessions/session-1/threads/thread-1").expect(401);
+    expect(deleteUser).not.toHaveBeenCalled();
+
+    const missing = express();
+    registerHarnessThreadRoutes(missing, {
+      registry: {} as never,
+      runtime: {
+        scopeForSession: vi.fn(async () => ({ workspaceId: "w", parent: { kind: "session", id: "s" } })),
+        deleteUser: vi.fn(async () => { throw new ThreadRuntimeError("not-found", "Thread not found: thread-9"); }),
+      } as never,
+    });
+    await request(missing)
+      .delete("/api/harness/sessions/s/threads/thread-9")
+      .expect(404, { code: "not-found", error: "Thread not found: thread-9" });
+  });
 });

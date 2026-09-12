@@ -3177,4 +3177,87 @@ describe("thread runtime", () => {
     await expect(mergeRuntime.merge(WORKSPACE, { kind: "thread", id: parent.id }, child.id)).rejects.toThrow(/archived/);
     await mergeRuntime.dispose();
   });
+
+  it("deletes a thread through the lifecycle cascade: stops the run, removes sessions, releases working state, reclaims the directory, and removes the rows", async () => {
+    const deletedSessions: string[] = [];
+    const released: { branches: string[]; baselines: string[]; results: string[] } = { branches: [], baselines: [], results: [] };
+    const reclaimed: string[] = [];
+    const deleting = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      deleteSession: async (sessionId) => { deletedSessions.push(sessionId); },
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      readBlocks: async (sessionId) => blocksBySession.get(sessionId) ?? null,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "r" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async (worktree) => { reclaimed.push(worktree.path); return { reclaimed: true }; },
+      },
+      workingStates: {
+        withStore: async (_workspaceId: string, _operation: string, runStore: (store: unknown, context: unknown) => unknown) => runStore({
+          captureDirectory: async () => ({}),
+          createBranch: async () => {},
+          listResults: (branchId: string) => [{ resultRevision: branchId === "branch-thread" ? 1 : 4 }],
+          reconcileObjectReferences: async () => {},
+          deleteResults: async (branchId: string, revisions: number[]) => { released.results.push(`${branchId}:${revisions.join(",")}`); return [...revisions]; },
+          deleteBranch: async (branchId: string) => { released.branches.push(branchId); },
+          deleteDraftBaseline: async (id: string) => { released.baselines.push(id); },
+        }, { collectUnreachableObjects: async () => ({ collected: 0 }) }),
+      } as never,
+    });
+
+    // Spawn the target through the deleting runtime so its live session binding
+    // is available for a confirmed stop; the child already settled its run.
+    const input = { ...createInput(), worktree: "shared" as const };
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await deleting.spawn({ ...input, threadId: thread.id, runId: run.id });
+    const childInput = { ...createInput(), parent: { kind: "thread" as const, id: thread.id }, brief: "delete me too" };
+    const child = await registry.createThread(childInput);
+    const childRun = await registry.startRun(WORKSPACE, child.id);
+    await registry.markRunRunning(WORKSPACE, child.id, childRun.id, "grandchild-session");
+    await registry.endRun(WORKSPACE, child.id, childRun.id, "success", "done");
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "branch-thread", resultRevision: 2 });
+    await registry.setWorkingState(WORKSPACE, child.id, { branchId: "branch-child", resultRevision: 1 });
+
+    const result = await deleting.deleteUser(WORKSPACE, PARENT, thread.id);
+    expect(result.deletedThreadIds).toEqual([child.id, thread.id]);
+    // The active run settled before rows were removed — without minting a partial result.
+    expect(await registry.getActiveRun(WORKSPACE, child.id)).toBeNull();
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toBeNull();
+    expect(await registry.getThread(WORKSPACE, { kind: "thread", id: thread.id }, child.id)).toBeNull();
+    expect(deletedSessions).toEqual(expect.arrayContaining(["child-1", "grandchild-session"]));
+    expect(released.branches).toEqual(expect.arrayContaining(["branch-child", "branch-thread"]));
+    expect(released.results).toEqual(expect.arrayContaining(["branch-child:4", "branch-thread:1"]));
+    expect(reclaimed).toContain("/workspace/thread");
+    await deleting.dispose();
+  });
+
+  it("refuses deletion when the managed directory cannot be removed, keeping the record", async () => {
+    const deleting = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      deleteSession: async () => ({}),
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      readBlocks: async () => null,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => ({ ...worktree, resultCommit: "r" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none" as const, changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        reclaim: async () => ({ reclaimed: false, reason: "ownership refused" }),
+      },
+    });
+    const input = { ...createInput(), worktree: "shared" as const };
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await deleting.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await expect(deleting.deleteUser(WORKSPACE, PARENT, thread.id)).rejects.toThrow(/ownership refused/);
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).not.toBeNull();
+    await deleting.dispose();
+  });
 });

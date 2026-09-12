@@ -2379,6 +2379,35 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return removed;
   };
 
+  /**
+   * Remove a Thread and all of its Runs after the runtime lifecycle cascade
+   * has settled them (D-242). Unlike `deleteThread` — which only discards a
+   * dispatch that never acquired a Run — this is the delete path's durable
+   * removal: it also drops session bindings for every Run the Thread owned.
+   */
+  const removeThread = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<Thread | null> => {
+    const removed = await mutateWorkspace(workspaceId, (catalog) => {
+      const index = catalog.threads.findIndex((thread) => thread.id === threadId && parentEquals(thread.parent, parent));
+      if (index < 0) return { value: null, changed: [], write: false };
+      const thread = catalog.threads[index]!;
+      const sessionIds = new Set(
+        catalog.runs
+          .filter((run) => run.threadId === threadId && typeof run.sessionId === "string" && run.sessionId.length > 0)
+          .map((run) => run.sessionId!),
+      );
+      catalog.threads.splice(index, 1);
+      catalog.runs = catalog.runs.filter((run) => run.threadId !== threadId);
+      for (const key of cursors.keys()) if (key.endsWith(`\0${threadId}`)) cursors.delete(key);
+      return { value: { thread, sessionIds }, changed: [], wakeParents: [parent] };
+    });
+    if (!removed) return null;
+    for (const sessionId of removed.sessionIds) {
+      await unbindRunSession(sessionId).catch(reportObserverError);
+    }
+    await Promise.resolve(options.onThreadRemoved?.(workspaceId, threadId)).catch(reportObserverError);
+    return removed.thread;
+  };
+
   const cursorKey = (observerSessionId: string, threadId: string): string => `${observerSessionId}\0${threadId}`;
   const getCursor = (observerSessionId: string, threadId: string): ThreadViewCursor | null => (
     structuredClone(cursors.get(cursorKey(observerSessionId, threadId)) ?? null)
@@ -2575,6 +2604,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     mergeThread,
     cancelAllForParent,
     deleteThread,
+    removeThread,
     getCursor,
     getCursorEpoch,
     setCursor,

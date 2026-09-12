@@ -90,6 +90,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [convertingThreadId, setConvertingThreadId] = React.useState<string | null>(null);
   const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
 
@@ -151,6 +152,22 @@ export const HarnessThreadsPanel: React.FC<{
     await threadState.reload();
     if (restoreFailed) throw new Error(readError(payload, t(failedKey)));
     return mutated;
+  }, [parentSessionId, reloadSpace, t, threadState]);
+
+  const deleteThread = React.useCallback(async (entry: HarnessThreadSnapshot) => {
+    const response = await runtimeFetch(
+      `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(entry.thread.id)}`,
+      { method: 'DELETE' },
+    );
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(readError(payload, t('harness.threads.deleteFailed')));
+    if (payload && typeof payload === 'object' && 'space' in payload) {
+      try { setSpace(parseHarnessThreadSpace((payload as { space: unknown }).space)); }
+      catch { await reloadSpace(); }
+    } else {
+      await reloadSpace();
+    }
+    await threadState.reload();
   }, [parentSessionId, reloadSpace, t, threadState]);
 
   const openThread = React.useCallback(async (entry: HarnessThreadSnapshot) => {
@@ -759,6 +776,31 @@ export const HarnessThreadsPanel: React.FC<{
                     {t(busy ? 'harness.threads.archiving' : 'harness.threads.archive')}
                   </button>
                 )}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    if (confirmDeleteId !== entry.thread.id) {
+                      setConfirmDeleteId(entry.thread.id);
+                      return;
+                    }
+                    setConfirmDeleteId(null);
+                    setThreadAction(entry.thread.id);
+                    void deleteThread(entry).catch((error) => {
+                      toast.error(error instanceof Error ? error.message : t('harness.threads.deleteFailed'));
+                    }).finally(() => setThreadAction(null));
+                  }}
+                  onBlur={() => {
+                    if (confirmDeleteId === entry.thread.id) setConfirmDeleteId(null);
+                  }}
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] disabled:opacity-50 ${confirmDeleteId === entry.thread.id ? 'bg-[var(--status-error)]/15 text-[var(--status-error)] hover:bg-[var(--status-error)]/25' : 'text-muted-foreground hover:bg-background/70 hover:text-foreground'}`}
+                >
+                  {t(busy && confirmDeleteId !== entry.thread.id
+                    ? 'harness.threads.deleting'
+                    : confirmDeleteId === entry.thread.id
+                      ? 'harness.threads.deleteConfirm'
+                      : 'harness.threads.delete')}
+                </button>
               </div>
             </div>
           );

@@ -466,6 +466,15 @@ results, Run inputs, review and Integration users. The guard ends before object
 collection. The current branch/report/transcript remains; completed Integration
 undo keeps its own safety/target objects. Metadata removal and physical cleanup
 have separate outcomes and the same branch/revision request can retry cleanup.
+`DELETE .../threads/:threadId` (D-242) removes the whole Thread through the same
+post-order cascade shape as archive: each node settles its active Run without
+minting a partial result, deletes every Pi session it owned (worker, transcript
+file, metadata via `piRuntimeBroker.deleteSession`), releases all result
+revisions plus the work branch and draft baseline under the storage lease,
+removes the managed directory (ownership assertion and user/writer guard still
+apply; keep_worktree does not — the record is being removed), then atomically
+removes the Thread and Run rows and unbinds session bindings. A directory
+removal failure keeps the record for retry.
 WorkingState publishes metadata before removing old references and protects new
 write candidates until durable publication; startup reconciles derived references
 without interpreting a missing catalog as empty (D-239).

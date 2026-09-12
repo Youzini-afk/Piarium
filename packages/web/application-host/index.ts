@@ -1429,6 +1429,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
+    deleteSession: (sessionId) => piRuntimeBroker.deleteSession(sessionId),
     onThreadSessionBound: (sessionId, owningWorkspaceId) => bindThreadKnowledgeSession(sessionId, owningWorkspaceId),
     worktrees: threadWorktreeRuntime,
     workingStates: harnessWorkingStates,
