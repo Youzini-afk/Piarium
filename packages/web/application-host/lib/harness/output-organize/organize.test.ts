@@ -79,7 +79,36 @@ describe("command identification", () => {
     expect(identifyFromCommand("npx tsc --noEmit")?.kind).toBe("tsc");
     expect(identifyFromCommand("bun run lint && npx eslint src")?.kind).toBe("generic");
     expect(identifyFromCommand("git -C repo status")?.gitSubcommand).toBe("status");
-    expect(identifyFromCommand("bun run test")?.kind).toBeUndefined();
+    expect(identifyFromCommand("bun run test")?.kind).toBe("package-manager");
+  });
+
+  it("classifies package-manager heads and binary-exec forms separately", () => {
+    // Script-runner and builtin forms: the manager is the execution position.
+    for (const command of [
+      "npm test", "npm run build", "npm install", "npm run lint -- --fix",
+      "pnpm test", "pnpm run vitest", "pnpm vitest", "pnpm install",
+      "yarn test", "yarn add leftpad", "yarn vitest",
+      "bun test", "bun run build", "bun install",
+    ]) {
+      expect(identifyFromCommand(command)?.kind, command).toBe("package-manager");
+    }
+    // exec/dlx/x forms resolve a binary directly — the binary is the tool.
+    for (const [command, kind] of [
+      ["npm exec vitest run", "vitest"],
+      ["pnpm dlx tsc --noEmit", "tsc"],
+      ["pnpm exec eslint src", "eslint"],
+      ["bun x vitest", "vitest"],
+      ["yarn dlx tsc", "tsc"],
+      ["npx --package typescript tsc --noEmit", "tsc"],
+    ] as const) {
+      expect(identifyFromCommand(command)?.kind, command).toBe(kind);
+    }
+    // Unresolvable binaries behind exec wrappers are not package-manager
+    // context — the tool's own output is all there is.
+    expect(identifyFromCommand("npx prettier --check src")?.kind).toBeUndefined();
+    expect(identifyFromCommand("node ./scripts/check.js")?.kind).toBeUndefined();
+    // Mixed kinds stay generic rather than misattributing output.
+    expect(identifyFromCommand("npm test && git status")?.kind).toBe("generic");
   });
 
   it("does not infer a tool from arguments or mix incompatible command segments", () => {
@@ -212,6 +241,101 @@ describe("git organizer", () => {
   });
 });
 
+describe("package-manager organizer", () => {
+  it("runs the inner organizer on npm's script echo and keeps the PM framing", () => {
+    const output = [
+      "> app@1.2.3 test",
+      "> vitest run",
+      "",
+      VITEST_FAIL,
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm test", output, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("vitest");
+    expect(organized.text).toContain("> vitest run");
+    expect(organized.text).toContain("FAIL src/mid.test.ts");
+    expect(organized.text).toContain("Tests  1 failed | 10 passed (11)");
+    expect(organized.text).not.toContain("RERUN");
+  });
+
+  it("identifies the inner tool through yarn's `$` echo and bun's echo", () => {
+    const yarnOutput = ["yarn run v1.22.22", "$ tsc --noEmit", TSC_FAIL, "error Command failed with exit code 2.", ""].join("\n");
+    const yarn = organizeShellOutput({ command: "yarn test", output: yarnOutput, complete: true, exitCode: 2 });
+    expect(yarn.kind).toBe("tsc");
+    expect(yarn.text).toContain("src/a.ts(12,5): error TS2322");
+    expect(yarn.text).toContain("error Command failed with exit code 2.");
+    const bunOutput = ["$ vitest run", VITEST_PASS].join("\n");
+    const bun = organizeShellOutput({ command: "bun run test", output: bunOutput, complete: true, exitCode: 0 });
+    expect(bun.kind).toBe("vitest");
+    expect(bun.text).toContain("Test Files  2 passed (2)");
+  });
+
+  it("falls back to the body shape when the echo names an unorganized tool", () => {
+    const output = [
+      "> app@1.0.0 test",
+      "> node ./scripts/run-tests.mjs",
+      "",
+      VITEST_PASS,
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "pnpm run test", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("vitest");
+    expect(organized.text).toContain("> node ./scripts/run-tests.mjs");
+  });
+
+  it("keeps install summaries and error blocks while collapsing manager noise", () => {
+    const warns = Array.from({ length: 6 }, (_, index) => `npm warn deprecated dep-${index}@1.0.0`);
+    const output = [
+      ...warns,
+      "npm warn exec ok to proceed",
+      "Progress: resolved 12, reused 10",
+      "Downloading registry.example/pkg-1.0.0.tgz",
+      "added 234 packages in 12s",
+      "found 0 vulnerabilities",
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm install", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("package-manager");
+    expect(organized.text).toContain("added 234 packages in 12s");
+    expect(organized.text).toContain("found 0 vulnerabilities");
+    expect(organized.text).not.toContain("npm warn deprecated dep-3");
+    expect(organized.text).toContain("collapsed 8 package-manager noise line(s)");
+    expect(organized.omitted).toBe(true);
+  });
+
+  it("keeps a failed script's error block without an echo", () => {
+    const output = [
+      "npm error Missing script: \"test\"",
+      "npm error",
+      "npm error To see a list of scripts, run:",
+      "npm error   npm run",
+      "",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm test", output, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("package-manager");
+    expect(organized.text).toContain("npm error Missing script");
+    expect(organized.text).toContain("npm error   npm run");
+  });
+
+  it("preserves unrecognizable inner output rather than claiming a tool ran", () => {
+    const output = [
+      "> app@1.0.0 build",
+      "> node ./scripts/build.mjs",
+      "compiling assets...",
+      "assets ready in 2.1s",
+    ].join("\n");
+    const organized = organizeShellOutput({ command: "npm run build", output, complete: true, exitCode: 0 });
+    expect(organized.kind).toBe("package-manager");
+    expect(organized.text).toContain("compiling assets...");
+    expect(organized.text).toContain("assets ready in 2.1s");
+  });
+
+  it("still organizes an exec-form command as its tool, not the manager", () => {
+    const organized = organizeShellOutput({ command: "pnpm exec vitest run", output: VITEST_FAIL, complete: true, exitCode: 1 });
+    expect(organized.kind).toBe("vitest");
+    expect(organized.text).toContain("FAIL src/mid.test.ts");
+  });
+});
+
 describe("normalization and budget", () => {
   it("retains the current text before a trailing carriage return", () => {
     expect(normalizeShellText("working\rError: failed\r")).toBe("Error: failed");
@@ -322,6 +446,33 @@ describe("public bash and get_output chain", () => {
     expect(result.display).toContain("FAIL src/mid.test.ts");
     expect(result.display).not.toContain("RERUN");
     expect(result.organized?.kind).toBe("vitest");
+  });
+
+  it("organizes an npm-wrapped vitest run through shell.exec", async () => {
+    const store = createOutputStore();
+    const supervisor = {
+      exec: async () => ({
+        kind: "completed" as const,
+        exitCode: 1,
+        durationMs: 10,
+        cwd: ".",
+        stdout: `> app@1.0.0 test\n> vitest run\n\n${VITEST_FAIL}`,
+        stderr: "",
+        handle: null,
+        shown: null,
+      }),
+    };
+    const host = {
+      outputStore: store,
+      observationCursors: createObservationCursorStore(),
+      getInterpreter: () => ({ kind: "bash", command: "bash", args: [], env: {} }),
+      getShellSupervisor: () => supervisor,
+    } as unknown as HarnessServiceHost;
+    const result = await createShellExecService(host).handle({ command: "npm test" }, context());
+    if (result.kind !== "completed") throw new Error("expected completed");
+    expect(result.organized?.kind).toBe("vitest");
+    expect(result.display).toContain("> vitest run");
+    expect(result.display).toContain("FAIL src/mid.test.ts");
   });
 
   it("organizes incremental get_output and keeps explicit paging on raw bytes", async () => {

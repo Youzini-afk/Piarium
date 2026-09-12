@@ -2,6 +2,7 @@ import { organizeEslint } from "./eslint.js";
 import { organizeGeneric } from "./generic.js";
 import { organizeGit } from "./git.js";
 import { identifyShellOutput, type OrganizedCommandKind } from "./identify.js";
+import { organizePackageManager } from "./package-manager.js";
 import { normalizeShellText, organizeBudget, SHELL_DISPLAY_BUDGET } from "./text.js";
 import { organizeTsc } from "./tsc.js";
 import { organizeVitest } from "./vitest.js";
@@ -30,6 +31,9 @@ export function organizeShellOutput(input: {
   const dangling = normalized.length > 0 && !input.output.endsWith("\n") && !input.output.endsWith("\r\n");
   const partial = !input.complete || dangling;
   const identified = identifyShellOutput(input.command, normalized);
+  const pmOrganized = identified.kind === "package-manager"
+    ? organizePackageManager(normalized, budget, input.exitCode)
+    : undefined;
   const organized = identified.kind === "vitest"
     ? organizeVitest(normalized, budget)
     : identified.kind === "tsc"
@@ -38,8 +42,13 @@ export function organizeShellOutput(input: {
         ? organizeEslint(normalized, budget)
         : identified.kind === "git"
           ? organizeGit(normalized, identified.gitSubcommand, budget, input.exitCode)
-          : { ...organizeGeneric(normalized, budget), recognized: false };
-  const kind = organized.recognized ? identified.kind : "generic";
+          : pmOrganized ?? { ...organizeGeneric(normalized, budget), recognized: false };
+  // A package-manager command whose echo/body resolved to a known tool reports
+  // that tool's kind — the display is that tool's organization plus the PM
+  // framing lines, which remain visible in the text.
+  const kind = !organized.recognized
+    ? "generic"
+    : pmOrganized?.innerKind ?? identified.kind;
   return {
     kind,
     text: organized.text,

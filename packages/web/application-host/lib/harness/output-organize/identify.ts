@@ -1,15 +1,34 @@
-export type OrganizedCommandKind = "vitest" | "tsc" | "eslint" | "git" | "generic";
+export type OrganizedCommandKind = "vitest" | "tsc" | "eslint" | "git" | "package-manager" | "generic";
 
 export type IdentifiedCommand = {
   kind: OrganizedCommandKind;
   gitSubcommand?: string;
+  /** The package-manager head token when the command runs through one (D-241). */
+  packageManager?: string;
   source: "command" | "output";
 };
 
-const WRAPPERS = new Set(["npx", "bunx", "pnpm", "yarn", "npm", "bun", "deno", "node"]);
-const WRAPPER_SUB = new Set(["run", "exec", "x", "dlx"]);
+/** Heads that execute a resolved binary directly: `npx vitest`, `bunx tsc`. */
+const EXEC_WRAPPERS = new Set(["npx", "bunx"]);
+/**
+ * Heads that act as the package manager itself: they run package.json
+ * scripts, their own builtins (install/test/add…), or a script/binary the
+ * command line cannot disambiguate — the reliable execution position is the
+ * manager, and the script echo identifies the inner command (D-241).
+ */
+const PACKAGE_MANAGERS = new Set(["npm", "pnpm", "yarn", "bun"]);
+/** `deno task`, `node file.js` — runtime heads, not package-manager context. */
+const RUNTIME_HEADS = new Set(["deno", "node"]);
+const WRAPPERS = new Set([...EXEC_WRAPPERS, ...PACKAGE_MANAGERS, ...RUNTIME_HEADS]);
+/** Subcommands that execute a resolved binary: `npm exec vitest`, `pnpm dlx tsc`. */
+const WRAPPER_EXEC_SUB = new Set(["exec", "x", "dlx"]);
+/** `<pm> run <script>` — the script name is user data, not a tool identity. */
+const WRAPPER_RUN_SUB = new Set(["run"]);
 const GIT_VALUE_FLAGS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
-const WRAPPER_VALUE_FLAGS = new Set(["-p", "--package", "--cwd", "--config"]);
+const WRAPPER_VALUE_FLAGS = new Set([
+  "-p", "--package", "--cwd", "--config", "--prefix",
+  "-w", "--workspace", "--filter", "-F", "--dir", "--mode",
+]);
 
 export function splitCommandSegments(command: string): string[] {
   const segments: string[] = [];
@@ -124,31 +143,41 @@ function classifySegment(tokens: string[]): SegmentClassification {
   }
 
   if (!WRAPPERS.has(executable)) return "unknown";
+  const packageManager = PACKAGE_MANAGERS.has(executable) ? executable : undefined;
   index += 1;
-  while (index < tokens.length && tokens[index]!.startsWith("-")) {
-    if (WRAPPER_VALUE_FLAGS.has(tokens[index]!)) index += 1;
-    index += 1;
-  }
-  if (WRAPPER_SUB.has(tokens[index] ?? "")) {
-    index += 1;
+  const skipWrapperFlags = (): void => {
     while (index < tokens.length && tokens[index]!.startsWith("-")) {
       if (WRAPPER_VALUE_FLAGS.has(tokens[index]!)) index += 1;
       index += 1;
     }
-  } else if (executable === "bun" || executable === "pnpm" || executable === "npm" || executable === "deno") {
-    // These wrappers execute an arbitrary package script unless an explicit
-    // binary subcommand was provided. `bun run test`, for example, gives no
-    // evidence that the script invokes vitest.
-    if (executable !== "deno") return "unknown";
+  };
+  skipWrapperFlags();
+  if (WRAPPER_RUN_SUB.has(tokens[index] ?? "")) {
+    // `npm run build` / `bun run test` invoke an arbitrary package script; the
+    // manager is the reliable execution position, not the script name.
+    if (packageManager) return { kind: "package-manager", source: "command", packageManager };
+    index += 1;
+    skipWrapperFlags();
+  } else if (WRAPPER_EXEC_SUB.has(tokens[index] ?? "")) {
+    // `npm exec` / `pnpm dlx` / `bun x` resolve and run a binary directly.
+    index += 1;
+    skipWrapperFlags();
+  } else if (packageManager) {
+    // `npm test` / `pnpm vitest` / `yarn add` / `bun install`: a builtin or an
+    // implicit script/binary run — the package manager is what executed.
+    return { kind: "package-manager", source: "command", packageManager };
   }
   const wrapped = tokenAt(tokens, index);
   const kind = wrapped ? specificKind(wrapped) : undefined;
-  if (!kind) return "unknown";
+  if (!kind) {
+    return packageManager ? { kind: "package-manager", source: "command", packageManager } : "unknown";
+  }
   const subcommand = kind === "git" ? gitSubcommandFromTokens(tokens, index) : undefined;
   return {
     kind,
     source: "command",
     ...(subcommand ? { gitSubcommand: subcommand } : {}),
+    ...(packageManager ? { packageManager } : {}),
   };
 }
 

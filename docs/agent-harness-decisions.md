@@ -5158,9 +5158,35 @@ unsupported；related 覆盖 resolved 段输出与 collector 接线；explore �
 草稿不写回。related 的 collect 上限 8 个定义、每定义各一次请求，超出即 `incomplete`；references 边只来自真实查询，
 不会主动铺满全图——冷启动工作区的 resolved 覆盖随查询增长，这是有意设计不是缺口。PageRank/多跳扩展仍未做。
 
+### D-241 · 2026-09-12 · 3.17 / 5.2（包管理器通配进命令输出整理）
+
+类型：问题与解法
+
+背景：五层输出整理（设计 5.2）接了专用解析器与输出嗅探，`npm test` / `pnpm run build` 这类包裹命令靠正文形状碰巧
+识别内层工具；内层输出被截断、缺页脚或格式不巧时就退回通用首尾。管理层自己的回显（`> name@ver script` 后接
+`> 内层命令`、yarn/bun 的 `$` 行）是可靠的执行位置，此前没有被消费。
+
+决定：
+
+1. `identifyFromCommand` 把 `npm`/`pnpm`/`yarn`/`bun` 头的脚本运行与内置命令归为 `package-manager`：`run` 子命令后的
+   名字是用户脚本而非工具身份；`exec`/`dlx`/`x` 子命令解析后直接跑二进制，二进制名仍是工具身份（`npm exec vitest` →
+   vitest）；`npx`/`bunx` 裸包裹同理，解析不出时仍回 generic。`deno`/`node` 是运行时头，不归管理层。
+2. `package-manager` 整理器先取管理器回显的内层命令（顶部窗口内第一个非 `name@ver` 的 `>`/`$` 行，深处的 `>` 行是
+   工具正文不算回显），能经 `identifyFromCommand` 认出已知工具就把其后正文交给对应解析器——kind 记为内层工具，包裹
+   行留在正文里；回显不可识别或缺失时对内层正文做形状嗅探，仍不识别才走管理器形状整理。
+3. 管理器形状：错误块（`npm error`/`ERR_PNPM_`/yarn `error Command failed`）与 install/audit/完成摘要是必需项；
+   `npm warn|timing|http|verb|sill`、进度、下载/解析类重复行折叠成计数并给首样本；其余正文原样保留——和 D-199 一样，
+   收起只针对明确的重复噪声。内层识别了但正文完全不可认时回退管理器形状，不丢弃。
+4. 混合命令（`npm test && git status`）仍按既有规则走通用展示，不把整份输出归给最后一个工具。
+
+验证与边界：`organize.test.ts` 覆盖命令分类（run/exec/dlx/x 三分、PM 头、混合段）、`npm test`→vitest、`yarn test`→tsc、
+`bun run test` 的 `$` 回显、echo 指向未识别工具时的正文嗅探、install 摘要+错误块+warn 折叠，以及 `shell.exec` 生产链上
+npm 包裹 vitest 的整理结果。未实测 yarn berry（无回显，靠嗅探）与 pnpm 递归脚本；声明式规则与模型总结仍未接。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-239 | implementation（用户旧结果释放、独立引用及中断对账） | — | 设计 9.2.5b/9.3.4；plan/status 3.4/3.4a/3.10；recovery / Thread UI |
 | D-240 | implementation（解析后 references/calls 进符号图：relation collector + lsp 导航回写 + related/explore 消费） | — | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |
+| D-241 | implementation（包管理器通配层：PM 头归类、脚本回显识别内层工具、PM 噪声折叠） | — | 设计 5.2；status 3.17；output-organize |

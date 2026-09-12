@@ -46,7 +46,7 @@ export interface OutputRef {
   handle: string;
 }
 
-export type ShellOutputKind = "vitest" | "tsc" | "eslint" | "git" | "generic";
+export type ShellOutputKind = "vitest" | "tsc" | "eslint" | "git" | "package-manager" | "generic";
 
 export interface ShellOutputOrganization {
   kind: ShellOutputKind;
