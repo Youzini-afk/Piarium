@@ -370,6 +370,17 @@ required filter 失败回退、`check-attr` 探测、`ls-files -s` 执行位与 
 跨平台保留 `0o755` 真值。未实测 git-lfs 客户端在场时的远端下载路径（有意不走网络）、Windows 符号链接创建、以及
 自定义 clean/smudge 命令的真实执行（已有失败回退路径覆盖）。
 
+**D-244 CoW/reflink 材料化后端已实现（2026-09-12）。** `workspace/reflink.ts` 的 `copyFilePreferReflink` 先尝试
+`COPYFILE_FICLONE_FORCE`（真实共享 extent 或真实失败），不支持时退化普通 `copyFile` 并返回实际 backend——Node 的非 FORCE
+FICLONE 会静默降级，调用方无法分辨，故用 FORCE 保持诚实。生产接线：非 Git/zero-commit worktree 准备、`.baseline` 快照、
+untracked/merge/rematerialize 复制（`thread-worktree.ts`）、WorkingState 材料化的对象库→目标写入
+（`materializer.ts` 新 `objectPathFor` + `cow.{reflink,copy}` 计数）与 recovery `replaceFile` 的对象→临时文件复制。
+真实 reflink 只在 ReFS/APFS/Btrfs 卷上生效；NTFS/ext4 上如实走 copy 且 backend 报告 "copy"。
+
+证据：`reflink.test.ts` 6 项——真实 fs 复制与 backend 报告、注入 EOPNOTSUPP 验证退化路径与原样内容、ENOENT/普通错误
+不重试、材料化经 `objectPathFor` 命中对象文件且 readContent 不被调用、对象缺失时 readContent 兜底、cow 计数。
+未实测真实 ReFS/APFS 卷上的 extent 共享（本机与 CI 均为 NTFS）；回退路径与结果正确性已覆盖。
+
 ## 未完成项（来自 D-027，按来源）
 
 | 来源 | 未完成 |

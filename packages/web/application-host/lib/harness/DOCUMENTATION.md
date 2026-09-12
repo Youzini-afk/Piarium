@@ -384,7 +384,11 @@ and EOL/encoding conversions run through `git cat-file --filters --path`, and
 the index mode (100644/100755) restores the executable bit where the
 filesystem cannot stat it. `sameState` normalizes file modes to the
 readonly/writable dimension on Windows so index-adapted and filesystem-captured
-states stay comparable. Failed prepare deletes an
+states stay comparable. Materialization and the non-Git worktree/baseline
+copies share `workspace/reflink.ts`: a forced reflink shares extents with the
+content-addressed object file where the filesystem supports it (ReFS/APFS/
+Btrfs) and reports the real backend otherwise (`MaterializeResult.cow`).
+Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a
 virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,

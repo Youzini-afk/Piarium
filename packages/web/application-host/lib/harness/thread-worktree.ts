@@ -10,6 +10,7 @@ import type { ShellInterpreter } from "./shell-supervisor.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { captureGitChangedPaths, importGitPathsToStore } from "./working-state/git-migration.js";
 import { gitIndexModes } from "./working-state/git-adaptation.js";
+import { copyFilePreferReflink } from "../workspace/reflink.js";
 import { assertManagedWorktreeOwnership } from "./worktree-ownership.js";
 import {
   isNotGitRepositoryError,
@@ -247,7 +248,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       if (info.isSymbolicLink()) {
         await fsPromises.symlink(await fsPromises.readlink(source), destination);
       } else if (info.isFile()) {
-        await fsPromises.copyFile(source, destination);
+        await copyFilePreferReflink(source, destination, fsPromises);
         await fsPromises.chmod(destination, info.mode & 0o7777);
       }
     }
@@ -267,7 +268,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       } else if (entry.isDirectory()) {
         await copyDirRecursive(s, d);
       } else if (entry.isFile()) {
-        await fsPromises.copyFile(s, d);
+        await copyFilePreferReflink(s, d, fsPromises);
         const mode = (await fsPromises.lstat(s)).mode & 0o7777;
         await fsPromises.chmod(d, mode);
       }
@@ -1100,7 +1101,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           } catch { /* platform ignore */ }
         }
       } else if (entry.source) {
-        await fsPromises.copyFile(entry.source, entry.destination);
+        await copyFilePreferReflink(entry.source, entry.destination, fsPromises);
       }
     }
     return {
@@ -1391,7 +1392,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         const cpFn = (fsPromises as typeof fs.promises).cp ?? fs.promises.cp;
         await cpFn(src, dst, { recursive: true, force: true });
       } else if (stat.isFile()) {
-        await fsPromises.copyFile(src, dst);
+        await copyFilePreferReflink(src, dst, fsPromises);
         await fsPromises.chmod(dst, stat.mode & 0o7777);
       }
     }

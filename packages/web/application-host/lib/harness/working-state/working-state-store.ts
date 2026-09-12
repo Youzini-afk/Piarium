@@ -1089,6 +1089,7 @@ export class WorkingStateStore {
       targetDir: directory,
       states,
       readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
+      objectPathFor: (state) => state.kind === "regular-file" ? objectPath(this.context.root, state.objectHash) : null,
       cleanUnreferenced: true,
       fsPromises: this.fsPromises,
       pathModule: this.pathModule,
@@ -1100,6 +1101,7 @@ export class WorkingStateStore {
       targetDir: directory,
       states,
       readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
+      objectPathFor: (state) => state.kind === "regular-file" ? objectPath(this.context.root, state.objectHash) : null,
       fsPromises: this.fsPromises,
       pathModule: this.pathModule,
     });

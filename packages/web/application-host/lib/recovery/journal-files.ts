@@ -3,6 +3,7 @@ import fs, { type Dirent, type Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { objectPath } from './journal-catalog.js';
+import { copyFilePreferReflink } from '../workspace/reflink.js';
 import { RecoveryPrimitiveError } from './errors.js';
 import {
   assertAbsolutePathInWorkspace,
@@ -330,7 +331,9 @@ export const createRecoveryFileStore = ({
   const replaceFile = async (source: string, target: string): Promise<void> => {
     const temporary = `${target}.piarium-recovery-${randomUUID()}.tmp`;
     try {
-      await fsPromises.copyFile(source, temporary);
+      // Reflink when the filesystem supports it (ReFS/APFS/Btrfs): the temp
+      // file shares extents with the content-addressed object and CoW on write.
+      await copyFilePreferReflink(source, temporary, fsPromises);
       try {
         await fsPromises.rename(temporary, target);
       } catch (error) {

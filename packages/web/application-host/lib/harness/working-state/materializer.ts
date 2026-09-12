@@ -2,11 +2,19 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RecoveryState } from "./types.js";
 import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
+import { copyFilePreferReflink } from "../../workspace/reflink.js";
 
 export interface MaterializeOptions {
   targetDir: string;
   states: Record<string, RecoveryState>;
   readContent: (state: RecoveryState) => Promise<Buffer | null>;
+  /**
+   * Filesystem path of the content-addressed object backing a regular-file
+   * state (D-244). When provided, materialization reflinks object bytes into
+   * place where the filesystem supports block cloning and plain-copies
+   * otherwise; `readContent` remains the fallback when no path is known.
+   */
+  objectPathFor?: (state: RecoveryState) => string | null;
   cleanUnreferenced?: boolean;
   preservePermissions?: boolean;
   fsPromises?: typeof fs.promises;
@@ -18,6 +26,8 @@ export interface MaterializeResult {
   materializedPaths: string[];
   cleanedPaths: string[];
   removedPaths: string[];
+  /** How regular-file bytes actually landed: shared extents vs byte copies. */
+  cow: { reflink: number; copy: number };
 }
 
 const normalizeRelPath = (p: string): string => p.replace(/\\/g, "/");
@@ -71,6 +81,7 @@ export async function materializeWorkingState(
 
   const fsPromises = options.fsPromises ?? fs.promises;
   const pathModule = options.pathModule ?? path;
+  const cow = { reflink: 0, copy: 0 };
 
   await fsPromises.mkdir(targetDir, { recursive: true });
 
@@ -145,12 +156,27 @@ export async function materializeWorkingState(
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
 
-      const content = await readContent(state);
-      if (content === null) {
-        throw new Error(`Content missing for file: ${relPath}`);
+      const objectPath = options.objectPathFor?.(state);
+      if (objectPath) {
+        try {
+          cow[await copyFilePreferReflink(objectPath, absPath, fsPromises)] += 1;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          const content = await readContent(state);
+          if (content === null) {
+            throw new Error(`Content missing for file: ${relPath}`);
+          }
+          await fsPromises.writeFile(absPath, content);
+          cow.copy += 1;
+        }
+      } else {
+        const content = await readContent(state);
+        if (content === null) {
+          throw new Error(`Content missing for file: ${relPath}`);
+        }
+        await fsPromises.writeFile(absPath, content);
+        cow.copy += 1;
       }
-
-      await fsPromises.writeFile(absPath, content);
       if (preservePermissions && state.mode !== undefined) {
         await fsPromises.chmod(absPath, state.mode);
       }
@@ -194,5 +220,6 @@ export async function materializeWorkingState(
     materializedPaths,
     cleanedPaths,
     removedPaths,
+    cow,
   };
 }

@@ -5239,6 +5239,27 @@ WorkingState 分支/结果/草稿基线、受管目录之间没有一条能完�
 index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。有意不做：`git lfs` 远端下载、Windows symlink 提权
 创建测试、自定义 filter 的真实双向运行（失败回退已覆盖）；非 Git 目录不受影响。
 
+### D-244 · 2026-09-12 · 3.4a（CoW/reflink 材料化后端）
+
+类型：问题与解法
+
+背景：设计（9.3.4）允许非 Git 目录"copy/CoW"等价记录，但实现里所有复制都是 `copyFile` 全量字节复制；材料化与 recovery
+恢复也都经 `writeFile`/`copyFile`。对象库文件与目标通常同卷，reflink 可以把字节成本变成元数据成本——前提是能如实分辨
+是否真共享了 extent（Node 的非 FORCE `COPYFILE_FICLONE` 会静默降级）。
+
+决定：
+
+1. `workspace/reflink.ts` 的 `copyFilePreferReflink`：先试 `COPYFILE_FICLONE_FORCE`，命中即真实 reflink；返回码属于
+   不支持集合（ENOSYS/ENOTSUP/EOPNOTSUPP/EINVAL/EPERM/EACCES/EXDEV）时退化 `copyFile` 并返回 `"copy"`；
+   ENOENT 与其他错误原样上抛（缺源不是"不支持"信号）。
+2. 生产接线点统一走该原语：`copyDirRecursive`（非 Git worktree 准备 + `.baseline` 快照）、`copyUntracked`、
+   merge/rematerialize 文件复制；`materializeWorkingState` 新增 `objectPathFor`，对象库→目标 reflink/复制并计入
+   `MaterializeResult.cow.{reflink,copy}`；recovery `replaceFile` 的对象→临时文件复制也 reflink，保留原子 rename 语义。
+3. 跨卷或 NTFS/ext4 上如实 copy——backend 报告让测试与调用方看到真实行为而非"声称 CoW"。
+
+验证与边界：`reflink.test.ts` 覆盖真实 fs、注入失败退化、缺源不重试、材料化对象路径命中与兜底、计数准确性。
+未实测真实 ReFS/APFS 卷（环境所限）；extent 共享的正确性由 `FICLONE_FORCE` 语义与字节级结果断言保证。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5248,3 +5269,4 @@ index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。
 | D-241 | implementation（包管理器通配层：PM 头归类、脚本回显识别内层工具、PM 噪声折叠） | — | 设计 5.2；status 3.17；output-organize |
 | D-242 | implementation（整条 Thread 删除：UI 两步确认 → 鉴权 DELETE → 级联停 Run/删会话/释分支/收目录/移行） | — | 设计 9.3.4；status 3.10；thread-runtime / thread-registry / thread-routes / HarnessThreadsPanel |
 | D-243 | implementation（Git filter/LFS 与执行位适配层：check-attr 探测、本地 LFS 对象解析、cat-file --filters smudge、index mode 恢复、win32 mode 归一比较） | — | 设计 9.3.4 尾部；status 3.4a；working-state/git-adaptation |
+| D-244 | implementation（CoW/reflink 材料化后端：FICLONE_FORCE+真实 backend 报告，对象库→目标与工作区复制统一走原语） | — | 设计 9.3.4；status 3.4a；workspace/reflink / materializer |

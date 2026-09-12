@@ -1529,7 +1529,10 @@ queued dequeue 把 `thread.manifest.permissions` 送进 `session.create`，live 
 显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和
 materialize 使用同一冻结范围，Git 是否忽略该路径不再决定结果是否保存。
 
-Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非 Git、尚无首次 commit 的目录按需捕获输入并使用 copy/CoW。
+Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非 Git、尚无首次 commit 的目录按需捕获输入并使用 copy/CoW
+（已实现：`workspace/reflink.ts`，D-244——`COPYFILE_FICLONE_FORCE` 先试，不支持退化为普通复制并如实报告 backend；
+非 Git worktree 准备、baseline 快照、untracked/merge 复制、对象库→目标材料化与 recovery `replaceFile` 都走同一原语，
+材料化返回 `cow.{reflink,copy}` 计数）。
 初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
 基线采集属于创建/更新分支的工作，不进入普通消息、每轮恢复或每次查询的全仓扫描。Git 的过滤器、LFS 与换行转换由适配层处理，
