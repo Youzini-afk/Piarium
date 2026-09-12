@@ -271,6 +271,10 @@ export interface SymbolGraphFileRelations {
   imports: Array<{ specifier: string; line: number; documentRevision: string | null }>;
   connections: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
   associations: Array<{ callee: string; literal: string; line: number; documentRevision: string | null }>;
+  /** Language-service-resolved reference sites inside this file (D-240). */
+  references: SymbolGraphRelationRecord[];
+  /** Language-service-resolved call sites inside this file (D-240). */
+  calls: SymbolGraphRelationRecord[];
   /**
    * Outgoing file edges whose target payload is gone. Used to assert that a
    * re-collect participates in the same generation lifecycle.
@@ -285,6 +289,74 @@ export interface SymbolGraphLinkSearchResult {
   line: number;
   callee?: string;
   documentRevision: string | null;
+}
+
+/**
+ * Language-service-resolved relation kinds (D-240). `references` is "this site
+ * refers to the queried symbol"; `calls` is "this call site resolves to callee
+ * C" (callHierarchy). Neither is a same-name, import, or string match — the
+ * language server resolved them. They share the file→link row model and the
+ * site file's generation lifecycle.
+ */
+export type SymbolGraphRelationKind = "references" | "calls";
+
+/** Which resolution produced the row. */
+export type SymbolGraphRelationSource =
+  | "lsp.references"
+  | "lsp.definition"
+  | "lsp.callHierarchy.incoming"
+  | "lsp.callHierarchy.outgoing";
+
+export interface SymbolGraphRelationInput {
+  kind: SymbolGraphRelationKind;
+  /**
+   * Symbol name written at the site: the referenced name for `references`,
+   * the callee name for `calls`.
+   */
+  value: string;
+  /** 1-based site line in `path`. */
+  line: number;
+  /** 1-based site column when the resolver reported one. */
+  character?: number;
+  /** Enclosing symbol at the site (the caller), when known. */
+  caller?: string;
+  /** Resolved other end: definition/callee file and symbol. */
+  targetPath?: string;
+  targetName?: string;
+  targetKind?: string;
+  targetLine?: number;
+  /** Queried position that produced this row (provenance). */
+  anchorPath?: string;
+  anchorLine?: number;
+  resolvedBy: SymbolGraphRelationSource;
+  /**
+   * Revision of the site file bound at resolve time, or null when the language
+   * server read the file itself — the site position is then unpinned (D-087).
+   */
+  siteRevision?: string | null;
+}
+
+export interface SymbolGraphRelationRecord {
+  kind: SymbolGraphRelationKind;
+  path: string;
+  value: string;
+  line: number;
+  character?: number;
+  caller?: string;
+  targetPath?: string;
+  targetName?: string;
+  targetKind?: string;
+  targetLine?: number;
+  anchorPath?: string;
+  anchorLine?: number;
+  resolvedBy: SymbolGraphRelationSource;
+  /** true when the site position was bound to `documentRevision` at resolve time. */
+  pinned: boolean;
+  documentRevision: string | null;
+  /** Catalog revision of `targetPath` observed when the row was written. */
+  targetObservedRevision: string | null;
+  /** The target file's catalog revision moved after this row was written. */
+  staleTarget: boolean;
 }
 
 // ── Store interface ────────────────────────────────────────────────
@@ -404,10 +476,32 @@ export interface KnowledgeStore {
       signal?: AbortSignal;
     },
   ): Promise<{ removedFiles: number; removedSymbols: number }>;
+  /**
+   * Persist language-service-resolved reference/call rows onto the site file's
+   * current generation (D-240). Rows carry the bound site revision when the
+   * collector synced the file itself, else null — unpinned positions. A row's
+   * relation key (kind, value, target, anchor) is replace-on-write, so a
+   * re-resolution of the same relation supersedes its earlier sites.
+   */
+  recordResolvedRelations(
+    path: string,
+    language: string,
+    relations: readonly SymbolGraphRelationInput[],
+  ): Promise<{ recorded: number }>;
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
   findLinks(value: string): Promise<SymbolGraphLinkSearchResult[]>;
+  /**
+   * Resolved reference sites for a symbol name — rows where `value` (the name
+   * at the site) or `targetName` (the resolved name) match. `roots` scopes the
+   * site paths before the result is returned (D-240).
+   */
+  findReferences(name: string, roots?: readonly string[]): Promise<SymbolGraphRelationRecord[]>;
+  /** Resolved call sites whose callee is `name` — "who calls name". */
+  findCallers(name: string, roots?: readonly string[]): Promise<SymbolGraphRelationRecord[]>;
+  /** Resolved call sites whose enclosing caller is `caller` — "what caller calls". */
+  findCalls(caller: string, roots?: readonly string[]): Promise<SymbolGraphRelationRecord[]>;
   catalogStats(): Promise<SymbolGraphCatalogStats>;
   findImporters(path: string): Promise<SymbolGraphImportersResult>;
   /**
@@ -553,6 +647,11 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   db.createIndex("value");
   db.createIndex("nameLower");
   db.createNgramIndex("nameLower");
+  // Resolved-relation lookups: targetPath for delete/rename invalidation of
+  // incoming edges, targetName and caller for the recall queries (D-240).
+  db.createIndex("targetPath");
+  db.createIndex("targetName");
+  db.createIndex("caller");
   db.createNgramIndex("pathLower");
   db.createIndex("hasAssociationCandidates");
 
@@ -682,6 +781,13 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
    * Both are dropped on any graph write and rebuilt on the next read (D-141).
    */
   const LINK_KINDS = new Set<SymbolGraphLinkKind>(["import", "connects", "associates"]);
+  const RELATION_KINDS = new Set<SymbolGraphRelationKind>(["references", "calls"]);
+  const RELATION_SOURCES = new Set<SymbolGraphRelationSource>([
+    "lsp.references",
+    "lsp.definition",
+    "lsp.callHierarchy.incoming",
+    "lsp.callHierarchy.outgoing",
+  ]);
   const validLinkLine = (line: number): boolean => Number.isSafeInteger(line) && line >= 1;
   const validRange = (range: SymbolGraphRange): boolean => (
     [range.startLine, range.startCharacter, range.endLine, range.endCharacter]
@@ -766,9 +872,99 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     return byTarget;
   };
 
-  const edgeLabelForKind = (kind: SymbolGraphLinkKind): "imports" | "connects" | "associates" => (
+  const edgeLabelForKind = (kind: SymbolGraphLinkKind | SymbolGraphRelationKind): "imports" | "connects" | "associates" | "references" | "calls" => (
     kind === "import" ? "imports" : kind
   );
+
+  /**
+   * Two rows describe the same resolved relation when their kind, site value,
+   * and resolved other end agree — re-resolving that relation replaces its
+   * earlier sites instead of stacking duplicates.
+   */
+  const relationKeyOf = (payload: Record<string, unknown>): string => (
+    [
+      String(payload["kind"] ?? ""),
+      String(payload["value"] ?? ""),
+      String(payload["targetPath"] ?? ""),
+      String(payload["targetName"] ?? ""),
+      String(payload["anchorPath"] ?? ""),
+      String(payload["anchorLine"] ?? ""),
+    ].join("\u0000")
+  );
+
+  const relationFromPayload = (
+    payload: Record<string, unknown>,
+    path: string,
+    staleTargetPaths: Set<string>,
+  ): SymbolGraphRelationRecord | null => {
+    const kind = payload["kind"];
+    const value = payload["value"];
+    const line = Number(payload["line"]);
+    if (
+      payload["type"] !== "link"
+      || payload["active"] !== true
+      || !RELATION_KINDS.has(kind as SymbolGraphRelationKind)
+      || typeof value !== "string"
+      || !value
+      || !validLinkLine(line)
+      || !RELATION_SOURCES.has(payload["resolvedBy"] as SymbolGraphRelationSource)
+    ) return null;
+    const targetPath = typeof payload["targetPath"] === "string" ? payload["targetPath"] : undefined;
+    const documentRevision = typeof payload["documentRevision"] === "string" ? payload["documentRevision"] : null;
+    return {
+      kind: kind as SymbolGraphRelationKind,
+      path,
+      value,
+      line,
+      ...(Number.isSafeInteger(Number(payload["character"])) && Number(payload["character"]) >= 1
+        ? { character: Number(payload["character"]) }
+        : {}),
+      ...(typeof payload["caller"] === "string" ? { caller: payload["caller"] } : {}),
+      ...(targetPath ? { targetPath } : {}),
+      ...(typeof payload["targetName"] === "string" ? { targetName: payload["targetName"] } : {}),
+      ...(typeof payload["targetKind"] === "string" ? { targetKind: payload["targetKind"] } : {}),
+      ...(Number.isSafeInteger(Number(payload["targetLine"])) && Number(payload["targetLine"]) >= 1
+        ? { targetLine: Number(payload["targetLine"]) }
+        : {}),
+      ...(typeof payload["anchorPath"] === "string" ? { anchorPath: payload["anchorPath"] } : {}),
+      ...(Number.isSafeInteger(Number(payload["anchorLine"])) && Number(payload["anchorLine"]) >= 1
+        ? { anchorLine: Number(payload["anchorLine"]) }
+        : {}),
+      resolvedBy: payload["resolvedBy"] as SymbolGraphRelationSource,
+      pinned: documentRevision !== null,
+      documentRevision,
+      targetObservedRevision: typeof payload["targetObservedRevision"] === "string"
+        ? payload["targetObservedRevision"] as string
+        : null,
+      staleTarget: targetPath !== undefined && staleTargetPaths.has(targetPath),
+    };
+  };
+
+  /**
+   * Whether the catalog's current revision of `targetPath` differs from the
+   * revision recorded on the relation row — the row then reports `staleTarget`
+   * rather than presenting a moved target as current (D-240).
+   */
+  const staleTargetPathsFor = (payloads: readonly Record<string, unknown>[]): Set<string> => {
+    const targets = new Map<string, string | null>();
+    for (const payload of payloads) {
+      const targetPath = typeof payload["targetPath"] === "string" ? payload["targetPath"] : undefined;
+      if (!targetPath || targets.has(targetPath)) continue;
+      const observed = typeof payload["targetObservedRevision"] === "string"
+        ? payload["targetObservedRevision"] as string
+        : null;
+      targets.set(targetPath, observed);
+    }
+    const stale = new Set<string>();
+    for (const [targetPath, observed] of targets) {
+      const current = fileNodes(targetPath)[0]?.payload;
+      const currentRevision = typeof current?.["documentRevision"] === "string"
+        ? current["documentRevision"] as string
+        : null;
+      if (currentRevision !== observed) stale.add(targetPath);
+    }
+    return stale;
+  };
   const assertGraphText = (value: string, label: string): string => {
     const text = value.trim();
     if (!text) throw new KnowledgeMutationError("invalid", `${label} is required`);
@@ -1732,7 +1928,30 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         const symbols = symbolNodes(normalizedPath);
         const links = linkNodes(normalizedPath);
+        // Relations in *other* files whose resolved target was this path die
+        // with it — a deleted/renamed target cannot stay a current fact (D-240).
+        const incomingToTarget = lookup({ type: "link", targetPath: normalizedPath })
+          .filter(({ payload }) => RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind));
+        const incomingOwnerId = new Map<number, { ownerId: number; label: "references" | "calls" }>();
+        for (const row of incomingToTarget) {
+          const owner = typeof row.payload["path"] === "string" ? fileNodes(row.payload["path"] as string)[0] : undefined;
+          if (owner) {
+            incomingOwnerId.set(row.id, {
+              ownerId: owner.id,
+              label: row.payload["kind"] === "calls" ? "calls" : "references",
+            });
+          }
+        }
         const operations: TransactionOperation[] = [
+          ...incomingToTarget.flatMap(({ id }) => {
+            const owner = incomingOwnerId.get(id);
+            return owner === undefined
+              ? [{ type: "delete" as const, id }]
+              : [
+                  { type: "unlinkLabel" as const, src: owner.ownerId, dst: id, label: owner.label },
+                  { type: "delete" as const, id },
+                ];
+          }),
           ...symbols.map(({ id }) => ({ type: "delete" as const, id })),
           ...links.map(({ id }) => ({ type: "delete" as const, id })),
           ...files.map(({ id }) => ({ type: "delete" as const, id })),
@@ -1741,11 +1960,127 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         bumpCounters({
           files: -files.length,
           symbols: -symbols.filter(({ payload }) => payload["active"] === true).length,
-          links: -links.filter(({ payload }) => payload["active"] === true).length,
+          links: -links.filter(({ payload }) => payload["active"] === true).length
+            - incomingToTarget.filter(({ payload }) => payload["active"] === true).length,
         });
         invalidateGraphShape();
         scheduleGraphFlush();
         return { removedFiles: files.length, removedSymbols: symbols.length };
+      });
+    },
+
+    async recordResolvedRelations(path, language, relations) {
+      return enqueueWrite(() => {
+        if (relations.length === 0) return { recorded: 0 };
+        const normalizedPath = assertGraphText(path, "File path");
+        const normalizedLanguage = assertGraphText(language, "File language");
+        for (const relation of relations) {
+          if (!RELATION_KINDS.has(relation.kind)) {
+            throw new KnowledgeMutationError("invalid", `Invalid relation kind ${String(relation.kind)}`);
+          }
+          assertGraphText(relation.value, "Relation value");
+          if (!validLinkLine(relation.line)) {
+            throw new KnowledgeMutationError("invalid", `Invalid line for relation ${relation.value}`);
+          }
+          if (!RELATION_SOURCES.has(relation.resolvedBy)) {
+            throw new KnowledgeMutationError("invalid", `Invalid relation source ${String(relation.resolvedBy)}`);
+          }
+        }
+        const files = fileNodes(normalizedPath);
+        const existing = files[0];
+        const previousLinks = linkNodes(normalizedPath).filter(({ payload }) => (
+          RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind)
+        ));
+        const fileId = existing?.id ?? db.insert(placeholderVec, {
+          type: "file",
+          path: normalizedPath,
+          language: normalizedLanguage,
+          modifiedAt: Date.now(),
+          active: true,
+        });
+        const filePayload = existing?.payload;
+        const generation = typeof filePayload?.["generation"] === "string" ? filePayload["generation"] : undefined;
+        // The catalog's current revision of each target file — informational,
+        // never a claim that the resolver read that revision (D-240).
+        const targetRevisions = new Map<string, string | null>();
+        for (const relation of relations) {
+          if (!relation.targetPath || targetRevisions.has(relation.targetPath)) continue;
+          const target = fileNodes(relation.targetPath)[0]?.payload;
+          targetRevisions.set(
+            relation.targetPath,
+            typeof target?.["documentRevision"] === "string" ? target["documentRevision"] as string : null,
+          );
+        }
+        // Replace-on-write per relation key: a fresh resolution of the same
+        // relation supersedes the earlier sites without touching other keys.
+        const incomingKeys = new Set(relations.map((relation) => relationKeyOf({
+          kind: relation.kind,
+          value: relation.value,
+          targetPath: relation.targetPath,
+          targetName: relation.targetName,
+          anchorPath: relation.anchorPath,
+          anchorLine: relation.anchorLine,
+        })));
+        const superseded = previousLinks.filter(({ payload }) => incomingKeys.has(relationKeyOf(payload)));
+        const supersededIds = new Set(superseded.map(({ id }) => id));
+        const outgoingUnlinks: TransactionOperation[] = db.getEdges(fileId).flatMap((edge) => (
+          supersededIds.has(edge.targetId)
+            ? [{ type: "unlinkLabel" as const, src: fileId, dst: edge.targetId, label: edge.label }]
+            : []
+        ));
+        const pathLower = normalizedPath.toLowerCase();
+        const pendingPayloads = relations.map((relation) => ({
+          type: "link",
+          path: normalizedPath,
+          pathLower,
+          language: normalizedLanguage,
+          kind: relation.kind,
+          value: relation.value,
+          line: relation.line,
+          ...(relation.character !== undefined ? { character: relation.character } : {}),
+          ...(relation.caller !== undefined ? { caller: relation.caller } : {}),
+          ...(relation.targetPath !== undefined ? { targetPath: relation.targetPath } : {}),
+          ...(relation.targetName !== undefined ? { targetName: relation.targetName } : {}),
+          ...(relation.targetKind !== undefined ? { targetKind: relation.targetKind } : {}),
+          ...(relation.targetLine !== undefined ? { targetLine: relation.targetLine } : {}),
+          ...(relation.anchorPath !== undefined ? { anchorPath: relation.anchorPath } : {}),
+          ...(relation.anchorLine !== undefined ? { anchorLine: relation.anchorLine } : {}),
+          resolvedBy: relation.resolvedBy,
+          documentRevision: relation.siteRevision ?? null,
+          ...(relation.targetPath !== undefined
+            ? { targetObservedRevision: targetRevisions.get(relation.targetPath) ?? null }
+            : {}),
+          ...(generation ? { generation } : {}),
+          active: true,
+        }));
+        const linkIds = pendingPayloads.length > 0
+          ? db.batchInsert(pendingPayloads.map(() => placeholderVec), pendingPayloads)
+          : [];
+        const operations: TransactionOperation[] = [
+          ...outgoingUnlinks,
+          ...superseded.map(({ id }) => ({ type: "delete" as const, id })),
+          ...linkIds.flatMap((id, index): TransactionOperation[] => [
+            { type: "upsertEdge", src: fileId, dst: id, label: edgeLabelForKind(relations[index]!.kind), weight: 1 },
+          ]),
+        ];
+        if (existing) {
+          operations.push({ type: "updatePayload", id: fileId, payload: {
+            ...filePayload,
+            modifiedAt: Date.now(),
+          } });
+        }
+        if (operations.length > 0) db.commitTransaction(operations);
+        bumpCounters({ links: linkIds.length - superseded.length });
+        for (let index = 0; index < linkIds.length; index += 1) {
+          const id = linkIds[index]!;
+          const relation = relations[index]!;
+          db.indexText(id, `${relation.value} ${normalizedPath}`);
+          db.indexKeyword(id, relation.value);
+        }
+        if (files.length === 0) bumpCounters({ files: 1 });
+        invalidateGraphShape();
+        scheduleGraphFlush();
+        return { recorded: linkIds.length };
       });
     },
 
@@ -1833,6 +2168,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       const imports: SymbolGraphFileRelations["imports"] = [];
       const connections: SymbolGraphFileRelations["connections"] = [];
       const associations: SymbolGraphFileRelations["associations"] = [];
+      const relationPayloads: Record<string, unknown>[] = [];
       let danglingEdges = 0;
       for (const edge of db.getEdges(file.id)) {
         const payload = db.getPayload(edge.targetId) as Record<string, unknown> | null;
@@ -1860,11 +2196,28 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           else associations.push(entry);
           continue;
         }
+        if (edge.label === "references" || edge.label === "calls") {
+          relationPayloads.push(payload);
+          continue;
+        }
         if (edge.label === "defines" && payload["type"] === "symbol") continue;
         if (edge.label === "defines" || edge.label === "imports" || edge.label === "connects" || edge.label === "associates") {
           danglingEdges += 1;
         }
       }
+      const staleTargets = staleTargetPathsFor(relationPayloads);
+      const references = relationPayloads
+        .flatMap((payload) => {
+          const record = relationFromPayload(payload, normalizedPath, staleTargets);
+          return record?.kind === "references" ? [record] : [];
+        })
+        .toSorted((left, right) => left.line - right.line || left.value.localeCompare(right.value));
+      const calls = relationPayloads
+        .flatMap((payload) => {
+          const record = relationFromPayload(payload, normalizedPath, staleTargets);
+          return record?.kind === "calls" ? [record] : [];
+        })
+        .toSorted((left, right) => left.line - right.line || left.value.localeCompare(right.value));
       const byLine = <T extends { line: number; specifier?: string; literal?: string; callee?: string }>(left: T, right: T) => (
         left.line - right.line
         || (left.specifier ?? left.literal ?? "").localeCompare(right.specifier ?? right.literal ?? "")
@@ -1879,6 +2232,8 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         imports: imports.toSorted(byLine),
         connections: connections.toSorted(byLine),
         associations: associations.toSorted(byLine),
+        references,
+        calls,
         danglingEdges,
       };
     },
@@ -1909,6 +2264,56 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           }];
         })
         .toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line || left.kind.localeCompare(right.kind));
+    },
+
+    async findReferences(name, roots) {
+      const normalized = assertGraphText(name, "Symbol name");
+      const seen = new Set<number>();
+      const rows = [
+        ...lookup({ type: "link", kind: "references", value: normalized, active: true }),
+        ...lookup({ type: "link", kind: "references", targetName: normalized, active: true }),
+      ].filter(({ id }) => !seen.has(id) && seen.add(id));
+      const staleTargets = staleTargetPathsFor(rows.map(({ payload }) => payload));
+      return rows
+        .flatMap(({ payload }) => {
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          if (!path || (roots?.length && !pathInRoots(path, roots))) return [];
+          const record = relationFromPayload(payload, path, staleTargets);
+          return record ? [record] : [];
+        })
+        .toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
+    },
+
+    async findCallers(name, roots) {
+      const normalized = assertGraphText(name, "Callee name");
+      const seen = new Set<number>();
+      const rows = [
+        ...lookup({ type: "link", kind: "calls", value: normalized, active: true }),
+        ...lookup({ type: "link", kind: "calls", targetName: normalized, active: true }),
+      ].filter(({ id }) => !seen.has(id) && seen.add(id));
+      const staleTargets = staleTargetPathsFor(rows.map(({ payload }) => payload));
+      return rows
+        .flatMap(({ payload }) => {
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          if (!path || (roots?.length && !pathInRoots(path, roots))) return [];
+          const record = relationFromPayload(payload, path, staleTargets);
+          return record ? [record] : [];
+        })
+        .toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
+    },
+
+    async findCalls(caller, roots) {
+      const normalized = assertGraphText(caller, "Caller name");
+      const rows = lookup({ type: "link", kind: "calls", caller: normalized, active: true });
+      const staleTargets = staleTargetPathsFor(rows.map(({ payload }) => payload));
+      return rows
+        .flatMap(({ payload }) => {
+          const path = typeof payload["path"] === "string" ? payload["path"] : "";
+          if (!path || (roots?.length && !pathInRoots(path, roots))) return [];
+          const record = relationFromPayload(payload, path, staleTargets);
+          return record ? [record] : [];
+        })
+        .toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line);
     },
 
     async catalogStats() {

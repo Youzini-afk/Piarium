@@ -67,7 +67,13 @@ export async function loadSnippetRelations(
     }
     answered += 1;
     if (!relation) continue;
-    if (relation.imports.length === 0 && relation.connections.length === 0 && relation.associations.length === 0) continue;
+    if (
+      relation.imports.length === 0
+      && relation.connections.length === 0
+      && relation.associations.length === 0
+      && (relation.references?.length ?? 0) === 0
+      && (relation.calls?.length ?? 0) === 0
+    ) continue;
     files.push({ ...relation, stale: relation.documentRevision !== excerptRevision });
   }
   const status: ExploreRelationStatus = answered === asked ? "ready" : answered === 0 ? "unavailable" : "partial";
@@ -271,6 +277,16 @@ function bindExploreGraphRecall(
     if (!store) throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
     return store;
   };
+  const toSite = (record: import("../knowledge/store.js").SymbolGraphRelationRecord) => ({
+    path: record.path,
+    line: record.line,
+    ...(record.caller !== undefined ? { caller: record.caller } : {}),
+    ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+    ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+    pinned: record.pinned,
+    ...(record.staleTarget ? { staleTarget: true } : {}),
+    resolvedBy: record.resolvedBy,
+  });
   return {
     catalogStats: async () => requireStore().catalogStats(),
     searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
@@ -281,9 +297,33 @@ function bindExploreGraphRecall(
       return {
         connections: relations.connections.map(({ callee, literal }) => ({ callee, literal })),
         linksIncomplete: relations.linksIncomplete,
+        references: relations.references.map((record) => ({
+          path: record.path,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
+        calls: relations.calls.map((record) => ({
+          path: record.path,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          callee: record.targetName ?? record.value,
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
       };
     },
     findImporters: (path) => requireStore().findImporters(path),
+    findReferences: async (name) => (await requireStore().findReferences(name)).map(toSite),
+    findCallers: async (name) => (await requireStore().findCallers(name)).map(toSite),
+    findCalls: async (caller) => (await requireStore().findCalls(caller)).map(toSite),
   };
 }
 

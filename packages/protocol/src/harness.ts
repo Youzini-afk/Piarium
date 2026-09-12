@@ -486,6 +486,54 @@ export interface RelatedQueryParams {
 
 export type RelatedQueryStatus = "ready" | "empty" | "unavailable" | "failed";
 
+/**
+ * Per-source status for resolved relations. `unsupported` means no language
+ * provider answered the feature at all (no `referencesProvider` /
+ * `callHierarchyProvider`), which is different from a resolved-but-empty set.
+ */
+export type RelatedRelationStatus = "ready" | "empty" | "unavailable" | "unsupported" | "partial" | "failed";
+
+/**
+ * One resolved reference site: "path:line refers to the queried symbol".
+ * `pinned` is true only when the site file's text identity was bound at resolve
+ * time; other-file sites are the language server's own read and stay unpinned.
+ */
+export interface RelatedReferenceSite {
+  path: string;
+  /** 1-based. */
+  line: number;
+  /** 1-based column when the resolver reported one. */
+  character?: number;
+  /** Enclosing catalog symbol at the site, when known. */
+  caller?: string;
+  /** Resolved definition file when the query pinned one. */
+  targetPath?: string;
+  targetName?: string;
+  pinned: boolean;
+  /** The target file's catalog revision moved after this row was resolved. */
+  staleTarget?: boolean;
+  /** Which resolution produced the row: lsp.references / lsp.definition / callHierarchy. */
+  resolvedBy: string;
+}
+
+/** One resolved call edge: `caller` at path:line calls `callee`. */
+export interface RelatedCallEdge {
+  /** Call-site file. */
+  path: string;
+  /** 1-based call-site line. */
+  line: number;
+  character?: number;
+  /** Enclosing symbol making the call, when known. */
+  caller?: string;
+  /** Called symbol name. */
+  callee: string;
+  targetPath?: string;
+  targetName?: string;
+  pinned: boolean;
+  staleTarget?: boolean;
+  resolvedBy: string;
+}
+
 /** Query-time file class shared by explore and related. Not stored on the graph. */
 export type HarnessFileRole = "source" | "test" | "docs" | "lock" | "other";
 export type HarnessFileRoleGround = "filename-pattern" | "project-declaration" | "unknown";
@@ -519,6 +567,27 @@ export interface RelatedQueryResult {
       path: string;
       otherEnds: Array<{ path: string; kind: string; callee?: string }>;
     }>;
+    incomplete: boolean;
+  };
+  /**
+   * Language-service-resolved reference sites for the anchor (name anchors)
+   * or references made inside the file (path anchors). Persisted in the symbol
+   * graph from real lsp.references / lsp.definition / callHierarchy results;
+   * unrelated to same-name text hits.
+   */
+  references: {
+    status: RelatedRelationStatus;
+    items: RelatedReferenceSite[];
+    incomplete: boolean;
+  };
+  /**
+   * Resolved call edges: `callers` are sites calling the anchor, `callees`
+   * are calls the anchor makes. From callHierarchy / resolved references only.
+   */
+  calls: {
+    status: RelatedRelationStatus;
+    callers: RelatedCallEdge[];
+    callees: RelatedCallEdge[];
     incomplete: boolean;
   };
 }
@@ -653,7 +722,7 @@ export interface ExploreLexicalArrival {
 
 export interface ExploreGraphArrival {
   kind: "graph";
-  edgeKind?: "connects" | "associates" | "definition" | "import";
+  edgeKind?: "connects" | "associates" | "definition" | "import" | "references" | "calls";
   arrivalReason: ExploreGraphArrivalReason;
 }
 
@@ -734,6 +803,11 @@ export interface ExploreGraphDetails {
   associates?: number;
   imports: number;
   /**
+   * Distinct files contributed by resolved `references`/`calls` edges
+   * (language-service results persisted on the graph, D-240).
+   */
+  relations?: number;
+  /**
    * Floor of graph-source files that exceeded the independent graph budget.
    * Combined with rg `searched.filesDropped` by taking the maximum, not the sum.
    */
@@ -756,6 +830,32 @@ export interface ExploreFileRelation {
   imports: Array<{ specifier: string; line: number }>;
   connections: Array<{ callee: string; literal: string; line: number }>;
   associations: Array<{ callee: string; literal: string; line: number }>;
+  /**
+   * Language-service-resolved relations collected on this file. `pinned` means
+   * the site text was bound at resolve time; unpinned sites are the server's
+   * own read and `staleTarget` means the target file's catalog revision moved
+   * after the row was written (D-240).
+   */
+  references?: Array<{
+    value: string;
+    line: number;
+    caller?: string;
+    targetPath?: string;
+    targetName?: string;
+    pinned: boolean;
+    staleTarget?: boolean;
+    resolvedBy: string;
+  }>;
+  calls?: Array<{
+    callee: string;
+    line: number;
+    caller?: string;
+    targetPath?: string;
+    targetName?: string;
+    pinned: boolean;
+    staleTarget?: boolean;
+    resolvedBy: string;
+  }>;
 }
 
 /**

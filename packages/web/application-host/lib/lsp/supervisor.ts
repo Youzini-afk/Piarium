@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
 import {
   LanguageMappingError,
+  mapCallHierarchyItem,
   mapCodeAction,
   mapColorPresentation,
   mapColorInformation,
@@ -20,6 +21,7 @@ import {
   mapInlayHint,
   mapLocation,
   mapLocationLink,
+  mapRange,
   mapSelectionRange,
   mapSignatureHelp,
   mapSymbols,
@@ -92,6 +94,7 @@ type ResolveCollectionName =
   | 'inlayHintResolveItems';
 
 interface LanguageSessionRecord {
+  callHierarchyItems: Map<string, unknown>;
   child: ChildProcessWithoutNullStreams | null;
   codeActionResolveItems: Map<string, unknown>;
   completionResolveItems: Map<string, unknown>;
@@ -137,6 +140,8 @@ interface LanguageRequest extends Record<string, unknown> {
   documentVersion?: number;
   expectedRevision?: string;
   formatting?: unknown;
+  /** Token for a CallHierarchyItem held by the session (callHierarchy requests). */
+  itemToken?: string;
   languageId?: string;
   newName?: string;
   position?: unknown;
@@ -274,6 +279,9 @@ const supportsMethod = (record: LanguageSessionRecord, method: string, request: 
     'textDocument/documentLink': 'documentLinkProvider',
     'textDocument/documentColor': 'colorProvider',
     'textDocument/colorPresentation': 'colorProvider',
+    'textDocument/prepareCallHierarchy': 'callHierarchyProvider',
+    'callHierarchy/incomingCalls': 'callHierarchyProvider',
+    'callHierarchy/outgoingCalls': 'callHierarchyProvider',
   } as Record<string, string>)[method];
   if (!key) return true;
   const value = capabilityValue(record, key);
@@ -447,6 +455,7 @@ export const createLanguageSupervisor = ({
     }
     record.child = null;
     record.documents.clear();
+    record.callHierarchyItems?.clear();
     record.completionResolveItems?.clear();
     record.codeActionResolveItems?.clear();
     record.inlayHintResolveItems?.clear();
@@ -487,6 +496,7 @@ export const createLanguageSupervisor = ({
     rpc: null,
     root: input.root,
     serverCapabilities: {},
+    callHierarchyItems: new Map<string, unknown>(),
     completionResolveItems: new Map<string, unknown>(),
     codeActionResolveItems: new Map<string, unknown>(),
     inlayHintResolveItems: new Map<string, unknown>(),
@@ -1019,6 +1029,9 @@ export const createLanguageSupervisor = ({
     if (method === 'textDocument/references') {
       return { textDocument: { uri }, position: request.position, context: { includeDeclaration: true } };
     }
+    if (method === 'textDocument/prepareCallHierarchy') {
+      return { textDocument: { uri }, position: request.position };
+    }
     if (method === 'textDocument/codeAction') {
       return {
         textDocument: { uri },
@@ -1356,6 +1369,60 @@ export const createLanguageSupervisor = ({
       const values = Array.isArray(raw) ? raw : [];
       return values.map((value) => mapLocation(value, record.workspaceId, record.root, pathModule)).filter(Boolean);
     }),
+    prepareCallHierarchy: (request: LanguageRequest) => requestFeature('textDocument/prepareCallHierarchy', request, (raw, record) => {
+      const values = Array.isArray(raw) ? raw : [];
+      record.callHierarchyItems.clear();
+      return values.map((value) => {
+        const mapped = mapCallHierarchyItem(value, record.workspaceId, record.root, pathModule);
+        if (!mapped) return null;
+        const itemToken = storeResolveItem(record, record.callHierarchyItems, value);
+        return { ...mapped, itemToken };
+      }).filter(Boolean);
+    }),
+    callHierarchyIncoming: async (request: LanguageRequest) => {
+      const languageId = request.languageId;
+      const workspaceId = request.resource?.workspaceId;
+      const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId, asView(request.view))) : null;
+      const raw = request.itemToken ? record?.callHierarchyItems.get(request.itemToken) : undefined;
+      if (!record || !record.rpc || !raw) {
+        return record
+          ? featureFailure(record, 'Language call hierarchy item is stale', 'stale-item')
+          : { status: 'absent' as const, ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
+      }
+      return requestFeature('callHierarchy/incomingCalls', request, (rawCalls, session) => {
+        const values = Array.isArray(rawCalls) ? rawCalls : [];
+        return values.map((value) => {
+          const call = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+          const from = mapCallHierarchyItem(call['from'], session.workspaceId, session.root, pathModule);
+          const fromRanges = (Array.isArray(call['fromRanges']) ? call['fromRanges'] : [])
+            .map((range) => mapRange(range))
+            .filter(Boolean);
+          return from ? { from, fromRanges } : null;
+        }).filter(Boolean);
+      }, { params: { item: raw } });
+    },
+    callHierarchyOutgoing: async (request: LanguageRequest) => {
+      const languageId = request.languageId;
+      const workspaceId = request.resource?.workspaceId;
+      const record = workspaceId && languageId ? sessions.get(sessionKey(workspaceId, languageId, asView(request.view))) : null;
+      const raw = request.itemToken ? record?.callHierarchyItems.get(request.itemToken) : undefined;
+      if (!record || !record.rpc || !raw) {
+        return record
+          ? featureFailure(record, 'Language call hierarchy item is stale', 'stale-item')
+          : { status: 'absent' as const, ...(workspaceId ? { workspaceId } : {}), ...(languageId ? { languageId } : {}) };
+      }
+      return requestFeature('callHierarchy/outgoingCalls', request, (rawCalls, session) => {
+        const values = Array.isArray(rawCalls) ? rawCalls : [];
+        return values.map((value) => {
+          const call = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+          const to = mapCallHierarchyItem(call['to'], session.workspaceId, session.root, pathModule);
+          const fromRanges = (Array.isArray(call['fromRanges']) ? call['fromRanges'] : [])
+            .map((range) => mapRange(range))
+            .filter(Boolean);
+          return to ? { to, fromRanges } : null;
+        }).filter(Boolean);
+      }, { params: { item: raw } });
+    },
     documentSymbols: (request: LanguageRequest) => requestFeature('textDocument/documentSymbol', request, (raw, record) => (
       mapSymbols(raw, mappingContext(record))
     )),

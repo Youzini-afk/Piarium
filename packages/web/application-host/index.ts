@@ -87,6 +87,7 @@ import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-c
 import { DEFAULT_SUGGESTIONS_SETTINGS, suggestionSettingsFromSnapshot } from './lib/harness/knowledge-suggestions.js';
 import { createLanguageSupervisorDiagnosticsProvider } from './lib/harness/diagnostics-adapter.js';
 import { createLspNavigationServices } from './lib/harness/lsp-nav.js';
+import { createRelationCollector } from './lib/knowledge/relations.js';
 import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
@@ -1984,6 +1985,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     };
   }
 
+  // D-240: one collector serves both entry points — lsp.* navigation writes its
+  // already-obtained resolutions back, and related.query deliberately resolves
+  // around its anchor. Both persist only against already-open stores.
+  const relationCollector = createRelationCollector({
+    documents: documentsAuthority,
+    supervisor: languageSupervisor,
+    getStore: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
+  });
+
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
@@ -2095,12 +2105,19 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     lspNavigationServices: createLspNavigationServices({
       documents: documentsAuthority,
       supervisor: languageSupervisor,
+      // Write-behind (D-240): a disk-bound lsp.references/lsp.definition answer
+      // becomes graph rows so later related/explore queries reuse the
+      // resolution instead of re-asking the language view.
+      recordRelations: (input) => relationCollector.record(input.workspaceId, input),
     }),
     structureSource,
     // Reading relations must not open a database or start a catalog scan, so
     // this consults an already-open store and reports "not answered" otherwise.
     // The session's own knowledge work opens it (D-112).
     graphRecall: (workspaceId) => knowledgeStores.get(workspaceId) ?? null,
+    // Bounded live resolution for related.query — one references +
+    // call-hierarchy pass per exact-match definition (D-240).
+    relationCollector,
     semanticRecall: semanticRuntime.semanticRecall,
     harnessSettings: semanticRuntime.harnessSettings,
     rerankExploreViews: semanticRuntime.rerankExploreViews,
@@ -2109,7 +2126,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);
       const relations = await store.getFileRelations(resourceId);
       if (!relations) return null;
-      if (relations.imports.length === 0 && relations.connections.length === 0 && relations.associations.length === 0) {
+      if (
+        relations.imports.length === 0
+        && relations.connections.length === 0
+        && relations.associations.length === 0
+        && relations.references.length === 0
+        && relations.calls.length === 0
+      ) {
         return null;
       }
       return {
@@ -2119,6 +2142,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         imports: relations.imports.map(({ specifier, line }) => ({ specifier, line })),
         connections: relations.connections.map(({ callee, literal, line }) => ({ callee, literal, line })),
         associations: relations.associations.map(({ callee, literal, line }) => ({ callee, literal, line })),
+        references: relations.references.map((record) => ({
+          value: record.value,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
+        calls: relations.calls.map((record) => ({
+          callee: record.targetName ?? record.value,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
       };
     },
     // Web services — fetch is always available (SSRF-guarded); read and search

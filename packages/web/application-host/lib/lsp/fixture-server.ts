@@ -7,7 +7,9 @@ interface FixtureParams extends Record<string, unknown> {
   command?: string;
   contentChanges?: ContentChange[];
   data?: Record<string, unknown>;
+  item?: { uri?: string; name?: string; data?: { uri?: string; name?: string; position?: number } };
   newName?: string;
+  position?: Position;
   positions?: Position[];
   range?: unknown;
   target?: unknown;
@@ -46,6 +48,61 @@ const applyContentChanges = (content: string, changes: ContentChange[]): string 
   return next;
 };
 
+const IDENTIFIER_RE = /[A-Za-z_$][A-Za-z0-9_$]*/;
+
+const identifierAt = (text: string, offset: number): { name: string; start: number } | null => {
+  let start = Math.max(0, Math.min(offset, text.length));
+  let end = start;
+  while (start > 0 && /[A-Za-z0-9_$]/.test(text[start - 1]!)) start -= 1;
+  while (end < text.length && /[A-Za-z0-9_$]/.test(text[end]!)) end += 1;
+  const name = text.slice(start, end);
+  return IDENTIFIER_RE.test(name) ? { name, start } : null;
+};
+
+const offsetToPosition = (text: string, offset: number): Position => {
+  const capped = Math.max(0, Math.min(offset, text.length));
+  let line = 0;
+  let lineStart = 0;
+  for (let index = 0; index < capped; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      line += 1;
+      lineStart = index + 1;
+    }
+  }
+  return { line, character: capped - lineStart };
+};
+
+const identifierSites = (text: string, name: string, followedByParen: boolean): Array<{ start: number; end: number }> => {
+  const sites: Array<{ start: number; end: number }> = [];
+  const pattern = new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g');
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    const end = match.index + match[0].length;
+    if (followedByParen && !/^\s*\(/.test(text.slice(end))) continue;
+    sites.push({ start: match.index, end });
+  }
+  return sites;
+};
+
+const siteRange = (text: string, site: { start: number; end: number }) => ({
+  start: offsetToPosition(text, site.start),
+  end: offsetToPosition(text, site.end),
+});
+
+/**
+ * `callee(` sites in a text — the fixture's stand-in for calls the queried item
+ * makes. Sites of the item's own name are excluded: `function foo(` is its
+ * declaration, and calls back into it are not outgoing.
+ */
+const callSitesIn = (text: string, excludeName: string): Array<{ name: string; start: number; end: number }> => {
+  const sites: Array<{ name: string; start: number; end: number }> = [];
+  const pattern = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  for (let match = pattern.exec(text); match; match = pattern.exec(text)) {
+    if (match[1] === excludeName) continue;
+    sites.push({ name: match[1]!, start: match.index, end: match.index + match[1]!.length });
+  }
+  return sites;
+};
+
 const publish = (server: { notify(method: string, params: unknown): void }, uri: string, version: number, text: string): void => {
   const diagnostics: Array<Record<string, unknown>> = [];
   if (text.includes('FIXTURE_ERROR')) {
@@ -81,6 +138,7 @@ const server = createJsonRpcServer({
           signatureHelpProvider: { triggerCharacters: ['(', ','] },
           definitionProvider: true,
           referencesProvider: true,
+          callHierarchyProvider: true,
           documentSymbolProvider: true,
           workspaceSymbolProvider: true,
           renameProvider: true,
@@ -156,7 +214,80 @@ const server = createJsonRpcServer({
     }
     if (method === 'textDocument/references') {
       const uri = params?.textDocument?.uri;
-      return uri ? [{ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } }] : [];
+      if (!uri) return [];
+      const text = files.get(uri)?.text ?? '';
+      const offset = positionToOffset(text, params.position);
+      const identifier = identifierAt(text, offset);
+      if (!identifier) return [];
+      // Content-driven: every identifier occurrence across synced documents is
+      // a reference site — a deterministic stand-in for real resolution.
+      const locations: unknown[] = [];
+      for (const [siteUri, file] of files) {
+        for (const site of identifierSites(file.text, identifier.name, false)) {
+          locations.push({ uri: siteUri, range: siteRange(file.text, site) });
+        }
+      }
+      return locations;
+    }
+    if (method === 'textDocument/prepareCallHierarchy') {
+      const uri = params?.textDocument?.uri;
+      if (!uri) return null;
+      const text = files.get(uri)?.text ?? '';
+      const offset = positionToOffset(text, params.position);
+      const identifier = identifierAt(text, offset);
+      if (!identifier) return null;
+      return [{
+        name: identifier.name,
+        kind: 12,
+        uri,
+        range: siteRange(text, { start: identifier.start, end: identifier.start + identifier.name.length }),
+        selectionRange: siteRange(text, { start: identifier.start, end: identifier.start + identifier.name.length }),
+        data: { uri, name: identifier.name, position: identifier.start },
+      }];
+    }
+    if (method === 'callHierarchy/incomingCalls' || method === 'callHierarchy/outgoingCalls') {
+      const item = params.item;
+      const itemUri = item?.data?.uri ?? item?.uri ?? '';
+      const name = item?.data?.name ?? item?.name ?? '';
+      const ownStart = typeof item?.data?.position === 'number' ? item.data.position : -1;
+      if (!itemUri || !name) return [];
+      if (method === 'callHierarchy/incomingCalls') {
+        const calls: unknown[] = [];
+        for (const [siteUri, file] of files) {
+          for (const site of identifierSites(file.text, name, true)) {
+            // The item's own declaration is not a call into it.
+            if (siteUri === itemUri && site.start === ownStart) continue;
+            calls.push({
+              from: {
+                name: 'fixtureCaller',
+                kind: 12,
+                uri: siteUri,
+                range: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+                selectionRange: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+                data: { uri: siteUri, name: 'fixtureCaller', position: 0 },
+              },
+              fromRanges: [siteRange(file.text, site)],
+            });
+          }
+        }
+        return calls;
+      }
+      const text = files.get(itemUri)?.text ?? '';
+      const calls: unknown[] = [];
+      for (const site of callSitesIn(text, name)) {
+        calls.push({
+          to: {
+            name: site.name,
+            kind: 12,
+            uri: itemUri,
+            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } },
+            selectionRange: siteRange(text, site),
+            data: { uri: itemUri, name: site.name, position: site.start },
+          },
+          fromRanges: [siteRange(text, site)],
+        });
+      }
+      return calls;
     }
     if (method === 'textDocument/documentSymbol') {
       return [{

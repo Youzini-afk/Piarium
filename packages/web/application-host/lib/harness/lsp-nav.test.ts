@@ -210,4 +210,44 @@ describe("LSP navigation services", () => {
       await harness.cleanup();
     }
   });
+
+  it("writes a disk-bound references result back through recordRelations", async () => {
+    const deps = createDeps();
+    const recordRelations = vi.fn(async () => ({ recorded: 1 }));
+    const services = createLspNavigationServices({ ...deps, recordRelations } as never);
+    const result = await services.references.handle({ path: "src/a.ts", line: 1, character: 14 }, context);
+    expect(result.status).toBe("ready");
+    await vi.waitFor(() => expect(recordRelations).toHaveBeenCalledOnce());
+    expect(recordRelations).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: "workspace-1",
+      anchor: { path: "src/a.ts", line: 1, character: 14 },
+      anchorRevision: "r1",
+      name: "value",
+      resolvedBy: "lsp.references",
+      sites: [{ path: "src/c.ts", line: 9, character: 2 }],
+    }));
+  });
+
+  it("does not persist a surface-draft-bound answer as a graph fact", async () => {
+    const deps = createDeps();
+    deps.documents.readAgentInputSnapshot = vi.fn(() => ({
+      status: "ready" as const,
+      content: "export const value = 2;",
+      revision: "surface-draft:ref-1:4",
+      encoding: "utf-8",
+      bom: false,
+      source: "surface-draft" as const,
+    })) as never;
+    const recordRelations = vi.fn(async () => ({ recorded: 0 }));
+    const services = createLspNavigationServices({ ...deps, recordRelations } as never);
+    const draftContext = {
+      ...context,
+      inputContext: { source: "surface" as const, workspaceId: "workspace-1", dirtyPaths: ["src/a.ts"], snapshot: { status: "ready" as const, ref: "ref-1" } },
+    };
+    const result = await services.references.handle({ path: "src/a.ts", line: 1, character: 14 }, draftContext);
+    expect(result).toMatchObject({ status: "ready", source: "surface-draft" });
+    // Give the (unconditional) write-behind a tick to run — it must not have.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(recordRelations).not.toHaveBeenCalled();
+  });
 });

@@ -8,10 +8,21 @@ export const DEFAULT_GRAPH_CONNECTION_BUDGET = 16;
 export const DEFAULT_GRAPH_IMPORT_PER_SEED = 6;
 export const DEFAULT_GRAPH_IMPORT_BUDGET = 12;
 export const DEFAULT_GRAPH_DEFINITIONS_PER_TERM = 8;
+/**
+ * Distinct files contributed by resolved `references`/`calls` edges — bounded
+ * so a hot symbol cannot flood the candidate pool (D-240).
+ */
+export const DEFAULT_GRAPH_RELATION_BUDGET = 8;
 
 export const GRAPH_DEFINITION_WEIGHT = 10;
 export const GRAPH_CONNECTION_WEIGHT = 7;
 export const GRAPH_IMPORT_WEIGHT = 3;
+/**
+ * Resolved relation edges are stronger evidence than an import but weaker than
+ * a confirmed connection — they are language-server resolved, yet the site
+ * may be unpinned or its target may have moved (D-240).
+ */
+export const GRAPH_RELATION_WEIGHT = 5;
 
 export interface ExploreGraphDefinition {
   name: string;
@@ -27,6 +38,20 @@ export interface ExploreGraphLink {
   callee?: string;
 }
 
+/** One resolved reference/call site persisted on the graph (D-240). */
+export interface ExploreGraphRelationSite {
+  /** Site file. */
+  path: string;
+  line: number;
+  caller?: string;
+  callee?: string;
+  targetPath?: string;
+  targetName?: string;
+  pinned: boolean;
+  staleTarget?: boolean;
+  resolvedBy: string;
+}
+
 export interface ExploreGraphRecall {
   catalogStats(): Promise<{ symbolCount: number; fileCount?: number; paths?: string[] }>;
   searchDefinitions(query: string, k: number): Promise<ExploreGraphDefinition[]>;
@@ -34,8 +59,19 @@ export interface ExploreGraphRecall {
   fileRelations(path: string): Promise<{
     connections: Array<{ callee: string; literal: string }>;
     linksIncomplete: boolean;
+    references?: ExploreGraphRelationSite[];
+    calls?: ExploreGraphRelationSite[];
   } | null>;
   findImporters(path: string): Promise<{ resolved: Array<{ path: string; specifier: string }> }>;
+  /**
+   * Resolved relation recall (D-240). Optional: a store that never collected
+   * relations simply lacks these — the graph source still answers the rest.
+   */
+  findReferences?(name: string): Promise<ExploreGraphRelationSite[]>;
+  /** Call sites whose resolved callee is `name` — "who calls name". */
+  findCallers?(name: string): Promise<ExploreGraphRelationSite[]>;
+  /** Call sites whose enclosing caller is `caller` — "what caller calls". */
+  findCalls?(caller: string): Promise<ExploreGraphRelationSite[]>;
 }
 
 export function locateIdentifierLines(lines: readonly string[], name: string): number[] {

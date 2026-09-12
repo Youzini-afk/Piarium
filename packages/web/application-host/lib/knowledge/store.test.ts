@@ -801,6 +801,196 @@ describe("KnowledgeStore", () => {
       await store.removeFileSymbols("lib/app.ts");
       expect((await store.findImporters("lib/core.ts")).resolved).toEqual([]);
     });
+
+    it("records resolved reference and call rows and answers the recall queries", async () => {
+      await store.replaceFileSymbols("src/caller.ts", "typescript", [
+        { name: "runAll", kind: "function", range },
+      ], "disk-c1");
+      await store.replaceFileSymbols("src/def.ts", "typescript", [
+        { name: "uniqueTarget", kind: "function", range },
+      ], "disk-d1");
+
+      const recorded = await store.recordResolvedRelations("src/caller.ts", "typescript", [
+        {
+          kind: "references",
+          value: "uniqueTarget",
+          line: 3,
+          character: 9,
+          caller: "runAll",
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          targetLine: 1,
+          anchorPath: "src/def.ts",
+          anchorLine: 1,
+          resolvedBy: "lsp.references",
+          siteRevision: "disk-c1",
+        },
+        {
+          kind: "calls",
+          value: "uniqueTarget",
+          line: 3,
+          character: 9,
+          caller: "runAll",
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          anchorPath: "src/caller.ts",
+          anchorLine: 3,
+          resolvedBy: "lsp.callHierarchy.outgoing",
+          siteRevision: "disk-c1",
+        },
+      ]);
+      expect(recorded).toEqual({ recorded: 2 });
+
+      const references = await store.findReferences("uniqueTarget");
+      expect(references).toEqual([expect.objectContaining({
+        kind: "references",
+        path: "src/caller.ts",
+        line: 3,
+        caller: "runAll",
+        targetPath: "src/def.ts",
+        pinned: true,
+        documentRevision: "disk-c1",
+        staleTarget: false,
+        resolvedBy: "lsp.references",
+      })]);
+      expect(await store.findCallers("uniqueTarget")).toEqual([expect.objectContaining({
+        kind: "calls",
+        path: "src/caller.ts",
+        caller: "runAll",
+        targetPath: "src/def.ts",
+        pinned: true,
+        resolvedBy: "lsp.callHierarchy.outgoing",
+      })]);
+      expect(await store.findCalls("runAll")).toEqual([expect.objectContaining({
+        kind: "calls",
+        path: "src/caller.ts",
+        value: "uniqueTarget",
+        caller: "runAll",
+      })]);
+      expect(await store.findCallers("unrelated")).toEqual([]);
+      expect(await store.findCalls("uniqueTarget")).toEqual([]);
+
+      const relations = await store.getFileRelations("src/caller.ts");
+      expect(relations?.references).toHaveLength(1);
+      expect(relations?.calls).toHaveLength(1);
+      expect(relations?.danglingEdges).toBe(0);
+    });
+
+    it("keeps unpinned sites unpinned and marks moved targets as stale-target", async () => {
+      await store.replaceFileSymbols("src/def.ts", "typescript", [
+        { name: "uniqueTarget", kind: "function", range },
+      ], "disk-d1");
+      // The language server read src/other.ts itself — no bound revision, so
+      // the row carries null and reports pinned:false (D-087/D-240).
+      await store.recordResolvedRelations("src/other.ts", "typescript", [
+        {
+          kind: "references",
+          value: "uniqueTarget",
+          line: 7,
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          resolvedBy: "lsp.references",
+          siteRevision: null,
+        },
+      ]);
+      let rows = await store.findReferences("uniqueTarget");
+      expect(rows[0]).toMatchObject({ pinned: false, documentRevision: null, staleTarget: false });
+
+      // The target file's catalog revision moves: the row now reports the move
+      // instead of presenting the old target as current.
+      await store.replaceFileSymbols("src/def.ts", "typescript", [
+        { name: "uniqueTarget", kind: "function", range },
+      ], "disk-d2");
+      rows = await store.findReferences("uniqueTarget");
+      expect(rows[0]).toMatchObject({ staleTarget: true, targetObservedRevision: "disk-d1" });
+    });
+
+    it("replaces a re-resolved relation instead of stacking duplicates", async () => {
+      await store.replaceFileSymbols("src/caller.ts", "typescript", [
+        { name: "runAll", kind: "function", range },
+      ], "disk-c1");
+      const relation = {
+        kind: "references" as const,
+        value: "uniqueTarget",
+        line: 3,
+        targetPath: "src/def.ts",
+        targetName: "uniqueTarget",
+        anchorPath: "src/def.ts",
+        anchorLine: 1,
+        resolvedBy: "lsp.references" as const,
+        siteRevision: "disk-c1",
+      };
+      await store.recordResolvedRelations("src/caller.ts", "typescript", [relation]);
+      await store.recordResolvedRelations("src/caller.ts", "typescript", [
+        { ...relation, character: 9 },
+      ]);
+      const references = await store.findReferences("uniqueTarget");
+      expect(references).toHaveLength(1);
+      expect(references[0]).toMatchObject({ character: 9 });
+    });
+
+    it("drops incoming relation rows when a resolved target file is removed", async () => {
+      await store.replaceFileSymbols("src/caller.ts", "typescript", [
+        { name: "runAll", kind: "function", range },
+      ], "disk-c1");
+      await store.replaceFileSymbols("src/def.ts", "typescript", [
+        { name: "uniqueTarget", kind: "function", range },
+      ], "disk-d1");
+      await store.recordResolvedRelations("src/caller.ts", "typescript", [
+        {
+          kind: "calls",
+          value: "uniqueTarget",
+          line: 3,
+          caller: "runAll",
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          resolvedBy: "lsp.callHierarchy.outgoing",
+          siteRevision: "disk-c1",
+        },
+      ]);
+      await store.removeFileSymbols("src/def.ts");
+      expect(await store.findCallers("uniqueTarget")).toEqual([]);
+      const relations = await store.getFileRelations("src/caller.ts");
+      expect(relations?.calls).toEqual([]);
+      expect(relations?.danglingEdges).toBe(0);
+    });
+
+    it("drops a file's own relation rows on re-collect but keeps other files' rows", async () => {
+      await store.replaceFileSymbols("src/caller.ts", "typescript", [
+        { name: "runAll", kind: "function", range },
+      ], "disk-c1", [{ kind: "import", value: "./def.js", line: 1 }]);
+      await store.recordResolvedRelations("src/caller.ts", "typescript", [
+        {
+          kind: "references",
+          value: "uniqueTarget",
+          line: 3,
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          resolvedBy: "lsp.references",
+          siteRevision: "disk-c1",
+        },
+      ]);
+      await store.recordResolvedRelations("src/other.ts", "typescript", [
+        {
+          kind: "references",
+          value: "uniqueTarget",
+          line: 2,
+          targetPath: "src/def.ts",
+          targetName: "uniqueTarget",
+          resolvedBy: "lsp.references",
+          siteRevision: null,
+        },
+      ]);
+      // The site file moved to a new revision: its old resolved rows are claims
+      // about moved text and die with the generation, while rows in other files
+      // survive (and report the moved target via staleTarget).
+      await store.replaceFileSymbols("src/caller.ts", "typescript", [
+        { name: "runAll", kind: "function", range },
+      ], "disk-c2", [{ kind: "import", value: "./def.js", line: 1 }]);
+      const references = await store.findReferences("uniqueTarget");
+      expect(references).toHaveLength(1);
+      expect(references[0]).toMatchObject({ path: "src/other.ts", pinned: false });
+    });
   });
 
   describe("recall", () => {

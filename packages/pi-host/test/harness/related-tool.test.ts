@@ -26,8 +26,8 @@ describe("Host-backed related tool", () => {
       },
     } as unknown as HostServicesBridge;
     const tool = createRelatedTool(bridge, "session");
-    assert.match(tool.description ?? "", /not lsp\.references/i);
-    assert.match(tool.description ?? "", /language server/);
+    assert.match(tool.description ?? "", /not a positional lsp\.references/i);
+    assert.match(tool.description ?? "", /language.server/i);
     await tool.execute("call", { anchor: "target.ts" }, undefined, undefined, undefined as never);
     assert.deepEqual(forwarded, { anchor: "target.ts" });
     assert.equal(Value.Check(tool.parameters, { anchor: "target.ts" }), true);

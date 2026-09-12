@@ -256,8 +256,9 @@ D-237 已补显式重扫的外部删除对账：完整枚举 + Documents missing
 失败/截断/未知 inventory 不删除，重建路径重新采集，关联随 connects 集合更新。沿现有扫描入口，不新增后台循环。
 
 已有 file/defines/symbol 以及 `imports` / `connects` / `associates`（3.11 第 4 步）。读者是 explore 的路径级候选
-（定义 / 连线另一端 / 反向 import，3.12）和 `related` 工具；摘录出边注解（D-108/D-112）仍在。
-继续按实际查询建 `references` / 解析后的跨文件 `calls`，来源/版本明确，LSP `references` 不冒充调用图，也不和 `related` 抢活。
+（定义 / 连线另一端 / 反向 import / 已解析 references/calls，3.12）和 `related` 工具；摘录出边注解（D-108/D-112）仍在。
+D-240 已按实际查询建 `references` / 解析后的跨文件 `calls`：relation collector 围绕锚点有界解析并持久化、lsp 导航回写
+磁盘绑定结果，来源/版本明确（resolvedBy + 站点修订 + staleTarget），LSP `references` 不冒充调用图，也不和 `related` 抢活。
 复用背压和按变化路径采集，未知语言/不可用不清最后图；不把全图或所有索引完成作为 explore 前置。
 范围只从磁盘正文采集并逐文件记 document revision（D-087）；脏缓冲结果不入图。图只选路径，行号在当前正文里重新确认。
 
@@ -282,8 +283,10 @@ D-237 已补显式重扫的外部删除对账：完整枚举 + Documents missing
 
 ### 3.3 related
 
-✓ 已接线（3.12）。工具回答文件级定义、import、反向 import 和连线另一端；没有与不完整分开表达。
-不是 `lsp.references`，不做 PageRank / 多跳。store 未打开返回 `unavailable`，不开库。
+✓ 已接线（3.12 + D-240）。工具回答文件级定义、import、反向 import 和连线另一端，并对符号名锚点做有界解析回答已
+解析的 references 与双向 call 边（每定义一次 references+definition+callHierarchy，≤8 个定义）；没有与不完整分开表达，
+relation 段按 per-source 状态区分。不是 `lsp.references`（按位置精确回答），不做 PageRank / 多跳。store 未打开返回
+`unavailable`，不开库。
 
 ### 3.4 工作状态、物化与生命周期
 

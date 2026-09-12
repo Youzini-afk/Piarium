@@ -87,4 +87,101 @@ describe('typescript language server smoke', () => {
       await harness.cleanup();
     }
   }, 20000);
+
+  it('resolves cross-file references and call hierarchy through the bundled server', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      await fs.promises.writeFile(
+        path.join(harness.workspaceRoot, 'def.ts'),
+        'export function uniqueTarget() { return 1; }\n',
+      );
+      await fs.promises.writeFile(
+        path.join(harness.workspaceRoot, 'caller.ts'),
+        'import { uniqueTarget } from "./def";\nexport function driver() { return uniqueTarget(); }\n',
+      );
+      language.registerProvider({
+        providerId: 'typescript-smoke',
+        command: 'node',
+        args: PIARIUM_LSP_TYPESCRIPT_SERVER_ARGS,
+        languageIds: ['typescript'],
+        source: 'host',
+      });
+      const def = harness.resource('def.ts');
+      const caller = harness.resource('caller.ts');
+      const defSync = await language.syncDocument({
+        resource: def,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'export function uniqueTarget() { return 1; }\n',
+      });
+      expect(defSync.status).toBe('synced');
+      // The server reads caller.ts from the workspace root on its own — it was
+      // never didOpen'd, which is exactly what "unpinned cross-file site" means.
+      const references = await language.references({
+        resource: def,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 16 },
+      });
+      expect(references.status).toBe('ready');
+      const sites = featureValue<Array<{ resource: { resourceId: string } }>>(references);
+      expect(sites.some((site) => site.resource.resourceId === 'caller.ts')).toBe(true);
+
+      const prepared = await language.prepareCallHierarchy({
+        resource: def,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 16 },
+      });
+      expect(prepared.status).toBe('ready');
+      const items = featureValue<Array<{ name: string; itemToken: string }>>(prepared);
+      expect(items[0]?.name).toBe('uniqueTarget');
+      const incoming = await language.callHierarchyIncoming({
+        resource: def,
+        languageId: 'typescript',
+        documentVersion: 1,
+        itemToken: items[0]!.itemToken,
+      });
+      expect(incoming.status).toBe('ready');
+      const calls = featureValue<Array<{ from: { name: string; resource: { resourceId: string } } }>>(incoming);
+      expect(calls.some((call) => call.from.name === 'driver' && call.from.resource.resourceId === 'caller.ts')).toBe(true);
+
+      // The caller makes an outgoing call to uniqueTarget.
+      const callerSync = await language.syncDocument({
+        resource: caller,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'import { uniqueTarget } from "./def";\nexport function driver() { return uniqueTarget(); }\n',
+      });
+      expect(callerSync.status).toBe('synced');
+      const callerPrepared = await language.prepareCallHierarchy({
+        resource: caller,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 1, character: 16 },
+      });
+      expect(callerPrepared.status).toBe('ready');
+      const callerItems = featureValue<Array<{ name: string; itemToken: string }>>(callerPrepared);
+      const outgoing = await language.callHierarchyOutgoing({
+        resource: caller,
+        languageId: 'typescript',
+        documentVersion: 1,
+        itemToken: callerItems[0]!.itemToken,
+      });
+      expect(outgoing.status).toBe('ready');
+      const outgoingCalls = featureValue<Array<{ to: { name: string; resource: { resourceId: string } } }>>(outgoing);
+      expect(outgoingCalls.some((call) => call.to.name === 'uniqueTarget' && call.to.resource.resourceId === 'def.ts')).toBe(true);
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  }, 30000);
 });

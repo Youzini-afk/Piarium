@@ -148,4 +148,132 @@ describe("related tool", () => {
     const relations = await store.getFileRelations("lib/core.ts");
     expect(JSON.stringify(relations ?? {})).not.toMatch(/filename-pattern|project-declaration|"role"/);
   });
+
+  it("answers stored resolved references and call edges for a symbol name", async () => {
+    await store.replaceFileSymbols("lib/def.ts", "typescript", [
+      { name: "uniqueTarget", kind: "function", range },
+    ], "disk-d1");
+    await store.replaceFileSymbols("lib/caller.ts", "typescript", [
+      { name: "runAll", kind: "function", range },
+    ], "disk-c1");
+    await store.recordResolvedRelations("lib/caller.ts", "typescript", [
+      {
+        kind: "references",
+        value: "uniqueTarget",
+        line: 3,
+        character: 9,
+        caller: "runAll",
+        targetPath: "lib/def.ts",
+        targetName: "uniqueTarget",
+        resolvedBy: "lsp.references",
+        siteRevision: "disk-c1",
+      },
+      {
+        kind: "calls",
+        value: "uniqueTarget",
+        line: 3,
+        caller: "runAll",
+        targetPath: "lib/def.ts",
+        targetName: "uniqueTarget",
+        resolvedBy: "lsp.callHierarchy.outgoing",
+        siteRevision: "disk-c1",
+      },
+    ]);
+
+    const byName = await executeRelated({ anchor: "uniqueTarget" }, store);
+    expect(byName.references.status).toBe("ready");
+    expect(byName.references.items).toEqual([expect.objectContaining({
+      path: "lib/caller.ts",
+      line: 3,
+      caller: "runAll",
+      pinned: true,
+    })]);
+    expect(byName.calls.status).toBe("ready");
+    expect(byName.calls.callers).toEqual([expect.objectContaining({
+      path: "lib/caller.ts",
+      caller: "runAll",
+      callee: "uniqueTarget",
+      targetPath: "lib/def.ts",
+    })]);
+    expect(byName.text).toContain("References (resolved");
+    expect(byName.text).toContain("lib/caller.ts:3");
+    expect(byName.text).toContain("Callers of uniqueTarget");
+
+    // The file's own resolved sites are visible from the path anchor too.
+    const byPath = await executeRelated({ anchor: "lib/caller.ts" }, store);
+    expect(byPath.references.items.some((item) => item.targetPath === "lib/def.ts")).toBe(true);
+    expect(byPath.calls.callees).toEqual([expect.objectContaining({
+      callee: "uniqueTarget",
+      caller: "runAll",
+      targetPath: "lib/def.ts",
+    })]);
+    // And the target file sees who calls its symbol (filtered by targetPath).
+    const defPath = await executeRelated({ anchor: "lib/def.ts" }, store);
+    expect(defPath.calls.callers).toEqual([expect.objectContaining({
+      path: "lib/caller.ts",
+      caller: "runAll",
+      callee: "uniqueTarget",
+    })]);
+  });
+
+  it("reports unavailable relation sections when nothing was resolved and no collector ran", async () => {
+    await store.replaceFileSymbols("lib/core.ts", "typescript", [
+      { name: "core", kind: "function", range },
+    ], "disk-r1");
+    const result = await executeRelated({ anchor: "core" }, store);
+    expect(result.references.status).toBe("unavailable");
+    expect(result.calls.status).toBe("unavailable");
+    expect(result.references.items).toEqual([]);
+    expect(result.text).toContain("References: unavailable");
+    expect(result.text).toContain("Calls: unavailable");
+  });
+
+  it("collects resolved relations for a name anchor through the wired collector", async () => {
+    await store.replaceFileSymbols("lib/def.ts", "typescript", [
+      { name: "uniqueTarget", kind: "function", range },
+    ], "disk-d1");
+    const collected: Array<{ path: string; line: number; character?: number }> = [];
+    const collector = {
+      collect: async (_workspaceId: string, anchor: { path: string; line: number; character?: number }) => {
+        collected.push(anchor);
+        // The real collector persists what it resolved; the fake writes the
+        // same rows so the stored-read path below observes them.
+        await store.recordResolvedRelations("lib/caller.ts", "typescript", [
+          {
+            kind: "calls",
+            value: "uniqueTarget",
+            line: 9,
+            caller: "driver",
+            targetPath: anchor.path,
+            targetName: "uniqueTarget",
+            resolvedBy: "lsp.callHierarchy.incoming",
+            siteRevision: "disk-x1",
+          },
+        ]);
+        return {
+          status: "ready" as const,
+          name: "uniqueTarget",
+          references: { status: "empty" as const, sites: [] },
+          calls: {
+            status: "ready" as const,
+            callers: [{ path: "lib/caller.ts", line: 9, caller: "driver", callee: "uniqueTarget" }],
+            callees: [],
+          },
+        };
+      },
+    };
+    const result = await executeRelated(
+      { anchor: "uniqueTarget" },
+      store,
+      { workspaceId: "ws", collector },
+    );
+    expect(collected).toEqual([{ path: "lib/def.ts", line: 1, character: 1 }]);
+    expect(result.calls.status).toBe("ready");
+    expect(result.calls.callers).toEqual([expect.objectContaining({
+      path: "lib/caller.ts",
+      caller: "driver",
+      callee: "uniqueTarget",
+      pinned: true,
+    })]);
+  });
 });

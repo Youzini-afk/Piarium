@@ -1,21 +1,49 @@
 /**
- * related — file-level import topology and connection endpoints.
+ * related — file-level topology plus language-service-resolved relations.
  *
- * Answers what a path (or symbol name) defines, imports, is imported by, and
- * which connection literals it sits on. This is not `lsp.references`: it does
- * not list symbol reference sites and does not need a language server.
+ * Answers what a path (or symbol name) defines, imports, is imported by, which
+ * connection literals it sits on — and, when a language server is wired, the
+ * resolved reference sites and call edges around the anchor (D-240). Resolved
+ * relations are persisted on the symbol graph around real queries; explore
+ * consumes the same stored edges.
  *
  * Design: agent-harness.md §6.2
  * Plan: agent-harness-plan.md §3.12
  */
 
-import type { HarnessFileRoleDecision, RelatedQueryResult, RelatedQueryStatus } from "@piarium/protocol";
+import type {
+  HarnessFileRoleDecision,
+  RelatedCallEdge,
+  RelatedQueryResult,
+  RelatedQueryStatus,
+  RelatedReferenceSite,
+  RelatedRelationStatus,
+} from "@piarium/protocol";
 import { resolveImportSpecifier } from "../knowledge/import-resolve.js";
-import type { KnowledgeStore } from "../knowledge/store.js";
+import type { RelationCollectOutcome } from "../knowledge/relations.js";
+import type { KnowledgeStore, SymbolGraphRelationRecord } from "../knowledge/store.js";
 import { classifyFileRoleDecision } from "./file-role.js";
 
 export interface RelatedQueryInput {
   anchor: string;
+}
+
+/**
+ * Bounded live resolution for the anchor (D-240). One collect call per
+ * definition — references + call hierarchy — never a repository sweep.
+ */
+export interface RelatedRelationCollector {
+  collect(
+    workspaceId: string,
+    anchor: { path: string; line: number; character?: number },
+    options?: { signal?: AbortSignal },
+  ): Promise<RelationCollectOutcome>;
+}
+
+export interface RelatedQueryDeps {
+  workspaceId?: string;
+  collector?: RelatedRelationCollector | null;
+  signal?: AbortSignal;
 }
 
 /**
@@ -26,6 +54,11 @@ export interface RelatedQueryInput {
  */
 export const RELATED_SECTION_LIMIT = 40;
 export const RELATED_FOCUS_LIMIT = 8;
+/**
+ * Defined symbols per path anchor that get a caller lookup — bounded so a
+ * symbol-dense file cannot fan out unbounded index reads per query.
+ */
+export const RELATED_CALLER_SYMBOL_LIMIT = 8;
 
 function capped<T>(items: readonly T[], limit: number): { shown: readonly T[]; omitted: number } {
   return items.length <= limit
@@ -39,9 +72,47 @@ const looksLikePath = (anchor: string): boolean => (
 
 const compareText = (left: string, right: string): number => left.localeCompare(right);
 
+const relationStatus = (rowCount: number, outcomes: readonly string[]): RelatedRelationStatus => {
+  if (rowCount > 0) return "ready";
+  if (outcomes.length === 0) return "unavailable";
+  if (outcomes.every((outcome) => outcome === "unsupported")) return "unsupported";
+  const worked = outcomes.some((outcome) => outcome === "ready" || outcome === "empty");
+  const failed = outcomes.some((outcome) => outcome === "failed" || outcome === "stale" || outcome === "unavailable");
+  if (worked && failed) return "partial";
+  if (worked) return "empty";
+  if (failed) return "failed";
+  return "empty";
+};
+
+const referenceItem = (record: SymbolGraphRelationRecord): RelatedReferenceSite => ({
+  path: record.path,
+  line: record.line,
+  ...(record.character !== undefined ? { character: record.character } : {}),
+  ...(record.caller !== undefined ? { caller: record.caller } : {}),
+  ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+  ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+  pinned: record.pinned,
+  ...(record.staleTarget ? { staleTarget: true } : {}),
+  resolvedBy: record.resolvedBy,
+});
+
+const callEdge = (record: SymbolGraphRelationRecord): RelatedCallEdge => ({
+  path: record.path,
+  line: record.line,
+  ...(record.character !== undefined ? { character: record.character } : {}),
+  ...(record.caller !== undefined ? { caller: record.caller } : {}),
+  callee: record.targetName ?? record.value,
+  ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+  ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+  pinned: record.pinned,
+  ...(record.staleTarget ? { staleTarget: true } : {}),
+  resolvedBy: record.resolvedBy,
+});
+
 export async function executeRelated(
   input: RelatedQueryInput,
   store: KnowledgeStore,
+  deps: RelatedQueryDeps = {},
 ): Promise<RelatedQueryResult> {
   const anchor = input.anchor.trim();
   const empty = (status: RelatedQueryStatus, kind: "path" | "name", message: string): RelatedQueryResult => ({
@@ -53,6 +124,8 @@ export async function executeRelated(
     imports: { items: [], unresolved: [], incomplete: false },
     importers: { items: [], incomplete: false },
     connections: { items: [], incomplete: false },
+    references: { status: "unavailable", items: [], incomplete: false },
+    calls: { status: "unavailable", callers: [], callees: [], incomplete: false },
   });
   if (!anchor) {
     return empty("failed", "name", "related failed: provide a path or symbol name.");
@@ -70,6 +143,7 @@ export async function executeRelated(
   const known = new Set(stats.paths);
   const kind = looksLikePath(anchor) ? "path" : "name";
   let focusPaths: string[] = [];
+  let anchorSymbols: Array<{ path: string; name: string; kind: string; range: { startLine: number; startCharacter: number } }> = [];
   if (kind === "path") {
     const normalized = anchor.replace(/\\/g, "/");
     if (!known.has(normalized)) {
@@ -78,6 +152,7 @@ export async function executeRelated(
     focusPaths = [normalized];
   } else {
     const exact = (await store.searchSymbols(anchor, 32)).filter((entry) => entry.match === "exact");
+    anchorSymbols = exact.map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, range: entry.range }));
     focusPaths = [...new Set(exact.map((entry) => entry.path))];
     if (focusPaths.length === 0) {
       const links = await store.findLinks(anchor);
@@ -102,6 +177,32 @@ export async function executeRelated(
   let connectionsIncomplete = false;
 
   const focus = capped(focusPaths.toSorted(compareText), RELATED_FOCUS_LIMIT);
+
+  // Bounded live resolution for a name anchor (D-240): one references +
+  // call-hierarchy pass per exact definition, capped by the focus limit. The
+  // collector persists what it resolved, so the stored reads below already
+  // include the fresh rows — nothing is merged twice.
+  const referenceOutcomes: string[] = [];
+  const callOutcomes: string[] = [];
+  if (kind === "name" && deps.collector && deps.workspaceId) {
+    const anchors = capped(anchorSymbols.toSorted((left, right) => compareText(left.path, right.path) || left.name.localeCompare(right.name)), RELATED_FOCUS_LIMIT);
+    for (const symbol of anchors.shown) {
+      try {
+        const outcome = await deps.collector.collect(deps.workspaceId, {
+          path: symbol.path,
+          line: symbol.range.startLine + 1,
+          character: symbol.range.startCharacter + 1,
+        }, { ...(deps.signal ? { signal: deps.signal } : {}) });
+        referenceOutcomes.push(outcome.references.status);
+        callOutcomes.push(outcome.calls.status);
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") throw error;
+        referenceOutcomes.push("failed");
+        callOutcomes.push("failed");
+      }
+    }
+  }
+
   for (const path of focus.shown) {
     for (const symbol of await store.getDefinedSymbols(path)) {
       definitions.push({ name: symbol.name, kind: symbol.kind, path: symbol.path });
@@ -140,6 +241,36 @@ export async function executeRelated(
     }
   }
 
+  // Resolved-relation sections (D-240). Name anchor: every stored site whose
+  // resolved name matches the anchor. Path anchor: the file's own reference and
+  // call sites, plus call sites whose resolved target lives in this file.
+  const referenceItems: RelatedReferenceSite[] = [];
+  const callerEdges: RelatedCallEdge[] = [];
+  const calleeEdges: RelatedCallEdge[] = [];
+  let relationsIncomplete = focus.omitted > 0;
+  if (kind === "name") {
+    for (const record of await store.findReferences(anchor)) referenceItems.push(referenceItem(record));
+    for (const record of await store.findCallers(anchor)) callerEdges.push(callEdge(record));
+    for (const record of await store.findCalls(anchor)) calleeEdges.push(callEdge(record));
+  } else {
+    const path = focusPaths[0]!;
+    const relations = await store.getFileRelations(path);
+    if (relations) {
+      for (const record of relations.references) referenceItems.push(referenceItem(record));
+      for (const record of relations.calls) calleeEdges.push(callEdge(record));
+    }
+    const definedSymbols = capped(definitions.filter((item) => item.path === path), RELATED_CALLER_SYMBOL_LIMIT);
+    if (definitions.filter((item) => item.path === path).length > definedSymbols.shown.length) relationsIncomplete = true;
+    for (const symbol of definedSymbols.shown) {
+      for (const record of await store.findCallers(symbol.name)) {
+        if (record.targetPath === path) callerEdges.push(callEdge(record));
+      }
+    }
+  }
+  const referenceItemsDeduped = [...new Map(referenceItems.map((item) => [`${item.path}:${item.line}:${item.character ?? 0}:${item.targetName ?? item.caller ?? ""}`, item])).values()];
+  const callerEdgesDeduped = [...new Map(callerEdges.map((item) => [`${item.path}:${item.line}:${item.callee}`, item])).values()];
+  const calleeEdgesDeduped = [...new Map(calleeEdges.map((item) => [`${item.path}:${item.line}:${item.callee}:${item.caller ?? ""}`, item])).values()];
+
   const result: RelatedQueryResult = {
     text: "",
     status: "ready",
@@ -158,6 +289,17 @@ export async function executeRelated(
     connections: {
       items: connectionItems.toSorted((left, right) => left.path.localeCompare(right.path) || left.literal.localeCompare(right.literal)),
       incomplete: connectionsIncomplete,
+    },
+    references: {
+      status: relationStatus(referenceItemsDeduped.length, referenceOutcomes),
+      items: referenceItemsDeduped.toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line),
+      incomplete: relationsIncomplete,
+    },
+    calls: {
+      status: relationStatus(callerEdgesDeduped.length + calleeEdgesDeduped.length, callOutcomes),
+      callers: callerEdgesDeduped.toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line),
+      callees: calleeEdgesDeduped.toSorted((left, right) => left.path.localeCompare(right.path) || left.line - right.line),
+      incomplete: relationsIncomplete,
     },
   };
   result.roles = rolesForRelated(result);
@@ -188,7 +330,7 @@ function rolesForRelated(result: RelatedQueryResult): HarnessFileRoleDecision[] 
 function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): string {
   const lines: string[] = [
     `related ${result.anchor.value} (${result.anchor.kind}) · ${result.status}`,
-    "File-level import topology and connection endpoints from the symbol graph. Use lsp.references for precise who-references-this-symbol at a position; related does not need a language server.",
+    "File-level import topology, connection endpoints, and language-server-resolved reference/call edges from the symbol graph. Sites marked [unpinned] came from the server's own read of another file — re-read them before acting.",
   ];
   if (focusOmitted > 0) {
     lines.push(`Anchor matched ${focusOmitted} more file(s) than were walked; the first ${RELATED_FOCUS_LIMIT} in path order are below. Narrow the anchor to a path for the rest.`);
@@ -249,6 +391,62 @@ function formatRelatedText(result: RelatedQueryResult, focusOmitted: number): st
     }
     note(shown.omitted);
     if (result.connections.incomplete) lines.push("- connection edges are incomplete for this revision");
+  }
+  const pinMark = (item: { pinned: boolean; staleTarget?: boolean }): string => (
+    `${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`
+  );
+  if (result.references.items.length === 0) {
+    lines.push(
+      result.references.status === "unsupported"
+        ? "References: unsupported (the language provider does not answer references/call-hierarchy for this file type)"
+        : result.references.status === "unavailable"
+          ? "References: unavailable (no language service or collector is wired — lsp.references resolves a position on demand)"
+          : result.references.status === "failed"
+            ? "References: failed (the language service could not resolve this anchor)"
+            : result.references.status === "partial"
+              ? "References: partial (some definitions could not be resolved)"
+              : "References: none resolved yet — lsp.references at a position resolves them on demand",
+    );
+  } else {
+    lines.push(`References (resolved, ${result.references.status}):`);
+    const shown = capped(result.references.items, RELATED_SECTION_LIMIT);
+    for (const item of shown.shown) {
+      const target = item.targetPath ? ` → ${item.targetPath}${item.targetName ? ` ${item.targetName}` : ""}` : "";
+      lines.push(`- ${item.path}:${item.line} references ${item.targetName ?? item.caller ?? result.anchor.value}${item.caller ? ` — in ${item.caller}` : ""}${target}${pinMark(item)}`);
+    }
+    note(shown.omitted);
+    if (result.references.incomplete) lines.push("- the resolved reference set may be incomplete for this anchor");
+  }
+  if (result.calls.callers.length === 0 && result.calls.callees.length === 0) {
+    lines.push(
+      result.calls.status === "unsupported"
+        ? "Calls: unsupported (the language provider does not answer call-hierarchy for this file type)"
+        : result.calls.status === "unavailable"
+          ? "Calls: unavailable (no language service or collector is wired)"
+          : result.calls.status === "failed"
+            ? "Calls: failed (the language service could not resolve this anchor)"
+            : result.calls.status === "partial"
+              ? "Calls: partial (some definitions could not be resolved)"
+              : "Calls: none resolved yet",
+    );
+  } else {
+    if (result.calls.callers.length > 0) {
+      lines.push(`Callers of ${result.anchor.value} (resolved, ${result.calls.status}):`);
+      const shown = capped(result.calls.callers, RELATED_SECTION_LIMIT);
+      for (const item of shown.shown) {
+        lines.push(`- ${item.caller ?? "?"} — ${item.path}:${item.line} calls ${item.callee}${pinMark(item)}`);
+      }
+      note(shown.omitted);
+    }
+    if (result.calls.callees.length > 0) {
+      lines.push(`Calls made by ${result.anchor.value} (resolved, ${result.calls.status}):`);
+      const shown = capped(result.calls.callees, RELATED_SECTION_LIMIT);
+      for (const item of shown.shown) {
+        lines.push(`- ${item.path}:${item.line} calls ${item.callee}${item.targetPath ? ` (→ ${item.targetPath})` : ""}${pinMark(item)}`);
+      }
+      note(shown.omitted);
+    }
+    if (result.calls.incomplete) lines.push("- the resolved call set may be incomplete for this anchor");
   }
   return lines.join("\n");
 }

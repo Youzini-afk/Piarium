@@ -840,6 +840,7 @@ describe("explore graph path recall", () => {
     ["register.ts", "router.register(\"unique.wire.literal\");\n"],
     ["core.ts", "export function uniqueCoreName() { return 1; }\n"],
     ["app.ts", "import { uniqueCoreName } from \"./core.js\";\nexport const boot = uniqueCoreName;\n"],
+    ["caller.ts", "export const driver = () => uniqueTarget();\n"],
     ["missing.ts", "export function other() { return 1; }\n"],
   ]);
 
@@ -897,6 +898,39 @@ describe("explore graph path recall", () => {
     expect(other?.why).not.toMatch(/matched uniqueWireHandler/);
     expect(result.details.graph?.status).toBe("ready");
     expect(result.details.graph?.connections).toBeGreaterThanOrEqual(1);
+  });
+
+  it("brings in a resolved call site the graph remembers, even with no rg hit on the name", async () => {
+    const result = await explore({ question: "uniqueTarget" }, {
+      rgSearch: async () => [
+        { path: "missing.ts", line: 1, text: "export function other() { return 1; }" },
+      ],
+      readFile: readNamed,
+      graph: {
+        catalogStats: async () => ({ symbolCount: 3 }),
+        searchDefinitions: async () => [],
+        findLinks: async () => [],
+        fileRelations: async () => null,
+        findImporters: async () => ({ resolved: [] }),
+        findCallers: async (name) => name === "uniqueTarget"
+          ? [{
+            path: "caller.ts",
+            line: 1,
+            caller: "driver",
+            targetPath: "def.ts",
+            targetName: "uniqueTarget",
+            pinned: true,
+            resolvedBy: "lsp.callHierarchy.incoming",
+          }]
+          : [],
+        findReferences: async () => [],
+      },
+    });
+    const caller = result.snippets.find((snippet) => snippet.path === "caller.ts");
+    expect(caller).toBeTruthy();
+    expect(caller?.why).toContain("calls uniqueTarget");
+    expect(result.details.graph?.status).toBe("ready");
+    expect(result.details.graph?.relations).toBe(1);
   });
 
   it("adds a reverse-import candidate and does not pretend it was an rg hit", async () => {

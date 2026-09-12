@@ -5,6 +5,7 @@ import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder, type LanguageTextSource } from "../lsp/language-view.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import { languageIdForPath } from "./language-id.js";
+import { identifierAt } from "../knowledge/relations.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
   "syncDocument" | "workspaceSymbols" | "definition" | "references" | "hover">;
@@ -12,6 +13,20 @@ type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
 interface LspNavigationDeps {
   documents: Pick<DocumentAuthority, "read" | "readAgentInputSnapshot">;
   supervisor: LanguageSupervisor;
+  /**
+   * Persist already-obtained resolution results into the workspace knowledge
+   * graph (D-240). Called only for disk-bound documents — a surface-draft
+   * result never becomes a committed fact.
+   */
+  recordRelations?: (input: {
+    workspaceId: string;
+    anchor: { path: string; line: number; character?: number };
+    anchorRevision: string;
+    name: string;
+    resolvedBy: "lsp.references" | "lsp.definition";
+    sites: Array<{ path: string; line: number; character?: number }>;
+    target?: { path: string; line: number; character?: number; name?: string };
+  }) => Promise<unknown>;
 }
 
 interface PreparedDocument {
@@ -182,6 +197,58 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
     expectedRevision: prepared.revision,
   });
 
+  /**
+   * Write-behind for the knowledge graph (D-240): a resolution the agent
+   * already asked for becomes a committed fact only when the queried document
+   * was bound to disk — a draft-bound answer is real but not graph evidence.
+   * Persistence failure never fails the navigation result.
+   */
+  const persistResolved = (
+    prepared: PreparedDocument,
+    params: { path: string; line: number; character?: number },
+    resolvedBy: "lsp.references" | "lsp.definition",
+    value: unknown,
+  ): void => {
+    if (!deps.recordRelations || prepared.source !== "disk") return;
+    const workspaceId = prepared.resource.workspaceId;
+    const anchorPath = prepared.resource.resourceId;
+    void (async () => {
+      const snapshot = await deps.documents.read({ workspaceId, resourceId: anchorPath });
+      if (snapshot.status !== "ready" || snapshot.revision !== prepared.revision) return;
+      const name = identifierAt(snapshot.content, params.line, params.character ?? 1)?.name;
+      if (!name) return;
+      const locations = (Array.isArray(value) ? value : []).flatMap((entry) => {
+        const path = resourcePath(entry);
+        const start = startOf(entry);
+        return path && start ? [{ path, line: start.line, character: start.character }] : [];
+      });
+      if (resolvedBy === "lsp.references") {
+        await deps.recordRelations!({
+          workspaceId,
+          anchor: { path: anchorPath, line: params.line, ...(params.character !== undefined ? { character: params.character } : {}) },
+          anchorRevision: prepared.revision,
+          name,
+          resolvedBy,
+          sites: locations,
+        });
+        return;
+      }
+      const target = locations[0];
+      await deps.recordRelations!({
+        workspaceId,
+        anchor: { path: anchorPath, line: params.line, ...(params.character !== undefined ? { character: params.character } : {}) },
+        anchorRevision: prepared.revision,
+        name,
+        resolvedBy,
+        sites: [{ path: anchorPath, line: params.line, ...(params.character !== undefined ? { character: params.character } : {}) }],
+        ...(target ? { target: { path: target.path, line: target.line, character: target.character, name } } : {}),
+      });
+    })().catch(() => {
+      // Persistence is observational; a failed write-behind never fails the
+      // navigation result the agent is waiting on.
+    });
+  };
+
   return {
     symbols: {
       handle: async (params, ctx) => {
@@ -207,6 +274,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
         if ("status" in outcome) return outcome;
+        persistResolved(outcome.prepared, params, "lsp.definition", outcome.value);
         const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
         if (lines.length === 0) return empty("No definition found");
         return ready(
@@ -224,6 +292,7 @@ export function createLspNavigationServices(deps: LspNavigationDeps): {
           position: { line: params.line - 1, character: (params.character ?? 1) - 1 },
         }));
         if ("status" in outcome) return outcome;
+        persistResolved(outcome.prepared, params, "lsp.references", outcome.value);
         const { lines, unpinnedPaths } = annotate(locationEntries(outcome.value), outcome.prepared);
         if (lines.length === 0) return empty("No references found");
         return ready(

@@ -119,6 +119,28 @@ export const mapLocationLink = (value: unknown, workspaceId: string, root: strin
   };
 };
 
+/**
+ * CallHierarchyItem (LSP 3.17): `uri` maps to a workspace resource; `data` is
+ * the server's opaque round-trip token and is kept so incoming/outgoing calls
+ * can hand the item back verbatim.
+ */
+export const mapCallHierarchyItem = (value: unknown, workspaceId: string, root: string, pathModule: typeof path = path) => {
+  const record = recordOrEmpty(value);
+  const resource = resourceFromUri(record.uri, workspaceId, root, pathModule);
+  const range = mapRange(record.range);
+  const selectionRange = mapRange(record.selectionRange);
+  if (!resource || !range || !selectionRange || typeof record.name !== 'string') return null;
+  return {
+    name: record.name,
+    kind: record.kind,
+    resource,
+    range,
+    selectionRange,
+    ...(typeof record.detail === 'string' ? { detail: record.detail } : {}),
+    ...(record.data !== undefined ? { data: record.data } : {}),
+  };
+};
+
 export const mapTextEdit = (value: unknown) => {
   const record = recordOrEmpty(value);
   const range = mapRange(record.range);

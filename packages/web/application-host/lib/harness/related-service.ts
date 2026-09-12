@@ -15,10 +15,12 @@ const unavailable = (anchor: string, message: string): RelatedQueryResult => ({
   imports: { items: [], unresolved: [], incomplete: false },
   importers: { items: [], incomplete: false },
   connections: { items: [], incomplete: false },
+  references: { status: "unavailable", items: [], incomplete: false },
+  calls: { status: "unavailable", callers: [], callees: [], incomplete: false },
 });
 
 export function createRelatedQueryService(
-  host: Pick<HarnessServiceHost, "graphRecall">,
+  host: Pick<HarnessServiceHost, "graphRecall" | "relationCollector">,
 ): HarnessService<"related.query"> {
   return {
     handle: async (params: RelatedParams, ctx) => {
@@ -38,7 +40,18 @@ export function createRelatedQueryService(
         );
       }
       try {
-        return await executeRelated({ anchor: params.anchor }, store);
+        // The collector resolves around the queried anchor and persists what it
+        // found; the stored reads inside executeRelated then see fresh rows
+        // alongside previously collected ones (D-240).
+        return await executeRelated(
+          { anchor: params.anchor },
+          store,
+          {
+            workspaceId,
+            ...(host.relationCollector ? { collector: host.relationCollector } : {}),
+            signal: ctx.signal,
+          },
+        );
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") throw error;
         return {

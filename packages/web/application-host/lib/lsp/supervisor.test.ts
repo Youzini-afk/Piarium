@@ -781,4 +781,123 @@ describe('language supervisor', () => {
       await harness.cleanup();
     }
   });
+
+  it('serves call hierarchy with session-scoped item tokens', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      language.registerProvider(fixtureProvider());
+      const a = harness.resource('a.ts');
+      const b = harness.resource('b.ts');
+      await language.syncDocument({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'export function targetFn() { return 1; }\nexport const callerA = () => targetFn();\n',
+      });
+      await language.syncDocument({
+        resource: b,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'export const callerB = targetFn();\n',
+      });
+      const prepared = await language.prepareCallHierarchy({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 16 },
+      });
+      expect(prepared.status).toBe('ready');
+      const items = featureValue<Array<Record<string, unknown>>>(prepared);
+      expect(items[0]).toMatchObject({
+        name: 'targetFn',
+        resource: { resourceId: 'a.ts' },
+      });
+      const itemToken = items[0]?.itemToken;
+      expect(typeof itemToken).toBe('string');
+
+      const incoming = await language.callHierarchyIncoming({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        itemToken: itemToken as string,
+      });
+      expect(incoming.status).toBe('ready');
+      const calls = featureValue<Array<{ from: Record<string, unknown>; fromRanges: unknown[] }>>(incoming);
+      // Sites in both synced files call `targetFn(` — the declaration itself
+      // is not a call into it.
+      expect(calls.some((call) => (call.from.resource as { resourceId: string }).resourceId === 'a.ts')).toBe(true);
+      expect(calls.some((call) => (call.from.resource as { resourceId: string }).resourceId === 'b.ts')).toBe(true);
+      expect(calls.every((call) => call.fromRanges.length > 0)).toBe(true);
+
+      const outgoing = await language.callHierarchyOutgoing({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        itemToken: itemToken as string,
+      });
+      expect(outgoing.status).toBe('ready');
+      const made = featureValue<Array<{ to: Record<string, unknown> }>>(outgoing);
+      // a.ts makes no calls to other names — outgoing is genuinely empty.
+      expect(made).toEqual([]);
+
+      // A token from an earlier prepare is cleared by the next one.
+      const second = await language.prepareCallHierarchy({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 1, character: 26 },
+      });
+      expect(second.status).toBe('ready');
+      const stale = await language.callHierarchyIncoming({
+        resource: a,
+        languageId: 'typescript',
+        documentVersion: 1,
+        itemToken: itemToken as string,
+      });
+      expect(stale).toMatchObject({ status: 'failed', reason: 'stale-item' });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
+
+  it('reports call hierarchy unsupported when the provider lacks the capability', async () => {
+    const harness = await createDocumentAuthorityHarness();
+    const language = createLanguageSupervisor({
+      documents: harness.authority,
+      spawn,
+      pathModule: path,
+      isTrusted: async () => true,
+    });
+    try {
+      // The minimal fixture advertises no callHierarchyProvider.
+      language.registerProvider(fixtureProvider({ env: { PIARIUM_LSP_FIXTURE_MINIMAL: '1' } }));
+      const resource = harness.resource('a.ts');
+      await language.syncDocument({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        reason: 'open',
+        content: 'export function targetFn() { return 1; }\n',
+      });
+      const prepared = await language.prepareCallHierarchy({
+        resource,
+        languageId: 'typescript',
+        documentVersion: 1,
+        position: { line: 0, character: 16 },
+      });
+      expect(prepared).toMatchObject({ status: 'failed', reason: 'unsupported' });
+    } finally {
+      await language.dispose();
+      await harness.cleanup();
+    }
+  });
 });

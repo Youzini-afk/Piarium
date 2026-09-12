@@ -5120,8 +5120,47 @@ ModelRuntime 纵切继续通过。
 重试；已完成 Integration 在释放原版本后仍可撤销。JSON 写失败/rename 后失败与 SQLite 引用清理中断有定向测试，UI 有实际组件
 交互测试。完整 Electron 浏览器点击、真实卷耗尽和进程级电源故障未实测，既有 3.4/3.4a 的其他 Partial 原因不因此关闭。
 
+### D-240 · 2026-09-12 · 6.2 / 3.1 / 3.3 / 3.8 / 3.12（解析后的 references/calls 进符号图与检索链）
+
+类型：问题与解法
+
+背景：符号图只有 tree-sitter 抽取的 defines/imports/connects/associates——「谁引用这个符号」「谁调谁」没有真实边，related 只能
+回答文件级拓扑，explore 的图候选也只有静态边。语言服务已经能解析 references 与 callHierarchy（内置 TypeScript server 在
+TS ≥3.80 时声明 callHierarchyProvider），缺的是把解析结果作为有修订语义的事实写回图、并让两个消费者真正消费它的生产接线。
+
+决定：
+
+1. 新增 `references`/`calls` 两类 link 行（`SymbolGraphRelationKind`），由 `recordResolvedRelations` 写入站点文件的当前
+   generation，按 relation key（kind/value/target/anchor）重解析即替换而非叠重。行携带 `resolvedBy`
+   （`lsp.references`/`lsp.definition`/`lsp.callHierarchy.incoming`/`lsp.callHierarchy.outgoing`）、站点修订、目标路径与写入时
+   观察到的目标 catalog revision。
+2. 修订语义沿用 D-087，不假装更强：锚点文件绑定磁盘 revision 才写（`pinned`）；跨文件站点是语言服务器自己的读盘结果，
+   `documentRevision` 为 null、一律 unpinned；草稿绑定答案不持久化为图事实。目标文件 revision 移动后行报 `staleTarget`；
+   目标文件被删除时指向它的行随 removeFileSymbols 级联删除；站点文件重新采集时旧 relation 行随 generation 消亡。
+3. 解析入口是**有界**的 relation collector：围绕查询锚点，每个定义一次 references + 一次 definition + 一条
+   prepareCallHierarchy→incoming/outgoing 链，不做仓库级扫描，也不冷启 LSP。lsp.references/lsp.definition 的磁盘绑定结果
+   经 `recordRelations` 写回（write-behind），写失败不挂起导航结果；related.query 对名字锚点的每个精确匹配定义做一次
+   collect（≤8 个定义），collector 不在时只回答已存行。
+4. 消费者：`related` 增加 references/calls 两段（名字锚点答已存站点与双向 call 边、路径锚点答本文件站点与指向本文件的
+   call 边），per-source 状态区分 ready/empty/unavailable/unsupported/partial/failed；`explore` 把 stored 关系边作为第二路
+   路径候选（relation 预算 8、权重介于 import 与 connection 之间、arrival 仍为 object-triggered），并在 `details.relations`
+   摘录注解里展示带 pinned/staleTarget 标记的站点。
+5. supervisor 增加 `prepareCallHierarchy`/`callHierarchyIncoming`/`callHierarchyOutgoing`，item 以会话作用域 token 往返
+   （下一次 prepare 清空前次 item）；能力门读 `callHierarchyProvider`，缺能力报 `unsupported` 而非失败。内置 TypeScript
+   语言服务侧实现真实 `ts.LanguageService` 解析：definition/references/prepareCallHierarchy/incoming/outgoing 均来自
+   `getDefinitionAtPosition`/`findReferences`/`prepareCallHierarchy`/`provideCallHierarchy{Incoming,Outgoing}Calls`，
+   项目按工作区根目录脚本枚举，未打开文件经宿主 `ts.sys` 读盘——这正是 unpinned 的来源。
+
+验证与边界：store 层覆盖 relation 行的写入/替换/pinned/staleTarget/级联删除/代际消亡；collector 经真 supervisor+fixture
+进程验证 collect→持久化与 piggyback record；fixture server 改为按已同步正文解析（identifierSites/callSites），测试 TS
+server 用真 ts.LanguageService 并在宿主读盘下探到未打开文件；supervisor 覆盖 callHierarchy 三方法、token 生命周期与
+unsupported；related 覆盖 resolved 段输出与 collector 接线；explore 覆盖 stored 关系边进候选；lsp-nav 覆盖磁盘绑定写回与
+草稿不写回。related 的 collect 上限 8 个定义、每定义各一次请求，超出即 `incomplete`；references 边只来自真实查询，
+不会主动铺满全图——冷启动工作区的 resolved 覆盖随查询增长，这是有意设计不是缺口。PageRank/多跳扩展仍未做。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-239 | implementation（用户旧结果释放、独立引用及中断对账） | — | 设计 9.2.5b/9.3.4；plan/status 3.4/3.4a/3.10；recovery / Thread UI |
+| D-240 | implementation（解析后 references/calls 进符号图：relation collector + lsp 导航回写 + related/explore 消费） | — | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |

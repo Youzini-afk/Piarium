@@ -1,12 +1,13 @@
 import { createJsonRpcServer } from './jsonrpc.js';
-import { fileURLToPath } from 'node:url';
-import { createTypescriptLanguageWorkspace } from './typescript-service.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createTypescriptLanguageWorkspace, type TypescriptCallItem } from './typescript-service.js';
 
 const workspace = createTypescriptLanguageWorkspace();
 
 interface Position { character?: number; line?: number }
 interface ServerParams extends Record<string, unknown> {
   contentChanges?: Array<{ text?: string }>;
+  item?: { data?: { fileName?: string; position?: number }; selectionRange?: { start?: Position }; uri?: string };
   position?: Position;
   textDocument?: { text?: string; uri?: string; version?: number };
 }
@@ -20,6 +21,8 @@ const uriToFile = (uri: unknown): string => {
   }
 };
 
+const fileToUri = (fileName: string): string => pathToFileURL(fileName).href;
+
 const offsetAt = (text: string, position?: Position): number => {
   const lines = text.split('\n');
   let offset = 0;
@@ -27,6 +30,52 @@ const offsetAt = (text: string, position?: Position): number => {
     offset += (lines[index]?.length ?? 0) + 1;
   }
   return offset + (position?.character ?? 0);
+};
+
+const positionAt = (text: string, offset: number): { line: number; character: number } => {
+  let line = 0;
+  let lineStart = 0;
+  const capped = Math.max(0, Math.min(offset, text.length));
+  for (let index = 0; index < capped; index += 1) {
+    if (text.charCodeAt(index) === 10) {
+      line += 1;
+      lineStart = index + 1;
+    }
+  }
+  return { line, character: capped - lineStart };
+};
+
+const spanToRange = (fileName: string, span: { start: number; length: number }) => {
+  const text = workspace.getText(fileName);
+  return { start: positionAt(text, span.start), end: positionAt(text, span.start + span.length) };
+};
+
+// ScriptElementKind → LSP SymbolKind for the kinds callHierarchy reports.
+const callItemKind = (kind: string): number => {
+  switch (kind) {
+    case 'classElement': return 5;
+    case 'methodElement': case 'memberFunctionElement': case 'memberGetAccessorElement': case 'memberSetAccessorElement': return 6;
+    case 'constructorImplementationElement': return 9;
+    case 'enumElement': return 10;
+    case 'interfaceElement': case 'typeElement': return 11;
+    case 'functionElement': case 'localFunctionElement': return 12;
+    case 'variableElement': case 'localVariableElement': case 'constElement': case 'letElement': return 13;
+    case 'moduleElement': return 2;
+    default: return 12;
+  }
+};
+
+const toCallHierarchyItem = (item: TypescriptCallItem) => {
+  const uri = fileToUri(item.file);
+  return {
+    name: item.name,
+    kind: callItemKind(item.kind),
+    uri,
+    range: spanToRange(item.file, item.span),
+    selectionRange: spanToRange(item.file, item.selectionSpan),
+    ...(item.containerName ? { detail: item.containerName } : {}),
+    data: { fileName: item.file, position: item.selectionSpan.start },
+  };
 };
 
 const publishDiagnostics = (
@@ -57,6 +106,7 @@ const server = createJsonRpcServer({
           hoverProvider: true,
           definitionProvider: true,
           referencesProvider: true,
+          callHierarchyProvider: true,
           documentSymbolProvider: true,
           workspaceSymbolProvider: true,
           renameProvider: true,
@@ -83,8 +133,43 @@ const server = createJsonRpcServer({
         const value = workspace.hover(fileName, offset);
         return value ? { contents: { kind: 'markdown', value } } : null;
       }
-      if (method === 'textDocument/definition' || method === 'textDocument/references') {
-        return uri ? [{ uri, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } } }] : [];
+      if (method === 'textDocument/definition') {
+        const offset = offsetAt(text, params?.position);
+        return workspace.definition(fileName, offset).map((info) => ({
+          uri: fileToUri(info.fileName),
+          range: spanToRange(info.fileName, info.span),
+        }));
+      }
+      if (method === 'textDocument/references') {
+        const offset = offsetAt(text, params?.position);
+        return workspace.references(fileName, offset).map((site) => ({
+          uri: fileToUri(site.fileName),
+          range: spanToRange(site.fileName, site.span),
+        }));
+      }
+      if (method === 'textDocument/prepareCallHierarchy') {
+        const offset = offsetAt(text, params?.position);
+        const items = workspace.prepareCallHierarchy(fileName, offset);
+        return items.length > 0 ? items.map(toCallHierarchyItem) : null;
+      }
+      if (method === 'callHierarchy/incomingCalls' || method === 'callHierarchy/outgoingCalls') {
+        const itemFile = params?.item?.data?.fileName ?? uriToFile(params?.item?.uri ?? '');
+        const itemText = workspace.getText(itemFile);
+        const itemOffset = params?.item?.data?.position
+          ?? offsetAt(itemText, params?.item?.selectionRange?.start);
+        if (!itemFile) return [];
+        const calls = method === 'callHierarchy/incomingCalls'
+          ? workspace.callHierarchyIncoming(itemFile, itemOffset)
+          : workspace.callHierarchyOutgoing(itemFile, itemOffset);
+        return calls.map((call) => {
+          // Incoming: fromRanges are sites in the caller's file; outgoing: sites
+          // in the queried file.
+          const sitesFile = 'from' in call ? call.from.file : itemFile;
+          return {
+            ...('from' in call ? { from: toCallHierarchyItem(call.from) } : { to: toCallHierarchyItem(call.to) }),
+            fromRanges: call.fromSpans.map((span) => spanToRange(sitesFile, span)),
+          };
+        });
       }
       if (method === 'textDocument/documentSymbol') {
         return [{ name: 'greeting', kind: 13, range: { start: { line: 0, character: 0 }, end: { line: 0, character: 8 } } }];

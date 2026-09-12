@@ -171,6 +171,12 @@ export interface HarnessServiceHost {
    * store is not open; the caller must degrade, not open a database (D-112).
    */
   graphRecall: ((workspaceId: string) => import("../knowledge/store.js").KnowledgeStore | null) | null;
+  /**
+   * Bounded live resolution of references/calls around a queried anchor
+   * (D-240). Absent when no language supervisor is wired — `related` then
+   * answers stored relations only.
+   */
+  relationCollector: import("./related-tool.js").RelatedRelationCollector | null;
   semanticRecall: ((
     workspaceId: string,
     question: string,
@@ -326,6 +332,7 @@ export interface HarnessServiceHostOptions {
   structureSource?: StructureSource;
   fileRelations?: HarnessServiceHost["fileRelations"];
   graphRecall?: HarnessServiceHost["graphRecall"];
+  relationCollector?: HarnessServiceHost["relationCollector"];
   semanticRecall?: HarnessServiceHost["semanticRecall"];
   pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
@@ -412,6 +419,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const structureSource = options.structureSource ?? null;
   const fileRelations = options.fileRelations ?? null;
   const graphRecall = options.graphRecall ?? null;
+  const relationCollector = options.relationCollector ?? null;
   const semanticRecall = options.semanticRecall ?? null;
   const pinWorkingBranchQuery = options.pinWorkingBranchQuery;
   const harnessSettings = options.harnessSettings;
@@ -639,6 +647,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     structureSource,
     fileRelations,
     graphRecall,
+    relationCollector,
     semanticRecall,
     ...(pinWorkingBranchQuery ? { pinWorkingBranchQuery } : {}),
     ...(harnessSettings ? { harnessSettings } : {}),

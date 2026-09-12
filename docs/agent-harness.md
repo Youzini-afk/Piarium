@@ -745,9 +745,10 @@ worker；配置刷新未完成时查询等待或取消，已退出 worker 的迟
 
 ### 6.2 第二层：这段代码和什么有关
 
-由知识库拥有。节点是文件与符号，边是 `defines` / `imports` / `connects` / `associates`（tree-sitter 写进同一张图；
-`references` 与解析后的跨文件 `calls` 仍未接）。这不是 Aider repo map + PageRank：多跳扩展和 rank 分数都还没做，
-也不在本刀范围。早期 TQL 草稿（`EXPAND [:calls|references*1..2]` + `pagerank`）留作远期形状，不是当前契约。
+由知识库拥有。节点是文件与符号，边是 `defines` / `imports` / `connects` / `associates`（tree-sitter 写进同一张图）
+加 `references` / `calls`——语言服务解析出的真实关系，由 relation collector 与 lsp 导航回写进入同一张图（D-240）。
+这不是 Aider repo map + PageRank：多跳扩展和 rank 分数都还没做，也不在本刀范围。早期 TQL 草稿
+（`EXPAND [:calls|references*1..2]` + `pagerank`）留作远期形状，不是当前契约。
 
 图把名字、路径和连接字面量变成可追踪的关系，提供三类定位材料：
 
@@ -759,7 +760,9 @@ worker；配置刷新未完成时查询等待或取消，已退出 worker 的迟
 收益由实际查询决定，不预设“只有一种边增加召回”。导航与开放候选的读取规则见第 6.1 节，图来源本身没有永久排名优势。
 
 当前图：Documents 写后事件 + 冷扫描把磁盘正文写进 `file → defines → symbol` 和 `file → imports|connects|associates → link`
-（绑 `documentRevision`，共用 generation；D-087/D-105）。LSP 暂不可用时保留最后图，权威空结果才清旧符号。
+（绑 `documentRevision`，共用 generation；D-087/D-105）。`references`/`calls` 行是另一类 link：来源是语言服务的解析
+（`resolvedBy` 记录 `lsp.references`/`lsp.definition`/`lsp.callHierarchy.*`），按 relation key 重解析即替换，不叠重；
+它随站点文件的 generation 消亡，不属于冷扫描抽取。LSP 暂不可用时保留最后图，权威空结果才清旧符号。
 确认连接与同名字符串关联候选分开，候选必须真是同名（D-106/D-109）。冷目录覆盖带 `importQuery` 的语言
 （TS/TSX/JS/JSX，D-115）；纯 Python 仓库对目录来说是 `empty`，不是坏了。轮廓收录模块级/类级值绑定（D-113）；
 边查询被阻塞时照写 defines 并记 `linksIncomplete`（D-111）。
@@ -772,11 +775,13 @@ worker；配置刷新未完成时查询等待或取消，已退出 worker 的迟
 排队期间取消也不得删除。路径重现则重新采集，连接消失后撤销相关关联；枚举失败、截断或未知时保留旧图（D-237）。
 这是派生图对账，不是对任意外部进程的文件系统事务。
 
-**读者。** `explore.search` 把图当第二路路径候选（定义 / 连线另一端 / 反向 import，D-136，取代 D-108 的「不扩候选池」），
-并继续用 `details.relations` 注解已经选中的摘录（D-112）。`related` 是真实注册的工具：对一个路径或符号名回答它定义了什么、
-import 了什么、谁 import 了它、它在哪些连线上以及另一端在哪。每一项都能表达「没有」和「不完整」（`linksIncomplete`、
-specifier 未解析、目录不覆盖该语言）。`related` **不是**更差的 `lsp.references`：references 精确回答「谁引用这个符号」，
-需要语言服务器；related 回答文件级 import 拓扑和连线端点，不需要语言服务器在跑。
+**读者。** `explore.search` 把图当第二路路径候选（定义 / 连线另一端 / 反向 import，D-136，取代 D-108 的「不扩候选池」；
+另有已解析的 references / calls 边，按显式 relation 预算进候选），并继续用 `details.relations` 注解已经选中的摘录（D-112）。
+`related` 是真实注册的工具：对一个路径或符号名回答它定义了什么、import 了什么、谁 import 了它、它在哪些连线上以及另一端
+在哪——并在语言服务可用时回答**已解析的** reference 站点与 call 边（谁调它、它调谁，D-240）。每一项都能表达「没有」和
+「不完整」（`linksIncomplete`、specifier 未解析、目录不覆盖该语言、relation 段 `unavailable`/`unsupported`/`partial`）。
+`related` **不是**更差的 `lsp.references`：references 按精确位置回答「谁引用这个符号」；related 围绕锚点的定义做有界
+解析，且不要求语言服务在跑——没有时只回答文件级拓扑与已存的 resolved 行。
 
 反向 import 在**查询期**解析：相对 specifier 相对于该文件所在目录加上常见扩展名（含 `.js`→`.ts` 孪生）；
 非相对（包名、别名）保持未解析。解析不了可见地报，不猜（D-135）。解析结果按目录形状缓存一份反向索引，
@@ -792,8 +797,11 @@ specifier 未解析、目录不覆盖该语言）。`related` **不是**更差�
 确认不了就不输出这个窗口。目录只有冷扫描 + Documents mutation 那么新，shell 和外部进程的写入不被观察——
 路径级召回 + 当前正文物化就是为此设计的，不另做第二套过期检测。
 
-`references`、解析后的跨文件 `calls` 与 PageRank 仍未接，不能通过对每个 symbol 无界请求 references 来伪装完成。
-仓库级词法索引仍等观察到「找不到入口」再定。
+`references` 与解析后的跨文件 `calls` 已接（D-240）：relation collector 对查询锚点做**有界**解析——每个定义一次
+references + 一次 definition + 一条 callHierarchy 链——lsp 导航也把已拿到的结果写回。两处都只持久化磁盘绑定的答案：
+锚点文件按绑定 revision 固定，跨文件站点是语言服务器自己的读盘结果、一律 `pinned: false`；目标文件 revision 移动后
+行报 `staleTarget`，目标被删除时指向它的行随文件删除一起移除，站点文件重新采集时旧 relation 行随 generation 消亡。
+绝不对每个 symbol 无界请求 references 来伪装完成；PageRank 仍未接。仓库级词法索引仍等观察到「找不到入口」再定。
 
 图是**已提交事实**：范围只从磁盘正文采集，并逐文件记录该 document revision（D-087）。脏缓冲算出的范围不入图——它既不是磁盘状态，
 也不是任何一轮输入的固定草稿。消费者据修订判断范围是否仍然成立，不成立时按来源状态降级，而不是拿一份无身份的范围继续用。

@@ -35,6 +35,7 @@ import {
   DEFAULT_GRAPH_DEFINITIONS_PER_TERM,
   DEFAULT_GRAPH_IMPORT_BUDGET,
   DEFAULT_GRAPH_IMPORT_PER_SEED,
+  DEFAULT_GRAPH_RELATION_BUDGET,
   locateIdentifierLines,
   locateLiteralLines,
   pathInRoots,
@@ -234,7 +235,7 @@ const searchVariantsOf = (group: TermGroup): string[] => {
   return group.variants.filter((variant) => variant === group.distinctive || variant.length > 1);
 };
 
-type GraphCandidateSource = "definition" | "connection" | "association" | "import";
+type GraphCandidateSource = "definition" | "connection" | "association" | "import" | "references" | "calls";
 /** Why this graph edge was walked (D-163). Same-container is ordinary supplement. */
 export type GraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
 
@@ -256,7 +257,7 @@ interface GraphClue {
   why: string;
   locate: { text: string; kind: "identifier" | "literal" };
   arrivalReason: GraphArrivalReason;
-  edgeKind?: "connects" | "associates";
+  edgeKind?: "connects" | "associates" | "definition" | "import" | "references" | "calls";
   match?: "exact" | "name-contains";
   callee?: string;
   /**
@@ -580,6 +581,11 @@ function primaryObjectFor(evidence: FileEvidence, groups: TermGroup[], parsed: E
 
 function isDirectClue(evidence: FileEvidence, groups: TermGroup[], parsed: ExploreQueryParse): boolean {
   if (evidence.graphClues.some(isDirectConnectionClue)) return true;
+  // A language-server-resolved call edge to a question object is the resolved
+  // counterpart of a confirmed connection literal (D-240).
+  if (evidence.graphClues.some((clue) => (
+    clue.source === "calls" && isDirectArrival(clue.arrivalReason) && !clue.offTopic
+  ))) return true;
   if (evidence.graphClues.some((clue) => (
     clue.source === "definition"
     && clue.match === "exact"
@@ -684,12 +690,18 @@ function arrivalsForWindow(
       && item.arrivalReason === clue.arrivalReason
       && item.edgeKind === (clue.edgeKind ?? clue.source)
     ))) continue;
+    const edgeKind = clue.edgeKind ?? (
+      clue.source === "definition" ? "definition"
+        : clue.source === "import" ? "import"
+          : clue.source === "association" ? "associates"
+            : clue.source === "references" ? "references"
+              : clue.source === "calls" ? "calls"
+                : "connects"
+    );
     arrivals.push({
       kind: "graph",
       arrivalReason: clue.arrivalReason,
-      ...(clue.edgeKind || clue.source === "definition" || clue.source === "import" || clue.source === "association" || clue.source === "connection"
-        ? { edgeKind: clue.edgeKind ?? (clue.source === "definition" ? "definition" : clue.source === "import" ? "import" : clue.source === "association" ? "associates" : "connects") }
-        : {}),
+      edgeKind,
     });
   }
   return arrivals;
@@ -1026,7 +1038,7 @@ function isDirectNavigationWindow(window: PreparedWindow, explicitNavigation: bo
     || (explicitNavigation && window.hasAnchor)
     || window.arrivals.some((arrival) => (
       arrival.kind === "graph"
-      && (arrival.edgeKind === "definition" || arrival.edgeKind === "connects")
+      && (arrival.edgeKind === "definition" || arrival.edgeKind === "connects" || arrival.edgeKind === "references" || arrival.edgeKind === "calls")
       && arrival.arrivalReason === "object-triggered"
     ));
 }
@@ -1477,12 +1489,13 @@ export function createExploreQueryRun(
   const connectionFiles = new Set<string>();
   const associateFiles = new Set<string>();
   const importFiles = new Set<string>();
+  const relationFiles = new Set<string>();
   let graphFilesDropped = 0;
   let graphPartial = false;
 
   const runGraphSeeds = async (): Promise<SettledProductionStatus> => {
     if (!deps.graph) return "unavailable";
-    const before = definitionFiles.size + connectionFiles.size + associateFiles.size;
+    const before = definitionFiles.size + connectionFiles.size + associateFiles.size + relationFiles.size;
     try {
       const stats = await deps.graph.catalogStats();
       signal.throwIfAborted();
@@ -1566,7 +1579,45 @@ export function createExploreQueryRun(
         graphFilesDropped = Math.max(graphFilesDropped, connectionDropped);
         graphPartial = true;
       }
-      return definitionFiles.size + connectionFiles.size + associateFiles.size > before ? "ready" : "empty";
+      // Resolved relation edges around the question's symbols (D-240): files
+      // holding a real reference or call site for an object are graph
+      // candidates like definitions and connection endpoints — bounded so a
+      // hot symbol cannot flood the pool.
+      let relationDropped = 0;
+      for (const object of parsed.objects) {
+        if (!looksLikeSymbolName(object)) continue;
+        signal.throwIfAborted();
+        const [callers, references] = await Promise.all([
+          deps.graph.findCallers ? deps.graph.findCallers(object) : Promise.resolve([]),
+          deps.graph.findReferences ? deps.graph.findReferences(object) : Promise.resolve([]),
+        ]);
+        signal.throwIfAborted();
+        for (const site of [
+          ...callers.map((entry) => ({ ...entry, edge: "calls" as const })),
+          ...references.map((entry) => ({ ...entry, edge: "references" as const })),
+        ]) {
+          if (!pathInRoots(site.path, input.paths)) continue;
+          if (!byFile.has(site.path) && relationFiles.size >= DEFAULT_GRAPH_RELATION_BUDGET) {
+            relationDropped += 1;
+            continue;
+          }
+          const evidence = byFile.get(site.path) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: site.edge,
+            why: site.edge === "calls" ? `calls ${object}` : `references ${object}`,
+            locate: { text: object, kind: "identifier" },
+            arrivalReason: "object-triggered",
+            edgeKind: site.edge,
+          });
+          byFile.set(site.path, evidence);
+          relationFiles.add(site.path);
+        }
+      }
+      if (relationDropped > 0) {
+        graphFilesDropped = Math.max(graphFilesDropped, relationDropped);
+        graphPartial = true;
+      }
+      return definitionFiles.size + connectionFiles.size + associateFiles.size + relationFiles.size > before ? "ready" : "empty";
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") throw error;
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
@@ -2114,8 +2165,98 @@ export function createExploreQueryRun(
           importPaths.push(importer.path);
         }
       }
-      if (connectionDropped > 0 || importDropped > 0) {
-        graphFilesDropped = Math.max(graphFilesDropped, connectionDropped, importDropped);
+      // Resolved call edges from materialized windows (D-240): a stored
+      // `calls` row's target file is where the callee resolves — a real
+      // follow-the-code hop the way an import edge is.
+      let relationDropped = 0;
+      const relationPaths: string[] = [];
+      for (const window of prepared) {
+        signal.throwIfAborted();
+        const relations = await deps.graph.fileRelations(window.path);
+        signal.throwIfAborted();
+        if (!relations) continue;
+        for (const site of relations.calls ?? []) {
+          if (!site.targetPath || !pathInRoots(site.targetPath, input.paths)) continue;
+          const alreadyRead = readPaths.has(site.targetPath);
+          if (!alreadyRead && relationPaths.length >= DEFAULT_GRAPH_RELATION_BUDGET) {
+            relationDropped += 1;
+            continue;
+          }
+          const evidence = byFile.get(site.targetPath) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: "calls",
+            why: `${site.caller ?? window.path} calls ${site.targetName ?? site.callee ?? "a symbol"} here`,
+            locate: { text: site.targetName ?? site.callee ?? "", kind: "identifier" },
+            arrivalReason: arrivalForImport(site.targetName ?? site.callee ?? "", site.targetPath, parsed, prepared),
+            edgeKind: "calls",
+          });
+          byFile.set(site.targetPath, evidence);
+          relationFiles.add(site.targetPath);
+          if (alreadyRead || seenNew.has(site.targetPath)) continue;
+          seenNew.add(site.targetPath);
+          relationPaths.push(site.targetPath);
+        }
+        for (const site of relations.references ?? []) {
+          // A reference site in this file pins the symbol's home file as a
+          // follow candidate — the definition side of a real use.
+          if (!site.targetPath || !pathInRoots(site.targetPath, input.paths)) continue;
+          const alreadyRead = readPaths.has(site.targetPath);
+          if (!alreadyRead && relationPaths.length >= DEFAULT_GRAPH_RELATION_BUDGET) {
+            relationDropped += 1;
+            continue;
+          }
+          const evidence = byFile.get(site.targetPath) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: "references",
+            why: `definition of ${site.targetName ?? "symbol"} referenced in ${window.path}`,
+            locate: { text: site.targetName ?? "", kind: "identifier" },
+            arrivalReason: arrivalForImport(site.targetName ?? "", site.targetPath, parsed, prepared),
+            edgeKind: "references",
+          });
+          byFile.set(site.targetPath, evidence);
+          relationFiles.add(site.targetPath);
+          if (alreadyRead || seenNew.has(site.targetPath)) continue;
+          seenNew.add(site.targetPath);
+          relationPaths.push(site.targetPath);
+        }
+      }
+      // And the reverse direction: stored call/reference sites that point at
+      // the question's symbols from anywhere in the catalog.
+      for (const object of parsed.objects) {
+        if (!looksLikeSymbolName(object)) continue;
+        signal.throwIfAborted();
+        const [callers, made] = await Promise.all([
+          deps.graph.findCallers ? deps.graph.findCallers(object) : Promise.resolve([]),
+          deps.graph.findCalls ? deps.graph.findCalls(object) : Promise.resolve([]),
+        ]);
+        signal.throwIfAborted();
+        for (const site of [
+          ...callers.map((entry) => ({ path: entry.path, locate: object, why: `calls ${object}` })),
+          ...made.flatMap((entry) => (entry.targetPath ? [{ path: entry.targetPath, locate: entry.targetName ?? entry.callee ?? object, why: `${object} calls ${entry.targetName ?? entry.callee ?? "a symbol"} here` }] : [])),
+        ]) {
+          if (!pathInRoots(site.path, input.paths)) continue;
+          const alreadyRead = readPaths.has(site.path);
+          if (!alreadyRead && relationPaths.length >= DEFAULT_GRAPH_RELATION_BUDGET) {
+            relationDropped += 1;
+            continue;
+          }
+          const evidence = byFile.get(site.path) ?? emptyEvidence();
+          attachGraphClue(evidence, {
+            source: "calls",
+            why: site.why,
+            locate: { text: site.locate, kind: "identifier" },
+            arrivalReason: "object-triggered",
+            edgeKind: "calls",
+          });
+          byFile.set(site.path, evidence);
+          relationFiles.add(site.path);
+          if (alreadyRead || seenNew.has(site.path)) continue;
+          seenNew.add(site.path);
+          relationPaths.push(site.path);
+        }
+      }
+      if (connectionDropped > 0 || importDropped > 0 || relationDropped > 0) {
+        graphFilesDropped = Math.max(graphFilesDropped, connectionDropped, importDropped, relationDropped);
         graphPartial = true;
       }
       // A graph clue landing on an already-read file is otherwise never located
@@ -2123,7 +2264,7 @@ export function createExploreQueryRun(
       await refreshReadEvidence();
       ranked = rankNow();
       const newcomers = ranked.filter((candidate) => (
-        (connectionPaths.includes(candidate.path) || importPaths.includes(candidate.path))
+        (connectionPaths.includes(candidate.path) || importPaths.includes(candidate.path) || relationPaths.includes(candidate.path))
         && !readPaths.has(candidate.path)
         && !issues.some((issue) => issue.path === candidate.path)
       ));
@@ -2563,6 +2704,7 @@ export function createExploreQueryRun(
       connections: connectionFiles.size,
       ...(associateFiles.size > 0 ? { associates: associateFiles.size } : {}),
       imports: importFiles.size,
+      ...(relationFiles.size > 0 ? { relations: relationFiles.size } : {}),
       ...(graphFilesDropped > 0 ? { filesDropped: graphFilesDropped } : {}),
       ...(graphPartial ? { partial: true } : {}),
     };
@@ -2724,7 +2866,11 @@ const RELATION_LINES_PER_FILE = 12;
 function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined): string[] {
   if (!relations) return [];
   const files = relations.files.filter((file) => (
-    file.imports.length > 0 || file.connections.length > 0 || file.associations.length > 0
+    file.imports.length > 0
+    || file.connections.length > 0
+    || file.associations.length > 0
+    || (file.references?.length ?? 0) > 0
+    || (file.calls?.length ?? 0) > 0
   ));
   const lines: string[] = [];
   if (relations.status !== "ready") {
@@ -2740,6 +2886,8 @@ function relationLines(relations: NonNullable<WireResult["details"]["relations"]
       ...file.connections.map((item) => `connects ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`}`),
       ...file.imports.map((item) => `imports ${item.specifier}${file.stale ? "" : ` (L${item.line})`}`),
       ...file.associations.map((item) => `associates ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`} [candidate]`),
+      ...(file.references ?? []).map((item) => `references ${item.value}${item.caller ? ` in ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
+      ...(file.calls ?? []).map((item) => `calls ${item.callee}${item.caller ? ` from ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
     ];
     for (const item of items.slice(0, RELATION_LINES_PER_FILE)) lines.push(`- ${where} ${item}`);
     const dropped = items.length - RELATION_LINES_PER_FILE;
