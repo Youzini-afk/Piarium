@@ -5458,6 +5458,36 @@ check-attr 失败抛出；stateIdentity 区分 0644/0755；sameState 在 Windows
 backend 汇总、verifyObjectIntegrity）；既有 materializer、working-state-store、
 state-trie、thread-runtime 套件回归通过。
 
+## D-251 — D-245 返工：生产级 Merkle WorkingState
+
+背景：D-245 引入了持久哈希 trie，但验收发现多处缺陷——`trieSet`/`trieRemove`
+每次复制整个 nodes Record（O(n) per set，`trieFromEntries` 近似 O(n²)）、加载时
+未核验 node key 与内容哈希、未检测缺节点/循环/malformed state、node hash 使用
+`sameState` 的 Windows 比较语义（0644/0755 确定性碰撞）、`treeIdentityFromStates`
+每次从平表重建 trie 而非用现有 root。
+
+决定（supersedes in part D-245 的 trieSet/remove 实现、加载验证与 identity 来源；
+D-245 的持久 trie 结构、共享 node pool、schema 4、structural sharing 保留）：
+
+1. **O(1) 单路径更新**：`trieSet`/`trieRemove` 改用 prototype chain over input
+   nodes——新节点写入 own properties，未变节点通过原型链查找。单次 set 创建
+   O(depth) 新节点，不复制整个池。
+2. **O(n·depth) 初始建树**：`trieFromEntries` 改用线性 builder——排序 entries 后
+   一次性构建嵌套结构，再 bottom-up 哈希。不再循环调用 `trieSet`。
+3. **加载时完整性核验**：新增 `verifyTrie`，在 `parseStateMap` 中调用。核验每个
+   node 的内容哈希等于其 key、所有子引用可解析、无循环。损坏/缺失/循环 trie
+   抛出而非静默当空树。
+4. **平台无关持久 identity**：node hash 使用 `stateIdentity`（含完整 mode），不使用
+   `sameState`（平台比较语义）。0644/0755 同内容同路径产生不同 roots。
+5. **`treeIdentityFromStates` 仍用 trie root**：保持现有实现（`trieIdentity(trieFromRecord(...))`），
+   但底层 `trieFromRecord` 现在是 O(n·depth) 而非 O(n²)。
+
+反例验证：`state-trie.test.ts` 13 项——0644/0755 不同 roots、篡改 node 检测、
+缺失 node 检测、自引用 cycle 检测、有效 trie 通过、兄弟分支共享未改子树、
+trieSet 创建 O(depth) 新节点（<10，非 O(pool)）、500→1000→2000 线性扩展
+（ratio < 8，非 O(n²) 的 ~16x）；既有 working-state-store、thread-runtime 套件
+回归通过。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5474,3 +5504,4 @@ state-trie、thread-runtime 套件回归通过。
 | D-248 | implementation（D-242 返工：exclusive lease；阶段化删除与结构化结果；幂等重试；KnowledgeStore.deleteSession 接入生产；UI 确认文案明确范围） | supersedes in part D-242（lease 模式、阶段化、knowledge 清理、UI 确认） | 设计 9.3.4；status 3.10；thread-runtime / index.ts / HarnessThreadsPanel |
 | D-249 | implementation（D-243 返工：base/result 各自绑定 commit 属性；probeGitAttributes 失败传播；required filter 失败 fail/unavailable；filter=lfs 尊重 process/smudge/skip-smudge；fingerprint 使用完整 mode） | supersedes in part D-243（属性来源、filter 失败处理、LFS smudge 路径、fingerprint mode 语义） | 设计 9.3.4；status 3.4a；git-adaptation / git-migration / journal-files |
 | D-250 | implementation（D-244 返工：对象完整性验证；EACCES/EPERM 是权限错误；CoW 统计到达现有 ThreadOccupancy 消费者） | supersedes in part D-244（错误分类与可观测性） | 设计 9.3.4；status 3.4a；reflink / materializer / thread-runtime / protocol |
+| D-251 | implementation（D-245 返工：O(1) trieSet/remove via prototype chain；O(n·depth) trieFromEntries；加载时 verifyTrie；平台无关持久 identity） | supersedes in part D-245（trieSet/remove 实现、加载验证、identity 哈希语义） | 设计 9.3.4；status 3.4a；state-trie / working-state-store |

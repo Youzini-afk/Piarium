@@ -428,6 +428,18 @@ v1–v3 目录照常读入并在下次 persist 升级。写路径从 `structured
 tombstone-vs-缺失的 diff 区分、持久化文件断言 `{trie}` 引用 + 共享 `stateNodes` + deltas/pathStates 同一根 +
 重开一致；既有 store/branch-view/draft-baseline/virtual-write 套件除 3 项基线环境失败外全过。
 
+**D-251 返工（2026-09-12）。** `trieSet`/`trieRemove` 改用 prototype chain over
+input nodes——单路径更新创建 O(depth) 新节点，不复制整个池（O(1) per set，非 O(n)）。
+`trieFromEntries` 改用线性 builder——排序 entries 后一次性构建嵌套结构再 bottom-up
+哈希（O(n·depth)，非 O(n²)）。加载时 `verifyTrie` 核验每个 node 内容哈希等于其 key、
+所有子引用可解析、无循环——损坏/缺失/循环 trie 抛出而非静默当空树。node hash 使用
+`stateIdentity`（含完整 mode），不使用 `sameState`（平台比较语义）——0644/0755 同内容
+同路径产生不同 roots。
+证据：`state-trie.test.ts` 13 项（0644/0755 不同 roots、篡改 node 检测、缺失 node
+检测、自引用 cycle 检测、有效 trie 通过、兄弟分支共享未改子树、trieSet 创建
+O(depth) 新节点 <10、500→1000→2000 线性扩展 ratio <8）；既有 working-state-store、
+thread-runtime 套件回归通过。
+
 ## 未完成项（来自 D-027，按来源）
 
 | 来源 | 未完成 |

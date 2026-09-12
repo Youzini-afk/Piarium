@@ -56,18 +56,23 @@ const lookupNode = (nodes: Record<string, StateTrieNode>, hash: string): StateTr
 /**
  * Set `path` to `state`, returning a new trie that shares every untouched
  * subtree with the input. `path` uses "/" separators.
+ *
+ * D-251 rework: the new nodes map is a prototype chain over the input —
+ * lookups fall through to the original, and only new nodes are written.
+ * This is O(1) per set (not O(n) from copying the entire pool), so
+ * `trieFromEntries` is O(n·depth) instead of O(n²).
  */
 export const trieSet = (trie: StateTrie, path: string, state: RecoveryState): StateTrie => {
   const segments = path.split("/").filter(Boolean);
   if (segments.length === 0) return trie;
   const existing = trieGet(trie, path);
   if (existing && stateIdentity(existing) === stateIdentity(state)) return trie;
-  const nodes = { ...trie.nodes };
+  const nodes = Object.create(trie.nodes) as Record<string, StateTrieNode>;
+  nodes[EMPTY_ROOT] = nodes[EMPTY_ROOT] ?? EMPTY_NODE;
   const set = (dirHash: string, depth: number): string => {
     const dir = lookupNode(nodes, dirHash);
     const name = segments[depth]!;
     const child = dir.children[name] ?? EMPTY_ROOT;
-    nodes[EMPTY_ROOT] = nodes[EMPTY_ROOT] ?? EMPTY_NODE;
     let childHash: string;
     if (depth === segments.length - 1) {
       const childNode = child === EMPTY_ROOT && !nodes[child] ? EMPTY_NODE : lookupNode(nodes, child);
@@ -88,7 +93,7 @@ export const trieSet = (trie: StateTrie, path: string, state: RecoveryState): St
 export const trieRemove = (trie: StateTrie, path: string): StateTrie => {
   const segments = path.split("/").filter(Boolean);
   if (segments.length === 0 || trieGet(trie, path) === undefined) return trie;
-  const nodes = { ...trie.nodes };
+  const nodes = Object.create(trie.nodes) as Record<string, StateTrieNode>;
   const remove = (dirHash: string, depth: number): string | null => {
     const dir = lookupNode(nodes, dirHash);
     const name = segments[depth]!;
@@ -152,10 +157,53 @@ export const trieEntries = (trie: StateTrie): Array<[string, RecoveryState]> => 
 export const trieToRecord = (trie: StateTrie): Record<string, RecoveryState> =>
   Object.fromEntries(trieEntries(trie));
 
+/**
+ * Build a trie from entries in O(n·depth) using a single flat nodes map
+ * (D-251 rework). Entries are sorted by path so subtrees are built
+ * bottom-up; shared prefixes create shared interior nodes naturally.
+ */
 export const trieFromEntries = (entries: Iterable<readonly [string, RecoveryState]>): StateTrie => {
-  let trie = EMPTY_STATE_TRIE;
-  for (const [path, state] of entries) trie = trieSet(trie, path, state);
-  return trie;
+  const sorted = [...entries].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  if (sorted.length === 0) return EMPTY_STATE_TRIE;
+  const nodes: Record<string, StateTrieNode> = { [EMPTY_ROOT]: EMPTY_NODE };
+
+  // Build a nested structure from sorted entries, then hash bottom-up.
+  interface BuildNode {
+    children: Map<string, BuildNode>;
+    self?: RecoveryState;
+  }
+  const root: BuildNode = { children: new Map() };
+
+  for (const [path, state] of sorted) {
+    const segments = path.split("/").filter(Boolean);
+    if (segments.length === 0) continue;
+    let node = root;
+    for (let i = 0; i < segments.length; i++) {
+      const name = segments[i]!;
+      let child = node.children.get(name);
+      if (!child) {
+        child = { children: new Map() };
+        node.children.set(name, child);
+      }
+      if (i === segments.length - 1) child.self = state;
+      node = child;
+    }
+  }
+
+  // Hash bottom-up from the root.
+  const hashBuildNode = (node: BuildNode): string => {
+    const children: Record<string, string> = {};
+    for (const [name, child] of node.children) {
+      children[name] = hashBuildNode(child);
+    }
+    const stateNode: StateTrieNode = { children, ...(node.self ? { self: node.self } : {}) };
+    const hash = nodeHash(stateNode);
+    nodes[hash] = stateNode;
+    return hash;
+  };
+
+  const rootHash = hashBuildNode(root);
+  return { root: rootHash, nodes };
 };
 
 export const trieFromRecord = (states: Record<string, RecoveryState>): StateTrie =>
@@ -163,6 +211,36 @@ export const trieFromRecord = (states: Record<string, RecoveryState>): StateTrie
 
 /** Content identity of the whole map — the Merkle root. */
 export const trieIdentity = (trie: StateTrie): string => `sha256-${trie.root}`;
+
+/**
+ * Verify a trie's integrity: every node's content must hash to its key,
+ * all child references must resolve, and there must be no cycles
+ * (D-251 rework). A corrupt or malformed trie must not be silently
+ * treated as an empty tree — the caller must see the verification failure.
+ */
+export const verifyTrie = (trie: StateTrie): void => {
+  const visited = new Set<string>();
+  const check = (hash: string, path: string): void => {
+    if (hash === EMPTY_ROOT) {
+      if (!trie.nodes[hash]) return; // empty root may be absent
+      return;
+    }
+    if (visited.has(hash)) throw new Error(`State trie has a cycle at ${hash} (path ${path})`);
+    visited.add(hash);
+    const node = trie.nodes[hash];
+    if (!node) throw new Error(`State trie node is missing: ${hash} (path ${path})`);
+    // Verify the node's content hashes to its key.
+    const actualHash = nodeHash(node);
+    if (actualHash !== hash) {
+      throw new Error(`State trie node ${hash} is corrupt: content hashes to ${actualHash} (path ${path})`);
+    }
+    // Verify all children exist (recursively).
+    for (const [name, childHash] of Object.entries(node.children)) {
+      check(childHash, path ? `${path}/${name}` : name);
+    }
+  };
+  check(trie.root, "");
+};
 
 export interface StateTrieDiff {
   added: string[];

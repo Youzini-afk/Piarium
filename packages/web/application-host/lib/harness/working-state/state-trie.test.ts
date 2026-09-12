@@ -12,9 +12,12 @@ import {
   trieEntries,
   trieFromRecord,
   trieGet,
+  trieIdentity,
   trieRemove,
   trieSet,
   trieToRecord,
+  verifyTrie,
+  type StateTrieNode,
 } from "./state-trie.js";
 import type { RecoveryState } from "./types.js";
 
@@ -69,6 +72,140 @@ describe("state trie", () => {
     expect(diff).toEqual({ added: ["d.txt"], removed: ["c.txt"], changed: ["b.txt"] });
     expect(trieDiff(before, before)).toEqual({ added: [], removed: [], changed: [] });
     expect(trieDiff(EMPTY_STATE_TRIE, after).added).toEqual(["a.txt", "b.txt", "d.txt"]);
+  });
+});
+
+describe("D-251 rework: platform-agnostic persistent identity", () => {
+  it("0644 and 0755 at the same path produce different roots on every platform", () => {
+    const content = "same\n";
+    const state644: RecoveryState = { kind: "regular-file", objectHash: `sha256-${createHash("sha256").update(content).digest("hex")}`, byteLength: content.length, mode: 0o644 };
+    const state755: RecoveryState = { kind: "regular-file", objectHash: `sha256-${createHash("sha256").update(content).digest("hex")}`, byteLength: content.length, mode: 0o755 };
+    const trie644 = trieFromRecord({ "a.txt": state644 });
+    const trie755 = trieFromRecord({ "a.txt": state755 });
+    // Roots differ even on Windows where sameState would consider them equal.
+    expect(trie644.root).not.toBe(trie755.root);
+    expect(trieIdentity(trie644)).not.toBe(trieIdentity(trie755));
+  });
+});
+
+describe("D-251 rework: node integrity verification", () => {
+  it("detects a tampered node (content doesn't match hash)", () => {
+    const trie = trieFromRecord({ "a.txt": file("a"), "b.txt": file("b") });
+    // Tamper: replace a node's content but keep its old key.
+    const root = trie.root;
+    const rootNode = trie.nodes[root]!;
+    const childName = Object.keys(rootNode.children)[0]!;
+    const childHash = rootNode.children[childName]!;
+    const childNode = trie.nodes[childHash]!;
+    // Tamper the child node's self state.
+    const tamperedNodes: Record<string, StateTrieNode> = { ...trie.nodes, [childHash]: { ...childNode, self: file("tampered") } };
+    const tamperedTrie = { root, nodes: tamperedNodes };
+    expect(() => verifyTrie(tamperedTrie)).toThrow(/corrupt/);
+  });
+
+  it("detects a missing node", () => {
+    const trie = trieFromRecord({ "a.txt": file("a") });
+    const root = trie.root;
+    const rootNode = trie.nodes[root]!;
+    const childHash = rootNode.children["a.txt"]!;
+    // Remove the child node but keep the reference.
+    const { [childHash]: _removed, ...remainingNodes } = trie.nodes;
+    const brokenTrie = { root, nodes: remainingNodes as Record<string, StateTrieNode> };
+    expect(() => verifyTrie(brokenTrie)).toThrow(/missing/);
+  });
+
+  it("detects a self-referencing child (hash mismatch catches the cycle attempt)", () => {
+    const trie = trieFromRecord({ "a.txt": file("a") });
+    const root = trie.root;
+    const rootNode = trie.nodes[root]!;
+    const childHash = rootNode.children["a.txt"]!;
+    const childNode = trie.nodes[childHash]!;
+    // Attempt to create a cycle by pointing the child back to the root.
+    // The hash check catches this first — the node's content no longer
+    // matches its key because the children changed.
+    const cyclicNodes: Record<string, StateTrieNode> = {
+      ...trie.nodes,
+      [childHash]: { children: { "loop": root }, ...(childNode.self ? { self: childNode.self } : {}) },
+    };
+    const cyclicTrie = { root, nodes: cyclicNodes };
+    expect(() => verifyTrie(cyclicTrie)).toThrow(/corrupt/);
+  });
+
+  it("passes verification on a valid trie", () => {
+    const trie = trieFromRecord({ "a.txt": file("a"), "b/c.txt": file("c") });
+    expect(() => verifyTrie(trie)).not.toThrow();
+  });
+});
+
+describe("D-251 rework: structural sharing", () => {
+  it("sibling branches share an unchanged subtree; writing one doesn't change the other", () => {
+    const base = trieFromRecord({
+      "src/shared/a.txt": file("a"),
+      "src/shared/b.txt": file("b"),
+      "docs/readme.md": file("r"),
+    });
+    const branchA = trieSet(base, "src/shared/a.txt", file("a2"));
+    const branchB = trieSet(base, "docs/readme.md", file("r2"));
+    // branchA's change doesn't affect branchB.
+    expect(trieGet(branchB, "src/shared/a.txt")).toEqual(file("a"));
+    expect(trieGet(branchA, "docs/readme.md")).toEqual(file("r"));
+    // The docs/ subtree is shared between base and branchA.
+    const docsHashBase = base.nodes[base.root]?.children["docs"];
+    const docsHashA = branchA.nodes[branchA.root]?.children["docs"];
+    expect(docsHashBase).toBe(docsHashA);
+    // The src/ subtree is shared between base and branchB.
+    const srcHashBase = base.nodes[base.root]?.children["src"];
+    const srcHashB = branchB.nodes[branchB.root]?.children["src"];
+    expect(srcHashBase).toBe(srcHashB);
+  });
+});
+
+describe("D-251 rework: single-path update scales with depth, not pool size", () => {
+  it("trieSet creates O(depth) new nodes, not O(pool size)", () => {
+    // Build a large trie, then set a single deep path.
+    // Count new nodes by comparing own properties of the new nodes object
+    // (the prototype chain pattern means new nodes are own properties,
+    // inherited nodes are not counted by Object.keys).
+    const entries: Record<string, RecoveryState> = {};
+    for (let i = 0; i < 1000; i++) {
+      entries[`dir${i % 10}/sub${i % 5}/file${i}.txt`] = file(`content${i}`);
+    }
+    const base = trieFromRecord(entries);
+
+    // Set a single new deep path.
+    const updated = trieSet(base, "dir0/sub0/file1000.txt", file("new"));
+    // The new nodes object's own properties are the newly created nodes.
+    // A path at depth 3 creates ~3 new nodes (leaf + 2 interior), not 1000.
+    // The exact count depends on how many segments are new vs shared, but
+    // it must be proportional to depth, not pool size.
+    const newNodes = Object.keys(updated.nodes).filter(
+      (key) => !Object.prototype.hasOwnProperty.call(base.nodes, key),
+    ).length;
+    expect(newNodes).toBeLessThan(10);
+    expect(newNodes).toBeGreaterThan(0);
+  });
+
+  it("trieFromEntries builds in O(n·depth), not O(n²) — 500→1000→2000 scaling", () => {
+    const build = (n: number): number => {
+      const entries: Record<string, RecoveryState> = {};
+      for (let i = 0; i < n; i++) {
+        entries[`dir${i % 10}/sub${i % 5}/file${i}.txt`] = file(`c${i}`);
+      }
+      const start = performance.now();
+      const trie = trieFromRecord(entries);
+      const elapsed = performance.now() - start;
+      // Verify correctness.
+      expect(Object.keys(trie.nodes).length).toBeGreaterThan(0);
+      return elapsed;
+    };
+    const t500 = build(500);
+    const t1000 = build(1000);
+    const t2000 = build(2000);
+    // O(n·depth) should scale roughly linearly (depth is bounded by path
+    // structure, not n). The old O(n²) would show ~4x from 500→1000.
+    // Allow generous slack for CI jitter, but reject ~4x growth.
+    const ratio = t2000 / t500;
+    expect(ratio).toBeLessThan(8); // O(n·depth) with depth=3 should be ~4x; O(n²) would be ~16x
   });
 });
 

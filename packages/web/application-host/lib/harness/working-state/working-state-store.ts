@@ -6,7 +6,7 @@ import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from ".
 import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
 import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
 import { applyIndexModes } from "./git-adaptation.js";
-import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieToRecord, type StateTrie, type StateTrieNode } from "./state-trie.js";
+import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieToRecord, verifyTrie, type StateTrie, type StateTrieNode } from "./state-trie.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
 import type {
   CommandVerificationRecord,
@@ -104,11 +104,14 @@ const parseStateMap = (value: unknown, label: string, nodes: StateNodePool): Rec
     && typeof (value as { trie?: unknown }).trie === "string") {
     const root = (value as { trie: string }).trie;
     try {
+      // D-251 rework: verify node integrity before hydrating. A corrupt or
+      // malformed trie must not be silently treated as an empty tree.
+      verifyTrie({ root, nodes });
       const record = trieToRecord({ root, nodes });
       // Re-run the same validation a flat map would get.
       return Object.fromEntries(Object.entries(record).map(([file, state]) => [normalizeRelative(file), parseRecoveryState(state)]));
     } catch (error) {
-      throw new Error(`${label} references a missing state trie node (${error instanceof Error ? error.message : String(error)})`);
+      throw new Error(`${label} references a corrupt or missing state trie node (${error instanceof Error ? error.message : String(error)})`);
     }
   }
   return parseStates(value, label);
