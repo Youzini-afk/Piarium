@@ -18,8 +18,9 @@ reliable as code, a script, or normal documentation.
 
 ## Product boundary
 
-- Piarium is a Pi-native direct refactor of the maintainer's OpenChamber fork. All Piarium edits,
-  commits, and pushes happen in this repository; external OpenChamber checkouts remain read-only.
+- Piarium is an independent Agent workspace and harness with a bundled Pi runtime, originating from
+  the maintainer's OpenChamber fork. All Piarium edits, commits, and pushes happen in this repository;
+  external OpenChamber checkouts remain read-only.
 - The OpenCode cutover is complete. Do not restore OpenCode contracts, compatibility facades, parallel
   implementations, or dead migration paths.
 - Preserve the fork capabilities recorded in
@@ -28,6 +29,11 @@ reliable as code, a script, or normal documentation.
 - Do not add speculative restrictions. A limit needs a concrete protocol, platform, safety, data, or
   measured resource failure behind it; defaults, warnings, and configurable budgets are distinct from
   hard rejection.
+- There are no users requiring backward compatibility for Piarium's internal formats. Replace obsolete
+  contracts and storage directly; remove old readers, writers, compatibility branches, and fallback
+  backends. Do not build internal-format upgrade/import machinery. Workspace files, Git history, native
+  Pi data, and external configuration remain assets; handing off unfinished work does not require keeping
+  the old internal schema. Normal durability and recovery still apply within the current format (D-253).
 
 ## Ownership and trust boundaries
 
@@ -43,6 +49,11 @@ reliable as code, a script, or normal documentation.
 - `packages/mobile` is a Capacitor client connected to a Piarium server.
 - Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
   [docs/architecture.md](docs/architecture.md).
+- Stage R in [docs/agent-harness-plan.md](docs/agent-harness-plan.md) is the accepted Rust system-kernel
+  transition; [docs/rust-kernel-design.md](docs/rust-kernel-design.md) owns its target boundaries. Until a
+  responsibility is delivered, its current owner remains authoritative. Transfer all writers together;
+  do not introduce dual TS/Rust storage or process authorities. The kernel is a private Application Host
+  component shared by surfaces, not a second Electron backend. Delivery facts remain in harness status.
 
 Never execute Pi extensions in a renderer. Keep privileged filesystem, network, credential, shell, and
 process behavior in the application host, Electron main/preload, VS Code extension host, or Pi host as

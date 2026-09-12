@@ -1,15 +1,21 @@
 # Piarium architecture
 
-Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
+Status: Pi-native workbench and harness in production; Rust system-kernel stage R accepted, not implemented
 
 Last updated: 2026-09-12
 
 ## 1. Context
 
-Piarium is a graphical workspace for Pi built from the maintainer's OpenChamber fork. The fork's
-product shell and custom capabilities are retained while its OpenCode engine, contracts, and
-terminology are directly replaced with Pi-native domain types and services. The source fork is a
-read-only input; all edits and history live in the Piarium repository.
+Piarium is an independent Agent workspace and harness with a bundled Pi runtime. It owns the tool
+environment, working state, recovery, retrieval, context policies, and task governance; Pi supplies
+the Agent loop, model/provider stack, native session tree, and extension ecosystem. The workbench
+originated from the maintainer's OpenChamber fork, whose product capabilities are retained. That
+source fork remains read-only; all Piarium edits and history live in this repository.
+
+The accepted next architecture separates a Rust system kernel from the TypeScript product and Agent
+orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the target responsibilities;
+[agent-harness-plan.md](agent-harness-plan.md) stage R defines the complete transition. This decision
+does not claim a Rust runtime is already shipped; delivery remains in [agent-harness-status.md](agent-harness-status.md).
 
 Desktop was the first surface to ship, and Windows, Linux, and macOS packages are published from
 matching runners. The same process and protocol boundaries carry the remote host, browser client, and
@@ -17,16 +23,17 @@ companion mobile client, so no surface moves extension execution into an untrust
 
 ## 2. Goals
 
-1. Discover and run a user-global, standalone, custom, or developer Pi runtime.
-   Desktop loads the selected Pi package root through a Host bootstrap resolver
-   instead of a permanently bundled SDK. Cloud images still ship a self-contained
-   Pi runtime.
+1. Provide a pinned bundled Pi runtime by default, while honoring an explicitly selected user-global,
+   standalone, custom, or developer Pi runtime. The Host bootstrap resolver loads the selected package
+   root; runtime code and the user's native Pi data remain separate.
 2. Provide first-class session, model, provider, settings, and package management.
 3. Render streaming messages, tools, commands, queues, compaction, retries, and extension UI.
 4. Make subagent work visible and controllable from its parent session.
 5. Integrate Magic Context, MCP, and Web Access without forking their core algorithms.
 6. Associate each user turn with a recoverable conversation and workspace checkpoint.
 7. Produce signed-ready desktop installers with deterministic runtime diagnostics.
+8. Deliver the Rust workspace, recovery, process, and file/structure computation kernel as stage R,
+   preserving one authority per resource and keeping product/model policy in TypeScript.
 
 ## 3. Non-goals
 
@@ -39,6 +46,9 @@ companion mobile client, so no surface moves extension execution into an untrust
 - Bundling arbitrary local extension working trees into a release without an explicit manifest.
 
 ## 4. Process model
+
+The following is the current process arrangement. Stage R transfers the specified system responsibilities
+to a private Rust child process; the transfer and current implementation must not be conflated.
 
 ```text
 React renderer: Workbench Profile selects a shell extension
@@ -66,6 +76,30 @@ Electron does not add a parallel backend. It hosts the Web application host in-p
 desktop renderer reaches the same HTTP/SSE/WebSocket surfaces over loopback rather than through a
 separate Electron IPC protocol. Only genuinely native capability — windows, menus, dialogs,
 notifications, updater — crosses the Electron preload boundary.
+
+### 4.0 Accepted Rust kernel target (D-252)
+
+One Rust kernel process belongs to each actual Application Host instance. Desktop and Web/remote
+deployments use the same private client and packaged executable. Renderer and Pi workers continue to
+call the existing authenticated Host boundaries, never a new public kernel endpoint.
+
+The kernel owns workspace file resources, content objects and immutable working-state roots, file
+recovery/Integration operations, capture/materialization, PTYs and managed tool processes, and fixed-view
+file/structure computation. TypeScript retains the public API and admission policy, Thread/Run product
+lifecycle, Document Registry coordination, knowledge-domain services, and model/context orchestration.
+Pi worker/session management stays in runtime-broker; credentials and native Pi state remain in Pi.
+TriviumDB graph/vector stores keep their current single-writer adapters; changing the implementation
+language is not authorization to replace those databases.
+
+The new process is an implementation component of this Host, shared by all surfaces. It does not create
+a second Electron backend. Responsibilities move with all their writers, references, consumers, and
+recovery paths; migrated TS code becomes a protocol adapter and the old implementation is removed.
+There are no users requiring Piarium internal-format compatibility (D-253): obsolete internal stores
+can be recreated, with no legacy readers, upgrade importers, or version branches. Workspace files/Git,
+native Pi data, and external configuration remain intact; any unfinished real work is handed off
+explicitly without preserving its old internal schema. There is no dual writer or silent return to
+the old backend on native-runtime failure. Exact protocol, data, lifecycle, performance, and packaging
+requirements are in [rust-kernel-design.md](rust-kernel-design.md).
 
 ### 4.1 Renderer
 

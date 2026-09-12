@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-10
+Last updated: 2026-09-12
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -23,6 +23,14 @@ authoritative record of delivery, and each phase names the design document that 
 | 8 | OpenChamber upstream capability absorption | Complete |
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
+| R | Rust system kernel and Host separation | Accepted plan; delivery tracked only in [harness status](agent-harness-status.md) |
+
+Stage R is the next architecture stage after acceptance of the current harness rework. Its complete
+scope is the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
+[harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
+storage, Documents/file operations, materialization, processes/terminals, file/structure computation,
+and production/performance/release acceptance. It retains TypeScript product/Agent policy and the
+bundled Pi runtime. This roadmap entry does not claim Rust code or a production takeover has shipped.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

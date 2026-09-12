@@ -18,6 +18,11 @@ Last updated: 2026-09-12
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**D-252 已采纳 Rust 系统内核架构，阶段 R 尚未实现。** 目标与完整范围见
+[rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
+本次文档变更不新增 Rust 可执行程序、不接管存储，也不把 D-246–D-251 的执行报告视为独立验收通过。
+D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
+
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
 Thread/ThreadRun catalog 与启动对账、事件驱动 wait、OutputRef/TranscriptRef、UTF-8 字节分页、workspace canonical lease，
 以及异步 dispatch → 真实 Pi child session → 冻结角色模型/工具 → worktree → report/transcript → merge 均已进入 Web/Application
@@ -156,6 +161,24 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.4a** 内容寻址工作分支、草稿基线与结果物化 | host / protocol / pi-host | ✓ | Partial（D-216–D-224 已接线 owning/execution、执行 Git baseline、查询级固定视图、dispatch 内容身份、branch Integration 锁顺序/WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle serialization 与 scope 完整 `..` 段；D-231 又补受管 retrieval scratch、managedRoot 与只读 settle。旧记录缺 managedRoot 时拒绝自动动作，真实付费嵌套 Pi / 完整桌面重启未测） | `working-state/working-state-store.test.ts`（schema 1/2→3、draft objects/ref、固定多修订、窄路径与 captureScopes、effectiveState/origin、writeRevision CAS、新文件 mode 不写 `.piarium-mode-probe-*`）；`working-state/draft-baseline.test.ts`；`working-state/materializer.test.ts`；`working-state/branch-view.test.ts`；`working-state/working-branch-view.test.ts`（Host router 上的 read/grep/find/ls，lease 后正文与 provenance 一致，explore start pin 后词法/原文/语义不读后写）；`working-state/working-branch-writes.test.ts`（虚拟 write 不碰父盘、兄弟隔离、迟到修订冲突、物化后 publishDirectoryResult）；`working-state/execution-baseline.test.ts`（isolated init 虚拟写+shell 写 settle/merge，无 bad object；reclaim/rematerialize；crash recovery baseline）；`working-state/virtual-write-invariants.test.ts` / `virtual-write-tree.test.ts` / `materialization-switch.test.ts`（失败物化并发写、孙 merge 后再写再物化、writeRevision 标签、树拒绝、semantic pin、abort/crash 恢复）；`working-state/workspace-baseline.test.ts`（Git 变化集与 ignored/captureScopes、unborn/非 Git、字节诚实、取消不建分支、listing 失败不发明完整 inventory、gitlink 列出）；`thread-runtime.test.ts`（surface 释放后的 queued spawn、revision 0、copyIgnored scope、虚拟 spawn 绑定、scratch 回收、bash 预算预占、prepare 后父漂移隔离、Git 失败/捕获窗口变化/writer/gitlink/dirty 内容替换不建完整分支、setWorkingState 失败清理未绑定 branch）；`thread-services.test.ts`（dispatch 必准备、失败删除、baseline-changed 可重试）；`nested-threads.test.ts`（父虚拟分支作孙基线、嵌套 merge 不写根盘、父结果再入工作区、captureScopes 继承父冻结范围）；`working-state/integration-coordinator.test.ts`（虚拟新文件省略 mode 仍可应用到工作区；物化父 directory 不把 recovery objects 写入父目录且 live/reconcile 走 execution Documents gate；无法解析 execution directory 则 needs-attention；branch 集成对账/撤销）；`dequeue-permissions.test.ts`；`knowledge-owning.test.ts`；`thread-registry.test.ts`（binding 重建与 stale 拒绝）；`thread-worktree.test.ts`（fixed/live、virtual scratch、detached Git 上下文、`executionBaseline`）；`workspace-identity.test.ts`；`working-state/path-requirement.test.ts`；pi-host `read-tool.test.ts` / `find-ls-tool.test.ts`（working-branch provenance）；`workspace-mutation-journal.test.ts` / `apply-patch-tool.test.ts`（`document.branchWrite` 优先，disk 才落盘） | — | 旧 Git base/resultCommit 是导入来源；带草稿的 Thread 缺原生结果时不走旧合并旁路；shared/none 仍读 live 父目录 | D-239 已接旧结果引用释放 UI、Host 依赖重查与中断对账；当前分支/结果和仍在使用的版本保持保护。Merkle 优化、跨平台 CoW 与整个 Thread/当前分支删除 UI 未交付。D-220–D-223 已关执行 baseline / 固定视图 / dispatch 内容身份、branch Integration WAL、directory reconcile execution gate、dequeue 冻结权限、binding 对账、知识 owning、级联 lifecycle 与 scope segment 反例；D-231 补受管 retrieval 目录和只读 settle。旧记录缺 managedRoot 会拒绝自动动作；真实付费嵌套 Pi 与完整桌面重启未测。物化预算与占用治理见 D-204；显式 copyIgnored 已随 branch 冻结并捕获后续新增/修改/删除；基线读工作目录字节，不把 Git blob 冒充转换后正文 |
 | **3.5a** 固定修订 Integration、草稿写回与绑定预览（D-203） | host / protocol / ui | ✓ | ✓ | `integration-coordinator.test.ts`（旧预览拒绝、持久 intent/回执、故障与条件补偿）；`integration-surface-vertical.test.js`（真实 Documents barrier + Registry + Coordinator，磁盘/草稿同一操作合并及撤销，草稿变 clean）；`documents/authority.test.ts`（定向注册、取消与固定来源更新）；UI `documents/registry.test.ts`（实例替换、观察者异常、重试/撤销）；`HarnessThreadIntegrationPanel.behavior.test.tsx`（真实 React 挂载、无请求循环、迟到丢弃、提交审阅绑定）；`thread-routes.test.ts`、Pi `phase3-e2e.test.ts` | ✓（UI 与 agent 共用 Host 定向执行；缓冲不保存） | 不明执行状态保留 needs-attention；不可用缓冲不写盘；失败不等于未写入；旧输入来源不冒充新正文 | 草稿目标支持文本；缓冲无法表达的类型/权限位变化明确 unavailable。完整浏览器点击链未跑；可应用性不代表测试或行为兼容 |
 
+## 阶段 R：Rust 系统内核（D-252，计划中）
+
+本阶段的 implemented / wired / proven / default-on 当前均未达到。R0–R6 是一个正式架构阶段的完整范围，
+单项完成不能替代整体交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
+
+| 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
+| --- | --- | --- |
+| R0 协议与进程 | 未实现 | 生成协议/client、Host 真实启动/取消/重启和发行 target 构建 |
+| R1 状态与存储 | 未实现 | 原生根/修订/引用/操作同事务域；完整消费者接管、新库启动并删除旧内部格式路径 |
+| R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
+| R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
+| R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
+| R5 文件与结构计算 | 未实现 | 固定视图检索和结构输入、scope/取消、前台与后台负载；保留 TriviumDB/Pi 原归属 |
+| R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
+
+下一步先验收已提交的 D-246–D-251 返工，再以健康生产行为和已确认反例推进 R。
+目前没有 Rust 性能、跨平台发行或故障恢复的实测结论；绝对性能目标在实施时定标，不预填提升倍数。
+
 ## 当前缺口与后续顺序
 
 **3.15 A–D 已接入生产调用链（D-176–D-189）。** 公开入口仍是 pi-host `explore`。Host 持有短生命周期查询：开始时固定问题、
@@ -229,8 +252,9 @@ TS/TSX/JS/JSX 文件调用生产 `scanWorkspace`、tree-sitter 和 TriviumDB；�
 | 语义草稿/线程视图 | 查询开始 pin；草稿立即遮蔽并异步向量；物化 child 查自身 Documents workspace | D-235 已测独立执行工作区 SessionHost 的公开工具和同回合写后查询；完整 dispatch/桌面链未测 |
 | 专用 rerank | HTTP `/rerank`；与 LLM select 互斥；失败保留来源排名 | 3.16E 已接线；真实 rerank 质量未观察 |
 
-按 plan 0.7：3.15 A–D、3.16B–E、2.8、3.17 与 D-227 retrieval Thread 已接线。下一步是真实 provider
-观察与扩散项。既有工作区范围和正文覆盖目标保留，活动工作集只改变建设优先级；没有采纳 sketch 替代全文或只索引热点的设计。
+按 plan 0.7：3.15 A–D、3.16B–E、2.8、3.17 与 D-227 retrieval Thread 已接线。D-252 将当前返工验收后的
+主线确定为阶段 R；真实 provider 观察保留为独立未测项，扩散/后训练不是下一步实现任务。
+既有工作区范围和正文覆盖目标保留，活动工作集只改变建设优先级；没有采纳 sketch 替代全文或只索引热点的设计。
 
 以下保留其他能力及历史检索阶段的验证记录；当前检索取舍以上述 2.8 / 3.15 / 3.16 行与 D-173–D-198 为准。
 

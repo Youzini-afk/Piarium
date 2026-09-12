@@ -4,7 +4,8 @@ Status: active execution plan; accepted capabilities ship as usable defaults (D-
 
 Last updated: 2026-09-12
 
-设计与边界见 [agent-harness.md](agent-harness.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
+设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
+[rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
 全部交付后删除本计划，决策日志归档保留。
 
@@ -14,9 +15,10 @@ Last updated: 2026-09-12
 
 - **正式设计直接实施。** D-078 已授权工作状态与目录分离、原生结果存储、版本化集成，以及检索、记忆和 review 的默认交付。
   执行者可以调整持久格式、数据 authority、协议、方法语义和默认值，连同消费者和文档完成，不按变更类别自动暂停。
-- **没有存量用户，就不要写兼容层。** 本项目尚未发布，不存在需要保全的既有 Piarium 持久状态（会话、设置、缓存、索引）。
-  替换一个格式、契约或 authority 时直接换掉并删除旧路径：不写迁移脚本、不双写、不留 facade、兼容分支或版本判别，
-  也不为假想的旧数据保留读取路径——旧数据丢弃即可。**这不适用于用户工作区里的文件与 Git 历史**，那是用户资产，照常保全。
+- **当前没有用户，不留旧内部格式兼容。** Piarium 内部协议、catalog、缓存、索引和派生状态直接替换，旧内部库可清除重建。
+  不做旧格式 reader、升级/导入器、多版本分支、双写或旧后端 fallback；相关消费者、夹具和文档在同一改动更新。
+  工作区文件/Git、原生 Pi 数据及外部配置照常保全；尚未写回的实际成果如需带走，做具体交接，不据此建设旧 schema 转换机制。
+  新格式自身的事务、引用保护、崩溃恢复与损坏报错仍须正确，不能把读取失败吞成空库（D-253 更正 D-252 的默认转换要求）。
 - **不暂停等决策，自己决定并记入日志。** 维护者通常不在线，等答复会阻塞整条交付。遇到产品取舍、设计与代码现实冲突、
   或任务范围内没明说的选择，执行者自行决定、按现有格式追加一条决策日志（新编号 + 索引行，写清背景、决定、明确不做什么），
   然后继续做下去；这正是决策日志存在的原因，验收复审会重点看这些条目。身份、权限、路径和持久化边界用代码实现，
@@ -90,6 +92,11 @@ Last updated: 2026-09-12
 
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
+**2026-09-12 的推进顺序（D-252）：** 先独立验收 D-246–D-251 的返工，关闭重要错误；随后进入本文的
+**阶段 R：Rust 系统内核与 Host 分层**。R0–R6 是正式整体范围，按完整权威逐项接管，不以一个原生 helper 或只读演示交付收尾。
+已有修复及反例作为迁移基线；不把 TS 功能数量等同稳定性，不用新计划替代本轮验收。外部 MCP/ACP、research profile 和新模型
+列在阶段 R 之后；无依赖的产品修复可并行，不要求把所有未测平台/真实 provider 观察先做完。
+
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
    同名 read/grep/find/ls/explore 的 WorkingState 只读视图已接入真实 Thread Run（D-212）。同名 edit/write/apply_patch 已在虚拟
@@ -117,7 +124,7 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
    Host 校验 `submit_facts`，Run-bound receipt 与 artifact 持久保护正文，报告经 wait / 支持字节分页的 read_thread / Zone 2 可见。
 2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
    分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
-3. **当前：快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
+3. **已接线的快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
    3.15 A–D 已接入公开 `explore`；独立验收补齐 actor scope、取消/截止、真实来源状态、终态、稳定视图、单元排名、required 组、到达即读与 scope 内 Top-K，见 status 3.15 与 D-182–D-189。
    3.16A 已提交（`37b12e8e`、`8752e039`）。3.16B–E 已接入生产链（D-190–D-193）：远程 embedding 绑定、向量复用与前台优先、
    草稿/线程语义覆盖、专用 HTTP rerank。已实现的旧 3.15①②④ 接口继续使用。
@@ -293,14 +300,17 @@ relation 段按 per-source 状态区分。不是 `lsp.references`（按位置精
 沿已交付 Thread/ThreadRun、catalog、角色冻结、异步 dispatch、blocks、传感器、真实 child 和 Fleet 扩展，不重建旧模型。
 设计 9.2.5b 为完整行为边界，下列工作直接实施：
 
+D-252 把本节存储、文件事务、物化及对应底层资源的下一轮结构演进纳入阶段 R。已完成的 TS 返工保留并独立验收；
+后续按 R1–R3 接管其权威与消费者，不再并行规划第二轮同目标的 TS 存储重写。本文 A–F 的用户行为仍是 Rust 验收输入。
+
 **A. 固定结果。** inspect/merge 选定 resultCommit 后，patch、新文件、二进制、链接和 mode 全从修订读取；snapshot 后 live
 修改不混入，另发新结果。报告/测试绑定受检修订，输入变化不自动继承通过。此修复可先交付，原生存储随后用同一结果契约。
 
 **B. 原生状态与迁移。** Host 建内容对象/路径树、固定基线与 delta/tombstone 分支头，结构共享、原子发布。结果/Integration
 独立持有正文引用，复用恢复捕获与路径状态；恢复历史删除不丢线程结果。Git tree 可作基线来源，原生 capture/copy/CoW 支持
 非 Git 和无首次 commit。初次采集有真实成本，普通消息不捕获全仓；监视器只作失效信号，变动中捕获重读或报告不完整。
-从 Git base/resultCommit 导入或建立受保护来源引用，新正文/引用可读后原子切换 Thread；崩溃可重试，不长期双权威。
-完成迁移清旧写路径，Git 留作后端/导出。覆盖读取失败、并发更新、迁移中断、对象保留与旧会话重开。
+固定 Git 修订导入属于正常输入能力，Git 留作基线/物化/导出后端；不以此为旧 Piarium 内部格式建设升级导入器。
+内部格式按 0.1 直接替换并清旧路径。覆盖新格式的读取失败、并发发布、中断、对象保留与原生 Pi 会话消费。
 
 **C. 工具与草稿。** 同名 read/grep/find/ls/edit/write/apply_patch 读写固定 base+delta，父改动不串读，包括子未改路径。
 用户消息自动取得草稿快照，来源/版本随分支保留；草稿集成走 Document Registry 的版本化编辑和 grouped undo，不隐式存盘。
@@ -680,13 +690,119 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 已有授权内无需重复形式审批，不静默降低用户权限或给未启用 authorizer 授权。测一次提示、跨会话/卸载、workspace 只收紧、
 高风险规则，不机械重复全量权限复审。
 
-## 阶段 4–6
+## 阶段 R：Rust 系统内核与 Host 分层（D-252）
+
+目标架构、资源归属和失败语义见 [rust-kernel-design.md](rust-kernel-design.md)。本阶段完整完成需要 R0–R6，
+不是“先试 Rust，后面再决定是否使用”。实现可按里程碑提交，但不能把其中一项完成写成整个阶段交付。
+模块迁移后的生产默认只有新写者；TS 保留产品编排、Pi runtime、Document Registry、知识领域和已经由原生库承担的查询。
+
+| 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
+| --- | --- | --- |
+| R0 | Cargo workspace、内核进程、生成协议/client、握手/取消/关闭、各发行目标构建 | 真实 Application Host 启动与就绪诊断；Electron/Web/serve 共用 client；不是独立运行的示例程序 |
+| R1 | SQLite/对象库接管，根/修订/节点/引用/恢复记录同事务域，原生固定视图与分支 CAS | WorkingState、recovery storage、结果/草稿/证据引用的全部存储消费者；移除对应 TS JSON/数据库直接写入 |
+| R2 | 磁盘资源 gate、Documents 后端、恢复/Integration/混合 surface 阶段机 | edit/write/apply_patch、保存/文件 CRUD、merge/undo/redo、内置 recovery provider；移除重复锁和文件 apply/补偿实现 |
+| R3 | Git/非 Git 基线、物化切换、执行结果收集、CoW、回收/空间、资源释放 | dispatch/queued/nested/settle/archive/restore/history release/delete；移除旧 thread-worktree 和 materializer 的对应实际操作 |
+| R4 | PTY/命令、外部语言/调试/任务进程和原始输出的统一资源后端 | 用户终端、bash/get_output/write/kill、LSP/DAP/任务/测试启动器；移除对同一进程的旧 provider/进程表 |
+| R5 | 固定视图文件检索、遍历/哈希、结构解析/切块的原生计算 | read/grep/find/ls/explore、目录/语义建设的文件与结构输入；移除被替代的扫描/解析实现和重复正文缓存 |
+| R6 | 完整生产与故障验收、性能定标、发行更新、遗留实现清理 | Desktop/Web/远程和既有 surface，实际 packaged binary；状态/模块文档指向唯一实现 |
+
+### R0. 契约、运行时与发行基础
+
+盘点目标模块的入口/写者/持久对象/后台任务，以设计职责表落实模块边界；复用已经存在的公开协议和错误语义。
+Rust 内核通过私有进程管道连接一个 Host，生成跨语言 DTO/schema，不复制 Pi provider/凭据栈。控制与数据流分开，
+批量范围/内容引用避免整树往返。actor grant、workspace/execution/storage identity、kernel epoch、request/operationId、
+取消/事件/回执均在第一版协议内形成可执行契约；不靠后续补一层“安全包装”。
+
+真实 Host 装配需验证启动、协议不匹配、损坏帧、背压、取消、关闭和内核退出后的状态。Windows/macOS/Linux 的仓库发行
+target 从此步开始构建，不把二进制打包、Node/Electron 协同和许可证检查留到最后才发现。R0 只标运行时基础完成，
+尚未迁移的功能保持原生产所有者。
+
+### R1. 工作状态与恢复存储接管
+
+沿现有 SQLite + 内容对象库建立原生存储。WorkingState 根/修订、结果/草稿、节点、对象所有者和 recovery operation/checkpoint
+在同一存储事务域发布。不可变根成为真实内存/持久入口，单路径写直接更新受影响索引页；宽目录不整表复制。
+树哈希保留完整 mode 等声明字段，与平台磁盘比较分开；损坏/缺节点/循环明确失败。对象先耐久，事务再发布引用，
+pin/GC/并发发布保证可达正文；不每次更新重写整个 JSON/node pool 或扫描全部历史。
+
+Rust 接管同一 storage location 的所有元数据 writer，TS storage adapter 只调用领域操作。在活动写者退出后切换代码，
+直接初始化唯一的新内部格式、重建夹具和派生数据；不导入旧 WorkingState/catalog/恢复元数据，不实现旧格式转换阶段机。
+需要保全的实际工作成果先作具体交接；跨 Thread catalog 的正常发布/释放仍有持久意图与幂等确认。
+尚未迁移的文件编排通过新 storage adapter 工作，不直接连 SQLite；分支写 gate/CAS 随分支权威一起迁移。
+
+验证真实 Host client→Rust→重开后的分支读写、跨分支 sharing、mode/字节身份、固定查询、CAS 冲突、pin 与 GC 并发、
+新格式发布关键窗口故障，以及旧实现/数据移除后从新库启动。复用本轮反例；节点数/读写字节从生产调用计量，不能仅测一个 trie helper。
+
+### R2. 文件权威、Documents 与恢复事务
+
+迁移 canonical 文件资源、路径 gate、磁盘 before/after、三方计划/应用/条件补偿及启动对账。
+完整接入 Documents 保存、Files CRUD、原生工具 mutation、Integration、恢复 provider 和内部文件消费者；
+尚未迁移的 Git/进程 adapter 向相同资源服务登记写者，不保留另一个决定“可写/可回收”的 TS gate。
+
+surface 权威留在 Registry，Rust 维护混合操作的 operationId/intent/回执阶段，Host 定向执行 Registry CAS/grouped undo。
+等待外部回执不持数据库事务或形成反向锁等待；断线/迟到不得伪报完成，surface 无正文不能改写磁盘。
+恢复仍是受影响路径变更集，不把 Rust 捕获能力用于普通回合全仓快照。
+
+验证公开 Pi edit/write/apply_patch 与真实 Documents/Registry，磁盘/草稿混合、编码/BOM/换行、用户后写、
+缺回执/取消/进程重启、嵌套 branch/directory merge 和恢复导航；实际 Rust 子进程必须参与。
+
+### R3. 基线、物化与资源生命周期
+
+Git 与非 Git/unborn 共用固定根、受管目录及执行世代；保留 dispatch 时捕获、草稿优先与 frozen captureScopes。
+Git 的 base/result 属性、执行 baseline、LFS/filter/EOL 和真实 index mode 各有身份，不静默吞过滤器错误。
+虚拟→物化的 staging/切换/重启、shell 写回发布、原路径重建、普通复制/真实 CoW 与空间事实全部迁到同一内核。
+
+Thread/Run 与级联产品策略继续归 Registry，Rust 提供可重试资源操作；会话/知识清理由各领域 adapter 确认。
+archive 保留引用；history release/delete 先核依赖和真实写者，再释放根和清理目录，返回阶段化结果。
+旧目录、未知进程、未收集内容不得因换格式而获得删除许可。
+
+验收 Git/非 Git/无 HEAD、queued/nested/virtual+shell 两阶段编辑、固定结果后 live 变动、filter 配置、
+共享引用删除、回收恢复、目录占用和 ENOSPC/中断。实际 clone 与普通 copy 分别报告；未测文件系统不能称已证明 CoW。
+
+### R4. 进程与终端底层
+
+Rust 接管现有 terminal runtime 实际进程，TS 保留 UI/API/命令整理/Zone 2 adapter；Agent 与用户仍附着同一 handle。
+stdin/resize、输出原字节/游标、自动后台、退出码、终止与 writer 释放均由实际进程决定。外部 LSP/DAP/任务/测试
+采用同一通用进程服务；Pi session/catalog/inference worker 的会话与协议生命周期继续归 runtime-broker。
+
+接管发生在实际进程生命周期边界，不把 PID 当可移交 PTY。Host 或 kernel 崩溃后，按平台进程证据处置遗留进程，
+不重放命令、不在未知状态回收目录；恢复新 epoch 后旧 handle 不复用。用户 shell hooks 与现有 OSC 命令事实不退化为猜测。
+验证本机真实 shell、UI attach/输入、后台自然退出、停止失败、Host/kernel 单独退出、LSP/DAP 流和已有任务消费者。
+
+### R5. 文件与结构检索计算
+
+用内核 pin 直接执行固定视图范围读、枚举、搜索、结构解析/切块，scope 在候选选择前约束。
+前台请求与后台扫描分开调度，取消到达实际任务；图/语义提供线索，原文依旧绑定实际 revision。
+复用 rg、tree-sitter 与已有原生计算，不为 Rust 重建搜索算法、TriviumDB、向量库或 ONNX；
+图/向量库继续经已有 TS adapter 单写，LLM 计划/选段与远程推理继续经 Pi。
+
+生产消费必须覆盖 read/grep/find/ls/explore 及索引输入，不只给新工具加一个旁路。
+验证父 live 漂移、草稿覆盖、嵌套 view、scope、查询取消/partial/终态、结构批量传输与后台负载下前台响应。
+删除对应旧扫描/解析/缓存路径；跨边界只传需要的记录/范围，不传整库。
+
+### R6. 完整验收与发行收口
+
+采用已修正并验收的 TS 基线，同机同语料区分冷/热，测端到端耗时、写放大、Host+kernel+Pi 总内存与资源释放。
+复用现有观察脚本，记录语料/文件字节/并发和节点/存储操作计数，避免把算法修复、缓存预热或省略耐久写当语言收益。
+性能目标按设计第 8 节：已有根操作不扫描全树、增量写不改无关状态、后台计算不阻塞前台；具体延迟/容量根据证据定标。
+结构回归和系统性性能退化必须解释并处理，不要求付费模型或独立研究评测才能验收。
+
+从真实发行目录启动 kernel，验证更新/退出、数据位置接管、Host+kernel 重启、文件与 shell 公开纵切；覆盖仓库支持的
+平台构建，真机证据按平台分别登记。移除全部已接管的旧 TS writer/重复状态/临时桥接，模块文档记录唯一调用链。
+现有薄的公共 API adapter 是架构组成，不因“清旧”误删。R0–R5 的消费者、故障和资源证据齐备后再把阶段 R 标成完成。
+
+依赖关系：R0 → R1 → R2 → R3；R4 在 R0/R2 的身份与 writer 契约确定后可独立推进，R5 依赖 R1/R2 的固定视图。
+R6 汇总所有里程碑并完成发行验收。并行不能让两个任务各改一份共享协议/存储权威；共同契约由一个整合者负责。
+
+## 阶段 4–6：既有默认 runtime 与后续领域
 
 - 默认 runtime：直接交付 bundled Pi、Runtime Manager 默认选择与 Git Bash 就绪说明，保留自有 runtime；实际 Electron smoke。
   已有版本依赖明确，不等 harness 全部完成。
 - 外部 runtime：按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
 - research/文件知识工作：沿共享工具、存储、文档、验证器做文献/PDF/引用/notebook；按实际用途交付。第二个 profile 发展公共
   接口，不是允许建接口的前置。SaaS 连接器与 Windows 沙箱保持范围之外。
+
+默认 bundled Pi 的已交付路径保持。当前新主线是阶段 R；外部 adapter 和新领域 profile 使用 R 收口后的系统边界，
+不在迁移中另建一套资源/存储后端。
 
 ## 文档同步与验收
 

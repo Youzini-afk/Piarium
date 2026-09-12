@@ -5505,3 +5505,74 @@ trieSet 创建 O(depth) 新节点（<10，非 O(pool)）、500→1000→2000 线
 | D-249 | implementation（D-243 返工：base/result 各自绑定 commit 属性；probeGitAttributes 失败传播；required filter 失败 fail/unavailable；filter=lfs 尊重 process/smudge/skip-smudge；fingerprint 使用完整 mode） | supersedes in part D-243（属性来源、filter 失败处理、LFS smudge 路径、fingerprint mode 语义） | 设计 9.3.4；status 3.4a；git-adaptation / git-migration / journal-files |
 | D-250 | implementation（D-244 返工：对象完整性验证；EACCES/EPERM 是权限错误；CoW 统计到达现有 ThreadOccupancy 消费者） | supersedes in part D-244（错误分类与可观测性） | 设计 9.3.4；status 3.4a；reflink / materializer / thread-runtime / protocol |
 | D-251 | implementation（D-245 返工：O(1) trieSet/remove via prototype chain；O(n·depth) trieFromEntries；加载时 verifyTrie；平台无关持久 identity） | supersedes in part D-245（trieSet/remove 实现、加载验证、identity 哈希语义） | 设计 9.3.4；status 3.4a；state-trie / working-state-store |
+
+### D-252 · 2026-09-12 · 阶段 R：Rust 系统内核与 Host 分层
+
+类型：架构决定（用户授权的正式计划阶段）
+
+决定：Piarium 作为独立 Agent 工作环境，采用 Rust 系统内核 + TypeScript 产品/Agent 编排 + 内置 Node/Pi runtime。
+将其立为 plan R0–R6 的完整架构演进阶段，覆盖协议与运行时、工作状态/恢复存储、文件/草稿协调、物化/Git/CoW、
+进程/终端、文件/结构计算，以及性能、故障和发行收口；不以最小原生函数、只读演示或长期 shadow/fallback 交付代替。
+
+原因：项目已有持久分支、恢复事务、真实执行与多 Agent 并发，需要长期明确的资源边界、增量存储和可控制的计算/进程生命周期。
+Rust 可用于集中这些责任，TS 继续利用产品与 Pi 生态。最近验收暴露的哈希、基线、授权与恢复错误仍是需要独立修复的设计/实现问题，
+不能把“改写 Rust”视为已修复或把降低语言层开销当作全部性能收益。
+
+具体决定：
+
+1. 每个实际 Application Host 管理一个私有 Rust 子进程，跨语言 schema 单一来源并生成 client；公开 API、Pi worker 通道保持。
+   这扩展原 Host 的系统后端，取代设计第 4 节“不引入新的进程边界”的约束，不创建 Electron 专属第二后端。
+2. Rust 统一文件资源、WorkingState/对象/引用、磁盘恢复/Integration、物化、PTY/受管工具进程与文件/结构计算。
+   Thread/Run 产品 lifecycle、Document Registry、知识 `.tdb`/图/向量 adapter、模型策略与 Pi 会话/凭据各保留原所有者。
+3. 工作状态沿现有 SQLite + 内容对象库接管，在同一存储位置内把根/修订/引用/operation/checkpoint 纳入同一事务域；
+   树根成为生产读写入口、节点增量持久，不把整份 JSON/node pool 换个语言继续全写。此为 D-245/D-251 后的目标演进，
+   不改写其实施记录、不据此裁定刚完成的返工。
+4. 一次接管一个完整权威及全部消费者。尚未接管的不同职责可以继续 TS；同一状态/进程只有一个写者，接管后删除旧实现。
+   runtime 故障不静默回到旧后端；取消、未知执行、epoch、幂等重试与重启按真实副作用设计。
+5. 澄清 plan 0.1 的旧格式政策：不承诺历史格式兼容、不建设长期双读/双写；可重建缓存/夹具可直接替换。
+   真实工作区/Git、Pi 会话与设置、知识及需保留的结果/草稿/恢复正文不能按“未发布”自动删除。
+   一次性权威接管所需的数据转换、验证和中断恢复随阶段交付，不要求先丢弃当前工作。
+6. D-246–D-251 先独立验收，重要错误关闭后进入 R；已有实现/反例作为基线，不回退提交、不重复建设同目标 TS 框架。
+   外部 MCP/ACP、research profile、新模型在此阶段之后；不引入知识库替换、Electron 壳替换或 OS 沙箱。
+7. 性能对照使用健康 TS 基线、同机同语料/构建模式，报告端到端时间、写放大、总进程内存和资源释放。
+   结构目标与产品调用链一起验收，不虚构倍数/容量上限、不新建通用评测平台。发行 target 从 R0 构建，R6 收口真实产物。
+
+考虑过的替代：整体后端翻译 Rust 会连带重写变化快的 Pi/产品生态；只迁哈希函数不能收口资源和事务边界；
+继续 TS 并只做 worker 隔离可缓解事件循环阻塞，但不落实本次选择的原生系统内核；保留双后端会形成两份持久权威。
+因此选择按完整职责迁移的正式阶段。
+
+影响：[rust-kernel-design.md](rust-kernel-design.md)、architecture 第 1/2/4 节、agent-harness 第 1/2/4/9.2.5b/12 节、
+plan 0.1/0.7/3.4/阶段 R、status 阶段 R、roadmap、AGENTS 与 native recovery 的目标边界。
+本条只追加，D-001–D-251 正文保持原样。
+
+状态：设计与计划已采用；本次仅修改文档。Rust 内核、生产接管、迁移执行和性能/故障证据均未交付，事实以 status 为准。
+
+## D-252 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-252 | accepted design / implementation planned（Rust 系统内核正式阶段 R0–R6） | —；调整 Host 进程边界与一次性数据接管政策，历史实施记录保留 | rust-kernel-design；architecture；harness 4.3/9.2.5b/12；plan R；status R |
+
+### D-253 · 2026-09-12 · 无用户阶段直接替换内部格式
+
+类型：用户澄清；修订 D-252 第 5 项及 R1 的默认存储转换要求
+
+决定：当前没有用户使用 Piarium，不建设旧内部格式兼容。旧内部 catalog、WorkingState、缓存、索引和恢复元数据
+可以直接清除重建；消费者更新到唯一新契约，旧 reader/writer、升级导入器、多版本分支、双写与旧后端 fallback 一并删除。
+撤回 D-252 把“一次性旧库转换与转换中断恢复”列为 Rust 阶段必交付工作的要求。
+
+原因：没有实际用户升级需求时，为旧内部状态设计转换机制会扩大维护范围，并使执行者继续保留旧格式和路径。
+用户明确要求直接替换。代码权威的完整接管仍要做，历史内部数据升级不再是接管的前提。
+
+边界：工作区文件/Git 历史、原生 Pi 数据和外部配置照常保全；若有尚未写回的实际成果，先保存/导出所需内容，
+做具体交接，不产品化旧 schema importer。新格式运行期间的事务、引用保留、取消/崩溃恢复和损坏报错不削弱。
+本次只更正文档，不删除本地数据，不修改执行 agent 的实现。
+
+影响：AGENTS、plan 0.1/3.4/R1、Rust 设计第 9/10 节、architecture 4.0、harness 1.3/9.2.5b/12.2、status R1。
+状态：设计与计划已修订；阶段 R 仍未实现。D-001–D-252 原文保持。
+
+## D-253 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-253 | accepted policy（无用户阶段直接替换旧内部格式，不建升级兼容） | —；supersedes in part D-252 第 5 项和 R1 默认转换要求 | AGENTS；rust-kernel-design 9/10；plan 0.1/R1；architecture；harness；status R |

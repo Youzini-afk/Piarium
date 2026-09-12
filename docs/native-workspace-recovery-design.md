@@ -2,7 +2,7 @@
 
 Status: delivered; R1 per-path coverage implemented 2026-09-03; remaining boundary revisions (dirty buffers, barrier, lease) accepted 2026-09-02 and not yet implemented
 
-Last updated: 2026-09-03
+Last updated: 2026-09-12
 
 ## Decision
 
@@ -14,6 +14,13 @@ package.
 
 The recovery unit is an affected-file change set. A message checkpoint is not a complete manifest of
 the workspace and does not schedule a background archive.
+
+D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the next implementation owner
+of the built-in provider's file resources, content/reference storage, and recovery operations. This
+keeps the public recovery service and affected-path semantics; Document Registry remains the mutable
+buffer owner and Pi remains the conversation owner. Stage R is planned, not delivered. Current evidence
+and the implementation transition are recorded only in [agent-harness-status.md](agent-harness-status.md)
+and [agent-harness-plan.md](agent-harness-plan.md).
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor
 consulted by Piarium's native rollback path.
