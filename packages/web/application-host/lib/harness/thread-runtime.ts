@@ -416,6 +416,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const resuming = new Set<string>();
   const backgroundTasks = new Set<Promise<void>>();
   const autoResumedThreads = new Set<string>();
+  // D-250: track the last materialization's CoW/reflink backend summary per
+  // thread so inspectSpace can surface it through the existing ThreadOccupancy
+  // consumer (no new dashboard).
+  const cowByThread = new Map<string, { reflink: number; copy: number }>();
   const terminatingSessions = new Set<string>();
   const recentToolSignatures = new Map<string, string[]>();
   const stallTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1034,11 +1038,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       worktree.preparationStage = "materializing";
       await persistWorktree(input.workspaceId, input.threadId, worktree);
       if (input.branchId && input.resultRevision && options.workingStates) {
-        await options.workingStates.withStore(
+        const result = await options.workingStates.withStore(
           input.workspaceId,
           "thread-result-materialize",
           (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
         );
+        if (result?.cow) cowByThread.set(input.threadId, result.cow);
       }
       worktree.preparationStage = input.setupRequired ? "setup" : "ready";
       delete worktree.materializationFingerprint;
@@ -3351,13 +3356,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
         throw error;
       });
-    return projectThreadOccupancy({
+    const occupancyInput: Parameters<typeof projectThreadOccupancy>[0] = {
       thread,
       materialized,
       exclusive,
       shared,
       keepReasons: await keepReasonsFor(workspaceId, thread),
-    });
+    };
+    const cow = cowByThread.get(thread.id);
+    if (cow) occupancyInput.cow = cow;
+    return projectThreadOccupancy(occupancyInput);
   };
 
   const objectHashMaps = async (workspaceId: string, threads: Thread[]): Promise<Map<string, Map<string, number | null>>> => {
@@ -4578,7 +4586,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const states = store.effectiveState(latest.branchId);
         if (!states) throw new Error(`Working branch ${latest.branchId} is unavailable`);
         await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
-        await store.materializeStates(states, journal.stagingPath);
+        const result = await store.materializeStates(states, journal.stagingPath);
+        if (result?.cow) cowByThread.set(latest.threadId, result.cow);
       });
       switchSignal.throwIfAborted();
       await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: journal });

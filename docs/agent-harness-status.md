@@ -405,6 +405,18 @@ untracked/merge/rematerialize 复制（`thread-worktree.ts`）、WorkingState �
 不重试、材料化经 `objectPathFor` 命中对象文件且 readContent 不被调用、对象缺失时 readContent 兜底、cow 计数。
 未实测真实 ReFS/APFS 卷上的 extent 共享（本机与 CI 均为 NTFS）；回退路径与结果正确性已覆盖。
 
+**D-250 返工（2026-09-12）。** 对象完整性验证：materializer 从 object path
+reflink/copy 前验证 byteLength + SHA-256（`verifyObjectIntegrity`，归一化
+`sha256-` 前缀），损坏对象抛出而非进入执行目录。EACCES/EPERM 从
+`REFLINK_UNSUPPORTED_CODES` 移除——权限/策略错误直接传播，只有平台级"不支持
+clone"/"跨卷"错误退化普通 copy。CoW 统计到达现有消费者：store 的
+`materializeResult`/`materializeStates` 返回 `MaterializeResult`；runtime 的
+restore 和 materialization switch 路径捕获 cow 统计存入 `cowByThread`；
+`inspectSpace`/`ThreadOccupancy.cow` 字段暴露给现有空间消费者（非新增看板）。
+证据：`reflink.test.ts` 12 项（损坏对象拒绝、EACCES/EPERM 传播、EXDEV 退化、
+backend 汇总、verifyObjectIntegrity）；既有 materializer、working-state-store、
+state-trie、thread-runtime 套件回归通过。
+
 **D-245 WorkingState Merkle 结构共享已实现（2026-09-12）。** `working-state/state-trie.ts` 把 path→RecoveryState 映射存为
 持久哈希 trie（节点 `children` + 可选 `self`，文件与祖先目录键可共存），根哈希即映射内容身份。catalog schema 4：
 `baseState`/`deltas`/`baseStates`/`pathStates`/草稿 `pathStates` 序列化为 `{trie: root}` 加共享 `stateNodes` 池——发布的

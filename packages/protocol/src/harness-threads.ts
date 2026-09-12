@@ -407,6 +407,8 @@ export interface ThreadOccupancy {
   reclaimable: boolean;
   reclaimableLogicalBytes: number | null;
   keepReasons: string[];
+  /** CoW/reflink backend summary from the last materialization (D-250). */
+  cow?: { reflink: number; copy: number };
 }
 
 export interface WorkspaceThreadSpace {

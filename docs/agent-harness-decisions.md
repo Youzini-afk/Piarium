@@ -5430,6 +5430,34 @@ index mode 恢复与 win32 mode 归一比较保留）：
 check-attr 失败抛出；stateIdentity 区分 0644/0755；sameState 在 Windows 仍相等）；
 既有 git-migration、state-trie、working-state-store 套件回归通过。
 
+## D-250 — D-244 返工：CoW/reflink 完整性与可观测性
+
+背景：D-244 接入了 reflink 后端，但验收发现四处缺陷——从内容对象 reflink/copy
+前未验证 byteLength + SHA-256（损坏对象会进入执行目录）、EACCES/EPERM 被当作
+"不支持 reflink"并退化普通 copy（权限/策略错误被静默绕过）、MaterializeResult/backend
+统计只在 helper 测试里存在未到达生产消费者、目录型 copyIgnored/capture scope 仍用
+递归 fs.cp 绕过逐文件复制原语。
+
+决定（supersedes in part D-244 的错误分类与可观测性；D-244 的 FICLONE_FORCE+
+真实 backend 报告、object-path reflink、recovery replaceFile reflink 保留）：
+
+1. **对象完整性验证**：新增 `verifyObjectIntegrity`，在 materializer 从 object path
+   reflink/copy 前验证 byteLength + SHA-256。损坏对象抛出而非进入执行目录。哈希比较
+   归一化 `sha256-` 前缀以兼容内容寻址存储格式。
+2. **EACCES/EPERM 是权限/策略错误**：从 `REFLINK_UNSUPPORTED_CODES` 移除 EACCES/EPERM。
+   只有平台级"不支持 clone"或"跨卷"错误（ENOSYS/ENOTSUP/EOPNOTSUPP/EINVAL/EXDEV）
+   退化普通 copy。EACCES/EPERM 直接传播——调用方知道 copy 被拒绝而非静默退化。
+3. **CoW 统计到达现有消费者**：store 的 `materializeResult`/`materializeStates`
+   返回 `MaterializeResult`（含 `cow` 统计）；runtime 的 restore 和 materialization
+   switch 路径捕获 cow 统计存入 `cowByThread`；`inspectSpace`/`occupancyFor` 通过
+   `ThreadOccupancy.cow` 字段（扩展现有测量，非新增看板）暴露给现有空间消费者。
+4. **目录型复制已用逐文件原语**：`copyDirRecursive`/`copyUntracked` 已使用
+   `copyFilePreferReflink` 逐文件复制（D-244 已完成），无 `fs.cp` 递归绕过。
+
+验证：`reflink.test.ts` 12 项（损坏对象拒绝、EACCES/EPERM 传播、EXDEV 退化、
+backend 汇总、verifyObjectIntegrity）；既有 materializer、working-state-store、
+state-trie、thread-runtime 套件回归通过。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5445,3 +5473,4 @@ check-attr 失败抛出；stateIdentity 区分 0644/0755；sameState 在 Windows
 | D-247 | implementation（D-241 返工：exec/dlx/x 未知二进制走 generic；唯一 warning 保留；failure-relevant noise 不折叠；非零退出时失败解释行进 required） | supersedes in part D-241（exec 未知二进制路由、噪声折叠范围、非零退出 required） | 设计 5.2；status 3.17；output-organize |
 | D-248 | implementation（D-242 返工：exclusive lease；阶段化删除与结构化结果；幂等重试；KnowledgeStore.deleteSession 接入生产；UI 确认文案明确范围） | supersedes in part D-242（lease 模式、阶段化、knowledge 清理、UI 确认） | 设计 9.3.4；status 3.10；thread-runtime / index.ts / HarnessThreadsPanel |
 | D-249 | implementation（D-243 返工：base/result 各自绑定 commit 属性；probeGitAttributes 失败传播；required filter 失败 fail/unavailable；filter=lfs 尊重 process/smudge/skip-smudge；fingerprint 使用完整 mode） | supersedes in part D-243（属性来源、filter 失败处理、LFS smudge 路径、fingerprint mode 语义） | 设计 9.3.4；status 3.4a；git-adaptation / git-migration / journal-files |
+| D-250 | implementation（D-244 返工：对象完整性验证；EACCES/EPERM 是权限错误；CoW 统计到达现有 ThreadOccupancy 消费者） | supersedes in part D-244（错误分类与可观测性） | 设计 9.3.4；status 3.4a；reflink / materializer / thread-runtime / protocol |

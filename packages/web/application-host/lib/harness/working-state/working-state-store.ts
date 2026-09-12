@@ -20,7 +20,7 @@ import type {
   WorkingResult,
   WorkingStateVerifications,
 } from "./types.js";
-import { materializeWorkingState } from "./materializer.js";
+import { materializeWorkingState, type MaterializeResult } from "./materializer.js";
 import { assertVirtualWriteTree } from "./virtual-write-tree.js";
 import { defaultNewFileMode as resolveDefaultNewFileMode } from "./workspace-baseline.js";
 
@@ -1169,10 +1169,10 @@ export class WorkingStateStore {
     ])];
   }
 
-  async materializeResult(branchId: string, revision: number, directory: string): Promise<void> {
+  async materializeResult(branchId: string, revision: number, directory: string): Promise<MaterializeResult> {
     const states = this.resultState(branchId, revision);
     if (!states) throw new Error(`Working result not found: ${branchId}@${revision}`);
-    await materializeWorkingState({
+    return materializeWorkingState({
       targetDir: directory,
       states,
       readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,
@@ -1183,8 +1183,8 @@ export class WorkingStateStore {
     });
   }
 
-  async materializeStates(states: Record<string, RecoveryState>, directory: string): Promise<void> {
-    await materializeWorkingState({
+  async materializeStates(states: Record<string, RecoveryState>, directory: string): Promise<MaterializeResult> {
+    return materializeWorkingState({
       targetDir: directory,
       states,
       readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null,

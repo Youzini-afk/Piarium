@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { RecoveryState } from "./types.js";
 import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
-import { copyFilePreferReflink } from "../../workspace/reflink.js";
+import { copyFilePreferReflink, verifyObjectIntegrity } from "../../workspace/reflink.js";
 
 export interface MaterializeOptions {
   targetDir: string;
@@ -159,6 +159,11 @@ export async function materializeWorkingState(
       const objectPath = options.objectPathFor?.(state);
       if (objectPath) {
         try {
+          // D-250: verify object integrity before reflinking/copying into the
+          // execution directory. A corrupt object must not enter the worktree.
+          if (state.objectHash && state.byteLength !== undefined) {
+            await verifyObjectIntegrity(objectPath, state.objectHash, state.byteLength, fsPromises);
+          }
           cow[await copyFilePreferReflink(objectPath, absPath, fsPromises)] += 1;
         } catch (error) {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;

@@ -187,6 +187,7 @@ export const projectThreadOccupancy = (input: {
   exclusive: Map<string, number | null>;
   shared: Map<string, number | null>;
   keepReasons: string[];
+  cow?: { reflink: number; copy: number };
 }): ThreadOccupancy => {
   const exclusiveObjects = measurementFromHashes(input.exclusive);
   const sharedObjects = measurementFromHashes(input.shared);
@@ -201,6 +202,7 @@ export const projectThreadOccupancy = (input: {
     reclaimable,
     reclaimableLogicalBytes: reclaimable ? input.materialized.logicalBytes : 0,
     keepReasons: input.keepReasons,
+    ...(input.cow ? { cow: input.cow } : {}),
   };
 };
 
