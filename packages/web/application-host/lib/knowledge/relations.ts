@@ -3,6 +3,7 @@ import type { createLanguageSupervisor } from "../lsp/supervisor.js";
 import { AGENT_LANGUAGE_VIEW } from "../lsp/supervisor.js";
 import { createLanguageViewBinder } from "../lsp/language-view.js";
 import { languageIdForPath } from "../harness/language-id.js";
+import { pathInRoots } from "../harness/explore-graph.js";
 import type { KnowledgeStore, SymbolGraphRelationInput } from "./store.js";
 
 type LanguageSupervisor = Pick<ReturnType<typeof createLanguageSupervisor>,
@@ -46,7 +47,8 @@ export type RelationSourceStatus =
   | "unavailable"
   | "unsupported"
   | "failed"
-  | "stale";
+  | "stale"
+  | "partial";
 
 export interface ResolvedReferenceSite {
   path: string;
@@ -260,9 +262,10 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
     async collect(
       workspaceId: string,
       anchor: RelationAnchor,
-      options: { kinds?: readonly ("references" | "calls")[]; signal?: AbortSignal } = {},
+      options: { kinds?: readonly ("references" | "calls")[]; roots?: readonly string[]; signal?: AbortSignal } = {},
     ): Promise<RelationCollectOutcome> {
       const kinds = new Set(options.kinds ?? ["references", "calls"]);
+      const roots = options.roots;
       const empty = (status: RelationSourceStatus): RelationCollectOutcome => ({
         status,
         references: { status, sites: [] },
@@ -321,11 +324,14 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
           const locations = (refs.value as MappedLocation[] | undefined) ?? [];
           outcome.references.sites = locations.flatMap((location) => {
             const range = location.range;
-            return range ? [{
+            if (!range) return [];
+            // Out-of-scope sites are neither returned nor persisted (D-240 rework).
+            if (!pathInRoots(location.resource.resourceId, roots)) return [];
+            return [{
               path: location.resource.resourceId,
               line: range.start.line + 1,
               character: range.start.character + 1,
-            }] : [];
+            }];
           });
           if (outcome.references.sites.length > 0) outcome.references.status = "ready";
         }
@@ -346,6 +352,8 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
             if (incoming.status === "ready") {
               const calls = (incoming.value as Array<{ from: MappedCallItem; fromRanges: MappedRange[] }> | undefined) ?? [];
               for (const call of calls) {
+                // Out-of-scope callers are neither returned nor persisted (D-240 rework).
+                if (!pathInRoots(call.from.resource.resourceId, roots)) continue;
                 for (const range of call.fromRanges) {
                   outcome.calls.callers.push({
                     path: call.from.resource.resourceId,
@@ -362,6 +370,8 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
             if (outgoing.status === "ready") {
               const calls = (outgoing.value as Array<{ to: MappedCallItem; fromRanges: MappedRange[] }> | undefined) ?? [];
               for (const call of calls) {
+                // Out-of-scope callees are neither returned nor persisted (D-240 rework).
+                if (!pathInRoots(call.to.resource.resourceId, roots)) continue;
                 for (const range of call.fromRanges) {
                   outcome.calls.callees.push({
                     path: anchor.path,
@@ -376,7 +386,10 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
               }
             }
             if (outcome.calls.callers.length + outcome.calls.callees.length > 0) {
-              outcome.calls.status = "ready";
+              // incoming/outgoing 任一方向 failed/stale/unavailable 时，另一方向
+              // 有一条结果不能把整组标成 ready (D-240 rework)。
+              const oneDirectionFailed = incoming.status !== "ready" || outgoing.status !== "ready";
+              outcome.calls.status = oneDirectionFailed ? "partial" : "ready";
             } else if (incoming.status !== "ready" || outgoing.status !== "ready") {
               outcome.calls.status = sourceStatusOf(incoming.status !== "ready" ? incoming : outgoing);
             }
@@ -444,11 +457,19 @@ export function createRelationCollector(deps: RelationCollectorDeps) {
             if (caller) relation.caller = caller;
           }
         }
-        await persistRows(workspaceId, rows);
+        // Authoritative reparse (D-240 rework): one batch call per anchor that
+        // removes disappeared sites. The batch identity is the anchor, not
+        // individual non-empty path writes — a site that existed before but
+        // vanished this resolution is cleared.
+        await store.replaceResolvedRelationsForAnchor(
+          { path: anchor.path, line: anchor.line },
+          [...rows.entries()].map(([path, entry]) => ({ path, language: entry.language, relations: entry.relations })),
+        );
       }
 
       const statuses = [outcome.references.status, outcome.calls.status];
-      if (statuses.includes("ready")) outcome.status = "ready";
+      if (statuses.includes("partial")) outcome.status = "partial";
+      else if (statuses.includes("ready")) outcome.status = "ready";
       else if (statuses.every((status) => status === "unsupported")) outcome.status = "unsupported";
       else if (statuses.includes("stale")) outcome.status = "stale";
       else if (statuses.every((status) => status === "empty" || status === "unsupported")) outcome.status = "empty";

@@ -55,6 +55,16 @@ export function bindExploreGraphRecall(
     if (!store) throw Object.assign(new Error("knowledge store is not open"), { code: "unavailable" });
     return store;
   };
+  const toSite = (record: import("../knowledge/store.js").SymbolGraphRelationRecord) => ({
+    path: record.path,
+    line: record.line,
+    ...(record.caller !== undefined ? { caller: record.caller } : {}),
+    ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+    ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+    pinned: record.pinned,
+    ...(record.staleTarget ? { staleTarget: true } : {}),
+    resolvedBy: record.resolvedBy,
+  });
   return {
     catalogStats: async () => requireStore().catalogStats(),
     searchDefinitions: (query, k) => requireStore().searchSymbols(query, k, roots),
@@ -65,9 +75,35 @@ export function bindExploreGraphRecall(
       return {
         connections: relations.connections.map(({ callee, literal }) => ({ callee, literal })),
         linksIncomplete: relations.linksIncomplete,
+        references: relations.references.map((record) => ({
+          path: record.path,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
+        calls: relations.calls.map((record) => ({
+          path: record.path,
+          line: record.line,
+          ...(record.caller !== undefined ? { caller: record.caller } : {}),
+          callee: record.targetName ?? record.value,
+          ...(record.targetPath !== undefined ? { targetPath: record.targetPath } : {}),
+          ...(record.targetName !== undefined ? { targetName: record.targetName } : {}),
+          pinned: record.pinned,
+          ...(record.staleTarget ? { staleTarget: true } : {}),
+          resolvedBy: record.resolvedBy,
+        })),
       };
     },
     findImporters: (path) => requireStore().findImporters(path),
+    // Wire resolved reference/call edges into the public explore.query chain,
+    // not only the low-level explore() unit tests (D-240 rework).
+    findReferences: async (name) => (await requireStore().findReferences(name, roots)).map(toSite),
+    findCallers: async (name) => (await requireStore().findCallers(name, roots)).map(toSite),
+    findCalls: async (caller) => (await requireStore().findCalls(caller, roots)).map(toSite),
   };
 }
 

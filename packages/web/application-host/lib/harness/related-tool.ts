@@ -23,6 +23,7 @@ import { resolveImportSpecifier } from "../knowledge/import-resolve.js";
 import type { RelationCollectOutcome } from "../knowledge/relations.js";
 import type { KnowledgeStore, SymbolGraphRelationRecord } from "../knowledge/store.js";
 import { classifyFileRoleDecision } from "./file-role.js";
+import { pathInRoots } from "./explore-graph.js";
 
 export interface RelatedQueryInput {
   anchor: string;
@@ -36,13 +37,20 @@ export interface RelatedRelationCollector {
   collect(
     workspaceId: string,
     anchor: { path: string; line: number; character?: number },
-    options?: { signal?: AbortSignal },
+    options?: { roots?: readonly string[]; signal?: AbortSignal },
   ): Promise<RelationCollectOutcome>;
 }
 
 export interface RelatedQueryDeps {
   workspaceId?: string;
   collector?: RelatedRelationCollector | null;
+  /**
+   * Actor's effective workspace scope (authorized roots). Applied to
+   * definition candidates, collector input, LSP returned locations,
+   * targetPath, persisted graph rows, and the final body — out-of-scope
+   * content is neither returned nor written (D-240 rework).
+   */
+  roots?: readonly string[];
   signal?: AbortSignal;
 }
 
@@ -73,11 +81,13 @@ const looksLikePath = (anchor: string): boolean => (
 const compareText = (left: string, right: string): number => left.localeCompare(right);
 
 const relationStatus = (rowCount: number, outcomes: readonly string[]): RelatedRelationStatus => {
-  if (rowCount > 0) return "ready";
+  const failed = outcomes.some((outcome) => outcome === "failed" || outcome === "stale" || outcome === "unavailable");
+  // incoming/outgoing 任一方向 failed/stale/unavailable 时，另一方向有一条结果
+  // 不能把整组标成 ready (D-240 rework)。
+  if (rowCount > 0) return failed ? "partial" : "ready";
   if (outcomes.length === 0) return "unavailable";
   if (outcomes.every((outcome) => outcome === "unsupported")) return "unsupported";
   const worked = outcomes.some((outcome) => outcome === "ready" || outcome === "empty");
-  const failed = outcomes.some((outcome) => outcome === "failed" || outcome === "stale" || outcome === "unavailable");
   if (worked && failed) return "partial";
   if (worked) return "empty";
   if (failed) return "failed";
@@ -141,6 +151,7 @@ export async function executeRelated(
   }
 
   const known = new Set(stats.paths);
+  const roots = deps.roots;
   const kind = looksLikePath(anchor) ? "path" : "name";
   let focusPaths: string[] = [];
   let anchorSymbols: Array<{ path: string; name: string; kind: string; range: { startLine: number; startCharacter: number } }> = [];
@@ -149,13 +160,16 @@ export async function executeRelated(
     if (!known.has(normalized)) {
       return empty("empty", "path", `related empty: the catalog has not collected ${normalized}.`);
     }
+    if (!pathInRoots(normalized, roots)) {
+      return empty("empty", "path", `related empty: ${normalized} is outside the authorized workspace scope.`);
+    }
     focusPaths = [normalized];
   } else {
-    const exact = (await store.searchSymbols(anchor, 32)).filter((entry) => entry.match === "exact");
+    const exact = (await store.searchSymbols(anchor, 32, roots)).filter((entry) => entry.match === "exact");
     anchorSymbols = exact.map((entry) => ({ path: entry.path, name: entry.name, kind: entry.kind, range: entry.range }));
     focusPaths = [...new Set(exact.map((entry) => entry.path))];
     if (focusPaths.length === 0) {
-      const links = await store.findLinks(anchor);
+      const links = (await store.findLinks(anchor)).filter((entry) => pathInRoots(entry.path, roots));
       focusPaths = [...new Set(links.map((entry) => entry.path))];
     }
   }
@@ -192,7 +206,7 @@ export async function executeRelated(
           path: symbol.path,
           line: symbol.range.startLine + 1,
           character: symbol.range.startCharacter + 1,
-        }, { ...(deps.signal ? { signal: deps.signal } : {}) });
+        }, { ...(deps.signal ? { signal: deps.signal } : {}), ...(roots ? { roots } : {}) });
         referenceOutcomes.push(outcome.references.status);
         callOutcomes.push(outcome.calls.status);
       } catch (error) {
@@ -223,9 +237,9 @@ export async function executeRelated(
       }
     }
     const importers = await store.findImporters(path);
-    importerItems.push(...importers.resolved);
+    importerItems.push(...importers.resolved.filter((item) => pathInRoots(item.path, roots)));
     for (const connection of relations.connections) {
-      const ends = await store.findLinks(connection.literal);
+      const ends = (await store.findLinks(connection.literal)).filter((end) => pathInRoots(end.path, roots));
       connectionItems.push({
         literal: connection.literal,
         callee: connection.callee,
@@ -244,26 +258,38 @@ export async function executeRelated(
   // Resolved-relation sections (D-240). Name anchor: every stored site whose
   // resolved name matches the anchor. Path anchor: the file's own reference and
   // call sites, plus call sites whose resolved target lives in this file.
+  // All reads apply the actor's effective workspace scope so out-of-scope
+  // content is neither returned nor written (D-240 rework).
   const referenceItems: RelatedReferenceSite[] = [];
   const callerEdges: RelatedCallEdge[] = [];
   const calleeEdges: RelatedCallEdge[] = [];
   let relationsIncomplete = focus.omitted > 0;
   if (kind === "name") {
-    for (const record of await store.findReferences(anchor)) referenceItems.push(referenceItem(record));
-    for (const record of await store.findCallers(anchor)) callerEdges.push(callEdge(record));
-    for (const record of await store.findCalls(anchor)) calleeEdges.push(callEdge(record));
+    for (const record of await store.findReferences(anchor, roots)) {
+      if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record));
+    }
+    for (const record of await store.findCallers(anchor, roots)) {
+      if (pathInRoots(record.path, roots)) callerEdges.push(callEdge(record));
+    }
+    for (const record of await store.findCalls(anchor, roots)) {
+      if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record));
+    }
   } else {
     const path = focusPaths[0]!;
     const relations = await store.getFileRelations(path);
     if (relations) {
-      for (const record of relations.references) referenceItems.push(referenceItem(record));
-      for (const record of relations.calls) calleeEdges.push(callEdge(record));
+      for (const record of relations.references) {
+        if (pathInRoots(record.path, roots)) referenceItems.push(referenceItem(record));
+      }
+      for (const record of relations.calls) {
+        if (pathInRoots(record.path, roots)) calleeEdges.push(callEdge(record));
+      }
     }
     const definedSymbols = capped(definitions.filter((item) => item.path === path), RELATED_CALLER_SYMBOL_LIMIT);
     if (definitions.filter((item) => item.path === path).length > definedSymbols.shown.length) relationsIncomplete = true;
     for (const symbol of definedSymbols.shown) {
-      for (const record of await store.findCallers(symbol.name)) {
-        if (record.targetPath === path) callerEdges.push(callEdge(record));
+      for (const record of await store.findCallers(symbol.name, roots)) {
+        if (record.targetPath === path && pathInRoots(record.path, roots)) callerEdges.push(callEdge(record));
       }
     }
   }

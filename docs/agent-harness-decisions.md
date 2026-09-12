@@ -5286,6 +5286,45 @@ index 执行位/跨平台比较；`git-migration.test.ts` 断言 0o755 真值。
 既有 working-state/store/view/draft/virtual-write 套件回归。局限：内存内 `WorkingBranch.baseState` 等仍为平铺
 Record（公开类型不动），trie 用于持久化去重与身份——跨重启的 map 级共享收益在磁盘与序列化侧。
 
+## D-246 — D-240 返工：resolved references/calls 生产边界修正
+
+背景：D-240 接入了 references/calls 边与 relation collector，但验收发现五处生产边界缺陷——
+LSP 工作区根从首个打开文件的父目录推断、related/explore 未应用 actor scope、权威重解析靠逐个
+非空 path 写入无法清掉消失 site、组合状态把任一方向有结果标 ready、explore 公开链未暴露
+findReferences/findCallers/findCalls。
+
+决定（supersedes in part D-240 的根推断、scope、批次重解析与组合状态部分；D-240 的 collector +
+lsp 导航回写 + related/explore 消费主体保留）：
+
+1. **LSP 工作区根来自 initialize**：`TypescriptWorkspaceOptions.workspaceRoot` 在构造时接收
+   真实根；`setWorkspaceRoot` 在 LSP `initialize` 后设置。不再用 `path.dirname([...files.keys()][0])`
+   推断。无根时回退 `process.cwd()`，不从首个文件父目录猜——`src/a` 下首个文件不会让 `src/a` 成为根，
+   `src/b` 下的 caller 因此不可达（有反例测试）。
+2. **actor scope 贯穿 related/explore**：`related-service` 传 `ctx.workspaceScope` 给
+   `executeRelated`；`related-tool` 对定义候选、importers、connection otherEnds、references、
+   callers、callees、file relations、collector 输入与 LSP 返回站点统一用 `pathInRoots` 过滤；
+   `relations.ts` collector 对 LSP 返回 reference/call 站点与持久行按 roots 过滤——范围外内容既不
+   返回也不写入图。
+3. **权威 anchor 批次重解析**：`KnowledgeStore.replaceResolvedRelationsForAnchor(anchor, rows)`
+   一次性删除该 anchor 的全部旧行再插入新行。批次身份是 anchor（path+line），不是逐个非空 path
+   写入——结果从两条缩到一条或缩到空集都能清掉消失 site。不同 anchor 的行不受影响。
+4. **partial 组合状态**：`RelationSourceStatus` 新增 `partial`。incoming/outgoing 任一方向
+   failed/stale/unavailable 时，另一方向有一条结果不能把整组标 ready——collector 的 calls 状态
+   与 related-tool 的 relationStatus 都遵循。
+5. **explore 公开链暴露 references/calls**：`bindExploreGraphRecall` 接入 `findReferences`、
+   `findCallers`、`findCalls`；`fileRelations` 映射包含持久化的 reference/call 行及其 pinning/
+   resolvedBy 元数据。不再只在底层 `explore()` 单测里手工注入。
+
+owning/execution/fixed-view 权威：图库归 owning workspace；当前正文、scope 与路径核验归
+execution/WorkingBranch 固定视图；无法证明图关系适用于当前固定视图时标 stale/unavailable，不把
+live 父图当 child 当前事实。
+
+验证：`typescript-service.test.ts`（显式根、嵌套首文件 cross-file、无根回退 cwd、setWorkspaceRoot
+生命周期）；`related-scope.test.ts`（scope 过滤定义/引用/importers/connections、anchor 外拒绝、
+权威重解析两缩一缩空、不同 anchor 隔离、partial 组合状态、pathInRoots 一致性）；既有 related-tool /
+explore / explore-query-services / explore-service / knowledge/store / knowledge/relations 套件
+回归通过。局限：scope 在 Windows 上大小写不敏感（`pathInRoots` 归一），非 Windows 区分。
+
 ## 决策索引追加修订
 
 | Decision | Current status | Superseded by | Folded into |
@@ -5297,3 +5336,4 @@ Record（公开类型不动），trie 用于持久化去重与身份——跨重
 | D-243 | implementation（Git filter/LFS 与执行位适配层：check-attr 探测、本地 LFS 对象解析、cat-file --filters smudge、index mode 恢复、win32 mode 归一比较） | — | 设计 9.3.4 尾部；status 3.4a；working-state/git-adaptation |
 | D-244 | implementation（CoW/reflink 材料化后端：FICLONE_FORCE+真实 backend 报告，对象库→目标与工作区复制统一走原语） | — | 设计 9.3.4；status 3.4a；workspace/reflink / materializer |
 | D-245 | implementation（WorkingState Merkle 结构共享：state-trie 持久哈希映射、catalog v4 共享 node 池、结构共享替代整树 clone、treeIdentity=trie 根） | — | 设计 9.3.4；status 3.4a；working-state/state-trie / working-state-store |
+| D-246 | implementation（D-240 返工：LSP 工作区根来自 initialize 而非首个文件父目录；related/explore 应用 actor scope；权威 anchor 批次重解析；partial 组合状态） | supersedes in part D-240（根推断、scope、批次重解析、组合状态） | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness |

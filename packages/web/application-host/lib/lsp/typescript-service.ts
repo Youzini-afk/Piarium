@@ -39,9 +39,25 @@ export interface TypescriptLanguageWorkspace {
   prepareCallHierarchy(fileName: string, offset: number): TypescriptCallItem[];
   references(fileName: string, offset: number): Array<{ fileName: string; span: TypescriptTextSpan }>;
   setFile(fileName: string, text: string, version: number): void;
+  /**
+   * Set the workspace root from the LSP `initialize` request. The project-wide
+   * disk scan and `getCurrentDirectory` use this root once set (D-240 rework).
+   */
+  setWorkspaceRoot(root: string): void;
 }
 
-export const createTypescriptLanguageWorkspace = (): TypescriptLanguageWorkspace => {
+export interface TypescriptWorkspaceOptions {
+  /**
+   * Workspace root from the LSP `initialize` request (`rootUri` /
+   * `workspaceFolders[0].uri`). The program's `getCurrentDirectory` and the
+   * lazy project-wide disk scan use this root — never the parent directory of
+   * the first opened file, which would misidentify the root when the first
+   * opened file lives in a subdirectory (D-240 rework).
+   */
+  workspaceRoot?: string;
+}
+
+export const createTypescriptLanguageWorkspace = (options: TypescriptWorkspaceOptions = {}): TypescriptLanguageWorkspace => {
   const files = new Map<string, string>();
   const versions = new Map<string, number>();
   // Project-wide disk membership is enabled lazily by the relation queries
@@ -49,10 +65,16 @@ export const createTypescriptLanguageWorkspace = (): TypescriptLanguageWorkspace
   // would make hover/diagnostics pay for a directory walk they never need.
   let projectDiskFiles: string[] | null = null;
   let projectVersion = 0;
+  // Mutable so the LSP `initialize` request can set the real workspace root
+  // after the workspace is constructed (D-240 rework).
+  let workspaceRoot = options.workspaceRoot;
 
   const rootOf = (): string => {
-    const first = [...files.keys()][0];
-    return first ? path.dirname(first) : process.cwd();
+    if (workspaceRoot) return workspaceRoot;
+    // No initialize root: fall back to cwd rather than guessing from the first
+    // opened file's parent — a file in `src/a` would otherwise make `src/a`
+    // the project root and hide callers in `src/b` (D-240 rework).
+    return process.cwd();
   };
 
   const host: ts.LanguageServiceHost = {
@@ -203,6 +225,16 @@ export const createTypescriptLanguageWorkspace = (): TypescriptLanguageWorkspace
     },
     dispose(): void {
       service.dispose();
+    },
+    setWorkspaceRoot(root: string): void {
+      const normalized = root.replace(/\\/g, '/');
+      if (workspaceRoot === normalized) return;
+      workspaceRoot = normalized;
+      // A new root changes the project-wide disk scan and `getCurrentDirectory`;
+      // reset the lazy scan and rebuild the language service.
+      projectDiskFiles = null;
+      projectVersion += 1;
+      refresh();
     },
   };
 };

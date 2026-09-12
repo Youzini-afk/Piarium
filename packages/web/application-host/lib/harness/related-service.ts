@@ -42,13 +42,18 @@ export function createRelatedQueryService(
       try {
         // The collector resolves around the queried anchor and persists what it
         // found; the stored reads inside executeRelated then see fresh rows
-        // alongside previously collected ones (D-240).
+        // alongside previously collected ones (D-240). The actor's effective
+        // workspace scope is applied to definition candidates, collector input,
+        // LSP returned locations, targetPath, persisted graph rows, and the
+        // final body — out-of-scope content is neither returned nor written
+        // (D-240 rework).
         return await executeRelated(
           { anchor: params.anchor },
           store,
           {
             workspaceId,
             ...(host.relationCollector ? { collector: host.relationCollector } : {}),
+            ...(ctx.actor.workspaceScope ? { roots: ctx.actor.workspaceScope } : {}),
             signal: ctx.signal,
           },
         );

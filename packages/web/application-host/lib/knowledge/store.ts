@@ -488,6 +488,18 @@ export interface KnowledgeStore {
     language: string,
     relations: readonly SymbolGraphRelationInput[],
   ): Promise<{ recorded: number }>;
+  /**
+   * Authoritative reparse for one anchor (D-240 rework). Deletes every
+   * existing relation row resolved from `(anchorPath, anchorLine)` across all
+   * files, then inserts the new rows. A site that disappeared between the
+   * previous and current resolution is removed — the result shrinks from two
+   * sites to one or to empty. The batch identity is the anchor, not individual
+   * non-empty path writes.
+   */
+  replaceResolvedRelationsForAnchor(
+    anchor: { path: string; line: number },
+    rows: ReadonlyArray<{ path: string; language: string; relations: readonly SymbolGraphRelationInput[] }>,
+  ): Promise<{ recorded: number; removed: number }>;
   searchSymbols(query: string, k: number, roots?: readonly string[]): Promise<SymbolGraphSearchResult[]>;
   getDefinedSymbols(path: string): Promise<Array<Omit<SymbolGraphSearchResult, "score" | "match">>>;
   getFileRelations(path: string): Promise<SymbolGraphFileRelations | null>;
@@ -2081,6 +2093,132 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         invalidateGraphShape();
         scheduleGraphFlush();
         return { recorded: linkIds.length };
+      });
+    },
+
+    async replaceResolvedRelationsForAnchor(anchor, rows) {
+      return enqueueWrite(() => {
+        const anchorPath = assertGraphText(anchor.path, "Anchor path");
+        const anchorLine = anchor.line;
+        if (!Number.isSafeInteger(anchorLine) || anchorLine < 1) {
+          throw new KnowledgeMutationError("invalid", "Anchor line must be a positive integer");
+        }
+        // Validate all incoming rows first so a partial batch never lands.
+        for (const entry of rows) {
+          const normalizedPath = assertGraphText(entry.path, "File path");
+          const normalizedLanguage = assertGraphText(entry.language, "File language");
+          for (const relation of entry.relations) {
+            if (!RELATION_KINDS.has(relation.kind)) {
+              throw new KnowledgeMutationError("invalid", `Invalid relation kind ${String(relation.kind)}`);
+            }
+            assertGraphText(relation.value, "Relation value");
+            if (!validLinkLine(relation.line)) {
+              throw new KnowledgeMutationError("invalid", `Invalid line for relation ${relation.value}`);
+            }
+            if (!RELATION_SOURCES.has(relation.resolvedBy)) {
+              throw new KnowledgeMutationError("invalid", `Invalid relation source ${String(relation.resolvedBy)}`);
+            }
+            void normalizedPath;
+            void normalizedLanguage;
+          }
+        }
+        // Find every existing relation row resolved from this anchor across
+        // all files. The batch identity is the anchor — not individual paths.
+        // anchorPath/anchorLine are not indexed, so scan in JS.
+        const staleIds = scanNodes((payload) => (
+          payload["type"] === "link"
+          && payload["active"] === true
+          && RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind)
+          && String(payload["anchorPath"] ?? "") === anchorPath
+          && Number(payload["anchorLine"] ?? 0) === anchorLine
+        )).map(({ id }) => id);
+        // Delete stale rows and their edges.
+        const deleteOps: TransactionOperation[] = [];
+        for (const id of staleIds) {
+          const fileEdges = db.getEdges(id);
+          for (const edge of fileEdges) {
+            deleteOps.push({ type: "unlinkLabel", src: id, dst: edge.targetId, label: edge.label });
+          }
+          deleteOps.push({ type: "delete", id });
+        }
+        // Insert new rows.
+        const newLinkPayloads: Record<string, unknown>[] = [];
+        const newLinkFileIds: number[] = [];
+        const newLinkRelations: SymbolGraphRelationInput[] = [];
+        for (const entry of rows) {
+          const normalizedPath = assertGraphText(entry.path, "File path");
+          const normalizedLanguage = assertGraphText(entry.language, "File language");
+          const files = fileNodes(normalizedPath);
+          const existing = files[0];
+          const fileId = existing?.id ?? db.insert(placeholderVec, {
+            type: "file",
+            path: normalizedPath,
+            language: normalizedLanguage,
+            modifiedAt: Date.now(),
+            active: true,
+          });
+          const filePayload = existing?.payload;
+          const generation = typeof filePayload?.["generation"] === "string" ? filePayload["generation"] : undefined;
+          const targetRevisions = new Map<string, string | null>();
+          for (const relation of entry.relations) {
+            if (!relation.targetPath || targetRevisions.has(relation.targetPath)) continue;
+            const target = fileNodes(relation.targetPath)[0]?.payload;
+            targetRevisions.set(
+              relation.targetPath,
+              typeof target?.["documentRevision"] === "string" ? target["documentRevision"] as string : null,
+            );
+          }
+          const pathLower = normalizedPath.toLowerCase();
+          for (const relation of entry.relations) {
+            newLinkFileIds.push(fileId);
+            newLinkRelations.push(relation);
+            newLinkPayloads.push({
+              type: "link",
+              path: normalizedPath,
+              pathLower,
+              language: normalizedLanguage,
+              kind: relation.kind,
+              value: relation.value,
+              line: relation.line,
+              ...(relation.character !== undefined ? { character: relation.character } : {}),
+              ...(relation.caller !== undefined ? { caller: relation.caller } : {}),
+              ...(relation.targetPath !== undefined ? { targetPath: relation.targetPath } : {}),
+              ...(relation.targetName !== undefined ? { targetName: relation.targetName } : {}),
+              ...(relation.targetKind !== undefined ? { targetKind: relation.targetKind } : {}),
+              ...(relation.targetLine !== undefined ? { targetLine: relation.targetLine } : {}),
+              ...(relation.anchorPath !== undefined ? { anchorPath: relation.anchorPath } : {}),
+              ...(relation.anchorLine !== undefined ? { anchorLine: relation.anchorLine } : {}),
+              resolvedBy: relation.resolvedBy,
+              documentRevision: relation.siteRevision ?? null,
+              ...(relation.targetPath !== undefined
+                ? { targetObservedRevision: targetRevisions.get(relation.targetPath) ?? null }
+                : {}),
+              ...(generation ? { generation } : {}),
+              active: true,
+            });
+          }
+        }
+        const linkIds = newLinkPayloads.length > 0
+          ? db.batchInsert(newLinkPayloads.map(() => placeholderVec), newLinkPayloads)
+          : [];
+        const insertOps: TransactionOperation[] = [
+          ...deleteOps,
+          ...linkIds.flatMap((id, index): TransactionOperation[] => [
+            { type: "upsertEdge", src: newLinkFileIds[index]!, dst: id, label: edgeLabelForKind(newLinkRelations[index]!.kind), weight: 1 },
+          ]),
+        ];
+        if (insertOps.length > 0) db.commitTransaction(insertOps);
+        bumpCounters({ links: linkIds.length - staleIds.length });
+        for (let index = 0; index < linkIds.length; index += 1) {
+          const id = linkIds[index]!;
+          const relation = newLinkRelations[index]!;
+          const indexPath = typeof newLinkPayloads[index]!["path"] === "string" ? newLinkPayloads[index]!["path"] as string : "";
+          db.indexText(id, `${relation.value} ${indexPath}`);
+          db.indexKeyword(id, relation.value);
+        }
+        invalidateGraphShape();
+        scheduleGraphFlush();
+        return { recorded: linkIds.length, removed: staleIds.length };
       });
     },
 

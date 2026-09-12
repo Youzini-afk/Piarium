@@ -25,7 +25,9 @@ describe('typescript language workspace', () => {
     const callerFile = path.join(dir, 'caller.ts');
     fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
     fs.writeFileSync(callerFile, 'import { uniqueTarget } from "./def";\nexport function driver() { return uniqueTarget(); }\n');
-    const workspace = createTypescriptLanguageWorkspace();
+    // The workspace root must come from the real LSP initialize, not the parent
+    // of the first opened file (D-240 rework).
+    const workspace = createTypescriptLanguageWorkspace({ workspaceRoot: dir });
     try {
       const defText = fs.readFileSync(defFile, 'utf8');
       // Only def.ts is opened; caller.ts reaches the program through the
@@ -45,6 +47,80 @@ describe('typescript language workspace', () => {
       const callerItems = workspace.prepareCallHierarchy(callerFile, callerText.indexOf('driver'));
       const outgoing = workspace.callHierarchyOutgoing(callerFile, callerItems[0]!.selectionSpan.start);
       expect(outgoing.some((call) => call.to.name === 'uniqueTarget')).toBe(true);
+    } finally {
+      workspace.dispose();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('uses the LSP initialize root, not the first opened file parent, so a caller in a sibling directory resolves', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-root-'));
+    const srcA = path.join(dir, 'src', 'a');
+    const srcB = path.join(dir, 'src', 'b');
+    fs.mkdirSync(srcA, { recursive: true });
+    fs.mkdirSync(srcB, { recursive: true });
+    const defFile = path.join(srcA, 'def.ts');
+    const callerFile = path.join(srcB, 'caller.ts');
+    fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
+    fs.writeFileSync(callerFile, 'import { uniqueTarget } from "../a/def";\nexport function driver() { return uniqueTarget(); }\n');
+    // The workspace root is the real project root (dir), not src/a — the first
+    // opened file's parent. Without the real root, caller.ts in src/b would
+    // be outside the project and never resolved (D-240 rework).
+    const workspace = createTypescriptLanguageWorkspace({ workspaceRoot: dir });
+    try {
+      const defText = fs.readFileSync(defFile, 'utf8');
+      workspace.setFile(defFile, defText, 1);
+      const defOffset = defText.indexOf('uniqueTarget');
+      const sites = workspace.references(defFile, defOffset);
+      expect(sites.some((site) => site.fileName.replace(/\\/g, '/').endsWith('caller.ts'))).toBe(true);
+    } finally {
+      workspace.dispose();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to cwd without an initialize root and does not infer from the first opened file parent', () => {
+    // Without a workspace root, the service must not guess from the first
+    // opened file's parent — a file in src/a must not make src/a the root
+    // (D-240 rework). The caller in a sibling dir is unreachable.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-no-root-'));
+    const srcA = path.join(dir, 'src', 'a');
+    const srcB = path.join(dir, 'src', 'b');
+    fs.mkdirSync(srcA, { recursive: true });
+    fs.mkdirSync(srcB, { recursive: true });
+    const defFile = path.join(srcA, 'def.ts');
+    const callerFile = path.join(srcB, 'caller.ts');
+    fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
+    fs.writeFileSync(callerFile, 'import { uniqueTarget } from "../a/def";\nexport function driver() { return uniqueTarget(); }\n');
+    const workspace = createTypescriptLanguageWorkspace();
+    try {
+      const defText = fs.readFileSync(defFile, 'utf8');
+      workspace.setFile(defFile, defText, 1);
+      const defOffset = defText.indexOf('uniqueTarget');
+      const sites = workspace.references(defFile, defOffset);
+      // caller.ts is under a sibling directory, not under cwd, so it must not
+      // be resolved when no root was provided.
+      expect(sites.some((site) => site.fileName.replace(/\\/g, '/').endsWith('caller.ts'))).toBe(false);
+    } finally {
+      workspace.dispose();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts setWorkspaceRoot after construction, matching the LSP initialize lifecycle', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'piarium-ts-set-root-'));
+    const defFile = path.join(dir, 'def.ts');
+    const callerFile = path.join(dir, 'caller.ts');
+    fs.writeFileSync(defFile, 'export function uniqueTarget() { return 1; }\n');
+    fs.writeFileSync(callerFile, 'import { uniqueTarget } from "./def";\nexport function driver() { return uniqueTarget(); }\n');
+    const workspace = createTypescriptLanguageWorkspace();
+    try {
+      workspace.setWorkspaceRoot(dir);
+      const defText = fs.readFileSync(defFile, 'utf8');
+      workspace.setFile(defFile, defText, 1);
+      const defOffset = defText.indexOf('uniqueTarget');
+      const sites = workspace.references(defFile, defOffset);
+      expect(sites.some((site) => site.fileName.replace(/\\/g, '/').endsWith('caller.ts'))).toBe(true);
     } finally {
       workspace.dispose();
       fs.rmSync(dir, { recursive: true, force: true });

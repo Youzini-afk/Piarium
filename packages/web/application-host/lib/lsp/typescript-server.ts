@@ -2,15 +2,21 @@ import { createJsonRpcServer } from './jsonrpc.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createTypescriptLanguageWorkspace, type TypescriptCallItem } from './typescript-service.js';
 
-const workspace = createTypescriptLanguageWorkspace();
-
 interface Position { character?: number; line?: number }
 interface ServerParams extends Record<string, unknown> {
   contentChanges?: Array<{ text?: string }>;
   item?: { data?: { fileName?: string; position?: number }; selectionRange?: { start?: Position }; uri?: string };
   position?: Position;
+  rootUri?: string;
   textDocument?: { text?: string; uri?: string; version?: number };
+  workspaceFolders?: Array<{ uri?: string }>;
 }
+
+// The workspace root arrives with the LSP `initialize` request. The built-in
+// TypeScript service must use this real root — not the parent of the first
+// opened file — so a definition in `src/a` can still resolve a caller in `src/b`
+// that was never didOpen'd (D-240 rework).
+const workspace = createTypescriptLanguageWorkspace();
 
 const uriToFile = (uri: unknown): string => {
   if (typeof uri !== 'string') return '';
@@ -99,6 +105,17 @@ const server = createJsonRpcServer({
     const params = (rawParams && typeof rawParams === 'object' && !Array.isArray(rawParams)
       ? rawParams : {}) as ServerParams;
     if (method === 'initialize') {
+      // Capture the real workspace root from the LSP initialize request so the
+      // built-in TypeScript service does not infer it from the first opened
+      // file's parent directory (D-240 rework).
+      const rootUri = params.rootUri ?? params.workspaceFolders?.[0]?.uri;
+      if (rootUri) {
+        try {
+          workspace.setWorkspaceRoot(uriToFile(rootUri));
+        } catch {
+          // If the URI is not a file:// URI, keep the cwd fallback.
+        }
+      }
       return {
         capabilities: {
           textDocumentSync: 1,
