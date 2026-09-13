@@ -211,6 +211,8 @@ agent-mutation 的真实持久 writer 仍是 TS recovery SQLite，Rust operation
 
 **D-264/D-273 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 已删除；Rust format v8 提供 typed recovery transaction/CAS。新增真实 Windows release 子进程证据覆盖 typed working result DTO 拒绝、result release/GC、固定 publish pin 与并发写、scoped subtree read；`storage-adapter.test.ts` 另走三参数 `createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore)`，覆盖 dirty surface Integration apply/undo。combined Recovery/Integration/agent-mutation 的旧 TS writer 与 compatibility callback 投影尚未全部删除，不能据 typed API 或局部纵切测试写成已接管。
 
+**D-273 后续纵切（2026-09-13）**：真实 kernel storage adapter 已将 retrieval artifact/receipt、Integration preview/branch CAS、parent verification、result verification publish 与 draft baseline 的新增路径接到 async root access；branch CAS terminal response 丢失后由新的 Rust operation reconciliation 在 Host 重启路径对账。`surface-mutation.test.ts` 以可控 deferred port 证明 intent CAS 和 terminal CAS 未完成前不会触发编辑器/公开返回，并验证磁盘阶段重启对账。旧 ThreadRuntime history/materialize/delete、部分 verification/review callback 与 combined Recovery TS SQLite writer 仍未迁移。
+
 **D-266 源码责任边界（2026-09-13）**：原 6483 行 `piarium-kernel/src/main.rs` 已缩为启动入口；crate 装配进入
 `lib.rs`，transport/admission 留在 `runtime.rs`，唯一 `Storage` 的 core/operation/authority/object/tree/branch/recovery/record/
 GC/health/dispatch 实现拆入 `storage/`。Windows release build、Rust workspace tests 与既有真实 child-process 反例用于证明此次
