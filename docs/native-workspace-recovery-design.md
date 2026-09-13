@@ -132,18 +132,24 @@ operations. It does not store one row for every workspace path at every turn. La
 there is no arbitrary product file-size cutoff. Cost is paid only when a touched path actually needs a
 before/after object.
 
-Storage location resolution remains:
+Storage location is provider capability, not a mandatory built-in mode. The built-in Rust provider shares
+WorkingState's kernel root at `<PIARIUM_DATA_DIR>/kernel/<hostId>`, reports `application-data`, and advertises
+`storageManagement: false`; it has no project override or independent transfer because R1 keeps WorkingState,
+Recovery, and their object references in one transaction authority.
 
-| Mode | Location |
+The v5 replacement-provider contract retains the four optional locations below when a provider advertises
+`storageManagement: true`:
+
+| Mode | Replacement-provider location |
 | --- | --- |
 | application data | provider storage below `PIARIUM_DATA_DIR` |
 | workspace local | `<workspace>/.piarium/recovery/v1` |
 | workspace adjacent | `<workspace-parent>/.piarium-recovery/<workspaceId>/v1` |
 | custom | `<selected-root>/<authorityId>/<workspaceId>/v1` |
 
-Project choice overrides the global default. Verified transfer switches the registry only after the
-destination catalog and objects are readable. Cleanup walks object references and removes unreachable
-content. Optional per-workspace retention limits cover automatic checkpoint count, completed-operation
+For such a provider, project choice overrides its global default and verified transfer switches its own
+registry only after the destination is readable. Cleanup remains provider-owned. Optional per-workspace
+retention limits cover automatic checkpoint count, completed-operation
 count, logical history bytes, and age. No guessed limit is enabled by default; when configured, the rule
 runs after settled turns. Named checkpoints, pending checkpoints, unfinished operations, and
 `needs-attention` evidence are protected. Deleting workspace history remains an explicit destructive

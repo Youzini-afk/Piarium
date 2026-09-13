@@ -34,8 +34,11 @@ domain method; it is not a mutable global identity.
 R0 is wired from `application-host/index.ts` for Web/serve and Electron's embedded Host. Electron
 stages the executable outside `app.asar`; Web packaging stages it in the package `kernel/` directory.
 The private storage root is `<PIARIUM_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
-diagnostic record is not the lock) preventing two Hosts from writing it at once. A process epoch
-invalidates transient handles after restart; Host, authority, worker generation, session, Thread and Run identity are bound into actor grants.
+diagnostic record is not the lock) preventing two Hosts from writing it at once. Built-in Recovery shares
+this root and reports `application-data` with `storageManagement: false`; it is not independently relocatable.
+The public recovery v5 location methods remain available to replacement providers that advertise storage
+management, but they do not move this kernel authority. A process epoch invalidates transient handles after
+restart; Host, authority, worker generation, session, Thread and Run identity are bound into actor grants.
 
 R1 uses SHA-256 content objects, Rust-typed path states, streamed batch-built immutable roots with a persistent
 AVL child index, copy-on-write path updates, CAS on `writeRevision`, explicit fixed revisions, explicit

@@ -18,9 +18,9 @@ Last updated: 2026-09-13
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-252 已采纳 Rust 系统内核架构；D-273 纠正了 D-267–D-272 的过度 wired/proven 表述。R0/R1 仍按各自证据记为 Partial，阶段 R 整体尚未完成。**
+**D-252 已采纳 Rust 系统内核架构；D-273 纠正了 D-267–D-272 的过度 wired/proven 表述；D-275 已关闭 R1。R0 仍按自身证据记为 Partial，阶段 R 整体尚未完成。**
 目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
-完整 TS consumer cutover、R2–R6 和跨平台/发行证据仍未交付，不把 D-246–D-251 的执行报告视为 Rust 验收通过。
+R2–R6 和 R0 的剩余跨平台/发行进程证据仍未交付，不把 R1 完成误写成整个 Rust 阶段完成。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -163,13 +163,13 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
 
-R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链。R1 的生产 WorkingState consumer 已统一使用 immutable root/path 接口，combined Recovery/Integration/agent-mutation 元数据也统一由 Rust typed recovery writer 持久化；TS 只保留 Documents/Registry 与文件副作用编排。R1 继续记为 Partial，是因为 storage location 产品语义、跨平台发行和硬故障证据尚未完成，不是因为生产仍有第二个元数据写者。
-R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
+R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链。R1 的生产 WorkingState consumer 已统一使用 immutable root/path 接口，combined Recovery/Integration/agent-mutation 元数据也统一由 Rust typed recovery writer 持久化；TS 只保留 Documents/Registry 与文件副作用编排。D-275 已收口内置 Recovery 的 storage-location 产品语义并明确 R1 耐久验收边界，因此 R1 状态与存储里程碑完成。
+R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。R0 的跨平台/发行进程证据仍按其自身里程碑保持 Partial，不反向阻塞 R1。
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
 | R0 协议与进程 | Partial（implemented / wired） | `kernel/rust-toolchain.toml` 钉住 1.97.1；同一 schema 生成 TS/Rust method DTO；真实 framed 子进程、单 envelope 交接背压、blob 与 branch create/write 流式输入、build/epoch/grant/generation 握手、取消、真实退出等待和 Host 启停已有 Windows release 证据；macOS/Linux、签名安装包、stdout 半帧断线和完整任意 cwd 包内 smoke 仍需验收 |
-| R1 状态与存储 | Partial（生产 consumer cutover implemented / wired；发行与故障证据未完成） | 当前唯一 catalog 格式为 v9，握手报告同一版本。Rust 拥有 blob、AVL/Merkle root、branch metadata/revision/pin、result/draft/verification/review、retrieval records、typed recovery operation/file、reference 与 GC；生产 ThreadRuntime/Integration/verification/review/history/materialize/delete 使用 root/path/domain API，combined Recovery/Integration/agent-mutation 以 Rust 为唯一耐久元数据 writer。旧 WorkingState 与 SQLite recovery engine 仅是测试 helper，生产 import graph 不可达；R2 的 Documents/Registry 与真实文件副作用仍由 TS 编排。storage location 迁移语义、macOS/Linux、签名包和硬故障窗口未验收，故不标 proven/完成 |
+| R1 状态与存储 | **Complete**（production authority / consumer cutover / durability semantics） | 当前唯一 catalog 格式为 v9，握手报告同一版本。Rust 拥有 blob、AVL/Merkle root、branch metadata/revision/pin、result/draft/verification/review、retrieval records、typed recovery operation/file、reference 与 GC；生产 ThreadRuntime/Integration/verification/review/history/materialize/delete 使用 root/path/domain API，combined Recovery/Integration/agent-mutation 以 Rust 为唯一耐久元数据 writer。旧 WorkingState 与 SQLite recovery engine 仅是测试 helper，生产 import graph 不可达。内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，固定报告 `application-data` / `storageManagement:false`，不独立迁移；replacement provider 仍可实现公开 v5 的可选位置管理。R2 的 Documents/Registry 与真实文件副作用仍由 TS 编排。跨平台 packaged smoke 属于 R0/发行 CI，代码签名按现有产品合同可选；物理断电 campaign 不作为 R1 实现完成门槛 |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -177,7 +177,7 @@ R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，�
 | R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
 
 D-246–D-251 已由 D-254 完成独立验收与重要错误收口；R0/R1 的本机 Rust 纵切现已补入，下一步是按 R1 consumer map 继续切换而非再建 TS 过渡内核。
-当前没有 Rust 端到端性能对照、macOS/Linux 真机发行或断电级故障注入结论；绝对性能目标仍在实施时定标，不预填提升倍数。
+当前没有 Rust 端到端性能对照；绝对性能目标仍在 R6 实施时定标，不预填提升倍数。macOS/Linux packaged smoke 由现有 native release CI 承担并归 R0/发行证据；当前产品允许 unsigned Windows/macOS artifact，因此签名不属于 R1。物理断电测试可作为后续发行耐久 QA，但 R1 已用明确落盘顺序、事务故障注入和重启对账覆盖可执行的耐久边界。
 
 **R0/R1 返工证据（2026-09-13，D-256）**：`packages/web/application-host/lib/kernel/kernel-client.test.ts` 通过真实
 release `piarium-kernel` 子进程覆盖固定 revision 不漂移、pin 保留到显式 unpin、GC、finish 失败回滚/同 operationId 重试、
@@ -189,7 +189,7 @@ Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 S
 typed `storage.record.*`、record-bound blob read、空根分页边界和 owner/reference release；独立 Host adapter 纵切经
 `KernelStorageAdapter` 完成 capture → branch create → virtual CAS write → publish result → kernel object read，重建/释放
 使用当时的 v6 catalog。生产装配切换位置是 `application-host/index.ts` 的 `createKernelWorkspaceWorkingStateAccess`；Recovery
-checkpoint/turn/mutation 通过 direct kernel record path 持久化；workspace composite record identity 和错误 actor 拒绝已由 release child-process test 覆盖。combined operation/operation-file 仍需 direct typed API，R1 仍因文件 apply、跨平台与完整故障证据保持 Partial。
+checkpoint/turn/mutation 通过 direct kernel record path 持久化；workspace composite record identity 和错误 actor 拒绝已由 release child-process test 覆盖。当时 combined operation/operation-file 尚未 direct typed cutover，因此该历史切片仍记 Partial；后续 D-274/D-275 已取代这一验收状态。
 Kernel protocol 使用 `kernel/protocol/schema.json` → generated TS DTO，Host 在 `application-host/index.ts` 启动/停止同一 client；
 Electron package 将可执行文件和 SHA-256 manifest 放在 `resources/kernel`（asar 外），after-pack 会核对 manifest；Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
 macOS/Linux 真机运行或完整跨平台签名证据。
@@ -201,16 +201,18 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 单路径更新没有复制完整兄弟集合。D-258 已确认其中 `length(TEXT)` 不是持久写入字节，原 payload 数字撤回；启动/缓存未控制的
 墙钟与 RSS 也不作为性能结论。受控端到端对照仍按 R6 执行。
 
-**R1 当前责任边界（D-274 当前权威）**：Rust kernel storage root 是 WorkingState 与 recovery 元数据的唯一生产 writer。生产 branch read/write、explore pin、result/draft、verification/review、retrieval、history、materialize/delete、Integration 与 agent mutation 全部通过异步 root/path/domain/recovery API；不再展开持久全树，也不再打开 TS recovery SQLite。`working-state-store.ts` 和 local SQLite recovery engine 只服务测试夹具，不能被生产装配导入。
+**R1 当前责任边界（D-274 实现边界；D-275 验收收口）**：Rust kernel storage root 是 WorkingState 与 recovery 元数据的唯一生产 writer。生产 branch read/write、explore pin、result/draft、verification/review、retrieval、history、materialize/delete、Integration 与 agent mutation 全部通过异步 root/path/domain/recovery API；不再展开持久全树，也不再打开 TS recovery SQLite。`working-state-store.ts` 和 local SQLite recovery engine 只服务测试夹具，不能被生产装配导入。
 
 固定 draft 是独立 branch/revision/root；result、verification 与 review 绑定明确 branch/revision/root。scope 在 Rust 遍历前生效，pin/diff/blob read 核对来源；result release 原子释放相关记录与 revision，独立 pin 继续保留 root。branch metadata 随 branch create 同事务发布，重复相同 blob 不覆盖已有 transient owner。combined 文件操作在 Rust phase/terminal CAS 完成后才执行或返回；导航回执丢失时重启复用同 operationId，而不是补偿文件后留下会话/磁盘分裂。
 
-**D-274 定向证据（2026-09-14）**：真实 Windows release kernel tests 覆盖 fixed revision/pin/scope、typed record 拒绝、result release/GC、branch metadata 幂等与重复对象 owner；`storage-adapter.test.ts` 覆盖真实 branch/root 与 durable operation，`kernel-durable-engine.test.ts` 覆盖 combined recovery 重启、导航回执丢失、undo 且不创建 legacy catalog；surface/authority 定向测试覆盖 Rust durable CAS 先于 Documents 副作用。R1 仍缺 storage location 产品语义、macOS/Linux/签名发行与断电级验证。
+**D-274 定向证据（2026-09-14）**：真实 Windows release kernel tests 覆盖 fixed revision/pin/scope、typed record 拒绝、result release/GC、branch metadata 幂等与重复对象 owner；`storage-adapter.test.ts` 覆盖真实 branch/root 与 durable operation，`kernel-durable-engine.test.ts` 覆盖 combined recovery 重启、导航回执丢失、undo 且不创建 legacy catalog；surface/authority 定向测试覆盖 Rust durable CAS 先于 Documents 副作用。
+
+**D-275 R1 收口证据（2026-09-14）**：内置 recovery 明确使用 Application Host kernel storage root，真实 kernel-backed facade 报告 `application-data` / `storageManagement:false`，独立 location mutation 返回 `unavailable`；Recovery UI 只在 provider 声明 `storageManagement:true` 时显示 location/migration 控件。Rust 对象安装先 flush staging，再 durable rename、目标文件 flush、目录同步后发布 SQLite 引用；已有 operation finish rollback/retry、typed recovery transaction fault injection、GC cleanup failure 跨重启重试和 terminal response 丢失后按 operation identity 对账。由此 R1 按可执行的 state/storage/durability 契约标为 Complete；R0 平台发行证据及 R2–R6 不随之提前完成。
 
 **D-266 源码责任边界（2026-09-13）**：原 6483 行 `piarium-kernel/src/main.rs` 已缩为启动入口；crate 装配进入
 `lib.rs`，transport/admission 留在 `runtime.rs`，唯一 `Storage` 的 core/operation/authority/object/tree/branch/recovery/record/
 GC/health/dispatch 实现拆入 `storage/`。Windows release build、Rust workspace tests 与既有真实 child-process 反例用于证明此次
-移动没有改变协议或持久行为。本条是可维护性收口，不改变 R0/R1 Partial 和 R2–R6 未完成状态。
+移动没有改变协议或持久行为。本条是当时的可维护性收口，不改变该时点 R0/R1 Partial 和 R2–R6 未完成状态；当前 R1 状态由 D-275 取代。
 
 **R0/R1 历史验收边界（D-258，2026-09-13；当前由 D-265 取代）**：D-257 的 64-envelope queue、hash-only blob read、可选 publish CAS、
 format v5 与 object attachment 表述已由本条取代。

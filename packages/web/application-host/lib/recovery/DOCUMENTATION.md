@@ -32,9 +32,10 @@ buffer becomes a path conflict and is the only normal reason to show the recover
 write, Piarium stores the current version of the affected paths as the redo/compensation state. It does
 not create a whole-workspace safety checkpoint or enter global maintenance mode.
 
-The small SQLite operation record is durable. If file application or Pi navigation fails, Piarium
-compensates only paths already changed by that operation. Startup resolves an interrupted operation
-from those recorded paths; it never leaves the workspace locked while waiting for a conversation step.
+The durable operation/file record is owned by the Rust kernel. If file application or Pi navigation
+fails, Piarium compensates only paths already changed by that operation. Startup resolves an interrupted
+operation from those recorded paths; it never leaves the workspace locked while waiting for a conversation
+step. The former local SQLite recovery engine is test-fixture code only and is not a production fallback.
 
 Thread result integration uses the same selected storage, content objects, exact path-state capture,
 conditional apply/compensation phases, and workspace lease through a trusted Host-only adapter. Its
@@ -54,11 +55,11 @@ steps remains needs-attention rather than being guessed or silently rolled back 
 
 ## Coverage boundary
 
-Kernel-backed Application Host production contexts expose a Rust `RecoveryDurableOperationPort`. Agent
-surface/disk mutation intent and file phases use that port before the first side effect; local SQLite
-operation rows remain only in isolated fixtures and in combined consumers not yet cut over. The port
-uses one operation revision for file CAS and terminal completion, so a lost response is reconciled by
-operation identity rather than replaying a mutation.
+Kernel-backed Application Host production contexts expose a Rust `RecoveryDurableOperationPort`. Combined
+Recovery, Integration, and agent surface/disk mutation intent and file phases use that port before the first
+side effect; local SQLite operation rows remain only in isolated fixtures. The port uses one operation
+revision for file CAS and terminal completion, so a lost response is reconciled by operation identity rather
+than replaying a mutation.
 
 `write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation
 boundary. A generic native process can modify unknown paths without a portable pre-write hook. Watcher
@@ -71,18 +72,21 @@ shell rollback without a real copy-on-write or operating-system interception pro
 
 ## Persistence
 
-Each selected recovery provider owns the same user-configurable storage-location model:
+The built-in `piarium.builtin.recovery` provider shares the Rust kernel storage authority with WorkingState.
+Its product location is the Application Host kernel root below `PIARIUM_DATA_DIR/kernel/<hostId>` and it
+reports `{ mode: "application-data" }` with `storageManagement: false`. It cannot be moved independently:
+doing so would split recovery references from the WorkingState/object transaction domain that R1 deliberately
+made authoritative. The Recovery settings UI therefore exposes location and migration controls only when the
+selected replacement provider advertises `storageManagement: true`.
 
-- application data under `PIARIUM_DATA_DIR`;
-- inside the workspace;
-- beside the workspace;
-- a custom directory.
+The public recovery v5 contract still permits replacement providers to implement application-data,
+workspace-local, workspace-adjacent, or custom locations. For those providers, transfer and cleanup semantics
+remain provider-owned. They do not grant direct access to the built-in kernel catalog.
 
-The payload contains `catalog.sqlite`, `objects/`, and `staging/`. Content objects use SHA-256 over the
-uncompressed bytes. Checkpoints store only affected-path state references. Location transfer verifies
-the destination before switching authority; cleanup removes unreachable objects.
-Working branches and every published Thread result own independent object references in this catalog,
-so deleting recovery history cannot collect result or baseline content that a Thread still retains.
+The built-in payload is the kernel catalog plus its content-addressed object and staging directories. Content
+objects use SHA-256 over the uncompressed bytes. Checkpoints store only affected-path state references.
+Working branches and every published Thread result own independent object references in this catalog, so
+releasing recovery history cannot collect result or baseline content that a Thread still retains.
 
 User Thread-history release removes selected old `WorkingResult` metadata before dropping its
 `thread-result` references. It uses the owning storage's exclusive lease and rechecks live Thread/Run,

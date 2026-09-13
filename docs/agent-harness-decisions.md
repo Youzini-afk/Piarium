@@ -6033,3 +6033,23 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-274 | implemented / wired / targeted local evidence；R1 remains Partial | supersedes D-273 implementation-required status | status 阶段 R1；plan 阶段 R1；architecture；rust-kernel-design；kernel module documentation |
+### D-275 · 2026-09-14 · R1 收口：内置 kernel storage 固定共址，发行签名与物理断电不是 R1 gate
+
+类型：R1 acceptance closure；只追加，不改写 D-274 的历史实施事实
+
+问题：D-274 已完成 production metadata cutover，但把 storage location、macOS/Linux/签名包和断电级验证一起留作 R1 blocker。这里混合了三个不同层次：内置 provider 的产品语义、R0/发行 CI 的平台 package evidence，以及无法在普通开发测试中诚实证明的物理掉电 QA。与此同时，Recovery Settings 仍无条件展示旧 SQLite provider 的 location/migration 控件，而 Rust facade 已正确声明 `storageManagement:false`，形成产品合同不一致。
+
+决定：
+
+1. `piarium.builtin.recovery` 与 WorkingState 使用同一 `<PIARIUM_DATA_DIR>/kernel/<hostId>` Rust storage authority。它公开报告 `application-data` / `storageManagement:false`，不提供 workspace-local、adjacent、custom 或独立 migration；把 Recovery 单独搬走会重新拆开 R1 已统一的 object/reference/transaction authority。Recovery UI 必须按 provider capability gating location/migration 控件。
+2. recovery v5 的四种 location 与 move 方法继续作为 replacement provider 的可选能力；provider 只有声明 `storageManagement:true` 才需要实现。内置 kernel 的选择不删除公共扩展合同，也不允许 replacement provider 直接移动 kernel 私有 catalog。
+3. R1 durability 的可执行验收是：内容对象先 flush/install 后发布引用，平台对应的 rename/目录持久化顺序明确，SQLite 事务保持单 writer；operation/recovery 关键事务窗口有 fault injection；GC physical cleanup failure、terminal response loss 和 unfinished operation 能在 restart 后对账。真实物理断电 campaign 可以作为后续 release QA，但不作为无法稳定自动化的 R1 实现门槛。
+4. native macOS/Linux/Windows package smoke 属于现有 release CI/R0 发行进程证据；开发者不需要拥有所有平台。当前产品文档明确允许 unsigned Windows installer，并且 public macOS workflow 有意产出 unsigned artifacts，因此代码签名不是 R1 gate。
+
+结果：R1 状态与存储标记为 Complete。R0 保留其独立的 process/package evidence 状态；Documents/Registry、真实磁盘 resource gate/file apply 属于 R2，baseline/materialization/CoW 属于 R3，R4–R6 均不因本决定提前完成。
+
+## D-275 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-275 | accepted / implemented / R1 complete | — | status 阶段 R1；plan 阶段 R1；architecture；rust-kernel-design；recovery/kernel documentation；Recovery Settings |

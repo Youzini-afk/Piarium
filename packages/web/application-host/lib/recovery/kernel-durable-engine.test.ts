@@ -92,6 +92,27 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   };
 
   let runtime = await open("cache-first");
+  expect(await runtime.engine.storageStatus(workspaceId)).toMatchObject({
+    status: "ready",
+    storage: { location: { mode: "application-data" }, locationSource: "global", state: "ready" },
+  });
+  expect(await runtime.engine.status(workspaceId)).toMatchObject({
+    status: "ready",
+    capabilities: { storageManagement: false },
+    storage: { location: { mode: "application-data" }, locationSource: "global" },
+  });
+  expect(await runtime.engine.setStorageLocation({ workspaceId, location: { mode: "workspace-local" } })).toMatchObject({
+    status: "failed",
+    failure: { code: "unavailable" },
+  });
+  expect(await runtime.engine.setDefaultStorageLocation({ mode: "workspace-adjacent" })).toMatchObject({
+    status: "failed",
+    failure: { code: "unavailable" },
+  });
+  expect(await runtime.engine.clearStorageLocationOverride(workspaceId)).toMatchObject({
+    status: "failed",
+    failure: { code: "unavailable" },
+  });
   await runtime.engine.recordTurnStart({
     activeWriterScopes: [], executionId: "execution-1", provenance: "caused-by", runtimeGeneration: 1,
     sessionId, userEntryId: "user-1", workerId: "worker-1", workspaceId,

@@ -413,6 +413,7 @@ export const RecoverySettings: React.FC = () => {
     && (workspace.checkpointCount > 0 || workspace.objectCount > 0)
   )), [visibleStorageWorkspaces]);
 
+  const storageManagement = status?.capabilities.storageManagement === true;
   const selectedLocation = status?.storage.location;
   const globalLocationChanged = globalStatus
     ? globalStatus.location.mode !== globalStorageMode
@@ -467,55 +468,57 @@ export const RecoverySettings: React.FC = () => {
           </Button>
         </div>
 
-        <div className="space-y-3 rounded-xl border border-border/60 p-3">
-          <div>
-            <h4 className="typography-ui-label font-medium text-foreground">
-              {t('settings.piarium.recovery.storage.globalTitle')}
-            </h4>
-            <p className="mt-1 typography-meta text-muted-foreground">
-              {t('settings.piarium.recovery.storage.globalDescription')}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {STORAGE_MODES.map((option) => (
-              <Button
-                key={option.mode}
-                type="button"
-                variant="chip"
-                size="sm"
-                aria-pressed={globalStorageMode === option.mode}
-                onClick={() => setGlobalStorageMode(option.mode)}
-              >
-                {t(option.labelKey)}
-              </Button>
-            ))}
-          </div>
-          {globalStorageMode === 'custom' ? (
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <Input
-                value={globalCustomRoot}
-                onChange={(event) => setGlobalCustomRoot(event.target.value)}
-                placeholder={t('settings.piarium.recovery.storage.customPlaceholder')}
-                className="min-w-0 flex-1 font-mono typography-meta"
-              />
-              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => void chooseStorageFolder('global')}>
-                <Icon name="folder" className="size-3.5" />
-                {t('settings.piarium.recovery.storage.chooseFolder')}
-              </Button>
+        {storageManagement ? (
+          <div className="space-y-3 rounded-xl border border-border/60 p-3">
+            <div>
+              <h4 className="typography-ui-label font-medium text-foreground">
+                {t('settings.piarium.recovery.storage.globalTitle')}
+              </h4>
+              <p className="mt-1 typography-meta text-muted-foreground">
+                {t('settings.piarium.recovery.storage.globalDescription')}
+              </p>
             </div>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!globalLocationChanged || busy !== null || (globalStorageMode === 'custom' && !globalCustomRoot.trim())}
-            onClick={() => void saveGlobalStorage()}
-          >
-            {busy === 'global'
-              ? t('settings.piarium.recovery.storage.savingGlobal')
-              : t('settings.piarium.recovery.storage.saveGlobal')}
-          </Button>
-        </div>
+            <div className="flex flex-wrap gap-2">
+              {STORAGE_MODES.map((option) => (
+                <Button
+                  key={option.mode}
+                  type="button"
+                  variant="chip"
+                  size="sm"
+                  aria-pressed={globalStorageMode === option.mode}
+                  onClick={() => setGlobalStorageMode(option.mode)}
+                >
+                  {t(option.labelKey)}
+                </Button>
+              ))}
+            </div>
+            {globalStorageMode === 'custom' ? (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={globalCustomRoot}
+                  onChange={(event) => setGlobalCustomRoot(event.target.value)}
+                  placeholder={t('settings.piarium.recovery.storage.customPlaceholder')}
+                  className="min-w-0 flex-1 font-mono typography-meta"
+                />
+                <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => void chooseStorageFolder('global')}>
+                  <Icon name="folder" className="size-3.5" />
+                  {t('settings.piarium.recovery.storage.chooseFolder')}
+                </Button>
+              </div>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!globalLocationChanged || busy !== null || (globalStorageMode === 'custom' && !globalCustomRoot.trim())}
+              onClick={() => void saveGlobalStorage()}
+            >
+              {busy === 'global'
+                ? t('settings.piarium.recovery.storage.savingGlobal')
+                : t('settings.piarium.recovery.storage.saveGlobal')}
+            </Button>
+          </div>
+        ) : null}
 
         {globalError ? (
           <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">
@@ -534,15 +537,17 @@ export const RecoverySettings: React.FC = () => {
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={maintenanceBusy !== null || migratableStorageWorkspaces.length === 0}
-                onClick={() => void maintainStorageWorkspaces('migrate', migratableStorageWorkspaces)}
-              >
-                {t('settings.piarium.recovery.storage.migrateAll')}
-              </Button>
+              {storageManagement ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={maintenanceBusy !== null || migratableStorageWorkspaces.length === 0}
+                  onClick={() => void maintainStorageWorkspaces('migrate', migratableStorageWorkspaces)}
+                >
+                  {t('settings.piarium.recovery.storage.migrateAll')}
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant="outline"
@@ -606,7 +611,7 @@ export const RecoverySettings: React.FC = () => {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {workspace.locationSource === 'global' && workspace.migrationRequired ? (
+                      {storageManagement && workspace.locationSource === 'global' && workspace.migrationRequired ? (
                         <Button
                           type="button"
                           variant="ghost"
@@ -789,7 +794,7 @@ export const RecoverySettings: React.FC = () => {
           </div>
         ) : null}
 
-        {status ? (
+        {status && storageManagement ? (
           <div className="space-y-3 rounded-xl border border-border/60 p-3">
             <div>
               <h4 className="typography-ui-label font-medium text-foreground">

@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R0/R1 foundations and root/path consumers are locally exercised. Retrieval plus checkpoint/turn/mutation use Rust durability; typed working records, root preview, directory integration and agent mutation operations now use Rust domain/operation ports. Combined Recovery public methods, callback compatibility consumers and branch undo/reconcile remain pending R1 cutover, while file apply/materialization remain later stages
+Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage authority is complete. R0 packaging/process evidence remains tracked separately, and R2–R6 retain their defined resource migrations.
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 ## 1. Context
 
@@ -1157,5 +1157,13 @@ D-274 completes the R1 production metadata cutover on catalog format v9. Working
 immutable root/path/domain methods; branch metadata and fixed draft/result identities publish in Rust
 transactions. Combined Recovery/Integration/agent-mutation uses the Rust typed operation/file stages as
 its only durable writer, while TS coordinates Documents/Registry and disk side effects after the relevant
-CAS. The old WorkingState and SQLite recovery engines are test helpers only. Storage-location product
-semantics and cross-platform, packaged, and hard-power-loss evidence remain R1 work.
+CAS. The old WorkingState and SQLite recovery engines are test helpers only.
+
+D-275 closes R1. Built-in Recovery shares `<PIARIUM_DATA_DIR>/kernel/<hostId>` with WorkingState, reports
+`application-data`, and advertises `storageManagement: false`; location/migration UI is capability-gated,
+while replacement recovery providers may still implement the optional v5 storage-management contract.
+R1 durability is evidenced by explicit object-install ordering, filesystem flush/write-through behavior,
+SQLite transactions, injected failure windows, and restart reconciliation. Native multi-platform package
+smokes remain release-CI evidence, code signing remains optional under the current product contract, and a
+physical power-cut campaign is release QA rather than an R1 implementation gate. R2/R3 continue to own
+Documents/Registry coordination, real disk mutation backends, baseline capture, and materialization.
