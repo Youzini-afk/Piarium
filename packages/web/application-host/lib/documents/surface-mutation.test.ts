@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import type { AgentInputContext, DocumentSurfaceWritePathResult } from "@piarium/protocol";
 import type { DirtyBufferPublication, DocumentSurfaceOperationRequest, DocumentSurfaceOperationResult } from "./authority.js";
 import { applyAgentSurfaceMutation, applyTextEdits } from "./surface-mutation.js";
+import { reconcileInterruptedAgentMutations } from "./agent-mutation-operation.js";
 import type { SurfaceSnapshotInspectResult } from "./surface-snapshot-store.js";
+import type { DurableFileOperationContext } from "../recovery/durable-file-operation.js";
+import type { RecoveryState } from "../recovery/journal-files.js";
 
 const hash = (text: string) => `sha256-${createHash("sha256").update(text, "utf8").digest("hex")}`;
 
@@ -612,3 +615,178 @@ describe("applyAgentSurfaceMutation", () => {
     ]));
   });
 });
+
+describe("durable agent mutation ordering", () => {
+  it("waits for Rust intent CAS before the editor and for terminal CAS before returning", async () => {
+    const inspect: SurfaceSnapshotInspectResult = {
+      status: "ready",
+      bom: false,
+      content: "B\n",
+      encoding: "utf-8",
+      localEditRevision: 2,
+      baseRevision: "disk-a",
+      revision: "surface-draft:fixed:2",
+      resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      source: "surface-draft",
+    };
+    const publication: DirtyBufferPublication = {
+      generation: 1,
+      ownerId: "surface",
+      registrationId: "reg-1",
+      resources: [{
+        baseRevision: "disk-a",
+        localEditRevision: 2,
+        documentInstanceId: "doc-1",
+        bufferHash: hash("B\n"),
+        encoding: "utf-8",
+        bom: false,
+        lineEnding: "lf",
+        resource: { workspaceId: "ws", resourceId: "draft.ts" },
+      }],
+      updatedAt: new Date().toISOString(),
+      workspaceId: "ws",
+    };
+    const intent = deferred<void>();
+    const terminal = deferred<void>();
+    let intentReleased = false;
+    let terminalReleased = false;
+    let operationId = "";
+    let revision = 1;
+    let phase = "pending";
+    let state = "applying";
+    let data: Record<string, unknown> = {};
+    let editorCalls = 0;
+    let settled = false;
+    const port = {
+      async createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; sessionId?: string }) {
+        operationId = input.operationId;
+        state = input.state;
+        data = structuredClone(input.data);
+        return { operationId, revision, state, data, files: [{ path: "draft.ts", phase, revision: 1, targetJson: JSON.stringify(input.targets["draft.ts"]?.target), safetyJson: JSON.stringify(input.targets["draft.ts"]?.safety) }] };
+      },
+      async getOperation() {
+        return { operationId, revision, state, data, files: [{ path: "draft.ts", phase, revision, targetJson: JSON.stringify((data.targets as Record<string, { target?: RecoveryState }>)?.["draft.ts"]?.target), safetyJson: JSON.stringify((data.safety as Record<string, RecoveryState>)?.["draft.ts"]) }] };
+      },
+      async updateOperationFile(input: { phase: string }) {
+        if (input.phase === "external-intent" && !intentReleased) await intent.promise;
+        phase = input.phase;
+        revision += 1;
+        return { revision };
+      },
+      async completeOperation(input: { state: string }) {
+        if (input.state === "complete" && !terminalReleased) await terminal.promise;
+        state = input.state;
+        revision += 1;
+        return { operationId, revision, state };
+      },
+      async listOperations() { return []; },
+      async releaseOperation() { return { released: true }; },
+    };
+    const durable: DurableFileOperationContext = {
+      durableRecoveryStore: port,
+      fileStore: {} as never,
+      identity: { authorityId: "host", canonicalRoot: "", filesystemProfile: "test", workspaceId: "ws" },
+      root: "",
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+    };
+    const requestSurfaceOperation = async (request: DocumentSurfaceOperationRequest) => {
+      editorCalls += 1;
+      expect(request.action).toBe("apply");
+      return [{
+        resource: { workspaceId: "ws", resourceId: "draft.ts" },
+        status: "applied" as const,
+        documentInstanceId: "doc-1",
+        beforeLocalEditRevision: 2,
+        beforeHash: hash("B\n"),
+        afterLocalEditRevision: 3,
+        afterHash: hash("C\n"),
+      }];
+    };
+    const run = applyAgentSurfaceMutation({
+      inspectSnapshot: () => inspect,
+      surfaceOwner: () => ({ ownerId: "surface", generation: 1, workspaceId: "ws" }),
+      inspectDirtyBuffers: async () => [publication],
+      requestSurfaceOperation,
+      inspectWorkspace: async () => ({ epoch: 1 }),
+      readDisk: async () => ({ status: "ready" as const, content: "A\n", revision: "disk-a" }),
+      writeDisk: async () => ({ status: "conflict" as const }),
+      deleteDisk: async () => ({ status: "conflict" as const }),
+      durable,
+    }, {
+      sessionId: "s1",
+      context: context("ws", ["draft.ts"]),
+      changes: [{ resourceId: "draft.ts", action: "edit", edits: [{ oldText: "B\n", newText: "C\n" }] }],
+    }).then((value) => { settled = true; return value; });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(editorCalls).toBe(0);
+    intentReleased = true;
+    intent.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(editorCalls).toBe(1);
+    expect(settled).toBe(false);
+    terminalReleased = true;
+    terminal.resolve();
+    const result = await run;
+    expect(settled).toBe(true);
+    expect(result.result.status).toBe("applied");
+  });
+
+  it("reconciles an interrupted disk phase through the Rust operation after host restart", async () => {
+    const safety: RecoveryState = { kind: "regular-file", objectHash: `sha256-${"a".repeat(64)}`, byteLength: 4, mode: 0o644 };
+    const target: RecoveryState = { kind: "regular-file", objectHash: `sha256-${"b".repeat(64)}`, byteLength: 6, mode: 0o644 };
+    const operation: Record<string, unknown> = {
+      operationId: "agent-restart-op",
+      state: "applying",
+      revision: 3,
+      data: {
+        operationId: "agent-restart-op",
+        workspaceId: "ws",
+        sessionId: "s1",
+        targetKinds: { "disk.ts": "disk" },
+        targets: { "disk.ts": { expected: safety, target } },
+        safety: { "disk.ts": safety },
+        appliedPaths: ["disk.ts"],
+        compensatedPaths: [],
+        needsAttentionPaths: [],
+        results: [],
+      },
+      files: [{ path: "disk.ts", phase: "target-observed", revision: 3, targetJson: JSON.stringify(target), safetyJson: JSON.stringify(safety) }],
+    };
+    const durable = {
+      async createOperation() { return {}; },
+      async listOperations() { return [{ operationId: "agent-restart-op", state: "applying", sessionId: "s1" }]; },
+      async getOperation() { return operation; },
+      async updateOperationFile(input: { phase: string }) {
+        const file = (operation.files as Array<Record<string, unknown>>)[0]!;
+        file.phase = input.phase;
+        operation.revision = Number(operation.revision) + 1;
+        file.revision = operation.revision;
+        return { revision: operation.revision };
+      },
+      async completeOperation(input: { state: string }) {
+        operation.state = input.state;
+        operation.revision = Number(operation.revision) + 1;
+        return { revision: operation.revision, state: operation.state };
+      },
+      async releaseOperation() { return { released: true }; },
+    };
+    const context: DurableFileOperationContext = {
+      durableRecoveryStore: durable,
+      fileStore: { captureState: async () => ({ state: safety }) } as never,
+      identity: { authorityId: "host", canonicalRoot: "", filesystemProfile: "test", workspaceId: "ws" },
+      root: "",
+      resourceOperationGate: { run: async (_resources, run) => run() },
+    };
+    const outcome = await reconcileInterruptedAgentMutations(context);
+    expect(outcome).toEqual({ compensated: ["agent-restart-op"], needsAttention: [], aborted: [] });
+    expect(operation.state).toBe("compensated");
+    expect((operation.files as Array<Record<string, unknown>>)[0]?.phase).toBe("safety-observed");
+  });
+});
+
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => { resolve = next; });
+  return { promise, resolve };
+}

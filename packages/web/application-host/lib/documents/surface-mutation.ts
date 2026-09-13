@@ -603,14 +603,14 @@ export async function applyAgentSurfaceMutation(
             message: `${entry.item.change.resourceId} was written to the editor buffer but could not be compensated.`,
           };
           if (deps.durable && durable) {
-            markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+            await markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
           }
         }
       } else {
         try {
           if (deps.durable && durable) {
             for (const entry of surfaceApplied) {
-              markAgentMutationSurfaceCompensateIntent(deps.durable, durable, entry.item.change.resourceId);
+              await markAgentMutationSurfaceCompensateIntent(deps.durable, durable, entry.item.change.resourceId);
             }
           }
           const undone = await deps.requestSurfaceOperation({
@@ -652,7 +652,7 @@ export async function applyAgentSurfaceMutation(
                 message: `${entry.item.change.resourceId} was restored to the editor buffer from before this mutation.`,
               };
               if (deps.durable && durable) {
-                markAgentMutationSurfaceCompensated(deps.durable, durable, entry.item.change.resourceId);
+                await markAgentMutationSurfaceCompensated(deps.durable, durable, entry.item.change.resourceId);
               }
             } else {
               entry.item.result = {
@@ -662,7 +662,7 @@ export async function applyAgentSurfaceMutation(
                 message: `${entry.item.change.resourceId} changed after it was written, so compensation left the live buffer untouched.`,
               };
               if (deps.durable && durable) {
-                markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+                await markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
               }
             }
           }
@@ -676,7 +676,7 @@ export async function applyAgentSurfaceMutation(
                 message: `${entry.item.change.resourceId} changed after it was written, so compensation left the live buffer untouched.`,
               };
               if (deps.durable && durable) {
-                markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
+                await markAgentMutationPathNeedsAttention(deps.durable, durable, entry.item.change.resourceId);
               }
             }
           }
@@ -771,7 +771,7 @@ export async function applyAgentSurfaceMutation(
       input.signal?.throwIfAborted();
       if (deps.durable && durable) {
         for (const item of toApplySurface) {
-          markAgentMutationSurfaceDispatched(deps.durable, durable, item.change.resourceId);
+          await markAgentMutationSurfaceDispatched(deps.durable, durable, item.change.resourceId);
           surfaceDispatched = true;
         }
       }
@@ -812,7 +812,7 @@ export async function applyAgentSurfaceMutation(
         };
         applied.push({ kind: "surface", item, receipt });
           if (deps.durable && durable) {
-            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+            await markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
               afterLocalEditRevision: receipt.afterLocalEditRevision,
               ...(receipt.afterHash === undefined ? {} : { afterHash: receipt.afterHash }),
             });
@@ -830,9 +830,9 @@ export async function applyAgentSurfaceMutation(
         failed = true;
         if (deps.durable && durable) {
           if (receipt) {
-            markAgentMutationSurfaceNotApplied(deps.durable, durable, item.change.resourceId);
+            await markAgentMutationSurfaceNotApplied(deps.durable, durable, item.change.resourceId);
           } else {
-            markAgentMutationPathNeedsAttention(
+            await markAgentMutationPathNeedsAttention(
               deps.durable,
               durable,
               item.change.resourceId,
@@ -860,7 +860,7 @@ export async function applyAgentSurfaceMutation(
         });
       }
       if (deps.durable && durable && surfaceDispatched && !item.result?.status?.startsWith("applied")) {
-        markAgentMutationPathNeedsAttention(deps.durable, durable, item.change.resourceId, message);
+        await markAgentMutationPathNeedsAttention(deps.durable, durable, item.change.resourceId, message);
         if (item.result) item.result = { ...item.result, status: "needs-attention" };
       }
     }
@@ -940,7 +940,7 @@ export async function applyAgentSurfaceMutation(
           item.result = { path: item.change.resourceId, target: "disk", status: "applied" };
           applied.push({ kind: "disk", item, before });
           if (deps.durable && durable) {
-            markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+            await markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
               target: after ?? { kind: "missing" },
             });
           }
@@ -1074,7 +1074,7 @@ export async function applyAgentSurfaceMutation(
         });
         applied.push({ kind: "disk", item, before });
         if (deps.durable && durable) {
-          markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
+          await markAgentMutationPathApplied(deps.durable, durable, item.change.resourceId, {
             ...(after ? { target: after } : {}),
           });
         }
@@ -1107,7 +1107,7 @@ export async function applyAgentSurfaceMutation(
 
   const result = summarize(planned, operationId);
   if (deps.durable && durable) {
-    finalizeAgentMutationOperation(deps.durable, durable, result.status === "disk" ? [] : result.results);
+    await finalizeAgentMutationOperation(deps.durable, durable, result.status === "disk" ? [] : result.results);
   }
   const record: AgentMutationRecord = {
     operationId,
