@@ -8,6 +8,7 @@ import type { KernelGrantHandle } from "./kernel-client.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
 const kernelPath = path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
+const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "package.json"), "utf8")).version as string;
 const clients: KernelClient[] = [];
 const roots: string[] = [];
 
@@ -39,7 +40,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   const host = createKernelClient({
     hostId: "kernel-test-host",
     storageRoot: root,
-    buildVersion: "test",
+    buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
   });
@@ -50,11 +51,12 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   const first = await client.putBlob(Buffer.from("one\n"), "op-blob-one");
   const large = await client.putBlob(Buffer.alloc(200_000, 7), "op-blob-large");
   assert.equal(large.byteLength, 200_000);
+  assert.equal((await client.releaseBlob(large.ownerId)).released, true);
   const created = await client.createBranch({
     operationId: "op-create",
     branchId: "branch-test",
     workspaceId: "workspace-test",
-    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } }],
+    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 }, ownerId: first.ownerId }],
   });
   const forked = await client.createBranch({
     operationId: "op-fork",
@@ -70,6 +72,10 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   const normalized = await client.readBranch({ branchId: "branch-test", paths: ["src\\file.txt"] });
   assert.equal(normalized.entries[0]?.path, "src/file.txt");
   assert.equal((await client.health({ deep: false })).integrity, "ok");
+  await assert.rejects(
+    client.createBranch({ operationId: "op-create", branchId: "operation-reuse", workspaceId: "workspace-test", entries: [] }),
+    /operationId.*reused|different parameters/i,
+  );
   await assert.rejects(client.createBranch({ operationId: "op-create-different", branchId: "branch-test", workspaceId: "workspace-test", entries: [] }), /creation parameters/i);
   assert.equal((await client.health({ deep: true })).integrity, "ok");
   await assert.rejects(
@@ -93,20 +99,21 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     }),
     /non-directory|descendant/i,
   );
+  const treeBlob = await client.putBlob(Buffer.from("tree\n"), "op-tree-blob");
   await client.createBranch({
     operationId: "op-tree-invariant",
     branchId: "tree-invariant",
     workspaceId: "workspace-test",
     entries: [
       { path: "a", state: { kind: "directory", mode: 0o755 } },
-      { path: "a/b", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } },
+      { path: "a/b", state: { kind: "regular-file", byteLength: treeBlob.byteLength, objectHash: treeBlob.hash, mode: 0o644 }, ownerId: treeBlob.ownerId },
     ],
   });
   await client.writeBranch({
     operationId: "op-tree-replace",
     branchId: "tree-invariant",
     expectedWriteRevision: 0,
-    changes: [{ path: "a", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o755 } }],
+    changes: [{ path: "a", state: { kind: "regular-file", byteLength: treeBlob.byteLength, objectHash: treeBlob.hash, mode: 0o755 }, sourcePath: "a/b" }],
   });
   const replaced = await client.readBranch({ branchId: "tree-invariant", includeEntries: true });
   assert.deepEqual(replaced.entries.map((entry) => entry.path), ["a"]);
@@ -125,9 +132,18 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     operationId: "op-write",
     branchId: "branch-test",
     expectedWriteRevision: 0,
-    changes: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: second.byteLength, objectHash: second.hash, mode: 0o755 } }],
+    changes: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: second.byteLength, objectHash: second.hash, mode: 0o755 }, ownerId: second.ownerId }],
   });
   assert.equal(committed.status, "committed");
+  await assert.rejects(
+    client.writeBranch({
+      operationId: "op-write",
+      branchId: "branch-test",
+      expectedWriteRevision: 1,
+      changes: [{ path: "src/reused.txt", state: { kind: "directory" } }],
+    }),
+    /operationId.*reused|different parameters/i,
+  );
   const conflict = await client.writeBranch({
     operationId: "op-write-stale",
     branchId: "branch-test",
@@ -135,7 +151,14 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     changes: [{ path: "src/other.txt", state: { kind: "directory" } }],
   });
   assert.equal(conflict.status, "conflict");
-  const published = await client.publishBranch({ operationId: "op-publish", branchId: "branch-test" });
+  const stalePublish = await client.publishBranch({
+    operationId: "op-publish-stale",
+    branchId: "branch-test",
+    expectedWriteRevision: 0,
+    expectedRoot: String(created.root),
+  });
+  assert.equal(stalePublish.status, "conflict");
+  const published = await client.publishBranch({ operationId: "op-publish", branchId: "branch-test", expectedWriteRevision: committed.writeRevision, expectedRoot: committed.root });
   const pin = await client.pinBranch({ operationId: "op-pin", branchId: "branch-test", revision: Number(published.revision) });
   assert.equal(pin.pinned, true);
   const operation = await client.getOperation("op-publish");
@@ -147,7 +170,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     operationId: "op-write-after-publish",
     branchId: "branch-test",
     expectedWriteRevision: 1,
-    changes: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: third.byteLength, objectHash: third.hash, mode: 0o644 } }],
+    changes: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: third.byteLength, objectHash: third.hash, mode: 0o644 }, ownerId: third.ownerId }],
   });
   assert.equal(afterPublishWrite.status, "committed");
   const fixed = await client.readBranch({ branchId: "branch-test", revision: Number(published.revision), includeEntries: true });
@@ -155,11 +178,12 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   assert.equal((fixed.entries[0]?.state as { objectHash?: string }).objectHash, second.hash);
   assert.equal((changed.entries[0]?.state as { objectHash?: string }).objectHash, third.hash);
   assert.equal((changed.entries[0]?.state as { mode?: number }).mode, 0o644);
+  assert.equal((await client.health({ deep: true })).integrity, "ok");
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: changed.root });
   assert.deepEqual(diff.changed, ["src/file.txt"]);
   assert.equal((await client.health()).integrity, "ok");
   await client.close();
-  const reopenedHost = createKernelClient({ hostId: "kernel-test-host", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const reopenedHost = createKernelClient({ hostId: "kernel-test-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(reopenedHost);
   await reopenedHost.start();
   const reopened = reopenedHost.scoped(await issueActor(reopenedHost, "kernel-test-actor", "workspace-test"));
@@ -193,7 +217,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
   const faultedHost = createKernelClient({
     hostId: "operation-fault-host",
     storageRoot: root,
-    buildVersion: "test",
+    buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
     env: { PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" },
@@ -203,7 +227,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
   const faulted = faultedHost.scoped(await issueActor(faultedHost, "operation-fault-actor", "recovery-workspace"));
   await assert.rejects(faulted.putBlob(Buffer.from("retry-me"), "retry-operation"), /injected operation finish failure|storage error/i);
   await faulted.close();
-  const retriedHost = createKernelClient({ hostId: "operation-fault-host", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const retriedHost = createKernelClient({ hostId: "operation-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retriedHost);
   await retriedHost.start();
   const retried = retriedHost.scoped(await issueActor(retriedHost, "operation-fault-actor", "recovery-workspace"));
@@ -240,7 +264,7 @@ test("GC distinguishes durable release from physical cleanup failure and retries
   const faultedHost = createKernelClient({
     hostId: "gc-fault-host",
     storageRoot: root,
-    buildVersion: "test",
+    buildVersion,
     kernelPath,
     allowCargoDevRunner: false,
     env: { PIARIUM_KERNEL_FAIL_GC_DELETE: "1" },
@@ -254,7 +278,7 @@ test("GC distinguishes durable release from physical cleanup failure and retries
     operationId: "gc-create",
     branchId: "gc-branch",
     workspaceId: "gc-workspace",
-    entries: [{ path: "file", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 } }],
+    entries: [{ path: "file", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 }, ownerId: blob.ownerId }],
   });
   await faulted.deleteBranch({ operationId: "gc-delete", branchId: "gc-branch" });
   const failed = await faultedMaintenance.gc("gc-run");
@@ -264,11 +288,10 @@ test("GC distinguishes durable release from physical cleanup failure and retries
   assert.equal((await faulted.health({ deep: true })).integrity, "degraded");
   await faulted.close();
 
-  const recoveredHost = createKernelClient({ hostId: "gc-fault-host", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const recoveredHost = createKernelClient({ hostId: "gc-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(recoveredHost);
   await recoveredHost.start();
   const recovered = recoveredHost.scoped(await issueActor(recoveredHost, "gc-fault-actor", "gc-workspace"));
-  const recoveredMaintenance = recoveredHost.scoped(await issueActor(recoveredHost, "gc-fault-maintenance", null));
   const health = await recovered.health({ deep: true });
   assert.equal(health.integrity, "ok");
   assert.equal(health.pendingCleanup, 0);
@@ -281,7 +304,7 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
   }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-grant-"));
   roots.push(root);
-  const host = createKernelClient({ hostId: "grant-host", hostGeneration: "grant-generation", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const host = createKernelClient({ hostId: "grant-host", hostGeneration: "grant-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
   const ownerGrant = await host.issueGrant({
@@ -297,14 +320,15 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     pathScopes: [""],
   });
   const owner = host.scoped(ownerGrant);
-  const blob = await owner.putBlob(Buffer.from("grant"), "grant-blob");
+  const publicBlob = await owner.putBlob(Buffer.from("PUBLIC"), "grant-public-blob");
+  const privateBlob = await owner.putBlob(Buffer.from("SECRET"), "grant-private-blob");
   await owner.createBranch({
     operationId: "grant-branch-ok",
     branchId: "grant-branch",
     workspaceId: "workspace-a",
     entries: [
-      { path: "src/public/a.txt", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 } },
-      { path: "src/private/secret.txt", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 } },
+      { path: "src/public/a.txt", state: { kind: "regular-file", byteLength: publicBlob.byteLength, objectHash: publicBlob.hash, mode: 0o644 }, ownerId: publicBlob.ownerId },
+      { path: "src/private/secret.txt", state: { kind: "regular-file", byteLength: privateBlob.byteLength, objectHash: privateBlob.hash, mode: 0o644 }, ownerId: privateBlob.ownerId },
     ],
   });
   const client = host.scoped(await host.issueGrant({
@@ -322,6 +346,34 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
   await assert.rejects(client.createBranch({ operationId: "grant-branch-other", branchId: "grant-other", workspaceId: "workspace-b", entries: [] }), /workspace|grant/i);
   const scopedRead = await client.readBranch({ branchId: "grant-branch", includeEntries: true });
   assert.deepEqual(scopedRead.entries.map((entry) => entry.path), ["src/public/a.txt"]);
+  const publicSlice = await client.getBlob(publicBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" });
+  assert.equal(Buffer.from(publicSlice.bytesBase64, "base64").toString("utf8"), "PUBLIC");
+  await assert.rejects(
+    client.getBlob(privateBlob.hash, { branchId: "grant-branch", path: "src/private/secret.txt" }),
+    /scope|path|grant/i,
+  );
+  await assert.rejects(
+    client.getBlob(privateBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" }),
+    /bound|source|path/i,
+  );
+  await assert.rejects(
+    client.writeBranch({
+      operationId: "grant-copy-private-by-hash",
+      branchId: "grant-branch",
+      expectedWriteRevision: 0,
+      changes: [{ path: "src/public/leak.txt", state: { kind: "regular-file", objectHash: privateBlob.hash, byteLength: privateBlob.byteLength, mode: 0o644 } }],
+    }),
+    /source path|bound|scope|grant/i,
+  );
+  await assert.rejects(
+    client.writeBranch({
+      operationId: "grant-copy-private-by-source",
+      branchId: "grant-branch",
+      expectedWriteRevision: 0,
+      changes: [{ path: "src/public/leak.txt", sourcePath: "src/private/secret.txt", state: { kind: "regular-file", objectHash: privateBlob.hash, byteLength: privateBlob.byteLength, mode: 0o644 } }],
+    }),
+    /source path|scope|grant/i,
+  );
   await assert.rejects(client.readBranch({ branchId: "grant-branch", paths: ["src/private/secret.txt"] }), /scope|path|grant/i);
   const ownerWrite = await owner.writeBranch({
     operationId: "grant-private-write",
@@ -332,12 +384,15 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
   const scopedDiff = await client.diffRoots({ leftRoot: String(scopedRead.root), rightRoot: String(ownerWrite.root) });
   assert.deepEqual(scopedDiff.changed, []);
   assert.deepEqual(scopedDiff.removed, []);
-  const published = await owner.publishBranch({ operationId: "grant-publish", branchId: "grant-branch" });
+  const published = await owner.publishBranch({ operationId: "grant-publish", branchId: "grant-branch", expectedWriteRevision: ownerWrite.writeRevision, expectedRoot: ownerWrite.root });
   const pin = await owner.pinBranch({ operationId: "grant-pin", branchId: "grant-branch", revision: Number(published.revision), pinId: "grant-pin" });
   const scopedPin = await client.readPin({ pinId: String(pin.pinId), includeEntries: true });
   assert.deepEqual((scopedPin.entries as Array<{ path: string }>).map((entry) => entry.path), ["src/public/a.txt"]);
   const other = host.scoped(await issueActor(host, "workspace-b-actor", "workspace-b"));
-  await assert.rejects(other.getBlob(blob.hash), /owned|grant|workspace/i);
+  await assert.rejects(
+    other.getBlob(publicBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" }),
+    /owned|grant|workspace/i,
+  );
   await host.revokeGrant("scoped-grant");
   await assert.rejects(client.readBranch({ branchId: "grant-branch", includeEntries: true }), /revoked|grant/i);
 });
@@ -349,7 +404,7 @@ test("queued long branch build observes cancellation and leaves the kernel usabl
   }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cancel-"));
   roots.push(root);
-  const host = createKernelClient({ hostId: "cancel-host", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const host = createKernelClient({ hostId: "cancel-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
   const client = host.scoped(await issueActor(host, "cancel-actor", "cancel-workspace"));
@@ -368,6 +423,7 @@ test("queued long branch build observes cancellation and leaves the kernel usabl
   setTimeout(() => controller.abort(), 0);
   await pending;
   assert.equal((await client.health()).integrity, "ok");
+  assert.equal((await client.releaseBlob(blob.ownerId)).released, true);
 });
 
 test("grant revoke cancels queued side effects before admission", { timeout: 30_000 }, async (t) => {
@@ -377,7 +433,7 @@ test("grant revoke cancels queued side effects before admission", { timeout: 30_
   }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-revoke-"));
   roots.push(root);
-  const host = createKernelClient({ hostId: "revoke-host", storageRoot: root, buildVersion: "test", kernelPath, allowCargoDevRunner: false });
+  const host = createKernelClient({ hostId: "revoke-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
   const actor = host.scoped(await issueActor(host, "revoke-actor", "revoke-workspace"));
@@ -398,4 +454,135 @@ test("grant revoke cancels queued side effects before admission", { timeout: 30_
   const base = await verifier.readBranch({ branchId: "revoke-base", includeEntries: true });
   assert.equal(base.writeRevision, 0);
   assert.deepEqual(base.entries, []);
+});
+
+test("temporary blob owners are independent and have explicit release", async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-owner-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "owner-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "owner-actor", "owner-workspace"));
+  const first = await client.putBlob(Buffer.from("same-content"), "owner-put-first");
+  const second = await client.putBlob(Buffer.from("same-content"), "owner-put-second");
+  assert.notEqual(first.ownerId, second.ownerId);
+  const beforeAttach = await client.getBlob(second.hash, { ownerId: second.ownerId });
+  assert.equal(Buffer.from(beforeAttach.bytesBase64, "base64").toString("utf8"), "same-content");
+  await client.createBranch({
+    operationId: "owner-create",
+    branchId: "owner-branch",
+    workspaceId: "owner-workspace",
+    entries: [{
+      path: "file.txt",
+      state: { kind: "regular-file", objectHash: first.hash, byteLength: first.byteLength, mode: 0o644 },
+      ownerId: first.ownerId,
+    }],
+  });
+  assert.equal((await client.releaseBlob(first.ownerId)).released, false);
+  assert.equal((await client.health()).temporaryObjectOwners, 1);
+  await client.deleteBranch({ operationId: "owner-delete", branchId: "owner-branch" });
+  await client.gc("owner-gc-retained");
+  assert.equal(Buffer.from((await client.getBlob(second.hash, { ownerId: second.ownerId })).bytesBase64, "base64").toString("utf8"), "same-content");
+  assert.equal((await client.releaseBlob(second.ownerId)).released, true);
+  assert.equal((await client.releaseOperation("owner-put-second")).released, true);
+  await client.gc("owner-gc-released");
+  await assert.rejects(client.getBlob(second.hash, { ownerId: second.ownerId }), /owner|owned|grant/i);
+});
+
+test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-large-branch-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "large-branch-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "large-branch-actor", "large-branch-workspace"));
+  const target = "x".repeat(1_024);
+  const entries = Array.from({ length: 17_000 }, (_, index) => ({
+    path: `wide/${String(index).padStart(6, "0")}`,
+    state: { kind: "symlink" as const, symlinkTarget: target },
+  }));
+  assert.ok(Buffer.byteLength(JSON.stringify(entries), "utf8") > 16 * 1024 * 1024);
+  const created = await client.createBranch({ operationId: "large-branch-create", branchId: "large-branch", workspaceId: "large-branch-workspace", entries });
+  assert.equal(created.created, true);
+  assert.equal((await client.readBranch({ branchId: "large-branch" })).writeRevision, 0);
+  const added = await client.writeBranch({
+    operationId: "large-branch-add",
+    branchId: "large-branch",
+    expectedWriteRevision: 0,
+    changes: [{ path: "wide/999999", state: { kind: "directory" } }],
+  });
+  const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: added.root });
+  assert.deepEqual(diff.added, ["wide/999999"]);
+  assert.deepEqual(diff.changed, []);
+  assert.deepEqual(diff.removed, []);
+});
+
+test("kernel rejects an Application Host build identity mismatch", async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-build-id-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "mismatch-host", storageRoot: root, buildVersion: `${buildVersion}-other`, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await assert.rejects(host.start(), /build identity|does not match kernel/i);
+});
+
+test("a current-format catalog with missing authority tables is rejected without repair", async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-schema-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "schema-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  await host.close();
+  const { default: Database } = await import("better-sqlite3");
+  const catalog = new Database(path.join(root, "catalog.sqlite"));
+  catalog.exec("DROP TABLE object_owners");
+  catalog.close();
+  const broken = createKernelClient({ hostId: "schema-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(broken);
+  await assert.rejects(broken.start(), /catalog table set is corrupt|schema fingerprint/i);
+  const verify = new Database(path.join(root, "catalog.sqlite"), { readonly: true });
+  const exists = verify.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'object_owners'").get();
+  verify.close();
+  assert.equal(exists, undefined);
+});
+
+test("the source package finds its kernel independently of process cwd", async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cwd-root-"));
+  const unrelated = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-cwd-"));
+  roots.push(root, unrelated);
+  const previous = process.cwd();
+  process.chdir(unrelated);
+  try {
+    const host = createKernelClient({
+      hostId: "cwd-host",
+      storageRoot: root,
+      buildVersion,
+      allowCargoDevRunner: false,
+      requireKernelManifest: false,
+      cwd: unrelated,
+    });
+    clients.push(host);
+    assert.equal((await host.start()).kernelBuildIdentity, buildVersion);
+  } finally {
+    process.chdir(previous);
+  }
 });

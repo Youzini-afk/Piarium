@@ -20,7 +20,7 @@ pub(crate) const KERNEL_ARCH: &str = match option_env!("PIARIUM_KERNEL_ARCH") {
     Some(value) => value,
     None => "unknown-arch",
 };
-pub(crate) const STORAGE_FORMAT_VERSION: &str = "5";
+pub(crate) const STORAGE_FORMAT_VERSION: &str = "6";
 // Control frames are deliberately bounded. Content bytes travel through the
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
 pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
@@ -82,68 +82,15 @@ pub(crate) fn reject_unknown_fields(
 }
 
 pub(crate) fn validate_method_params(method: &str, params: &Value) -> Result<(), KernelError> {
-    let fields: &[&str] = match method {
-        "kernel.ping" | "kernel.shutdown" => &[],
-        "storage.health" => &["deep"],
-        "storage.snapshot" => &["workspaceId"],
-        "authority.grant.revoke" => &["grantId"],
-        "storage.putBlob.begin" => &["operationId", "byteLength", "expectedHash", "workspaceId"],
-        "storage.putBlob.finish" => &["operationId", "streamId", "expectedHash", "workspaceId"],
-        "storage.putBlob.abort" => &["operationId", "streamId", "workspaceId"],
-        "storage.blob.release" => &["ownerId", "operationId", "workspaceId"],
-        "storage.getBlob" => &["hash", "offset", "length"],
-        "branch.create" => &[
-            "operationId",
-            "branchId",
-            "workspaceId",
-            "entries",
-            "baseRef",
-        ],
-        "branch.read" => &["branchId", "revision", "paths", "includeEntries"],
-        "branch.write" => &[
-            "operationId",
-            "branchId",
-            "expectedWriteRevision",
-            "changes",
-        ],
-        "branch.publish" => &[
-            "operationId",
-            "branchId",
-            "expectedWriteRevision",
-            "expectedRoot",
-        ],
-        "branch.pin" => &["operationId", "branchId", "revision", "pinId"],
-        "branch.unpin" => &["operationId", "branchId", "pinId"],
-        "branch.diff" => &["leftRoot", "rightRoot"],
-        "branch.delete" => &["operationId", "branchId"],
-        "pin.read" => &["pinId", "includeEntries"],
-        "recovery.operation.begin" | "recovery.operation.update" => {
-            &["operationId", "recordId", "workspaceId", "state", "data"]
-        }
-        "recovery.operation.get" => &["recordId", "operationId"],
-        "operation.get" => &["operationId"],
-        "storage.gc" => &["operationId"],
-        "authority.grant.issue" => &[
-            "grantId",
-            "hostGeneration",
-            "sessionId",
-            "threadId",
-            "runId",
-            "owningWorkspace",
-            "executionWorkspace",
-            "storageIdentity",
-            "capabilities",
-            "pathScopes",
-        ],
-        _ => return Ok(()),
-    };
-    reject_unknown_fields(params, fields, method)
+    crate::protocol_generated::validate_generated_method_params(method, params)
+        .map_err(|error| KernelError::Protocol(format!("invalid {method} params: {error}")))
 }
 pub(crate) fn read_frame(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
     let mut header = [0u8; 4];
-    match input.read_exact(&mut header) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
+    match input.read(&mut header[..1]) {
+        Ok(0) => return Ok(None),
+        Ok(1) => input.read_exact(&mut header[1..])?,
+        Ok(_) => unreachable!("one-byte frame header read returned more than one byte"),
         Err(error) => return Err(error),
     }
     let length = u32::from_be_bytes(header) as usize;
@@ -156,6 +103,50 @@ pub(crate) fn read_frame(input: &mut impl Read) -> io::Result<Option<Vec<u8>>> {
     let mut payload = vec![0u8; length];
     input.read_exact(&mut payload)?;
     Ok(Some(payload))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn frame_reader_distinguishes_clean_eof_from_truncation() {
+        assert_eq!(
+            read_frame(&mut Cursor::new(Vec::<u8>::new())).unwrap(),
+            None
+        );
+        assert_eq!(
+            read_frame(&mut Cursor::new(vec![0, 0])).unwrap_err().kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+        let mut partial_payload = vec![0, 0, 0, 4, b'{', b'}'];
+        assert_eq!(
+            read_frame(&mut Cursor::new(&mut partial_payload))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[test]
+    fn generated_publish_contract_requires_both_cas_fields() {
+        assert!(validate_method_params(
+            "branch.publish",
+            &json!({"operationId": "op", "branchId": "branch"})
+        )
+        .is_err());
+        assert!(validate_method_params(
+            "branch.publish",
+            &json!({
+                "operationId": "op",
+                "branchId": "branch",
+                "expectedWriteRevision": 3,
+                "expectedRoot": "sha256-root"
+            })
+        )
+        .is_ok());
+    }
 }
 pub(crate) fn write_frame(output: &mut impl Write, value: &Value) -> io::Result<()> {
     let payload = serde_json::to_vec(value)

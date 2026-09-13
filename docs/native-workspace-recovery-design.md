@@ -2,7 +2,7 @@
 
 Status: delivered; R1 per-path coverage implemented 2026-09-03; Rust kernel R0/R1 foundations are implemented and locally exercised, while the Application Host still has no recovery/WorkingState consumer cutover
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 ## Decision
 

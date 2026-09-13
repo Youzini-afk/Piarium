@@ -9,14 +9,15 @@ import {
   KERNEL_PROTOCOL_VERSION,
   type KernelBranchReadResult,
   type KernelBranchChange,
-  type KernelBlobResult,
   type KernelCreateEntry,
   type KernelError,
   type KernelHandshakeResult,
   type KernelHealthResult,
+  type KernelGetBlobParams,
   type KernelMethod,
   type KernelMethodParams,
   type KernelObjectSlice,
+  type KernelPutBlobResult,
   type KernelRequest,
   type KernelResponse,
   type KernelWriteResult,
@@ -39,6 +40,11 @@ export interface KernelClientOptions {
   requireKernelManifest?: boolean;
   onExit?: (error: Error) => void;
 }
+
+export type KernelBlobReadSource =
+  | { branchId: string; path: string; revision?: number }
+  | { pinId: string; path: string }
+  | { ownerId: string };
 
 export interface KernelGrantHandle {
   readonly grantId: string;
@@ -85,12 +91,12 @@ export class KernelScopedClient {
     return this.owner.snapshot(workspaceId, this.grant, signal);
   }
 
-  putBlob(bytes: Uint8Array, operationId: string, signal?: AbortSignal): Promise<KernelBlobResult> {
+  putBlob(bytes: Uint8Array, operationId: string, signal?: AbortSignal): Promise<KernelPutBlobResult> {
     return this.owner.putBlob(bytes, operationId, this.grant, signal);
   }
 
-  getBlob(hash: string, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
-    return this.owner.getBlob(hash, this.grant, options);
+  getBlob(hash: string, source: KernelBlobReadSource, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
+    return this.owner.getBlob(hash, source, this.grant, options);
   }
 
   createBranch(params: { operationId: string; branchId: string; workspaceId: string; entries: KernelCreateEntry[]; baseRef?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -105,7 +111,7 @@ export class KernelScopedClient {
     return this.owner.writeBranch(params, this.grant, signal);
   }
 
-  publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision?: number; expectedRoot?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.publishBranch(params, this.grant, signal);
   }
 
@@ -153,6 +159,10 @@ export class KernelScopedClient {
     return this.owner.releaseBlob(ownerId, this.grant, signal);
   }
 
+  releaseOperation(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.releaseOperation(operationId, this.grant, signal);
+  }
+
   close(): Promise<void> { return this.owner.close(); }
 }
 
@@ -168,6 +178,26 @@ const frame = (payload: string): Buffer => {
   const header = Buffer.allocUnsafe(4);
   header.writeUInt32BE(body.byteLength, 0);
   return Buffer.concat([header, body]);
+};
+
+const KERNEL_BATCH_TARGET_BYTES = 512 * 1024;
+
+const batchForKernelTransport = <T>(values: readonly T[]): T[][] => {
+  const batches: T[][] = [];
+  let batch: T[] = [];
+  let batchBytes = 0;
+  for (const value of values) {
+    const valueBytes = Buffer.byteLength(JSON.stringify(value), "utf8") + 1;
+    if (batch.length > 0 && batchBytes + valueBytes > KERNEL_BATCH_TARGET_BYTES) {
+      batches.push(batch);
+      batch = [];
+      batchBytes = 0;
+    }
+    batch.push(value);
+    batchBytes += valueBytes;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
 };
 
 const normalizeStorageIdentity = (value: string): string => {
@@ -191,6 +221,7 @@ interface KernelManifest {
   targetTriple: string;
   platform: string;
   arch: string;
+  binaryFormat: "pe" | "elf" | "macho";
   buildIdentity: string;
   protocolVersion: number;
   kernelVersion: string;
@@ -320,7 +351,7 @@ export class KernelClient {
         manifest = JSON.parse(await fs.promises.readFile(command.manifestPath, "utf8")) as KernelManifest;
         const bytes = await fs.promises.readFile(command.command);
         const digest = createHash("sha256").update(bytes).digest("hex");
-        if (manifest.schema !== 2 || manifest.sha256 !== digest || manifest.protocolVersion !== KERNEL_PROTOCOL_VERSION
+        if (manifest.schema !== 3 || manifest.sha256 !== digest || manifest.protocolVersion !== KERNEL_PROTOCOL_VERSION
           || manifest.platform !== process.platform || manifest.arch !== (this.options.targetArch ?? process.arch)
           || (this.options.targetTriple !== undefined && manifest.targetTriple !== this.options.targetTriple)
           || (this.options.kernelBuildIdentity !== undefined && manifest.buildIdentity !== this.options.kernelBuildIdentity)) {
@@ -335,7 +366,11 @@ export class KernelClient {
     }
     const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
-      env: { ...process.env, ...this.options.env },
+      env: {
+        ...process.env,
+        PIARIUM_KERNEL_BUILD_IDENTITY: this.options.kernelBuildIdentity ?? this.options.buildVersion,
+        ...this.options.env,
+      },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -471,6 +506,10 @@ export class KernelClient {
       rejectPending = reject;
       this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, grantId: grant?.grantId });
     });
+    // Abort can fire while stdin is blocked on drain. Attach a handler before
+    // awaiting the write so Node never observes the pending request as an
+    // unhandled rejection during genuine transport backpressure.
+    void promise.catch(() => undefined);
     const abort = () => {
       if (!this.pending.delete(id)) return;
       rejectPending?.(new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }));
@@ -499,24 +538,25 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("storage.snapshot", { workspaceId }, { signal, grant });
   }
 
-  async putBlob(bytes: Uint8Array, operationId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBlobResult> {
+  async putBlob(bytes: Uint8Array, operationId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelPutBlobResult> {
     const scoped = this.assertGrant(grant);
     const source = Buffer.from(bytes);
     const expectedHash = `sha256-${createHash("sha256").update(source).digest("hex")}`;
     const existing = await this.getOperation(operationId, scoped, signal).catch(() => null);
     if (existing?.state === "committed" && existing.result && typeof existing.result === "object") {
-      const result = existing.result as Partial<KernelBlobResult>;
-      if (result.hash === expectedHash && result.byteLength === source.byteLength) return result as KernelBlobResult;
+      const result = existing.result as Partial<KernelPutBlobResult>;
+      if (result.hash === expectedHash && result.byteLength === source.byteLength && typeof result.ownerId === "string") return result as KernelPutBlobResult;
     }
-    const begin = await this.requestRaw<Record<string, unknown>>("storage.putBlob.begin", {
-      operationId,
-      byteLength: source.byteLength,
-      expectedHash,
-      ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
-    }, { signal, grant: scoped });
-    const streamId = typeof begin.streamId === "string" ? begin.streamId : "";
-    if (!streamId) throw new KernelClientError({ code: "kernel-stream-invalid", message: "Rust kernel did not return an upload stream", retryable: false });
+    const streamId = `blob-${randomUUID()}`;
     try {
+      const begin = await this.requestRaw<Record<string, unknown>>("storage.putBlob.begin", {
+        operationId,
+        streamId,
+        byteLength: source.byteLength,
+        expectedHash,
+        ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
+      }, { signal, grant: scoped });
+      if (begin.streamId !== streamId) throw new KernelClientError({ code: "kernel-stream-invalid", message: "Rust kernel returned a different upload stream identity", retryable: false });
       const chunkSize = 64 * 1024;
       let sequence = 0;
       for (let offset = 0; offset < source.byteLength; offset += chunkSize) {
@@ -525,7 +565,7 @@ export class KernelClient {
         await this.writeDataFrame(streamId, sequence, chunk, scoped);
         sequence += 1;
       }
-      return await this.requestRaw<KernelBlobResult>("storage.putBlob.finish", {
+      return await this.requestRaw<KernelPutBlobResult>("storage.putBlob.finish", {
         operationId,
         streamId,
         expectedHash,
@@ -554,12 +594,32 @@ export class KernelClient {
     });
   }
 
-  async getBlob(hash: string, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
-    return this.requestRaw<KernelObjectSlice>("storage.getBlob", { hash, ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) }, { signal: options.signal, grant });
+  async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
+    const params: KernelGetBlobParams = { hash, ...source, ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) };
+    return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant });
   }
 
   async createBranch(params: { operationId: string; branchId: string; workspaceId: string; entries: KernelCreateEntry[]; baseRef?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("branch.create", params, { signal, grant });
+    const scoped = this.assertGrant(grant);
+    const builderId = `branch-builder-${randomUUID()}`;
+    try {
+      await this.requestRaw<Record<string, unknown>>("branch.create.begin", {
+        operationId: params.operationId,
+        builderId,
+        branchId: params.branchId,
+        workspaceId: params.workspaceId,
+        ...(params.baseRef === undefined ? {} : { baseRef: params.baseRef }),
+      }, { signal, grant: scoped });
+      let sequence = 0;
+      for (const batch of batchForKernelTransport(params.entries)) {
+        await this.requestRaw<Record<string, unknown>>("branch.create.append", { builderId, sequence, entries: batch }, { signal, grant: scoped });
+        sequence += 1;
+      }
+      return await this.requestRaw<Record<string, unknown>>("branch.create.finish", { operationId: params.operationId, builderId }, { signal, grant: scoped });
+    } catch (error) {
+      await this.requestRaw<Record<string, unknown>>("branch.create.abort", { builderId }, { grant: scoped }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
@@ -567,10 +627,28 @@ export class KernelClient {
   }
 
   async writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[] }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {
-    return this.requestRaw<KernelWriteResult>("branch.write", params, { signal, grant });
+    const scoped = this.assertGrant(grant);
+    const builderId = `branch-write-${randomUUID()}`;
+    try {
+      await this.requestRaw<Record<string, unknown>>("branch.write.begin", {
+        operationId: params.operationId,
+        builderId,
+        branchId: params.branchId,
+        expectedWriteRevision: params.expectedWriteRevision,
+      }, { signal, grant: scoped });
+      let sequence = 0;
+      for (const batch of batchForKernelTransport(params.changes)) {
+        await this.requestRaw<Record<string, unknown>>("branch.write.append", { builderId, sequence, changes: batch }, { signal, grant: scoped });
+        sequence += 1;
+      }
+      return await this.requestRaw<KernelWriteResult>("branch.write.finish", { operationId: params.operationId, builderId }, { signal, grant: scoped });
+    } catch (error) {
+      await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
+      throw error;
+    }
   }
 
-  async publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision?: number; expectedRoot?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async publishBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; expectedRoot: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("branch.publish", params, { signal, grant });
   }
 
@@ -632,7 +710,15 @@ export class KernelClient {
   }
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("storage.blob.release", { ownerId, operationId: ownerId }, { signal, grant });
+    return this.requestRaw<Record<string, unknown>>("storage.blob.release", { ownerId }, { signal, grant });
+  }
+
+  async releaseOperation(operationId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const scoped = this.assertGrant(grant);
+    return this.requestRaw<Record<string, unknown>>("operation.release", {
+      operationId,
+      ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
+    }, { signal, grant: scoped });
   }
 
   async close(): Promise<void> {
@@ -644,12 +730,28 @@ export class KernelClient {
     const child = this.child;
     this.child = null;
     if (!child) return;
+    const waitForExit = (): Promise<boolean> => new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve(true);
+        return;
+      }
+      const onExit = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        child.removeListener("exit", onExit);
+        resolve(false);
+      }, 5_000);
+      child.once("exit", onExit);
+    });
     if (child.exitCode !== null || child.signalCode !== null) return;
     if (!child.killed) child.stdin.end();
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => { child.kill(); resolve(); }, 5_000);
-      child.once("exit", () => { clearTimeout(timer); resolve(); });
-    });
+    const stopped = await waitForExit();
+    if (stopped) return;
+    child.kill();
+    const killed = await waitForExit();
+    if (!killed) throw new KernelClientError({ code: "kernel-stop-failed", message: "Rust kernel did not exit after termination", retryable: true });
   }
 }
 

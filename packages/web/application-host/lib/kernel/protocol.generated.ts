@@ -19,9 +19,15 @@ export type KernelMethod =
   | "storage.putBlob.abort"
   | "storage.blob.release"
   | "storage.getBlob"
-  | "branch.create"
+  | "branch.create.begin"
+  | "branch.create.append"
+  | "branch.create.finish"
+  | "branch.create.abort"
   | "branch.read"
-  | "branch.write"
+  | "branch.write.begin"
+  | "branch.write.append"
+  | "branch.write.finish"
+  | "branch.write.abort"
   | "branch.publish"
   | "branch.pin"
   | "branch.unpin"
@@ -32,6 +38,7 @@ export type KernelMethod =
   | "recovery.operation.update"
   | "recovery.operation.get"
   | "operation.get"
+  | "operation.release"
   | "storage.gc";
 
 export interface KernelEmptyParams {
@@ -74,6 +81,7 @@ export interface KernelSnapshotParams {
 
 export interface KernelPutBlobBeginParams {
   operationId: string;
+  streamId: string;
   byteLength: number;
   expectedHash?: string;
   workspaceId?: string;
@@ -93,28 +101,49 @@ export interface KernelPutBlobAbortParams {
 }
 
 export interface KernelBlobReleaseParams {
-  ownerId?: string;
-  operationId?: string;
+  ownerId: string;
   workspaceId?: string;
 }
 
 export interface KernelGetBlobParams {
   hash: string;
+  branchId?: string;
+  revision?: number;
+  pinId?: string;
+  ownerId?: string;
+  path?: string;
   offset?: number;
   length?: number;
 }
 
-export interface KernelCreateBranchParams {
+export interface KernelCreateBranchBeginParams {
   operationId: string;
+  builderId: string;
   branchId: string;
   workspaceId: string;
-  entries: KernelCreateEntry[];
   baseRef?: string;
+}
+
+export interface KernelCreateBranchAppendParams {
+  builderId: string;
+  sequence: number;
+  entries: KernelCreateEntry[];
+}
+
+export interface KernelCreateBranchFinishParams {
+  operationId: string;
+  builderId: string;
+}
+
+export interface KernelCreateBranchAbortParams {
+  builderId: string;
 }
 
 export interface KernelCreateEntry {
   path: string;
   state: KernelBranchState;
+  ownerId?: string;
+  sourcePath?: string;
 }
 
 export interface KernelBranchReadParams {
@@ -124,23 +153,40 @@ export interface KernelBranchReadParams {
   includeEntries?: boolean;
 }
 
-export interface KernelBranchWriteParams {
+export interface KernelBranchWriteBeginParams {
   operationId: string;
+  builderId: string;
   branchId: string;
   expectedWriteRevision: number;
+}
+
+export interface KernelBranchWriteAppendParams {
+  builderId: string;
+  sequence: number;
   changes: KernelBranchChange[];
+}
+
+export interface KernelBranchWriteFinishParams {
+  operationId: string;
+  builderId: string;
+}
+
+export interface KernelBranchWriteAbortParams {
+  builderId: string;
 }
 
 export interface KernelBranchChange {
   path: string;
   state: KernelBranchState;
+  ownerId?: string;
+  sourcePath?: string;
 }
 
 export interface KernelBranchPublishParams {
   operationId: string;
   branchId: string;
-  expectedWriteRevision?: number;
-  expectedRoot?: string;
+  expectedWriteRevision: number;
+  expectedRoot: string;
 }
 
 export interface KernelBranchPinParams {
@@ -186,6 +232,11 @@ export interface KernelRecoveryGetParams {
 
 export interface KernelOperationGetParams {
   operationId: string;
+}
+
+export interface KernelOperationReleaseParams {
+  operationId: string;
+  workspaceId?: string;
 }
 
 export interface KernelGcParams {
@@ -257,6 +308,10 @@ export interface KernelBlobResult {
   byteLength: number;
 }
 
+export interface KernelPutBlobResult extends KernelBlobResult {
+  ownerId: string;
+}
+
 export interface KernelObjectSlice extends KernelBlobResult {
   offset: number;
   nextOffset: number;
@@ -268,7 +323,11 @@ export interface KernelHealthResult {
   integrity: string;
   branches: number;
   nodes: number;
-  nodePayloadBytes?: number;
+  nodeJsonBytes?: number;
+  catalogBytes?: number;
+  walBytes?: number;
+  operations?: number;
+  temporaryObjectOwners?: number;
   blobs: number;
   storageRoot: string;
   pendingCleanup?: number;
@@ -293,9 +352,15 @@ export type KernelMethodParams = {
   "storage.putBlob.abort": KernelPutBlobAbortParams;
   "storage.blob.release": KernelBlobReleaseParams;
   "storage.getBlob": KernelGetBlobParams;
-  "branch.create": KernelCreateBranchParams;
+  "branch.create.begin": KernelCreateBranchBeginParams;
+  "branch.create.append": KernelCreateBranchAppendParams;
+  "branch.create.finish": KernelCreateBranchFinishParams;
+  "branch.create.abort": KernelCreateBranchAbortParams;
   "branch.read": KernelBranchReadParams;
-  "branch.write": KernelBranchWriteParams;
+  "branch.write.begin": KernelBranchWriteBeginParams;
+  "branch.write.append": KernelBranchWriteAppendParams;
+  "branch.write.finish": KernelBranchWriteFinishParams;
+  "branch.write.abort": KernelBranchWriteAbortParams;
   "branch.publish": KernelBranchPublishParams;
   "branch.pin": KernelBranchPinParams;
   "branch.unpin": KernelBranchUnpinParams;
@@ -306,6 +371,7 @@ export type KernelMethodParams = {
   "recovery.operation.update": KernelRecoveryParams;
   "recovery.operation.get": KernelRecoveryGetParams;
   "operation.get": KernelOperationGetParams;
+  "operation.release": KernelOperationReleaseParams;
   "storage.gc": KernelGcParams;
 };
 
@@ -422,8 +488,35 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
-      method: "branch.create";
-      params: KernelCreateBranchParams;
+      method: "branch.create.begin";
+      params: KernelCreateBranchBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.create.append";
+      params: KernelCreateBranchAppendParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.create.finish";
+      params: KernelCreateBranchFinishParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.create.abort";
+      params: KernelCreateBranchAbortParams;
       epoch?: string;
       grantId?: string;
     }
@@ -440,8 +533,35 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
-      method: "branch.write";
-      params: KernelBranchWriteParams;
+      method: "branch.write.begin";
+      params: KernelBranchWriteBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.write.append";
+      params: KernelBranchWriteAppendParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.write.finish";
+      params: KernelBranchWriteFinishParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "branch.write.abort";
+      params: KernelBranchWriteAbortParams;
       epoch?: string;
       grantId?: string;
     }
@@ -532,6 +652,15 @@ export type KernelRequest =
       id: string;
       method: "operation.get";
       params: KernelOperationGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "operation.release";
+      params: KernelOperationReleaseParams;
       epoch?: string;
       grantId?: string;
     }

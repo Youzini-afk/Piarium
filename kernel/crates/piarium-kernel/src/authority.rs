@@ -10,12 +10,19 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "storage.putBlob.abort"
         | "storage.blob.release"
         | "storage.putBlob.chunk"
-        | "branch.create"
-        | "branch.write"
+        | "branch.create.begin"
+        | "branch.create.append"
+        | "branch.create.finish"
+        | "branch.create.abort"
+        | "branch.write.begin"
+        | "branch.write.append"
+        | "branch.write.finish"
+        | "branch.write.abort"
         | "branch.publish"
         | "branch.pin"
         | "branch.unpin"
-        | "branch.delete" => "storage.write",
+        | "branch.delete"
+        | "operation.release" => "storage.write",
         "storage.gc" => "storage.gc",
         "recovery.operation.begin" | "recovery.operation.update" | "recovery.operation.get" => {
             "recovery"

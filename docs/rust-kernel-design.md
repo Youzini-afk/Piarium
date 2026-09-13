@@ -9,7 +9,7 @@ Last updated: 2026-09-13
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-本轮 D-257 只重新验收 R0/R1 基础：Host 已能管理真实 kernel 进程，Rust storage foundation 已具备
+本轮 D-258 只重新验收 R0/R1 基础：Host 已能管理真实 kernel 进程，Rust storage foundation 已具备
 scope/owner/CAS/pin/recovery/GC 不变量；WorkingState、Recovery、结果、草稿与 evidence 的产品消费者
 仍未切换，R2–R6 不因本轮实现而完成。
 

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -93,4 +94,24 @@ pub(crate) struct BlobStream {
     pub(crate) staging: PathBuf,
     pub(crate) grant_id: String,
     pub(crate) workspace_id: Option<String>,
+}
+
+pub(crate) struct BranchBuilder {
+    pub(crate) operation_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) base_ref: Option<String>,
+    pub(crate) next_sequence: u64,
+    pub(crate) entries: Vec<Value>,
+    pub(crate) grant_id: String,
+}
+
+pub(crate) struct BranchWriteBuilder {
+    pub(crate) operation_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) expected_write_revision: i64,
+    pub(crate) workspace_id: String,
+    pub(crate) next_sequence: u64,
+    pub(crate) changes: Vec<Value>,
+    pub(crate) grant_id: String,
 }

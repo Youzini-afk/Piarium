@@ -38,6 +38,33 @@ fn mark_grant_revoked(
     }
 }
 
+fn admission_revoke_target(request: &Value, current_epoch: Option<&str>) -> Option<String> {
+    let fields = request.as_object()?;
+    if !fields.keys().all(|field| {
+        matches!(
+            field.as_str(),
+            "v" | "kind" | "id" | "method" | "params" | "epoch" | "grantId"
+        )
+    }) || request.get("v").and_then(Value::as_u64) != Some(PROTOCOL_VERSION)
+        || request.get("kind").and_then(Value::as_str) != Some("request")
+        || request
+            .get("id")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || request.get("method").and_then(Value::as_str) != Some("authority.grant.revoke")
+        || request.get("epoch").and_then(Value::as_str) != current_epoch
+    {
+        return None;
+    }
+    let params = request.get("params")?;
+    validate_method_params("authority.grant.revoke", params).ok()?;
+    params
+        .get("grantId")
+        .and_then(Value::as_str)
+        .filter(|grant_id| !grant_id.is_empty())
+        .map(str::to_string)
+}
+
 struct Kernel {
     epoch: String,
     host_id: Option<String>,
@@ -204,6 +231,11 @@ impl Kernel {
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| KernelError::Protocol("buildVersion is required".to_string()))?
                 .to_string();
+            if build_version != KERNEL_BUILD_IDENTITY {
+                return Err(KernelError::Protocol(format!(
+                    "application build identity does not match kernel: host={build_version}, kernel={KERNEL_BUILD_IDENTITY}"
+                )));
+            }
             let requested_capabilities = params_value
                 .get("capabilities")
                 .and_then(Value::as_array)
@@ -309,20 +341,14 @@ impl Kernel {
                 storage.revoke_grant(&params_value, host_id)?,
             )));
         }
-        let authorized_params =
-            if method == "authority.grant.issue" || method == "authority.grant.revoke" {
-                params_value.clone()
-            } else {
-                let (_grant, authorized_params) = storage.authorize(
-                    grant_id,
-                    &self.epoch,
-                    host_id,
-                    self.host_generation.as_deref().unwrap_or_default(),
-                    method,
-                    &params_value,
-                )?;
-                authorized_params
-            };
+        let (authorized_grant, authorized_params) = storage.authorize(
+            grant_id,
+            &self.epoch,
+            host_id,
+            self.host_generation.as_deref().unwrap_or_default(),
+            method,
+            &params_value,
+        )?;
         storage.set_cancellation(cancellation);
         let result = match method {
             "storage.health" => storage.health(&authorized_params),
@@ -338,20 +364,41 @@ impl Kernel {
             "storage.putBlob.abort" => {
                 storage.abort_blob_stream(&authorized_params, grant_id.unwrap_or(""))
             }
-            "storage.blob.release" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.release_object_owner(
-                    &authorized_params,
-                    authorized_params.get("workspaceId").and_then(Value::as_str),
-                )
-            }),
-            "storage.getBlob" => storage.get_blob(&authorized_params),
-            "branch.create" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.create_branch(&authorized_params)
-            }),
+            "storage.blob.release" => storage.release_object_owner(
+                &authorized_params,
+                authorized_params.get("workspaceId").and_then(Value::as_str),
+                grant_id.unwrap_or(""),
+            ),
+            "storage.getBlob" => storage.get_blob(
+                &authorized_params,
+                grant_id.unwrap_or(""),
+                authorized_grant.capabilities.contains("storage.admin"),
+            ),
+            "branch.create.begin" => {
+                storage.begin_branch_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.create.append" => {
+                storage.append_branch_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.create.finish" => {
+                storage.finish_branch_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.create.abort" => {
+                storage.abort_branch_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
             "branch.read" => storage.branch_read(&authorized_params),
-            "branch.write" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.branch_write(&authorized_params)
-            }),
+            "branch.write.begin" => {
+                storage.begin_branch_write_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.write.append" => {
+                storage.append_branch_write_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.write.finish" => {
+                storage.finish_branch_write_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "branch.write.abort" => {
+                storage.abort_branch_write_builder(&authorized_params, grant_id.unwrap_or(""))
+            }
             "branch.publish" => idempotent(storage, method, &authorized_params, |storage| {
                 storage.branch_publish(&authorized_params)
             }),
@@ -374,6 +421,7 @@ impl Kernel {
             }
             "recovery.operation.get" => storage.recovery_get(&authorized_params),
             "operation.get" => storage.operation_get(&authorized_params),
+            "operation.release" => storage.operation_release(&authorized_params),
             _ => Err(KernelError::Protocol(format!("unknown method: {method}"))),
         };
         storage.clear_cancellation();
@@ -382,11 +430,11 @@ impl Kernel {
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // A bounded queue is part of the protocol's backpressure contract. The
-    // reader blocks once the worker has 64 frames queued instead of allowing
-    // an untrusted Host to grow process memory without bound.
-    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(64);
-    let (response_tx, response_rx) = mpsc::sync_channel::<Value>(64);
+    // The worker and writer are each serial, so queueing more than one full
+    // envelope cannot improve throughput. A one-item handoff provides real
+    // backpressure without multiplying the 16 MiB control-frame bound.
+    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(1);
+    let (response_tx, response_rx) = mpsc::sync_channel::<Value>(1);
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
     let admission_epoch = Arc::new(Mutex::new(None::<String>));
@@ -457,9 +505,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .unwrap_or("");
                 if response.get("ok") == Some(&Value::Bool(true)) {
                     mark_grant_revoked(&worker_revoked_grants, &worker_cancellations, target);
-                    if let Some(storage) = kernel.storage.as_mut() {
-                        storage.abort_streams_for_grant(target);
-                    }
                 } else if let Ok(mut revoked) = worker_revoked_grants.lock() {
                     revoked.remove(target);
                 }
@@ -561,20 +606,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             .and_then(Value::as_str)
             .map(str::to_string);
         if request.get("method").and_then(Value::as_str) == Some("authority.grant.revoke") {
-            let target = request
-                .get("params")
-                .and_then(Value::as_object)
-                .and_then(|params| params.get("grantId"))
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let epoch_matches = admission_epoch
-                .lock()
-                .ok()
-                .and_then(|epoch| epoch.clone())
-                .as_deref()
-                == request_epoch.as_deref();
-            if epoch_matches {
-                mark_grant_revoked(&revoked_grants, &cancellations, target);
+            let current_epoch = admission_epoch.lock().ok().and_then(|epoch| epoch.clone());
+            if let Some(target) = admission_revoke_target(&request, current_epoch.as_deref()) {
+                mark_grant_revoked(&revoked_grants, &cancellations, &target);
             }
         }
         if !id.is_empty() {
@@ -595,6 +629,34 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     drop(request_tx);
     let _ = worker.join();
+    drop(response_tx);
     let _ = writer.join();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn revoke_admission_requires_a_fully_valid_envelope() {
+        let valid = json!({
+            "v": PROTOCOL_VERSION,
+            "kind": "request",
+            "id": "revoke-request",
+            "method": "authority.grant.revoke",
+            "params": {"grantId": "actor"},
+            "epoch": "epoch",
+        });
+        assert_eq!(
+            admission_revoke_target(&valid, Some("epoch")).as_deref(),
+            Some("actor")
+        );
+        let mut malformed = valid.clone();
+        malformed["params"]["unexpected"] = Value::Bool(true);
+        assert_eq!(admission_revoke_target(&malformed, Some("epoch")), None);
+        let mut stale = valid;
+        stale["epoch"] = Value::String("old".to_string());
+        assert_eq!(admission_revoke_target(&stale, Some("epoch")), None);
+    }
 }

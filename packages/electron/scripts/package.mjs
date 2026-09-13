@@ -11,10 +11,19 @@ const builderArgs = process.argv.slice(2);
 const unsignedMacIndex = builderArgs.indexOf('--piarium-unsigned-mac');
 const unsignedMac = unsignedMacIndex >= 0;
 if (unsignedMac) builderArgs.splice(unsignedMacIndex, 1);
-const targetArchitecture = resolveTargetArchitecture({ environment: env, builderArgs });
+const requestedPlatforms = new Set();
+for (const argument of builderArgs) {
+  if (argument === '--win' || argument.startsWith('--win=')) requestedPlatforms.add('win32');
+  if (argument === '--linux' || argument.startsWith('--linux=')) requestedPlatforms.add('linux');
+  if (argument === '--mac' || argument.startsWith('--mac=')) requestedPlatforms.add('darwin');
+}
+if (requestedPlatforms.size > 1) throw new Error(`Exactly one Electron target platform is required, got: ${[...requestedPlatforms].join(', ')}.`);
+const targetPlatform = [...requestedPlatforms][0] || process.platform;
+const targetArchitecture = resolveTargetArchitecture({ platform: targetPlatform, environment: env, builderArgs });
 const require = createRequire(import.meta.url);
 const electronVersion = require('electron/package.json').version;
 env.PIARIUM_TARGET_ARCH = targetArchitecture.node;
+env.PIARIUM_TARGET_PLATFORM = targetPlatform;
 env.PIARIUM_PACKAGING_NODE = process.execPath;
 
 if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
@@ -53,7 +62,21 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
   return false;
 }) || (process.platform === 'win32' ? 'bun.exe' : 'bun');
 
-if (process.platform === 'linux' && !builderArgs.some((argument) => (
+execFileSync(process.execPath, [
+  path.resolve(electronDir, '..', '..', 'scripts', 'build-kernel.mjs'),
+  '--stage',
+  path.join(electronDir, 'resources', 'kernel'),
+  '--platform',
+  targetPlatform,
+  '--arch',
+  targetArchitecture.node,
+], {
+  cwd: electronDir,
+  env,
+  stdio: 'inherit',
+});
+
+if (targetPlatform === 'linux' && !builderArgs.some((argument) => (
   argument === '--x64' || argument === '--arm64' || argument === '--arch' || argument.startsWith('--arch=')
 ))) {
   builderArgs.push(`--${targetArchitecture.electronBuilder}`);

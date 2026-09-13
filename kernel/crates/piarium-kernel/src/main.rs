@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -15,13 +15,18 @@ mod authority;
 mod error;
 mod model;
 mod protocol;
+mod protocol_generated;
 mod runtime;
 mod storage_schema;
 use authority::{path_allowed, path_allowed_scopes, require_capability};
 use error::KernelError;
-use model::{BlobStream, BranchRow, BuildTree, Grant, PathState, TrieNode};
+use model::{
+    BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, Grant, PathState, TrieNode,
+};
 use protocol::*;
-use storage_schema::CATALOG_SCHEMA;
+use storage_schema::{
+    CATALOG_SCHEMA, CATALOG_USER_VERSION, REQUIRED_COLUMNS, REQUIRED_INDEXES, REQUIRED_TABLES,
+};
 
 fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
@@ -31,11 +36,71 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(not(unix))]
     {
         let _ = path;
-        // Windows does not expose a portable directory fsync primitive. The
-        // file itself is synced before rename and the limitation is recorded
-        // in the release evidence rather than pretending otherwise.
         Ok(())
     }
+}
+
+fn durable_rename(source: &Path, target: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        fs::rename(source, target)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+        const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
+        }
+        let existing = source
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let replacement = target
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let moved = unsafe {
+            MoveFileExW(
+                existing.as_ptr(),
+                replacement.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+}
+
+fn hash_file(path: &Path) -> Result<(String, u64), KernelError> {
+    let mut reader = BufReader::new(File::open(path)?);
+    let mut digest = Sha256::new();
+    let mut length = 0u64;
+    let mut buffer = [0u8; 128 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+        length = length
+            .checked_add(read as u64)
+            .ok_or_else(|| KernelError::Storage("content length overflow".to_string()))?;
+    }
+    Ok((format!("sha256-{}", hex::encode(digest.finalize())), length))
+}
+
+fn blob_owner_id(operation_id: &str) -> String {
+    format!(
+        "blob-owner-{}",
+        hex::encode(Sha256::digest(operation_id.as_bytes()))
+    )
 }
 
 struct StorageLock {
@@ -54,9 +119,88 @@ struct Storage {
     _lock: StorageLock,
     cancellation: Option<Arc<AtomicBool>>,
     streams: HashMap<String, BlobStream>,
+    branch_builders: HashMap<String, BranchBuilder>,
+    branch_write_builders: HashMap<String, BranchWriteBuilder>,
+    verified_objects: BTreeSet<String>,
 }
 
 impl Storage {
+    fn catalog_schema_fingerprint() -> String {
+        format!(
+            "sha256-{}",
+            hex::encode(Sha256::digest(CATALOG_SCHEMA.as_bytes()))
+        )
+    }
+
+    fn validate_catalog_schema(conn: &Connection) -> Result<(), KernelError> {
+        let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        if user_version != CATALOG_USER_VERSION {
+            return Err(KernelError::Storage(format!(
+                "catalog user_version does not match format {}: {user_version}",
+                STORAGE_FORMAT_VERSION
+            )));
+        }
+        let fingerprint: Option<String> = conn
+            .query_row(
+                "SELECT value FROM metadata WHERE key = 'schema_fingerprint'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let expected_fingerprint = Self::catalog_schema_fingerprint();
+        if fingerprint.as_deref() != Some(expected_fingerprint.as_str()) {
+            return Err(KernelError::Storage(
+                "catalog schema fingerprint does not match this kernel".to_string(),
+            ));
+        }
+        let tables = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let expected_tables = REQUIRED_TABLES
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+        if tables != expected_tables {
+            return Err(KernelError::Storage(format!(
+                "catalog table set is corrupt: expected {:?}, found {:?}",
+                expected_tables, tables
+            )));
+        }
+        let indexes = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name")?
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let expected_indexes = REQUIRED_INDEXES
+            .iter()
+            .map(|value| value.to_string())
+            .collect::<Vec<_>>();
+        if indexes != expected_indexes {
+            return Err(KernelError::Storage(format!(
+                "catalog index set is corrupt: expected {:?}, found {:?}",
+                expected_indexes, indexes
+            )));
+        }
+        for (table, expected) in REQUIRED_COLUMNS {
+            let pragma = format!("PRAGMA table_info({table})");
+            let columns = conn
+                .prepare(&pragma)?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let expected = expected
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>();
+            if columns != expected {
+                return Err(KernelError::Storage(format!(
+                    "catalog columns are corrupt for {table}: expected {:?}, found {:?}",
+                    expected, columns
+                )));
+            }
+        }
+        Ok(())
+    }
+
     fn open(root: &Path, host_id: &str) -> Result<Self, KernelError> {
         fs::create_dir_all(root)?;
         let lock_path = root.join("kernel.lock");
@@ -64,6 +208,7 @@ impl Storage {
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(&lock_path)?;
         if file.try_lock_exclusive().is_err() {
             return Err(KernelError::Storage(format!(
@@ -145,14 +290,18 @@ impl Storage {
                     "INSERT INTO metadata(key, value) VALUES ('format_version', ?1)",
                     params![STORAGE_FORMAT_VERSION],
                 )?;
-                conn.execute_batch("PRAGMA user_version = 5")
+                conn.execute(
+                    "INSERT INTO metadata(key, value) VALUES ('schema_fingerprint', ?1)",
+                    params![Self::catalog_schema_fingerprint()],
+                )?;
+                conn.pragma_update(None, "user_version", CATALOG_USER_VERSION)
             }) {
                 let _ = conn.execute_batch("ROLLBACK");
                 return Err(error.into());
             }
             conn.execute_batch("COMMIT")?;
         } else {
-            conn.execute_batch(CATALOG_SCHEMA)?;
+            Self::validate_catalog_schema(&conn)?;
         }
         let mut storage = Self {
             root: PathBuf::from(root),
@@ -160,6 +309,9 @@ impl Storage {
             _lock: StorageLock { _file: file },
             cancellation: None,
             streams: HashMap::new(),
+            branch_builders: HashMap::new(),
+            branch_write_builders: HashMap::new(),
+            verified_objects: BTreeSet::new(),
         };
         // A process may have exited after the SQLite commit and before the
         // object unlink. Retry durable cleanup on the next owner start; a
@@ -309,11 +461,11 @@ impl Storage {
         hash: &str,
         workspace_id: Option<&str>,
         operation_id: Option<&str>,
-        owner_kind: &str,
+        grant_id: &str,
     ) -> Result<(), KernelError> {
         self.conn.execute(
-            "INSERT OR REPLACE INTO object_owners(owner_id, blob_hash, workspace_id, operation_id, owner_kind, state, created_at) VALUES (?1, ?2, ?3, ?4, ?5, 'active', ?6)",
-            params![owner_id, hash, workspace_id, operation_id, owner_kind, now_ms()],
+            "INSERT OR REPLACE INTO object_owners(owner_id, blob_hash, workspace_id, operation_id, grant_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![owner_id, hash, workspace_id, operation_id, grant_id, now_ms()],
         )?;
         Ok(())
     }
@@ -322,37 +474,61 @@ impl Storage {
         &mut self,
         params_value: &Value,
         workspace_id: Option<&str>,
+        grant_id: &str,
     ) -> Result<Value, KernelError> {
         let owner_id = params_value
             .get("ownerId")
-            .or_else(|| params_value.get("operationId"))
             .and_then(Value::as_str)
-            .ok_or_else(|| {
-                KernelError::Operation("ownerId or operationId is required".to_string())
-            })?;
+            .ok_or_else(|| KernelError::Operation("ownerId is required".to_string()))?;
         let released = if let Some(workspace_id) = workspace_id {
             self.conn.execute(
-                "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2",
-                params![owner_id, workspace_id],
+                "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2 AND grant_id = ?3",
+                params![owner_id, workspace_id, grant_id],
             )?
         } else {
             self.conn.execute(
-                "DELETE FROM object_owners WHERE owner_id = ?1",
-                params![owner_id],
+                "DELETE FROM object_owners WHERE owner_id = ?1 AND grant_id = ?2",
+                params![owner_id, grant_id],
             )?
         };
         Ok(json!({"ownerId": owner_id, "released": released > 0}))
     }
 
-    fn attach_object_owners(
+    fn validate_object_owners(
+        &self,
+        workspace_id: &str,
+        grant_id: &str,
+        owners: &BTreeMap<String, String>,
+    ) -> Result<(), KernelError> {
+        for (owner_id, expected_hash) in owners {
+            let actual: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT blob_hash FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2 AND grant_id = ?3",
+                    params![owner_id, workspace_id, grant_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if actual.as_deref() != Some(expected_hash) {
+                return Err(KernelError::Authorization(format!(
+                    "temporary object owner is not valid for this write: {owner_id}"
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn consume_object_owners(
         &mut self,
         workspace_id: &str,
-        hashes: impl IntoIterator<Item = String>,
+        grant_id: &str,
+        owners: &BTreeMap<String, String>,
     ) -> Result<(), KernelError> {
-        for hash in hashes {
+        self.validate_object_owners(workspace_id, grant_id, owners)?;
+        for owner_id in owners.keys() {
             self.conn.execute(
-                "UPDATE object_owners SET state = 'attached' WHERE blob_hash = ?1 AND workspace_id = ?2 AND owner_kind = 'operation' AND state = 'active'",
-                params![hash, workspace_id],
+                "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2 AND grant_id = ?3",
+                params![owner_id, workspace_id, grant_id],
             )?;
         }
         Ok(())
@@ -511,18 +687,32 @@ impl Storage {
         }
         let mut revoked = grant;
         revoked.revoked = true;
-        self.conn.execute(
-            "UPDATE grants SET revoked = 1, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
-            params![grant_id, now_ms(), serde_json::to_string(&revoked)?],
-        )?;
-        Ok(json!({"grantId": grant_id, "revoked": true}))
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let outcome = (|| {
+            self.conn.execute(
+                "UPDATE grants SET revoked = 1, updated_at = ?2, grant_json = ?3 WHERE grant_id = ?1",
+                params![grant_id, now_ms(), serde_json::to_string(&revoked)?],
+            )?;
+            self.abort_streams_for_grant(grant_id)?;
+            Ok::<(), KernelError>(())
+        })();
+        match outcome {
+            Ok(()) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(json!({"grantId": grant_id, "revoked": true}))
+            }
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
     }
 
-    fn blob_owned(&self, hash: &str, workspace: Option<&str>) -> Result<bool, KernelError> {
+    fn blob_reachable(&self, hash: &str, workspace: Option<&str>) -> Result<bool, KernelError> {
         let query = if workspace.is_some() {
-            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches WHERE workspace_id = ?2 UNION SELECT head_root FROM branches WHERE workspace_id = ?2 UNION SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE b.workspace_id = ?2 UNION SELECT p.root_hash FROM pins p WHERE p.workspace_id = ?2 UNION SELECT rr.root_hash FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rec.workspace_id = ?2 UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 UNION SELECT 1 FROM object_owners oo WHERE oo.blob_hash = ?1 AND oo.workspace_id = ?2 AND oo.state = 'active' LIMIT 1"
+            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches WHERE workspace_id = ?2 UNION SELECT head_root FROM branches WHERE workspace_id = ?2 UNION SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE b.workspace_id = ?2 UNION SELECT p.root_hash FROM pins p WHERE p.workspace_id = ?2 UNION SELECT rr.root_hash FROM recovery_roots rr JOIN recovery_records rec ON rec.record_id = rr.record_id WHERE rec.workspace_id = ?2 UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 LIMIT 1"
         } else {
-            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches UNION SELECT head_root FROM branches UNION SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT root_hash FROM recovery_roots UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 UNION SELECT 1 FROM object_owners oo WHERE oo.blob_hash = ?1 AND oo.state = 'active' LIMIT 1"
+            "WITH RECURSIVE roots(root_hash) AS (SELECT base_root FROM branches UNION SELECT head_root FROM branches UNION SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT root_hash FROM recovery_roots UNION SELECT parent.parent_root FROM root_parents parent JOIN roots ON parent.root_hash = roots.root_hash) SELECT 1 FROM root_blobs rb JOIN roots ON roots.root_hash = rb.root_hash WHERE rb.blob_hash = ?1 LIMIT 1"
         };
         let row: Option<i64> = if let Some(workspace) = workspace {
             self.conn
@@ -531,6 +721,30 @@ impl Storage {
         } else {
             self.conn
                 .query_row(query, params![hash], |row| row.get(0))
+                .optional()?
+        };
+        Ok(row.is_some())
+    }
+
+    fn blob_owned(&self, hash: &str, workspace: Option<&str>) -> Result<bool, KernelError> {
+        if self.blob_reachable(hash, workspace)? {
+            return Ok(true);
+        }
+        let row: Option<i64> = if let Some(workspace) = workspace {
+            self.conn
+                .query_row(
+                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 AND workspace_id = ?2 LIMIT 1",
+                    params![hash, workspace],
+                    |row| row.get(0),
+                )
+                .optional()?
+        } else {
+            self.conn
+                .query_row(
+                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 LIMIT 1",
+                    params![hash],
+                    |row| row.get(0),
+                )
                 .optional()?
         };
         Ok(row.is_some())
@@ -603,15 +817,43 @@ impl Storage {
                         .get(stream_id)
                         .and_then(|stream| stream.workspace_id.clone())
                 })
+        } else if let Some(builder_id) = params.get("builderId").and_then(Value::as_str) {
+            let builder = self
+                .branch_builders
+                .get(builder_id)
+                .map(|builder| (&builder.grant_id, &builder.workspace_id))
+                .or_else(|| {
+                    self.branch_write_builders
+                        .get(builder_id)
+                        .map(|builder| (&builder.grant_id, &builder.workspace_id))
+                });
+            if builder.is_some_and(|(builder_grant, _)| builder_grant != &grant.grant_id)
+                && !grant.capabilities.contains("storage.admin")
+            {
+                return Err(KernelError::Authorization(
+                    "branch builder belongs to another grant".to_string(),
+                ));
+            }
+            builder.map(|(_, workspace)| workspace.clone())
         } else if let Some(owner_id) = params.get("ownerId").and_then(Value::as_str) {
-            self.conn
+            let owner: Option<(Option<String>, String)> = self
+                .conn
                 .query_row(
-                    "SELECT workspace_id FROM object_owners WHERE owner_id = ?1",
+                    "SELECT workspace_id, grant_id FROM object_owners WHERE owner_id = ?1",
                     params![owner_id],
-                    |row| row.get::<_, Option<String>>(0),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
-                .optional()?
-                .flatten()
+                .optional()?;
+            if owner
+                .as_ref()
+                .is_some_and(|(_, owner_grant)| owner_grant != &grant.grant_id)
+                && !grant.capabilities.contains("storage.admin")
+            {
+                return Err(KernelError::Authorization(
+                    "temporary object owner belongs to another grant".to_string(),
+                ));
+            }
+            owner.and_then(|(workspace, _)| workspace)
         } else if let Some(operation_id) = params.get("operationId").and_then(Value::as_str) {
             let operation_workspace: Option<String> = self
                 .conn
@@ -667,13 +909,15 @@ impl Storage {
         } else {
             None
         };
+        if method == "operation.get" && workspace.is_none() {
+            return Err(KernelError::Authorization(
+                "operation is not owned by this storage authority".to_string(),
+            ));
+        }
         let workspace = if workspace.is_none()
             && matches!(
                 method,
-                "operation.get"
-                    | "recovery.operation.get"
-                    | "recovery.operation.begin"
-                    | "recovery.operation.update"
+                "recovery.operation.get" | "recovery.operation.begin" | "recovery.operation.update"
             ) {
             grant.owning_workspace.clone()
         } else {
@@ -735,7 +979,23 @@ impl Storage {
                             "path is outside grant scope: {canonical}"
                         )));
                     }
+                    if let Some(source_path) = value.get("sourcePath").and_then(Value::as_str) {
+                        let source = Self::validate_path(source_path)?.join("/");
+                        if !path_allowed(&grant, &source) {
+                            return Err(KernelError::Authorization(format!(
+                                "source path is outside grant scope: {source}"
+                            )));
+                        }
+                    }
                 }
+            }
+        }
+        if let Some(path) = params.get("path").and_then(Value::as_str) {
+            let canonical = Self::validate_path(path)?.join("/");
+            if !path_allowed(&grant, &canonical) {
+                return Err(KernelError::Authorization(format!(
+                    "path is outside grant scope: {canonical}"
+                )));
             }
         }
         if method == "storage.getBlob" {
@@ -1263,12 +1523,7 @@ impl Storage {
     fn parse_state(&self, state: &Value) -> Result<PathState, KernelError> {
         let parsed: PathState = serde_json::from_value(state.clone())
             .map_err(|error| KernelError::Operation(format!("invalid path state: {error}")))?;
-        if let PathState::RegularFile {
-            object_hash,
-            byte_length,
-            ..
-        } = &parsed
-        {
+        if let PathState::RegularFile { object_hash, .. } = &parsed {
             if !object_hash.starts_with("sha256-")
                 || object_hash.len() != 71
                 || !object_hash[7..].chars().all(|c| c.is_ascii_hexdigit())
@@ -1277,32 +1532,50 @@ impl Storage {
                     "regular-file.objectHash is malformed".to_string(),
                 ));
             }
-            let row: Option<i64> = self
-                .conn
-                .query_row(
-                    "SELECT byte_length FROM blobs WHERE hash = ?1",
-                    params![object_hash],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            if row
-                != Some(i64::try_from(*byte_length).map_err(|_| {
-                    KernelError::Operation("regular-file.byteLength is too large".to_string())
-                })?)
-            {
-                return Err(KernelError::Storage(format!(
-                    "content object is not durable: {object_hash}"
-                )));
-            }
         }
         Ok(parsed)
     }
 
+    fn validate_blob_metadata(&self, state: &PathState) -> Result<(), KernelError> {
+        let PathState::RegularFile {
+            object_hash,
+            byte_length,
+            ..
+        } = state
+        else {
+            return Ok(());
+        };
+        let recorded: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT byte_length FROM blobs WHERE hash = ?1",
+                params![object_hash],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if recorded
+            != Some(i64::try_from(*byte_length).map_err(|_| {
+                KernelError::Operation("regular-file.byteLength is too large".to_string())
+            })?)
+        {
+            return Err(KernelError::Storage(format!(
+                "content object is not durable: {object_hash}"
+            )));
+        }
+        Ok(())
+    }
+
     fn begin_blob_stream(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
         let operation_id = params
             .get("operationId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let stream_id = params
+            .get("streamId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("streamId is required".to_string()))?;
         let expected_length = params
             .get("byteLength")
             .and_then(Value::as_u64)
@@ -1311,12 +1584,9 @@ impl Storage {
             .get("expectedHash")
             .and_then(Value::as_str)
             .map(str::to_string);
-        if let Some((stream_id, stream)) = self
-            .streams
-            .iter()
-            .find(|(_, stream)| stream.operation_id == operation_id)
-        {
+        if let Some(stream) = self.streams.get(stream_id) {
             if stream.grant_id != grant_id
+                || stream.operation_id != operation_id
                 || stream.expected_length != expected_length
                 || stream.expected_hash != expected_hash
             {
@@ -1328,7 +1598,6 @@ impl Storage {
                 json!({"streamId": stream_id, "operationId": operation_id, "byteLength": expected_length, "received": stream.received, "nextSequence": stream.next_sequence}),
             );
         }
-        let stream_id = format!("stream-{}", Uuid::new_v4());
         let staging = self
             .root
             .join("staging")
@@ -1338,14 +1607,14 @@ impl Storage {
             .create_new(true)
             .open(&staging)?;
         self.streams.insert(
-            stream_id.clone(),
+            stream_id.to_string(),
             BlobStream {
                 operation_id: operation_id.to_string(),
                 expected_length,
                 received: 0,
                 next_sequence: 0,
                 expected_hash,
-                staging,
+                staging: staging.clone(),
                 grant_id: grant_id.to_string(),
                 workspace_id: params
                     .get("workspaceId")
@@ -1353,6 +1622,11 @@ impl Storage {
                     .map(str::to_string),
             },
         );
+        if let Err(error) = self.check_cancelled() {
+            self.streams.remove(stream_id);
+            let _ = fs::remove_file(&staging);
+            return Err(error);
+        }
         Ok(
             json!({"streamId": stream_id, "operationId": operation_id, "byteLength": expected_length}),
         )
@@ -1401,6 +1675,7 @@ impl Storage {
     }
 
     fn finish_blob_stream(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
         let stream_id = params
             .get("streamId")
             .and_then(Value::as_str)
@@ -1413,6 +1688,12 @@ impl Storage {
             let _ = fs::remove_file(&stream.staging);
             return Err(KernelError::Authorization(
                 "content stream identity is invalid".to_string(),
+            ));
+        }
+        if params.get("workspaceId").and_then(Value::as_str) != stream.workspace_id.as_deref() {
+            let _ = fs::remove_file(&stream.staging);
+            return Err(KernelError::Authorization(
+                "content stream workspace identity is invalid".to_string(),
             ));
         }
         if let Some(expected_hash) = params.get("expectedHash").and_then(Value::as_str) {
@@ -1435,8 +1716,11 @@ impl Storage {
             .open(&stream.staging)?;
         file.sync_all()?;
         drop(file);
-        let decoded = fs::read(&stream.staging)?;
-        let hash = format!("sha256-{}", hex::encode(Sha256::digest(&decoded)));
+        if let Err(error) = self.check_cancelled() {
+            let _ = fs::remove_file(&stream.staging);
+            return Err(error);
+        }
+        let (hash, byte_length) = hash_file(&stream.staging)?;
         if stream
             .expected_hash
             .as_deref()
@@ -1449,31 +1733,53 @@ impl Storage {
         }
         let target = object_path(&self.root, &hash)?;
         if target.exists() {
-            let existing = fs::read(&target)?;
-            if existing != decoded {
+            let (existing_hash, existing_length) = hash_file(&target)?;
+            if existing_hash != hash || existing_length != byte_length {
                 let _ = fs::remove_file(&stream.staging);
                 return Err(KernelError::Storage(format!(
                     "content object is corrupt: {hash}"
                 )));
             }
             fs::remove_file(&stream.staging)?;
+            sync_directory(&self.root.join("staging"))?;
         } else {
-            fs::create_dir_all(target.parent().unwrap())?;
-            fs::rename(&stream.staging, &target)?;
+            let shard = target.parent().expect("object path always has a shard");
+            if !shard.exists() {
+                fs::create_dir(shard)?;
+                sync_directory(&self.root.join("objects"))?;
+            }
+            if let Err(error) = self.check_cancelled() {
+                let _ = fs::remove_file(&stream.staging);
+                return Err(error);
+            }
+            durable_rename(&stream.staging, &target)?;
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(&target)?
+                .sync_all()?;
+            sync_directory(&self.root.join("staging"))?;
         }
         sync_directory(target.parent().unwrap())?;
         self.conn.execute(
             "INSERT OR IGNORE INTO blobs(hash, byte_length) VALUES (?1, ?2)",
-            params![hash, decoded.len() as i64],
+            params![
+                hash,
+                i64::try_from(byte_length).map_err(|_| KernelError::Operation(
+                    "content object is too large".to_string()
+                ))?
+            ],
         )?;
+        self.verified_objects.insert(hash.clone());
+        let owner_id = blob_owner_id(&stream.operation_id);
         self.record_object_owner(
-            &format!("operation:{}", stream.operation_id),
+            &owner_id,
             &hash,
             params.get("workspaceId").and_then(Value::as_str),
             Some(&stream.operation_id),
-            "operation",
+            grant_id,
         )?;
-        Ok(json!({"hash": hash, "byteLength": decoded.len()}))
+        Ok(json!({"hash": hash, "byteLength": byte_length, "ownerId": owner_id}))
     }
 
     fn abort_blob_stream(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
@@ -1494,7 +1800,7 @@ impl Storage {
         Ok(json!({"streamId": stream_id, "aborted": true}))
     }
 
-    fn abort_streams_for_grant(&mut self, grant_id: &str) {
+    fn abort_streams_for_grant(&mut self, grant_id: &str) -> Result<(), KernelError> {
         let stream_ids = self
             .streams
             .iter()
@@ -1506,20 +1812,132 @@ impl Storage {
                 let _ = fs::remove_file(stream.staging);
             }
         }
+        self.branch_builders
+            .retain(|_, builder| builder.grant_id != grant_id);
+        self.branch_write_builders
+            .retain(|_, builder| builder.grant_id != grant_id);
+        self.conn.execute(
+            "DELETE FROM object_owners WHERE grant_id = ?1",
+            params![grant_id],
+        )?;
+        Ok(())
     }
 
-    fn get_blob(&self, params: &Value) -> Result<Value, KernelError> {
+    fn validate_blob_read_source(
+        &self,
+        params: &Value,
+        hash: &str,
+        grant_id: &str,
+        storage_admin: bool,
+    ) -> Result<(), KernelError> {
+        let branch_id = params.get("branchId").and_then(Value::as_str);
+        let pin_id = params.get("pinId").and_then(Value::as_str);
+        let owner_id = params.get("ownerId").and_then(Value::as_str);
+        if [branch_id.is_some(), pin_id.is_some(), owner_id.is_some()]
+            .into_iter()
+            .filter(|value| *value)
+            .count()
+            != 1
+        {
+            return Err(KernelError::Authorization(
+                "content reads require exactly one branchId, pinId, or ownerId source".to_string(),
+            ));
+        }
+        if let Some(owner_id) = owner_id {
+            if params.get("path").is_some() || params.get("revision").is_some() {
+                return Err(KernelError::Authorization(
+                    "owner content reads cannot claim a path or revision".to_string(),
+                ));
+            }
+            let owned: Option<(String, String)> = self
+                .conn
+                .query_row(
+                    "SELECT blob_hash, grant_id FROM object_owners WHERE owner_id = ?1",
+                    params![owner_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+            if owned.as_ref().is_none_or(|(owned_hash, owner_grant)| {
+                owned_hash != hash || (!storage_admin && owner_grant != grant_id)
+            }) {
+                return Err(KernelError::Authorization(
+                    "content object is not bound to the supplied owner".to_string(),
+                ));
+            }
+            return Ok(());
+        }
+        let raw_path = params.get("path").and_then(Value::as_str).ok_or_else(|| {
+            KernelError::Authorization(
+                "path is required for a branch or pin content read".to_string(),
+            )
+        })?;
+        let path = Self::validate_path(raw_path)?.join("/");
+        let root = if let Some(branch_id) = branch_id {
+            if let Some(revision) = params.get("revision").and_then(Value::as_i64) {
+                self.conn
+                    .query_row(
+                        "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                        params![branch_id, revision],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .map_err(|error| match error {
+                        rusqlite::Error::QueryReturnedNoRows => KernelError::Operation(format!(
+                            "revision not found: {branch_id}@{revision}"
+                        )),
+                        other => other.into(),
+                    })?
+            } else {
+                self.branch(branch_id)?.head_root
+            }
+        } else {
+            if params.get("revision").is_some() {
+                return Err(KernelError::Authorization(
+                    "revision is only valid for a branch content source".to_string(),
+                ));
+            }
+            self.conn
+                .query_row(
+                    "SELECT root_hash FROM pins WHERE pin_id = ?1",
+                    params![pin_id.expect("source count checked")],
+                    |row| row.get::<_, String>(0),
+                )
+                .map_err(|error| match error {
+                    rusqlite::Error::QueryReturnedNoRows => {
+                        KernelError::Operation("pin not found".to_string())
+                    }
+                    other => other.into(),
+                })?
+        };
+        let state = self.root_get(&root, &path)?;
+        if state.as_ref().and_then(PathState::object_hash) != Some(hash) {
+            return Err(KernelError::Authorization(
+                "content object is not the file bound to the supplied source path".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn get_blob(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+        storage_admin: bool,
+    ) -> Result<Value, KernelError> {
         let hash = params
             .get("hash")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("hash is required".to_string()))?;
+        self.validate_blob_read_source(params, hash, grant_id, storage_admin)?;
         let path = object_path(&self.root, hash)?;
-        let bytes = fs::read(path)?;
-        let actual = format!("sha256-{}", hex::encode(Sha256::digest(&bytes)));
-        if actual != hash {
-            return Err(KernelError::Storage(format!(
-                "content object is corrupt: {hash}"
-            )));
+        let byte_length = fs::metadata(&path)?.len();
+        if !self.verified_objects.contains(hash) {
+            let (actual, hashed_length) = hash_file(&path)?;
+            if actual != hash || hashed_length != byte_length {
+                return Err(KernelError::Storage(format!(
+                    "content object is corrupt: {hash}"
+                )));
+            }
+            self.verified_objects.insert(hash.to_string());
         }
         let recorded: Option<i64> = self
             .conn
@@ -1529,33 +1947,50 @@ impl Storage {
                 |row| row.get(0),
             )
             .optional()?;
-        if recorded != Some(bytes.len() as i64) {
+        if recorded
+            != Some(
+                i64::try_from(byte_length)
+                    .map_err(|_| KernelError::Storage("content object is too large".to_string()))?,
+            )
+        {
             return Err(KernelError::Storage(format!(
                 "content object metadata is missing or corrupt: {hash}"
             )));
         }
-        let offset = params.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let length = params
-            .get("length")
-            .and_then(Value::as_u64)
-            .map(|value| value as usize);
-        if bytes.len() > MAX_BLOB_RESPONSE_BYTES && length.is_none() {
+        let offset = match params.get("offset") {
+            Some(value) => value.as_u64().ok_or_else(|| {
+                KernelError::Operation("offset must be a non-negative integer".to_string())
+            })?,
+            None => 0,
+        };
+        let length = match params.get("length") {
+            Some(value) => value.as_u64().ok_or_else(|| {
+                KernelError::Operation("length must be a non-negative integer".to_string())
+            })?,
+            None => byte_length.saturating_sub(offset),
+        };
+        if byte_length > MAX_BLOB_RESPONSE_BYTES as u64 && params.get("length").is_none() {
             return Err(KernelError::Operation(
                 "content object is larger than one response frame; request a byte range"
                     .to_string(),
             ));
         }
-        if length.is_some_and(|length| length > MAX_BLOB_RESPONSE_BYTES) {
+        if length > MAX_BLOB_RESPONSE_BYTES as u64 {
             return Err(KernelError::Operation(
                 "requested byte range is larger than one response frame".to_string(),
             ));
         }
-        let start = offset.min(bytes.len());
-        let end = length
-            .map(|value| start.saturating_add(value).min(bytes.len()))
-            .unwrap_or(bytes.len());
+        let start = offset.min(byte_length);
+        let end = start.saturating_add(length).min(byte_length);
+        let slice_length = usize::try_from(end - start).map_err(|_| {
+            KernelError::Operation("requested object range is too large".to_string())
+        })?;
+        let mut file = File::open(&path)?;
+        file.seek(SeekFrom::Start(start))?;
+        let mut bytes = vec![0u8; slice_length];
+        file.read_exact(&mut bytes)?;
         Ok(
-            json!({"hash": hash, "byteLength": bytes.len(), "offset": start, "nextOffset": end, "eof": end >= bytes.len(), "bytesBase64": BASE64.encode(&bytes[start..end])}),
+            json!({"hash": hash, "byteLength": byte_length, "offset": start, "nextOffset": end, "eof": end >= byte_length, "bytesBase64": BASE64.encode(bytes)}),
         )
     }
 
@@ -1589,21 +2024,223 @@ impl Storage {
     fn validate_state_ownership(
         &self,
         entries: &[(Vec<String>, PathState)],
-        workspace_id: &str,
+        temporary_owners: &BTreeMap<String, String>,
+        source_paths: &BTreeMap<String, String>,
+        source_root: &str,
     ) -> Result<(), KernelError> {
-        for (_, state) in entries {
+        for (segments, state) in entries {
             if let Some(hash) = state.object_hash() {
-                if !self.blob_owned(hash, Some(workspace_id))? {
+                let supplied_owner = temporary_owners.values().any(|owned| owned == hash);
+                let target_path = segments.join("/");
+                let source_path = source_paths.get(&target_path).unwrap_or(&target_path);
+                let source_hash = self
+                    .root_get(source_root, source_path)?
+                    .as_ref()
+                    .and_then(PathState::object_hash)
+                    .map(str::to_string);
+                if !supplied_owner && source_hash.as_deref() != Some(hash) {
                     return Err(KernelError::Authorization(format!(
-                        "content object is not owned by workspace: {hash}"
+                        "content object is not bound to an authorized source path: {target_path}"
                     )));
                 }
+                self.validate_blob_metadata(state)?;
             }
         }
         Ok(())
     }
 
-    fn create_branch(&mut self, params: &Value) -> Result<Value, KernelError> {
+    fn begin_branch_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let operation_id = params
+            .get("operationId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let branch_id = params
+            .get("branchId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let workspace_id = params
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("workspaceId is required".to_string()))?;
+        let base_ref = params
+            .get("baseRef")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        if self.branch_write_builders.contains_key(builder_id) {
+            return Err(KernelError::Operation(
+                "builderId is already used by a branch mutation".to_string(),
+            ));
+        }
+        if let Some(existing) = self.branch_builders.get(builder_id) {
+            if existing.operation_id != operation_id
+                || existing.branch_id != branch_id
+                || existing.workspace_id != workspace_id
+                || existing.base_ref != base_ref
+                || existing.grant_id != grant_id
+            {
+                return Err(KernelError::Operation(
+                    "builderId was reused with a different branch identity".to_string(),
+                ));
+            }
+            return Ok(json!({
+                "builderId": builder_id,
+                "operationId": operation_id,
+                "nextSequence": existing.next_sequence,
+                "entryCount": existing.entries.len(),
+            }));
+        }
+        self.branch_builders.insert(
+            builder_id.to_string(),
+            BranchBuilder {
+                operation_id: operation_id.to_string(),
+                branch_id: branch_id.to_string(),
+                workspace_id: workspace_id.to_string(),
+                base_ref,
+                next_sequence: 0,
+                entries: Vec::new(),
+                grant_id: grant_id.to_string(),
+            },
+        );
+        Ok(
+            json!({"builderId": builder_id, "operationId": operation_id, "nextSequence": 0, "entryCount": 0}),
+        )
+    }
+
+    fn append_branch_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let sequence = params
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| KernelError::Operation("sequence is required".to_string()))?;
+        let entries = params
+            .get("entries")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Operation("entries is required".to_string()))?;
+        for entry in entries {
+            let path = entry
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
+            Self::validate_path(path)?;
+            let state = entry
+                .get("state")
+                .cloned()
+                .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
+            self.parse_state(&state)?;
+        }
+        let builder = self
+            .branch_builders
+            .get_mut(builder_id)
+            .ok_or_else(|| KernelError::Operation("branch builder not found".to_string()))?;
+        if builder.grant_id != grant_id || builder.next_sequence != sequence {
+            return Err(KernelError::Authorization(
+                "branch builder identity or sequence is invalid".to_string(),
+            ));
+        }
+        let original_len = builder.entries.len();
+        builder.entries.extend(entries.iter().cloned());
+        builder.next_sequence += 1;
+        if let Err(error) = self.check_cancelled() {
+            if let Some(builder) = self.branch_builders.get_mut(builder_id) {
+                builder.entries.truncate(original_len);
+                builder.next_sequence = sequence;
+            }
+            return Err(error);
+        }
+        Ok(json!({
+            "builderId": builder_id,
+            "nextSequence": sequence + 1,
+            "entryCount": self.branch_builders.get(builder_id).map_or(0, |builder| builder.entries.len()),
+        }))
+    }
+
+    fn finish_branch_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let operation_id = params
+            .get("operationId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let builder = self
+            .branch_builders
+            .get(builder_id)
+            .ok_or_else(|| KernelError::Operation("branch builder not found".to_string()))?;
+        if builder.grant_id != grant_id || builder.operation_id != operation_id {
+            return Err(KernelError::Authorization(
+                "branch builder identity is invalid".to_string(),
+            ));
+        }
+        let builder = self
+            .branch_builders
+            .remove(builder_id)
+            .expect("validated branch builder still exists");
+        let mut creation = json!({
+            "operationId": builder.operation_id,
+            "branchId": builder.branch_id,
+            "workspaceId": builder.workspace_id,
+            "entries": builder.entries,
+        });
+        if let Some(base_ref) = &builder.base_ref {
+            creation
+                .as_object_mut()
+                .expect("branch creation is an object")
+                .insert("baseRef".to_string(), Value::String(base_ref.clone()));
+        }
+        idempotent(self, "branch.create", &creation, |storage| {
+            storage.create_branch(&creation, grant_id)
+        })
+    }
+
+    fn abort_branch_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let Some(builder) = self.branch_builders.get(builder_id) else {
+            return Ok(json!({"builderId": builder_id, "aborted": false}));
+        };
+        if builder.grant_id != grant_id {
+            return Err(KernelError::Authorization(
+                "branch builder belongs to another grant".to_string(),
+            ));
+        }
+        self.branch_builders.remove(builder_id);
+        Ok(json!({"builderId": builder_id, "aborted": true}))
+    }
+
+    fn create_branch(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -1647,6 +2284,8 @@ impl Storage {
             .cloned()
             .unwrap_or_default();
         let mut entries_to_write = Vec::with_capacity(entries.len());
+        let mut owners_to_consume = BTreeMap::new();
+        let mut source_paths = BTreeMap::new();
         for entry in entries {
             self.check_cancelled()?;
             let path = entry
@@ -1658,19 +2297,45 @@ impl Storage {
                 .get("state")
                 .cloned()
                 .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
-            entries_to_write.push((segments, self.parse_state(&state)?));
+            let parsed = self.parse_state(&state)?;
+            let normalized_path = segments.join("/");
+            if let Some(source_path) = entry.get("sourcePath").and_then(Value::as_str) {
+                source_paths.insert(normalized_path, Self::validate_path(source_path)?.join("/"));
+            }
+            if let Some(owner_id) = entry.get("ownerId").and_then(Value::as_str) {
+                let hash = parsed.object_hash().ok_or_else(|| {
+                    KernelError::Operation(
+                        "ownerId is only valid for a regular-file entry".to_string(),
+                    )
+                })?;
+                if owners_to_consume
+                    .insert(owner_id.to_string(), hash.to_string())
+                    .is_some_and(|previous| previous != hash)
+                {
+                    return Err(KernelError::Operation(
+                        "one ownerId cannot identify different content objects".to_string(),
+                    ));
+                }
+            }
+            entries_to_write.push((segments, parsed));
         }
         Self::validate_batch_paths(&entries_to_write)?;
-        self.validate_state_ownership(&entries_to_write, workspace_id)?;
-        let entry_blob_hashes = entries_to_write
-            .iter()
-            .filter_map(|(_, state)| state.object_hash().map(str::to_string))
-            .collect::<Vec<_>>();
+        self.validate_object_owners(workspace_id, grant_id, &owners_to_consume)?;
         let base_root = if let Some(base_ref) = params.get("baseRef").and_then(Value::as_str) {
             self.resolve_base_ref(base_ref, workspace_id)?
         } else {
             self.empty_root()?
         };
+        self.validate_state_ownership(
+            &entries_to_write,
+            &owners_to_consume,
+            &source_paths,
+            &base_root,
+        )?;
+        let entry_blob_hashes = entries_to_write
+            .iter()
+            .filter_map(|(_, state)| state.object_hash().map(str::to_string))
+            .collect::<Vec<_>>();
         let mut root = base_root.clone();
         if !entries_to_write.is_empty() {
             if params.get("baseRef").is_none() {
@@ -1688,7 +2353,7 @@ impl Storage {
         if params.get("baseRef").is_none() {
             self.record_root_blobs(&root)?;
         }
-        self.attach_object_owners(workspace_id, entry_blob_hashes)?;
+        self.consume_object_owners(workspace_id, grant_id, &owners_to_consume)?;
         self.record_root_parent(&root, &base_root)?;
         let now = now_ms();
         self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, 0, 0, ?6, ?6)", params![branch_id, workspace_id, create_params_hash, base_root, root, now])?;
@@ -1770,7 +2435,191 @@ impl Storage {
         )
     }
 
-    fn branch_write(&mut self, params: &Value) -> Result<Value, KernelError> {
+    fn begin_branch_write_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let operation_id = params
+            .get("operationId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let branch_id = params
+            .get("branchId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let expected_write_revision = params
+            .get("expectedWriteRevision")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                KernelError::Operation("expectedWriteRevision is required".to_string())
+            })?;
+        let workspace_id = self.branch(branch_id)?.workspace_id;
+        if self.branch_builders.contains_key(builder_id) {
+            return Err(KernelError::Operation(
+                "builderId is already used by a branch creation".to_string(),
+            ));
+        }
+        if let Some(existing) = self.branch_write_builders.get(builder_id) {
+            if existing.operation_id != operation_id
+                || existing.branch_id != branch_id
+                || existing.expected_write_revision != expected_write_revision
+                || existing.grant_id != grant_id
+            {
+                return Err(KernelError::Operation(
+                    "builderId was reused with a different branch mutation".to_string(),
+                ));
+            }
+            return Ok(json!({
+                "builderId": builder_id,
+                "operationId": operation_id,
+                "nextSequence": existing.next_sequence,
+                "changeCount": existing.changes.len(),
+            }));
+        }
+        self.branch_write_builders.insert(
+            builder_id.to_string(),
+            BranchWriteBuilder {
+                operation_id: operation_id.to_string(),
+                branch_id: branch_id.to_string(),
+                expected_write_revision,
+                workspace_id,
+                next_sequence: 0,
+                changes: Vec::new(),
+                grant_id: grant_id.to_string(),
+            },
+        );
+        Ok(
+            json!({"builderId": builder_id, "operationId": operation_id, "nextSequence": 0, "changeCount": 0}),
+        )
+    }
+
+    fn append_branch_write_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let sequence = params
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| KernelError::Operation("sequence is required".to_string()))?;
+        let changes = params
+            .get("changes")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Operation("changes is required".to_string()))?;
+        for change in changes {
+            let path = change
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Operation("change.path is required".to_string()))?;
+            Self::validate_path(path)?;
+            let state = change
+                .get("state")
+                .cloned()
+                .ok_or_else(|| KernelError::Operation("change.state is required".to_string()))?;
+            self.parse_state(&state)?;
+        }
+        let builder = self
+            .branch_write_builders
+            .get_mut(builder_id)
+            .ok_or_else(|| {
+                KernelError::Operation("branch mutation builder not found".to_string())
+            })?;
+        if builder.grant_id != grant_id || builder.next_sequence != sequence {
+            return Err(KernelError::Authorization(
+                "branch mutation builder identity or sequence is invalid".to_string(),
+            ));
+        }
+        let original_len = builder.changes.len();
+        builder.changes.extend(changes.iter().cloned());
+        builder.next_sequence += 1;
+        if let Err(error) = self.check_cancelled() {
+            if let Some(builder) = self.branch_write_builders.get_mut(builder_id) {
+                builder.changes.truncate(original_len);
+                builder.next_sequence = sequence;
+            }
+            return Err(error);
+        }
+        Ok(json!({
+            "builderId": builder_id,
+            "nextSequence": sequence + 1,
+            "changeCount": self.branch_write_builders.get(builder_id).map_or(0, |builder| builder.changes.len()),
+        }))
+    }
+
+    fn finish_branch_write_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.check_cancelled()?;
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let operation_id = params
+            .get("operationId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let builder = self.branch_write_builders.get(builder_id).ok_or_else(|| {
+            KernelError::Operation("branch mutation builder not found".to_string())
+        })?;
+        if builder.grant_id != grant_id || builder.operation_id != operation_id {
+            return Err(KernelError::Authorization(
+                "branch mutation builder identity is invalid".to_string(),
+            ));
+        }
+        let builder = self
+            .branch_write_builders
+            .remove(builder_id)
+            .expect("validated branch mutation builder still exists");
+        let mutation = json!({
+            "operationId": builder.operation_id,
+            "branchId": builder.branch_id,
+            "workspaceId": builder.workspace_id,
+            "expectedWriteRevision": builder.expected_write_revision,
+            "changes": builder.changes,
+        });
+        idempotent(self, "branch.write", &mutation, |storage| {
+            storage.branch_write(&mutation, grant_id)
+        })
+    }
+
+    fn abort_branch_write_builder(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let builder_id = params
+            .get("builderId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("builderId is required".to_string()))?;
+        let Some(builder) = self.branch_write_builders.get(builder_id) else {
+            return Ok(json!({"builderId": builder_id, "aborted": false}));
+        };
+        if builder.grant_id != grant_id {
+            return Err(KernelError::Authorization(
+                "branch mutation builder belongs to another grant".to_string(),
+            ));
+        }
+        self.branch_write_builders.remove(builder_id);
+        Ok(json!({"builderId": builder_id, "aborted": true}))
+    }
+
+    fn branch_write(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -1792,6 +2641,8 @@ impl Storage {
             .and_then(Value::as_array)
             .ok_or_else(|| KernelError::Operation("changes is required".to_string()))?;
         let mut changes_to_write = Vec::with_capacity(changes.len());
+        let mut owners_to_consume = BTreeMap::new();
+        let mut source_paths = BTreeMap::new();
         for change in changes {
             self.check_cancelled()?;
             let path = change
@@ -1803,10 +2654,36 @@ impl Storage {
                 .get("state")
                 .cloned()
                 .ok_or_else(|| KernelError::Operation("change.state is required".to_string()))?;
-            changes_to_write.push((segments, self.parse_state(&state)?));
+            let parsed = self.parse_state(&state)?;
+            let normalized_path = segments.join("/");
+            if let Some(source_path) = change.get("sourcePath").and_then(Value::as_str) {
+                source_paths.insert(normalized_path, Self::validate_path(source_path)?.join("/"));
+            }
+            if let Some(owner_id) = change.get("ownerId").and_then(Value::as_str) {
+                let hash = parsed.object_hash().ok_or_else(|| {
+                    KernelError::Operation(
+                        "ownerId is only valid for a regular-file change".to_string(),
+                    )
+                })?;
+                if owners_to_consume
+                    .insert(owner_id.to_string(), hash.to_string())
+                    .is_some_and(|previous| previous != hash)
+                {
+                    return Err(KernelError::Operation(
+                        "one ownerId cannot identify different content objects".to_string(),
+                    ));
+                }
+            }
+            changes_to_write.push((segments, parsed));
         }
         Self::validate_batch_paths(&changes_to_write)?;
-        self.validate_state_ownership(&changes_to_write, &branch.workspace_id)?;
+        self.validate_object_owners(&branch.workspace_id, grant_id, &owners_to_consume)?;
+        self.validate_state_ownership(
+            &changes_to_write,
+            &owners_to_consume,
+            &source_paths,
+            &branch.head_root,
+        )?;
         let previous_root = branch.head_root.clone();
         let changed_blobs = changes_to_write
             .iter()
@@ -1826,7 +2703,7 @@ impl Storage {
         }
         self.record_root_parent(&root, &previous_root)?;
         self.record_root_blob_hashes(&root, changed_blobs.clone())?;
-        self.attach_object_owners(&branch.workspace_id, changed_blobs)?;
+        self.consume_object_owners(&branch.workspace_id, grant_id, &owners_to_consume)?;
         Ok(json!({"status": "committed", "writeRevision": next, "root": root}))
     }
 
@@ -1836,19 +2713,20 @@ impl Storage {
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
         let branch = self.branch(branch_id)?;
-        if let Some(expected) = params.get("expectedWriteRevision").and_then(Value::as_i64) {
-            if expected != branch.write_revision {
-                return Ok(
-                    json!({"status": "conflict", "branchId": branch_id, "writeRevision": branch.write_revision, "root": branch.head_root}),
-                );
-            }
-        }
-        if let Some(expected_root) = params.get("expectedRoot").and_then(Value::as_str) {
-            if expected_root != branch.head_root {
-                return Ok(
-                    json!({"status": "conflict", "branchId": branch_id, "writeRevision": branch.write_revision, "root": branch.head_root}),
-                );
-            }
+        let expected = params
+            .get("expectedWriteRevision")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                KernelError::Operation("expectedWriteRevision is required".to_string())
+            })?;
+        let expected_root = params
+            .get("expectedRoot")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("expectedRoot is required".to_string()))?;
+        if expected != branch.write_revision || expected_root != branch.head_root {
+            return Ok(
+                json!({"status": "conflict", "branchId": branch_id, "writeRevision": branch.write_revision, "root": branch.head_root}),
+            );
         }
         let revision = branch.head_revision + 1;
         self.conn.execute("INSERT INTO revisions(branch_id, revision, root_hash, operation_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)", params![branch_id, revision, branch.head_root, params.get("operationId").and_then(Value::as_str), now_ms()])?;
@@ -2155,150 +3033,159 @@ impl Storage {
         removed: &mut Vec<String>,
         changed: &mut Vec<String>,
     ) -> Result<(), KernelError> {
+        self.diff_index_range(
+            left.cloned(),
+            right.cloned(),
+            None,
+            None,
+            prefix,
+            added,
+            removed,
+            changed,
+        )
+    }
+
+    fn index_root_in_range(
+        &self,
+        mut root: Option<String>,
+        lower: Option<&str>,
+        upper: Option<&str>,
+    ) -> Result<Option<String>, KernelError> {
+        while let Some(hash) = root.clone() {
+            let TrieNode::Index {
+                key, left, right, ..
+            } = self.load_node(&hash)?
+            else {
+                return Err(KernelError::Storage("path node used as index".to_string()));
+            };
+            if lower.is_some_and(|lower| key.as_str() <= lower) {
+                root = right;
+            } else if upper.is_some_and(|upper| key.as_str() >= upper) {
+                root = left;
+            } else {
+                return Ok(Some(hash));
+            }
+        }
+        Ok(None)
+    }
+
+    fn collect_index_range(
+        &self,
+        root: Option<String>,
+        lower: Option<&str>,
+        upper: Option<&str>,
+        prefix: &str,
+        target: &mut Vec<String>,
+    ) -> Result<(), KernelError> {
         self.check_cancelled()?;
+        let Some(root) = root else {
+            return Ok(());
+        };
+        let TrieNode::Index {
+            key,
+            child,
+            left,
+            right,
+            ..
+        } = self.load_node(&root)?
+        else {
+            return Err(KernelError::Storage("path node used as index".to_string()));
+        };
+        if lower.is_none_or(|lower| key.as_str() > lower) {
+            self.collect_index_range(left, lower, upper, prefix, target)?;
+        }
+        if lower.is_none_or(|lower| key.as_str() > lower)
+            && upper.is_none_or(|upper| key.as_str() < upper)
+        {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}/{key}")
+            };
+            self.collect_paths(&child, &path, target)?;
+        }
+        if upper.is_none_or(|upper| key.as_str() < upper) {
+            self.collect_index_range(right, lower, upper, prefix, target)?;
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn diff_index_range(
+        &self,
+        left: Option<String>,
+        right: Option<String>,
+        lower: Option<&str>,
+        upper: Option<&str>,
+        prefix: &str,
+        added: &mut Vec<String>,
+        removed: &mut Vec<String>,
+        changed: &mut Vec<String>,
+    ) -> Result<(), KernelError> {
+        self.check_cancelled()?;
+        let left = self.index_root_in_range(left, lower, upper)?;
+        let right = self.index_root_in_range(right, lower, upper)?;
         if left == right {
             return Ok(());
         }
-        if left.is_none() {
-            if let Some(right) = right {
-                let mut entries = Vec::new();
-                self.index_entries(right, &mut entries)?;
-                for (key, child) in entries {
-                    let path = if prefix.is_empty() {
-                        key
-                    } else {
-                        format!("{prefix}/{key}")
-                    };
-                    self.collect_paths(&child, &path, added)?;
-                }
+        match (&left, &right) {
+            (None, Some(_)) => return self.collect_index_range(right, lower, upper, prefix, added),
+            (Some(_), None) => {
+                return self.collect_index_range(left, lower, upper, prefix, removed)
             }
-            return Ok(());
+            (None, None) => return Ok(()),
+            _ => {}
         }
-        if right.is_none() {
-            if let Some(left) = left {
-                let mut entries = Vec::new();
-                self.index_entries(left, &mut entries)?;
-                for (key, child) in entries {
-                    let path = if prefix.is_empty() {
-                        key
-                    } else {
-                        format!("{prefix}/{key}")
-                    };
-                    self.collect_paths(&child, &path, removed)?;
-                }
+        let TrieNode::Index { key: left_key, .. } =
+            self.load_node(left.as_deref().expect("range root checked"))?
+        else {
+            return Err(KernelError::Storage("path node used as index".to_string()));
+        };
+        let TrieNode::Index { key: right_key, .. } =
+            self.load_node(right.as_deref().expect("range root checked"))?
+        else {
+            return Err(KernelError::Storage("path node used as index".to_string()));
+        };
+        let pivot = if left_key <= right_key {
+            left_key
+        } else {
+            right_key
+        };
+        let left_child = self.index_get(left.as_ref(), &pivot)?;
+        let right_child = self.index_get(right.as_ref(), &pivot)?;
+        self.diff_index_range(
+            left.clone(),
+            right.clone(),
+            lower,
+            Some(&pivot),
+            prefix,
+            added,
+            removed,
+            changed,
+        )?;
+        let path = if prefix.is_empty() {
+            pivot.clone()
+        } else {
+            format!("{prefix}/{pivot}")
+        };
+        match (left_child, right_child) {
+            (Some(left_child), Some(right_child)) => {
+                self.diff_nodes(&left_child, &right_child, &path, added, removed, changed)?
             }
-            return Ok(());
+            (Some(left_child), None) => self.collect_paths(&left_child, &path, removed)?,
+            (None, Some(right_child)) => self.collect_paths(&right_child, &path, added)?,
+            (None, None) => {}
         }
-        let left_node = self.load_node(left.expect("checked above"))?;
-        let right_node = self.load_node(right.expect("checked above"))?;
-        if let (
-            TrieNode::Index {
-                key: left_key,
-                child: left_child,
-                left: left_left,
-                right: left_right,
-                ..
-            },
-            TrieNode::Index {
-                key: right_key,
-                child: right_child,
-                left: right_left,
-                right: right_right,
-                ..
-            },
-        ) = (&left_node, &right_node)
-        {
-            if left_key == right_key {
-                self.diff_indices(
-                    left_left.as_ref(),
-                    right_left.as_ref(),
-                    prefix,
-                    added,
-                    removed,
-                    changed,
-                )?;
-                let path = if prefix.is_empty() {
-                    left_key.clone()
-                } else {
-                    format!("{prefix}/{left_key}")
-                };
-                self.diff_nodes(left_child, right_child, &path, added, removed, changed)?;
-                self.diff_indices(
-                    left_right.as_ref(),
-                    right_right.as_ref(),
-                    prefix,
-                    added,
-                    removed,
-                    changed,
-                )?;
-                return Ok(());
-            }
-        }
-        let mut left_entries = Vec::new();
-        let mut right_entries = Vec::new();
-        if let Some(left) = left {
-            self.index_entries(left, &mut left_entries)?;
-        }
-        if let Some(right) = right {
-            self.index_entries(right, &mut right_entries)?;
-        }
-        let mut li = 0;
-        let mut ri = 0;
-        while li < left_entries.len() || ri < right_entries.len() {
-            self.check_cancelled()?;
-            match (left_entries.get(li), right_entries.get(ri)) {
-                (Some((left_key, left_child)), Some((right_key, right_child)))
-                    if left_key == right_key =>
-                {
-                    let path = if prefix.is_empty() {
-                        left_key.clone()
-                    } else {
-                        format!("{prefix}/{left_key}")
-                    };
-                    self.diff_nodes(left_child, right_child, &path, added, removed, changed)?;
-                    li += 1;
-                    ri += 1;
-                }
-                (Some((left_key, left_child)), Some((right_key, _))) if left_key < right_key => {
-                    let path = if prefix.is_empty() {
-                        left_key.clone()
-                    } else {
-                        format!("{prefix}/{left_key}")
-                    };
-                    self.collect_paths(left_child, &path, removed)?;
-                    li += 1;
-                }
-                (Some((_, _)), Some((right_key, right_child))) => {
-                    let path = if prefix.is_empty() {
-                        right_key.clone()
-                    } else {
-                        format!("{prefix}/{right_key}")
-                    };
-                    self.collect_paths(right_child, &path, added)?;
-                    ri += 1;
-                }
-                (Some((left_key, left_child)), None) => {
-                    let path = if prefix.is_empty() {
-                        left_key.clone()
-                    } else {
-                        format!("{prefix}/{left_key}")
-                    };
-                    self.collect_paths(left_child, &path, removed)?;
-                    li += 1;
-                }
-                (None, Some((right_key, right_child))) => {
-                    let path = if prefix.is_empty() {
-                        right_key.clone()
-                    } else {
-                        format!("{prefix}/{right_key}")
-                    };
-                    self.collect_paths(right_child, &path, added)?;
-                    ri += 1;
-                }
-                (None, None) => break,
-            }
-        }
-        Ok(())
+        self.diff_index_range(
+            left,
+            right,
+            Some(&pivot),
+            upper,
+            prefix,
+            added,
+            removed,
+            changed,
+        )
     }
 
     fn collect_paths(
@@ -2484,7 +3371,7 @@ impl Storage {
         }
         for row in self
             .conn
-            .prepare("SELECT blob_hash FROM object_owners WHERE state = 'active'")?
+            .prepare("SELECT blob_hash FROM object_owners")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
             blobs.insert(row?);
@@ -2520,7 +3407,7 @@ impl Storage {
             [],
         )?;
         self.conn.execute(
-            "DELETE FROM object_owners WHERE owner_kind = 'operation' AND operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
+            "DELETE FROM object_owners WHERE operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
             [],
         )?;
         let all_nodes: Vec<String> = self
@@ -2553,6 +3440,7 @@ impl Storage {
                 )?;
                 self.conn
                     .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
+                self.verified_objects.remove(&hash);
                 deleted_blobs += 1;
             }
         }
@@ -2627,15 +3515,15 @@ impl Storage {
             .cloned()
             .unwrap_or_else(|| json!({}));
         let data_json = serde_json::to_string(&data)?;
-        let existing: Option<(String, String)> = self
+        let existing: Option<(String, String, String)> = self
             .conn
             .query_row(
-                "SELECT operation_id, workspace_id FROM recovery_records WHERE record_id = ?1",
+                "SELECT operation_id, workspace_id, initial_data_json FROM recovery_records WHERE record_id = ?1",
                 params![record_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
-        if let Some((existing_operation, existing_workspace)) = &existing {
+        if let Some((existing_operation, existing_workspace, _)) = &existing {
             if existing_operation != operation_id || existing_workspace != workspace_id {
                 return Err(KernelError::Authorization(
                     "recovery record identity cannot be changed".to_string(),
@@ -2651,10 +3539,27 @@ impl Storage {
                 params![record_id, operation_id, workspace_id, state, data_json, now_ms()],
             )?;
         }
-        for key in ["root", "rootHash"] {
-            if let Some(root) = data.get(key).and_then(Value::as_str) {
-                self.load_node(root)?;
-                if !self.root_owned_by_workspace(root, workspace_id)? {
+        self.conn.execute(
+            "DELETE FROM recovery_roots WHERE record_id = ?1",
+            params![record_id],
+        )?;
+        if !matches!(state, "released" | "abandoned") {
+            let initial_data = existing
+                .as_ref()
+                .map(|(_, _, initial)| serde_json::from_str::<Value>(initial))
+                .transpose()?
+                .unwrap_or_else(|| data.clone());
+            let mut roots = BTreeSet::new();
+            for value in [&initial_data, &data] {
+                for key in ["root", "rootHash"] {
+                    if let Some(root) = value.get(key).and_then(Value::as_str) {
+                        roots.insert(root.to_string());
+                    }
+                }
+            }
+            for root in roots {
+                self.load_node(&root)?;
+                if !self.root_owned_by_workspace(&root, workspace_id)? {
                     return Err(KernelError::Authorization(
                         "recovery root is not owned by workspace".to_string(),
                     ));
@@ -2664,12 +3569,6 @@ impl Storage {
                     params![record_id, root],
                 )?;
             }
-        }
-        if matches!(state, "released" | "abandoned") {
-            self.conn.execute(
-                "DELETE FROM recovery_roots WHERE record_id = ?1",
-                params![record_id],
-            )?;
         }
         Ok(
             json!({"recordId": record_id, "operationId": operation_id, "state": state, "data": data}),
@@ -2807,17 +3706,14 @@ impl Storage {
             if self
                 .conn
                 .query_row(
-                    "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                    "SELECT 1 FROM revisions WHERE branch_id = ?1 AND revision = ?2",
                     params![branch_id, head_revision],
-                    |row| row.get::<_, String>(0),
+                    |row| row.get::<_, i64>(0),
                 )
                 .optional()?
-                .as_deref()
-                != Some(head_root.as_str())
+                .is_none()
             {
-                errors.push(format!(
-                    "branch head revision does not match root: {branch_id}"
-                ));
+                errors.push(format!("branch published revision is missing: {branch_id}"));
             }
             if let Err(error) = validate_root(&head_root, &mut errors) {
                 errors.push(format!("{branch_id}: {error}"));
@@ -2880,7 +3776,7 @@ impl Storage {
         }
         let mut owners = self
             .conn
-            .prepare("SELECT owner_id, blob_hash FROM object_owners WHERE state = 'active'")?;
+            .prepare("SELECT owner_id, blob_hash FROM object_owners")?;
         for row in owners.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })? {
@@ -2942,6 +3838,70 @@ impl Storage {
         }))
     }
 
+    fn operation_release(&mut self, params_value: &Value) -> Result<Value, KernelError> {
+        let operation_id = params_value
+            .get("operationId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let workspace_id = params_value
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                KernelError::Authorization("operation workspace is required".to_string())
+            })?;
+        let blocked: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT 'temporary-object' FROM object_owners WHERE operation_id = ?1 UNION SELECT 'revision' FROM revisions WHERE operation_id = ?1 UNION SELECT 'recovery' FROM recovery_records WHERE operation_id = ?1 LIMIT 1",
+                params![operation_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if let Some(blocked) = blocked {
+            return Ok(json!({
+                "operationId": operation_id,
+                "released": false,
+                "status": "in-use",
+                "reason": blocked,
+            }));
+        }
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let outcome = (|| {
+            let owned: Option<i64> = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM operation_owners WHERE operation_id = ?1 AND workspace_id = ?2",
+                    params![operation_id, workspace_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if owned.is_none() {
+                return Ok(false);
+            }
+            self.conn.execute(
+                "DELETE FROM operation_owners WHERE operation_id = ?1 AND workspace_id = ?2",
+                params![operation_id, workspace_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM operations WHERE operation_id = ?1",
+                params![operation_id],
+            )?;
+            Ok::<bool, KernelError>(true)
+        })();
+        match outcome {
+            Ok(released) => {
+                self.conn.execute_batch("COMMIT")?;
+                Ok(
+                    json!({"operationId": operation_id, "released": released, "status": if released { "released" } else { "missing" }}),
+                )
+            }
+            Err(error) => {
+                let _ = self.conn.execute_batch("ROLLBACK");
+                Err(error)
+            }
+        }
+    }
+
     fn health(&self, params: &Value) -> Result<Value, KernelError> {
         let integrity: String = self
             .conn
@@ -2956,10 +3916,23 @@ impl Storage {
             .conn
             .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
         let (pending_cleanup, cleanup_failures) = self.cleanup_status()?;
-        let node_payload_bytes: i64 = self.conn.query_row("SELECT COALESCE(SUM(length(children_json) + COALESCE(length(state_json), 0)), 0) FROM trie_nodes", [], |row| row.get(0))?;
+        let node_json_bytes: i64 = self.conn.query_row("SELECT COALESCE(SUM(length(CAST(children_json AS BLOB)) + COALESCE(length(CAST(state_json AS BLOB)), 0)), 0) FROM trie_nodes", [], |row| row.get(0))?;
+        let operations: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM operations", [], |row| row.get(0))?;
+        let temporary_object_owners: i64 =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM object_owners", [], |row| row.get(0))?;
+        let catalog_path = self.root.join("catalog.sqlite");
+        let catalog_bytes = fs::metadata(&catalog_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        let wal_bytes = fs::metadata(self.root.join("catalog.sqlite-wal"))
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         if !params.get("deep").and_then(Value::as_bool).unwrap_or(false) {
             return Ok(
-                json!({"integrity": integrity, "branches": branches, "nodes": nodes, "nodePayloadBytes": node_payload_bytes, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": false}),
+                json!({"integrity": integrity, "branches": branches, "nodes": nodes, "nodeJsonBytes": node_json_bytes, "catalogBytes": catalog_bytes, "walBytes": wal_bytes, "operations": operations, "temporaryObjectOwners": temporary_object_owners, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": false}),
             );
         }
         let mut roots = BTreeSet::new();
@@ -2996,10 +3969,10 @@ impl Storage {
                     |row| row.get(0),
                 )
                 .optional()?;
-            match (recorded, fs::read(object_path(&self.root, &hash)?)) {
-                (Some(length), Ok(bytes))
-                    if length == bytes.len() as i64
-                        && format!("sha256-{}", hex::encode(Sha256::digest(&bytes))) == hash => {}
+            match (recorded, hash_file(&object_path(&self.root, &hash)?)) {
+                (Some(length), Ok((actual_hash, actual_length)))
+                    if i64::try_from(actual_length).ok() == Some(length) && actual_hash == hash => {
+                }
                 (None, _) => missing_objects.push(hash),
                 (Some(_), Err(_)) => missing_objects.push(hash),
                 _ => corrupt_objects.push(hash),
@@ -3018,7 +3991,7 @@ impl Storage {
             "degraded"
         };
         Ok(
-            json!({"integrity": status, "sqliteIntegrity": integrity, "branches": branches, "nodes": nodes, "nodePayloadBytes": node_payload_bytes, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": true, "missingNodes": missing_nodes, "missingObjects": missing_objects, "corruptObjects": corrupt_objects, "relationshipErrors": relationship_errors}),
+            json!({"integrity": status, "sqliteIntegrity": integrity, "branches": branches, "nodes": nodes, "nodeJsonBytes": node_json_bytes, "catalogBytes": catalog_bytes, "walBytes": wal_bytes, "operations": operations, "temporaryObjectOwners": temporary_object_owners, "blobs": blobs, "storageRoot": self.root, "pendingCleanup": pending_cleanup, "cleanupFailures": cleanup_failures, "deep": true, "missingNodes": missing_nodes, "missingObjects": missing_objects, "corruptObjects": corrupt_objects, "relationshipErrors": relationship_errors}),
         )
     }
 }

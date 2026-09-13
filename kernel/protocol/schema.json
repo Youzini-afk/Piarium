@@ -21,9 +21,15 @@
     "storage.putBlob.abort": "KernelPutBlobAbortParams",
     "storage.blob.release": "KernelBlobReleaseParams",
     "storage.getBlob": "KernelGetBlobParams",
-    "branch.create": "KernelCreateBranchParams",
+    "branch.create.begin": "KernelCreateBranchBeginParams",
+    "branch.create.append": "KernelCreateBranchAppendParams",
+    "branch.create.finish": "KernelCreateBranchFinishParams",
+    "branch.create.abort": "KernelCreateBranchAbortParams",
     "branch.read": "KernelBranchReadParams",
-    "branch.write": "KernelBranchWriteParams",
+    "branch.write.begin": "KernelBranchWriteBeginParams",
+    "branch.write.append": "KernelBranchWriteAppendParams",
+    "branch.write.finish": "KernelBranchWriteFinishParams",
+    "branch.write.abort": "KernelBranchWriteAbortParams",
     "branch.publish": "KernelBranchPublishParams",
     "branch.pin": "KernelBranchPinParams",
     "branch.unpin": "KernelBranchUnpinParams",
@@ -34,6 +40,7 @@
     "recovery.operation.update": "KernelRecoveryParams",
     "recovery.operation.get": "KernelRecoveryGetParams",
     "operation.get": "KernelOperationGetParams",
+    "operation.release": "KernelOperationReleaseParams",
     "storage.gc": "KernelGcParams"
   },
   "dto": {
@@ -62,7 +69,7 @@
     "KernelGrantRevokeParams": {"fields": {"grantId": {"type": "string"}}},
     "KernelSnapshotParams": {"fields": {"workspaceId": {"type": "string"}}},
     "KernelPutBlobBeginParams": {"fields": {
-      "operationId": {"type": "string"}, "byteLength": {"type": "number"},
+      "operationId": {"type": "string"}, "streamId": {"type": "string"}, "byteLength": {"type": "number"},
       "expectedHash": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
     }},
     "KernelPutBlobFinishParams": {"fields": {
@@ -73,25 +80,35 @@
       "operationId": {"type": "string"}, "streamId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}
     }},
     "KernelBlobReleaseParams": {"fields": {
-      "ownerId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
+      "ownerId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}
     }},
     "KernelGetBlobParams": {"fields": {
-      "hash": {"type": "string"}, "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
+      "hash": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true},
+      "pinId": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "path": {"type": "string", "optional": true},
+      "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
     }},
-    "KernelCreateBranchParams": {"fields": {
-      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "workspaceId": {"type": "string"},
-      "entries": {"type": "KernelCreateEntry[]"}, "baseRef": {"type": "string", "optional": true}
+    "KernelCreateBranchBeginParams": {"fields": {
+      "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "workspaceId": {"type": "string"},
+      "baseRef": {"type": "string", "optional": true}
     }},
-    "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}}},
+    "KernelCreateBranchAppendParams": {"fields": {
+      "builderId": {"type": "string"}, "sequence": {"type": "number"}, "entries": {"type": "KernelCreateEntry[]"}
+    }},
+    "KernelCreateBranchFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}}},
+    "KernelCreateBranchAbortParams": {"fields": {"builderId": {"type": "string"}}},
+    "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}}},
     "KernelBranchReadParams": {"fields": {
       "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}
     }},
-    "KernelBranchWriteParams": {"fields": {
-      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}
+    "KernelBranchWriteBeginParams": {"fields": {
+      "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}
     }},
-    "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}}},
+    "KernelBranchWriteAppendParams": {"fields": {"builderId": {"type": "string"}, "sequence": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}}},
+    "KernelBranchWriteFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}}},
+    "KernelBranchWriteAbortParams": {"fields": {"builderId": {"type": "string"}}},
+    "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}}},
     "KernelBranchPublishParams": {"fields": {
-      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number", "optional": true}, "expectedRoot": {"type": "string", "optional": true}
+      "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}, "expectedRoot": {"type": "string"}
     }},
     "KernelBranchPinParams": {"fields": {
       "operationId": {"type": "string"}, "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "pinId": {"type": "string", "optional": true}
@@ -105,6 +122,7 @@
     }},
     "KernelRecoveryGetParams": {"fields": {"recordId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}}},
     "KernelOperationGetParams": {"fields": {"operationId": {"type": "string"}}},
+    "KernelOperationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}}},
     "KernelGcParams": {"fields": {"operationId": {"type": "string"}}},
     "KernelError": {
       "fields": {
@@ -173,6 +191,7 @@
         "byteLength": {"type": "number"}
       }
     },
+    "KernelPutBlobResult": {"extends": ["KernelBlobResult"], "fields": {"ownerId": {"type": "string"}}},
     "KernelObjectSlice": {
       "extends": ["KernelBlobResult"],
       "fields": {
@@ -187,7 +206,11 @@
         "integrity": {"type": "string"},
         "branches": {"type": "number"},
         "nodes": {"type": "number"},
-        "nodePayloadBytes": {"type": "number", "optional": true},
+        "nodeJsonBytes": {"type": "number", "optional": true},
+        "catalogBytes": {"type": "number", "optional": true},
+        "walBytes": {"type": "number", "optional": true},
+        "operations": {"type": "number", "optional": true},
+        "temporaryObjectOwners": {"type": "number", "optional": true},
         "blobs": {"type": "number"},
         "storageRoot": {"type": "string"},
         "pendingCleanup": {"type": "number", "optional": true},
@@ -213,9 +236,15 @@
     "storage.putBlob.abort": "discard a content upload stream",
     "storage.blob.release": "release a temporary content owner",
     "storage.getBlob": "read a content object or byte range",
-    "branch.create": "batch-build an immutable branch root",
+    "branch.create.begin": "open a backpressured branch builder",
+    "branch.create.append": "append a bounded entry batch to a branch builder",
+    "branch.create.finish": "atomically publish a completed branch builder",
+    "branch.create.abort": "discard a branch builder",
     "branch.read": "read a root or selected paths",
-    "branch.write": "copy-on-write path mutation with writeRevision CAS",
+    "branch.write.begin": "open a backpressured copy-on-write mutation",
+    "branch.write.append": "append a bounded change batch",
+    "branch.write.finish": "commit the complete mutation with writeRevision CAS",
+    "branch.write.abort": "discard a branch mutation builder",
     "branch.publish": "publish the current root as an immutable revision",
     "branch.pin": "pin an immutable root/revision",
     "branch.unpin": "release a pin",
@@ -226,6 +255,7 @@
     "recovery.operation.update": "advance recovery operation state",
     "recovery.operation.get": "read a recovery operation",
     "operation.get": "read the durable state of a persistent operation",
+    "operation.release": "release a completed operation after its product owner is gone",
     "storage.gc": "collect unreferenced nodes and objects"
   }
 }

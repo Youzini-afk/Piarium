@@ -15,7 +15,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE TABLE IF NOT EXISTS grants (grant_id TEXT PRIMARY KEY, host_id TEXT NOT NULL, grant_json TEXT NOT NULL, params_hash TEXT NOT NULL, revoked INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS operations (operation_id TEXT PRIMARY KEY, kind TEXT NOT NULL, params_hash TEXT NOT NULL, state TEXT NOT NULL, result_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS operation_owners (operation_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, created_at INTEGER NOT NULL);
-     CREATE TABLE IF NOT EXISTS object_owners (owner_id TEXT PRIMARY KEY, blob_hash TEXT NOT NULL, workspace_id TEXT, operation_id TEXT, owner_kind TEXT NOT NULL, state TEXT NOT NULL, created_at INTEGER NOT NULL);
+	     CREATE TABLE IF NOT EXISTS object_owners (owner_id TEXT PRIMARY KEY, blob_hash TEXT NOT NULL, workspace_id TEXT, operation_id TEXT, grant_id TEXT NOT NULL, created_at INTEGER NOT NULL);
      CREATE INDEX IF NOT EXISTS object_owners_blob ON object_owners(blob_hash);
      CREATE INDEX IF NOT EXISTS object_owners_workspace ON object_owners(workspace_id);
      CREATE TABLE IF NOT EXISTS recovery_records (record_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, state TEXT NOT NULL, data_json TEXT NOT NULL, initial_data_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -23,4 +23,141 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS revisions_root ON revisions(root_hash);
      CREATE INDEX IF NOT EXISTS pins_root ON pins(root_hash);
      CREATE INDEX IF NOT EXISTS root_blobs_blob ON root_blobs(blob_hash);
-     CREATE INDEX IF NOT EXISTS recovery_operation ON recovery_records(operation_id);";
+	     CREATE INDEX IF NOT EXISTS recovery_operation ON recovery_records(operation_id);";
+
+pub(crate) const CATALOG_USER_VERSION: i64 = 6;
+
+pub(crate) const REQUIRED_TABLES: &[&str] = &[
+    "blobs",
+    "branches",
+    "grants",
+    "metadata",
+    "object_owners",
+    "operation_owners",
+    "operations",
+    "pending_gc_files",
+    "pins",
+    "recovery_records",
+    "recovery_roots",
+    "revisions",
+    "root_blobs",
+    "root_parents",
+    "trie_nodes",
+];
+
+pub(crate) const REQUIRED_INDEXES: &[&str] = &[
+    "object_owners_blob",
+    "object_owners_workspace",
+    "pins_root",
+    "recovery_operation",
+    "revisions_root",
+    "root_blobs_blob",
+];
+
+pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
+    ("blobs", &["hash", "byte_length"]),
+    (
+        "branches",
+        &[
+            "branch_id",
+            "workspace_id",
+            "create_params_hash",
+            "base_root",
+            "head_root",
+            "head_revision",
+            "write_revision",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "grants",
+        &[
+            "grant_id",
+            "host_id",
+            "grant_json",
+            "params_hash",
+            "revoked",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    ("metadata", &["key", "value"]),
+    (
+        "object_owners",
+        &[
+            "owner_id",
+            "blob_hash",
+            "workspace_id",
+            "operation_id",
+            "grant_id",
+            "created_at",
+        ],
+    ),
+    (
+        "operation_owners",
+        &["operation_id", "workspace_id", "created_at"],
+    ),
+    (
+        "operations",
+        &[
+            "operation_id",
+            "kind",
+            "params_hash",
+            "state",
+            "result_json",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    (
+        "pending_gc_files",
+        &[
+            "hash",
+            "path",
+            "state",
+            "last_error",
+            "queued_at",
+            "cleaned_at",
+        ],
+    ),
+    (
+        "pins",
+        &[
+            "pin_id",
+            "branch_id",
+            "workspace_id",
+            "revision",
+            "root_hash",
+            "created_at",
+        ],
+    ),
+    (
+        "recovery_records",
+        &[
+            "record_id",
+            "operation_id",
+            "workspace_id",
+            "state",
+            "data_json",
+            "initial_data_json",
+            "created_at",
+            "updated_at",
+        ],
+    ),
+    ("recovery_roots", &["record_id", "root_hash"]),
+    (
+        "revisions",
+        &[
+            "branch_id",
+            "revision",
+            "root_hash",
+            "parent_revision",
+            "operation_id",
+            "created_at",
+        ],
+    ),
+    ("root_blobs", &["root_hash", "blob_hash"]),
+    ("root_parents", &["root_hash", "parent_root"]),
+    ("trie_nodes", &["hash", "children_json", "state_json"]),
+];

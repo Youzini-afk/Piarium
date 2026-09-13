@@ -5702,3 +5702,40 @@ Host KernelClient、R0/R1 status 与本模块文档。完整 consumer cutover �
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-257 | implementation correction / partial re-acceptance boundary | —；本条只收口 D-256 后的基础缺口和状态，不改 D-256 正文 | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |
+
+### D-258 · 2026-09-13 · R0/R1 协议与存储不变量收口
+
+类型：验收返工；部分取代 D-257 的具体协议、格式和证据表述，不改写 D-257 正文
+
+决定：在产品 consumer cutover 前直接更换当前私有 kernel 契约，不保留旧方法或格式兼容：(1) `storage.getBlob` 必须绑定
+`branchId + path (+ revision)`、`pinId + path` 或当前 grant 的临时 `ownerId`，hash 和 workspace 归属本身不构成路径授权；
+(2) blob upload 返回一对一 owner，branch entry/change 显式消费具体 owner；复用已有正文则绑定 base/current root 上同一路径或授权范围内的
+`sourcePath`，不能拿 workspace 内任意 hash 搬运范围外正文。release 不复用 upload operationId；已完成 operation
+另有显式 release 生命周期；(3) branch create/write 都使用 begin/append/finish/abort 的有背压构建器，控制帧不再承载整棵初始树或
+整批变化；(4) publish 强制同时携带 expected writeRevision 与 root；合法未发布 head 与最后发布 revision 分开检查；
+(5) Rust method DTO 与 TS DTO 同由 `kernel/protocol/schema.json` 生成并在构建中检查；请求/响应队列各只保留一个待交接 envelope，
+因为 worker/writer 本来就是串行；(6) catalog 直接启用 format v6，核验 user version、schema fingerprint、完整表/索引/列，
+旧 v5 或缺表的 v6 都拒绝，不补表、不迁移；(7) Application Host build identity 与编译期 kernel identity 必须一致，构建和
+after-pack 从 PE/ELF/Mach-O 正文核验实际 platform/architecture，不能只信 manifest 标签；(8) 对象安装使用流式 hash、目标文件 flush、
+Windows write-through rename，Unix 同步 source/target/新 shard 的目录项。断电级保证仍需真实故障证据。
+
+原因：D-257 的实现仍允许同 workspace 的 scope 外 hash 读取、无 CAS publish、临时 owner 误消费/无法释放、损坏 catalog 静默补表、
+合法 dirty head 误报 degraded，以及大 branch 在 16 MiB 控制帧前直接失败。真实背压又暴露 Host pending Promise 的未处理拒绝，
+正常 shutdown 也因未释放 response sender 每次等待五秒强杀。这些都是进入 R1 consumer cutover 前必须消除的基础错误。
+
+影响：协议删除直接 `branch.create` / `branch.write`，新增流式 builder 与 `operation.release`；blob result 增加 `ownerId`；
+storage format 从 v5 直接换成 v6。当前没有用户，按 D-253 不提供 importer、dual-read 或 fallback。Application Host 仍只接管
+kernel 生命周期，WorkingState/Recovery/result/draft/evidence/materializer 的生产 consumer 尚未切换，R1 仍为 implemented，
+不是 wired/proven/default-on；R2–R6 不变。
+
+证据边界：Windows release 子进程覆盖 16 MiB 以上 branch 输入、同 hash 双 owner、scope 外 blob、强制 publish CAS、dirty head deep
+health、损坏 v6 缺表拒绝且不修补、取消/revoke、operation release、关闭重开；Rust 单测覆盖 malformed revoke admission。
+实际 Windows x64 binary header 已在 build 中核验，macOS/Linux 与真正 cross-target 产物、断电注入、签名安装包和完整 product consumer
+仍未实测。旧 `nodePayloadBytes` 数字只统计 SQLite TEXT 字符，不能作为持久写放大；本条改为明确的 node JSON UTF-8 bytes 与
+catalog/WAL 文件大小观测，尚不据此给性能倍数。
+
+## D-258 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-258 | implementation correction / R0-R1 foundation acceptance | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |

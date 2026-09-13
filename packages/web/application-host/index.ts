@@ -993,6 +993,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId: extensionRuntime.services.hostId,
     storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     buildVersion: PIARIUM_VERSION,
+    kernelBuildIdentity: PIARIUM_VERSION,
     onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();

@@ -57,8 +57,8 @@
     "test:linux-desktop": "vitest run linux-autostart.test.ts --config vitest.config.ts && tsx ./scripts/smoke-linux-app-discovery.mjs && tsx ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
-    "package": "bun run build:web-assets && bun run prepare:pi-runtime && bun run build:kernel && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
-    "package:win:x64": "bun run build:web-assets && bun run prepare:pi-runtime && bun run build:kernel && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs --win --x64 --publish=never",
+    "package": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs",
+    "package:win:x64": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run rebuild:native && node ./scripts/package.mjs --win --x64 --publish=never",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint \"./*.ts\" --config ../../eslint.config.js"
