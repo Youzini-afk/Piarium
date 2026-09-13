@@ -300,8 +300,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }, options?.signal),
     ]);
     const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-    for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { branchId, path: file, revision });
-    for (const [file, state] of Object.entries(states(base))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { branchId, path: file, revision: 0 });
+    const resultRecordId = `working-result:${branchId}@${revision}`;
+    for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
+    for (const [file, state] of Object.entries(states(base))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
     return {
       resultRevision: revision,
       branchId,
@@ -616,7 +617,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const changes = Object.entries(committedWrites).map(([path, state]) => ({
       path,
       state: toKernelState(state),
-      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash) ? { ownerId: this.ownerByHash.get(state.objectHash)! } : {}),
+      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
+        ? { ownerId: this.ownerByHash.get(state.objectHash)! }
+        : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.recordId && this.sourceByHash.get(state.objectHash)?.slot
+          ? { sourceRecordId: this.sourceByHash.get(state.objectHash)!.recordId!, sourceSlot: this.sourceByHash.get(state.objectHash)!.slot! }
+          : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.branchId && this.sourceByHash.get(state.objectHash)?.path
+            ? { sourcePath: this.sourceByHash.get(state.objectHash)!.path! }
+            : {}),
     }));
     const result = await this.context.client.writeBranch({ operationId: `branch-write:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`, branchId, expectedWriteRevision, changes });
     if (result.status === "committed") {
@@ -1447,7 +1454,10 @@ export const createKernelWorkspaceWorkingStateAccess = (
         ...(actor ?? {}),
         capabilities: actor ? [] : ["storage.maintenance"],
       });
-      return operation(new KernelWorkingStateRootStore(context), context);
+      return operation(new KernelWorkingStateRootStore(context), {
+        ...context,
+        ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
+      });
     },
   };
 };

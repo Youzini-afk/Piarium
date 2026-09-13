@@ -342,6 +342,18 @@ export class IntegrationCoordinator {
     this.resolveDirectoryApplyContext = options.resolveDirectoryApplyContext;
   }
 
+  private withWorkingStore<T>(
+    workspaceId: string,
+    purpose: string,
+    operation: (store: WorkingStateStore | WorkingStateRootStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
+    mode: "exclusive" | "shared" = "exclusive",
+  ): Promise<T> {
+    if (isRootAccess(this.workingStates)) {
+      return this.workingStates.withBranchStore(workspaceId, purpose, (store, context) => operation(store, context as unknown as WorkspaceRecoveryStorageContext), mode);
+    }
+    return this.workingStates.withStore(workspaceId, purpose, operation, mode);
+  }
+
   invalidateThread(workspaceId: string, threadId: string): void {
     this.previewByThread.delete(this.previewKey(workspaceId, threadId));
   }
@@ -498,14 +510,14 @@ export class IntegrationCoordinator {
   async mergeResult(input: IntegrationPlanInput): Promise<IntegrationApplyResult & { changedFiles: string[] }> {
     const releaseParentWrite = await this.holdParentBranchWrite(input.parentAuthority, input.signal);
     try {
-    return await this.workingStates.withStore(input.workspaceId, "thread-result-integration", async (store, context) => {
+    return await this.withWorkingStore(input.workspaceId, "thread-result-integration", async (store, context) => {
       if (input.requireTurnBinding && !input.executionId) {
         throw new Error("Parent turn recovery binding is required for integration");
       }
       if (input.executionId && !context.durableRecoveryStore) {
         assertIntegrationTurnBinding(context.database!, input.workspaceId, input.executionId);
       }
-      if (!context.durableRecoveryStore) {
+      if (!context.durableRecoveryStore && !isWorkingStateRootStore(store)) {
         await reconcileInterruptedIntegrationOperations(context);
         await reconcileInterruptedBranchIntegrations(context, store);
       }
@@ -599,7 +611,9 @@ export class IntegrationCoordinator {
             writes[pathPlan.path] = { kind: "missing" };
           }
         }
-        const parentBranch = store.getBranch(parentAuthority.branchId);
+        const parentBranch = isWorkingStateRootStore(store)
+          ? await store.getBranchRoot(parentAuthority.branchId)
+          : store.getBranch(parentAuthority.branchId);
         if (!parentBranch) throw new Error(`Parent working branch not found: ${parentAuthority.branchId}`);
         const expectedWriteRevision = parentBranch.writeRevision ?? 0;
         const failed = planned.plan.conflictPaths.length > 0 || planned.preview.unavailablePaths.length > 0;
@@ -649,7 +663,7 @@ export class IntegrationCoordinator {
               branchId: parentAuthority.branchId,
               files: writes,
               expectedWriteRevision,
-              store,
+              store: store as WorkingStateStore,
               ...(parentAuthority.sessionId ? { sessionId: parentAuthority.sessionId } : {}),
             })
             : await store.commitVirtualWrites(parentAuthority.branchId, expectedWriteRevision, writes);
@@ -923,7 +937,7 @@ export class IntegrationCoordinator {
     /** The caller already holds the parent VirtualWriteGate across this undo. */
     parentWriteHeld?: boolean;
   }): Promise<IntegrationApplyResult> {
-    const inspection = await this.workingStates.withStore(
+    const inspection = await this.withWorkingStore(
       input.workspaceId,
       "thread-result-integration-undo-inspect",
       (_store, context) => inspectDurableIntegrationOperation(context, input.operationId),
@@ -941,8 +955,8 @@ export class IntegrationCoordinator {
       }
     }
     try {
-    return await this.workingStates.withStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
-      if (!context.durableRecoveryStore) {
+    return await this.withWorkingStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
+      if (!context.durableRecoveryStore && !isWorkingStateRootStore(store)) {
         await reconcileInterruptedIntegrationOperations(context);
         await reconcileInterruptedBranchIntegrations(context, store);
       }
@@ -1001,7 +1015,9 @@ export class IntegrationCoordinator {
             // on disk.  Bring the non-authoritative branch cache back to the
             // same before slice so a later rematerialization cannot resurrect
             // the undone child result.
-            const parentBranch = store.getBranch(operation.parentBranchId);
+            const parentBranch = isWorkingStateRootStore(store)
+              ? await store.getBranchRoot(operation.parentBranchId)
+              : store.getBranch(operation.parentBranchId);
             if (!parentBranch) {
               return {
                 ...await markDurableIntegrationNeedsAttention(
@@ -1014,7 +1030,9 @@ export class IntegrationCoordinator {
               };
             }
             const before = operation.retryBinding?.parentStates ?? operation.safety;
-            const current = store.effectiveState(operation.parentBranchId) ?? {};
+            const current = isWorkingStateRootStore(store)
+              ? await store.readStateSlice(operation.parentBranchId, Object.keys(operation.retryBinding?.parentStates ?? operation.safety)) ?? {}
+              : store.effectiveState(operation.parentBranchId) ?? {};
             const currentAfter = operation.retryBinding?.resultingParentStates ?? Object.fromEntries(
               Object.entries(operation.targets).map(([file, states]) => [file, states.target]),
             );
@@ -1068,13 +1086,17 @@ export class IntegrationCoordinator {
           this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
           return { ...undoneDirectory, status: undoneDirectory.status as IntegrationApplyResult["status"] };
         }
-        const parentBranch = store.getBranch(operation.parentBranchId);
+        const parentBranch = isWorkingStateRootStore(store)
+          ? await store.getBranchRoot(operation.parentBranchId)
+          : store.getBranch(operation.parentBranchId);
         if (!parentBranch) throw new Error(`Parent working branch not found: ${operation.parentBranchId}`);
         const before = operation.retryBinding?.parentStates ?? operation.safety;
         const after = operation.retryBinding?.resultingParentStates ?? Object.fromEntries(
           Object.entries(operation.targets).map(([file, states]) => [file, states.target]),
         );
-        const currentView = store.effectiveState(operation.parentBranchId) ?? {};
+        const currentView = isWorkingStateRootStore(store)
+          ? await store.readStateSlice(operation.parentBranchId, Object.keys(operation.retryBinding?.parentStates ?? operation.safety)) ?? {}
+          : store.effectiveState(operation.parentBranchId) ?? {};
         if (this.sameParentSlice(currentView, before)) {
           this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
           const finalized = await finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
@@ -1099,7 +1121,7 @@ export class IntegrationCoordinator {
             branchId: operation.parentBranchId,
             files: before,
             expectedWriteRevision: parentBranch.writeRevision ?? 0,
-            store,
+            store: store as WorkingStateStore,
             ...(parentSessionId ? { sessionId: parentSessionId } : {}),
           })
           : await store.commitVirtualWrites(operation.parentBranchId, parentBranch.writeRevision ?? 0, before);
@@ -1114,7 +1136,9 @@ export class IntegrationCoordinator {
             status: "needs-attention" as const,
           };
         }
-        const observed = store.effectiveState(operation.parentBranchId) ?? {};
+        const observed = isWorkingStateRootStore(store)
+          ? await store.readStateSlice(operation.parentBranchId, Object.keys(before)) ?? {}
+          : store.effectiveState(operation.parentBranchId) ?? {};
         if (!this.sameParentSlice(observed, before)) {
           return {
             ...await markDurableIntegrationNeedsAttention(
@@ -1259,7 +1283,7 @@ export class IntegrationCoordinator {
         return this.planFrom(store, context, input);
       }, "shared");
     }
-    return this.workingStates.withStore(input.workspaceId, "thread-result-preview", (store, context) => this.planFrom(store, context, input));
+    return this.withWorkingStore(input.workspaceId, "thread-result-preview", (store, context) => this.planFrom(store, context, input));
   }
 
   private async planFrom(
