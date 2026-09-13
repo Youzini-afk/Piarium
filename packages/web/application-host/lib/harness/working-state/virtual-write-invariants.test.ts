@@ -22,7 +22,8 @@ import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchLookups } from "./working-branch-lookups.js";
 import { createWorkingBranchWriteServices } from "./working-branch-writes.js";
 import { acquireVirtualWriteTicket, VirtualWriteGate } from "./virtual-write-gate.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { WorkingStateStore } from "./working-state-store.js";
+import { asTestWorkingStateRootAccess, asTestWorkingStateRootStore, type TestWorkspaceWorkingStateAccess } from "./working-state-root-adapter.test-helper.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
@@ -54,9 +55,11 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
     root: recoveryRoot,
   };
   const store = await WorkingStateStore.open(context);
-  const workingStates: WorkspaceWorkingStateAccess = {
+  const rootStore = asTestWorkingStateRootStore(store, context);
+  const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
     withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
   };
+  const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
   const views = new ThreadExecutionViewRegistry();
   const writeGate = new VirtualWriteGate();
   const lookups = createWorkingBranchLookups({ views, workingStates });
@@ -231,6 +234,7 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
     runtime,
     scratch,
     store,
+    rootStore,
     views,
     workspace,
     workspaceId,
@@ -285,7 +289,7 @@ describe("virtual write production invariants", () => {
     expect(f.store.getBranch("thread-parent")?.writeRevision).toBe(3);
     expect(f.store.effectiveState("thread-parent")?.["link.txt"]).toMatchObject({ kind: "symlink" });
     expect(f.store.effectiveState("thread-parent")?.["kept.txt/child.ts"]).toBeUndefined();
-    await expect(readBranchFile(f.store, "thread-parent", "link.txt")).resolves.toMatchObject({
+    await expect(readBranchFile(f.rootStore, "thread-parent", "link.txt")).resolves.toMatchObject({
       unavailable: expect.stringMatching(/cycle/),
     });
   });
@@ -307,7 +311,7 @@ describe("virtual write production invariants", () => {
         provenance: { revision: 1, origin: "delta" },
       },
     });
-    const files = await listBranchTextFiles(f.store, "thread-parent", [""]);
+    const files = await listBranchTextFiles(f.rootStore, "thread-parent", [""]);
     expect(files.find((file) => file.path === "kept.txt")?.revision).toBe("working-branch:thread-parent@1:delta");
   });
 
@@ -319,7 +323,7 @@ describe("virtual write production invariants", () => {
       content: "export const secret = \"branch-only pineapple\";\n",
     })).toMatchObject({ ok: true, result: { status: "committed", revision: 1 } });
     await fs.writeFile(path.join(f.workspace, "kept.txt"), "parent drifted after dispatch\n");
-    const files = await listBranchTextFiles(f.store, "thread-parent", [""]);
+    const files = await listBranchTextFiles(f.rootStore, "thread-parent", [""]);
     const pinned = await pinSemanticQueryView({
       inputContext: { source: "disk" },
       threadDocuments: files.map((file) => ({
@@ -415,7 +419,9 @@ describe("virtual write production invariants", () => {
       materialized: false,
       preparationStage: "ready",
       materializationSwitch: {
+        revision: 0,
         writeRevision: 1,
+        root: "sha256-promoted-root",
         stagingPath: staging,
         backupPath: backup,
         stage: "staging-promoted",
@@ -450,7 +456,9 @@ describe("virtual write production invariants", () => {
       materialized: false,
       preparationStage: "ready",
       materializationSwitch: {
+        revision: 0,
         writeRevision: 1,
+        root: "sha256-aborted-root",
         stagingPath: abortedStaging,
         backupPath: abortedBackup,
         stage: "live-backed-up",

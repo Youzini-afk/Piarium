@@ -1,27 +1,6 @@
 import { statfs } from "node:fs/promises";
 import type { HarnessWorktreeBudget, Thread, ThreadOccupancy, ThreadSpaceMeasurement, WorkspaceThreadSpace } from "@piarium/protocol";
-import type { RecoveryState } from "./types.js";
-import type { WorkingStateStore } from "./working-state-store.js";
-
-const addHash = (
-  hashes: Map<string, number | null>,
-  state: RecoveryState | undefined,
-): void => {
-  if (state?.kind !== "regular-file") return;
-  if (!hashes.has(state.objectHash)) hashes.set(state.objectHash, state.byteLength);
-};
-
-export const collectDraftBaselineHashes = (
-  store: WorkingStateStore,
-  draftBaselineId: string | null | undefined,
-): Map<string, number | null> => {
-  const hashes = new Map<string, number | null>();
-  if (!draftBaselineId) return hashes;
-  const baseline = store.getDraftBaselineRecord(draftBaselineId);
-  if (!baseline) return hashes;
-  for (const state of Object.values(baseline.pathStates)) addHash(hashes, state);
-  return hashes;
-};
+import type { RecoveryState, WorkingStateRootStore } from "./types.js";
 
 export const mergeHashMaps = (
   ...groups: Array<Map<string, number | null>>
@@ -69,22 +48,19 @@ export const assembleKeepReasons = (input: {
   return [...new Set(reasons)];
 };
 
-export const collectBranchObjectHashes = (
-  store: WorkingStateStore,
+export const collectBranchObjectHashesFromRoot = async (
+  store: WorkingStateRootStore,
   branchId: string,
-): Map<string, number | null> => {
-  const hashes = new Map<string, number | null>();
-  const branch = store.getBranch(branchId);
-  if (branch) {
-    for (const state of Object.values(branch.baseState)) addHash(hashes, state);
-    for (const state of Object.values(branch.deltas)) addHash(hashes, state);
-  }
-  for (const result of store.listResults(branchId)) {
-    for (const state of Object.values(result.baseStates)) addHash(hashes, state);
-    for (const state of Object.values(result.pathStates)) addHash(hashes, state);
-  }
-  return hashes;
-};
+): Promise<Map<string, number | null>> => new Map(
+  (await store.listBranchObjectReferences(branchId)).map((entry) => [entry.hash, entry.byteLength]),
+);
+
+export const collectDraftBaselineHashesFromRoot = async (
+  store: WorkingStateRootStore,
+  draftBaselineId: string | null | undefined,
+): Promise<Map<string, number | null>> => draftBaselineId
+  ? new Map((await store.listDraftObjectReferences(draftBaselineId)).map((entry) => [entry.hash, entry.byteLength]))
+  : new Map();
 
 export const measurementFromHashes = (hashes: Map<string, number | null>): ThreadSpaceMeasurement => {
   let logical = 0;

@@ -1,5 +1,4 @@
-import type { RecoveryState, RegularFileState, WorkingBranch } from "./types.js";
-import type { WorkingStateStore } from "./working-state-store.js";
+import type { RecoveryState, RegularFileState, WorkingBranchRoot, WorkingStateRootStore } from "./types.js";
 import { defaultNewFileMode } from "./workspace-baseline.js";
 
 export interface EditorDraft {
@@ -167,18 +166,15 @@ export async function overlayDraftsOnBaseline(
   };
 }
 
-/**
- * Helper to initialize a WorkingBranch in WorkingStateStore with dirty editor drafts already merged.
- */
 export async function createBranchWithDraftBaseline(
-  store: WorkingStateStore,
+  store: WorkingStateRootStore,
   workspaceId: string,
   branchId: string,
   baseState: Record<string, RecoveryState>,
   drafts: EditorDraft[] | Record<string, EditorDraft | string | Buffer | null>,
   baseRef?: string,
   captureScopes: string[] = [],
-): Promise<WorkingBranch> {
+): Promise<WorkingBranchRoot> {
   const { effectiveState, changedPaths } = await overlayDraftsOnBaseline({
     baseState,
     drafts,

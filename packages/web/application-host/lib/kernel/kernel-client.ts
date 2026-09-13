@@ -49,6 +49,18 @@ export type KernelBlobReadSource =
   | { recordId: string; slot: string }
   | { ownerId: string };
 
+export interface KernelCreateBranchInput {
+  operationId: string;
+  branchId: string;
+  workspaceId: string;
+  entries: KernelCreateEntry[];
+  baseRef?: string;
+  /** Product-level immutable parent identity. This is metadata, not the root used by the kernel builder. */
+  parentRef?: string;
+  draftBasePaths: string[];
+  captureScopes: string[];
+}
+
 export interface KernelGrantHandle {
   readonly grantId: string;
   readonly kernelEpoch: string;
@@ -105,7 +117,7 @@ export class KernelScopedClient {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
 
-  createBranch(params: { operationId: string; branchId: string; workspaceId: string; entries: KernelCreateEntry[]; baseRef?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  createBranch(params: KernelCreateBranchInput, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.createBranch(params, this.grant, signal);
   }
 
@@ -133,11 +145,15 @@ export class KernelScopedClient {
     return this.owner.diffRoots(params, this.grant, signal);
   }
 
+  branchObjects(params: { branchId: string; includeRevisions?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.branchObjects(params, this.grant, signal);
+  }
+
   deleteBranch(params: { operationId: string; branchId: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.deleteBranch(params, this.grant, signal);
   }
 
-  readPin(params: { pinId: string; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  readPin(params: KernelMethodParams["pin.read"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.readPin(params, this.grant, signal);
   }
 
@@ -183,6 +199,10 @@ export class KernelScopedClient {
 
   recoveryChangeGet(params: KernelMethodParams["recovery.change.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.owner.recoveryChangeGet(params, this.grant, signal);
+  }
+
+  recoveryChangeList(params: KernelMethodParams["recovery.change.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryChangeList(params, this.grant, signal);
   }
 
   recoveryChangeAfter(params: KernelMethodParams["recovery.change.after"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -687,7 +707,7 @@ export class KernelClient {
     return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant });
   }
 
-  async createBranch(params: { operationId: string; branchId: string; workspaceId: string; entries: KernelCreateEntry[]; baseRef?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async createBranch(params: KernelCreateBranchInput, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const scoped = this.assertGrant(grant);
     const builderId = `branch-builder-${randomUUID()}`;
     try {
@@ -697,6 +717,9 @@ export class KernelClient {
         branchId: params.branchId,
         workspaceId: params.workspaceId,
         ...(params.baseRef === undefined ? {} : { baseRef: params.baseRef }),
+        ...(params.parentRef === undefined ? {} : { parentRef: params.parentRef }),
+        draftBasePaths: params.draftBasePaths,
+        captureScopes: params.captureScopes,
       }, { signal, grant: scoped });
       let sequence = 0;
       for (const batch of batchForKernelTransport(params.entries)) {
@@ -752,11 +775,15 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("branch.diff", params, { signal, grant });
   }
 
+  async branchObjects(params: { branchId: string; includeRevisions?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("branch.objects", params, { signal, grant });
+  }
+
   async deleteBranch(params: { operationId: string; branchId: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("branch.delete", params, { signal, grant });
   }
 
-  async readPin(params: { pinId: string; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async readPin(params: KernelMethodParams["pin.read"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("pin.read", params, { signal, grant });
   }
 
@@ -802,6 +829,10 @@ export class KernelClient {
 
   async recoveryChangeGet(params: KernelMethodParams["recovery.change.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.requestRaw<Record<string, unknown> | null>("recovery.change.get", params, { signal, grant });
+  }
+
+  async recoveryChangeList(params: KernelMethodParams["recovery.change.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.change.list", params, { signal, grant });
   }
 
   async recoveryChangeAfter(params: KernelMethodParams["recovery.change.after"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

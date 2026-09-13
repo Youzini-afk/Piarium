@@ -1,15 +1,15 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0/R1 foundations and direct root/path consumers have local release-path evidence. Retrieval and checkpoint/turn/mutation use Rust durability; combined Recovery/Integration still uses the TS recovery journal pending R1 cutover
+Status: accepted architecture; R0/R1 production metadata consumers use the Rust kernel. R1 remains partial for storage-location semantics and cross-platform/packaged/hard-failure evidence
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 本文规定 Piarium Rust 系统内核的最终职责和跨进程契约。实施顺序见
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-本轮已把 WorkingState root/path/range、branch publish/CAS、materializer 输入、retrieval artifact/receipt，以及 Recovery checkpoint/turn/change 交给 Rust v8 API；生产不再使用内存 SQL-shaped catalog 或 close-time flush。ThreadRuntime/IntegrationCoordinator 的同步接口仍用 callback 级临时树投影；combined Recovery/Integration/agent-mutation 的耐久 writer 仍是 TS recovery SQLite。Rust typed operation/file 方法是下一步替换 seam，API 存在不等于 consumer 已迁移。实际文件 apply/materialize 与 R2–R6 不因本轮实现而完成。
+WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer；TS 继续编排 Documents/Registry 和真实文件副作用，这些资源后端属于 R2/R3。旧实现仅作测试 helper，不是运行时兼容路径。R1 尚缺 storage location 产品语义、跨平台发行和硬故障证据，因此不把这一纵切写成阶段 R 完成。
 
 ## 1. 产品与阶段目标
 

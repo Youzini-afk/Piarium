@@ -69,29 +69,39 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter);
+    await access.withBranchStore(workspaceId, "test-duplicate-owner-release", async (store) => {
+      const provenance = { baseRevision: null, encoding: "utf-8", bom: false, localEditRevision: 1, revision: "draft-1" };
+      const draft = await store.createDraftBaseline(workspaceId, [
+        { path: "same-a.txt", content: "same draft body\n", provenance },
+        { path: "same-b.txt", content: "same draft body\n", provenance },
+      ]);
+      await store.deleteDraftBaseline(draft.id);
+      const first = await store.putObject(Buffer.from("same branch body\n"));
+      const second = await store.putObject(Buffer.from("same branch body\n"));
+      assert.equal(first.hash, second.hash);
+      const state = { kind: "regular-file" as const, objectHash: first.hash, byteLength: first.byteLength };
+      await store.createBranch(workspaceId, "duplicate-content-branch", { "a.txt": state, "b.txt": state }, "duplicate-base");
+      await store.deleteBranch("duplicate-content-branch");
+    });
+    const ownerAudit = await adapter.context(workspaceId, "test-duplicate-owner-audit", {
+      owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.maintenance"],
+    });
+    assert.equal((await ownerAudit.client.health()).temporaryObjectOwners, 0);
     let baseMode: number | undefined;
-    await access.withStore(workspaceId, "test-create", async (store) => {
+    await access.withBranchStore(workspaceId, "test-create", async (store) => {
       const base = await store.captureDirectory(workspace);
       baseMode = base["mode.txt"]?.kind === "regular-file" ? base["mode.txt"].mode : undefined;
-      await store.createBranch(workspaceId, branchId, base, "disk-base");
+      await store.createBranch(workspaceId, branchId, base, "disk-base", ["draft-only.ts"], ["src"]);
     });
-
-    const maintenance = await adapter.context(workspaceId, "test-drop-branch-metadata", {
-      owningWorkspace: workspaceId,
-      executionWorkspace: workspaceId,
-      pathScopes: [""],
-      capabilities: ["storage.maintenance"],
-    });
-    await maintenance.records.release("test-drop-branch-metadata", `working-branch:${branchId}`);
-    await access.withStore(workspaceId, "test-repair-branch-metadata", async (store) => {
+    await access.withBranchStore(workspaceId, "test-validate-branch-metadata", async (store) => {
       const base = await store.captureDirectory(workspace);
-      const repaired = await store.createBranch(workspaceId, branchId, base, "disk-base", ["draft-only.ts"], ["src"]);
-      assert.equal(repaired.baseRef, "disk-base");
-      assert.deepEqual(repaired.draftBasePaths, ["draft-only.ts"]);
-      assert.deepEqual(repaired.captureScopes, ["src"]);
+      const existing = await store.createBranch(workspaceId, branchId, base, "disk-base", ["draft-only.ts"], ["src"]);
+      assert.equal(existing.baseRef, "disk-base");
+      assert.deepEqual(existing.draftBasePaths, ["draft-only.ts"]);
+      assert.deepEqual(existing.captureScopes, ["src"]);
       await assert.rejects(
         store.createBranch(workspaceId, branchId, base, "other-base", ["draft-only.ts"], ["src"]),
-        /different metadata/i,
+        /different parameters|creation identity/i,
       );
     });
 
@@ -147,6 +157,23 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
 
     const later = await writes.branchWrite(sessionId, [{ resourceId: "mode.txt", action: "write", content: "later body\n" }]);
     assert.equal(later.status, "committed");
+    await access.withBranchStore(workspaceId, "test-slice-content-source", async (store) => {
+      const slice = await store.readStateSlice(branchId, ["mode.txt"]);
+      const state = slice?.["mode.txt"];
+      assert.equal(state?.kind, "regular-file");
+      if (state?.kind === "regular-file") {
+        assert.equal((await store.getObject(state.objectHash))?.toString("utf8"), "later body\n");
+      }
+      const provenancePin = await store.pinBranch(branchId);
+      try {
+        await assert.rejects(
+          store.readPath("another-branch", "mode.txt", { pin: provenancePin }),
+          /does not belong/i,
+        );
+      } finally {
+        await provenancePin.release();
+      }
+    }, "shared");
     const pinnedRead = await pinned.readFile("mode.txt");
     assert.equal(pinnedRead.status, "ready");
     if (pinnedRead.status === "ready") assert.equal(pinnedRead.content, "pinned body\n");
@@ -166,11 +193,11 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
       /operation gate is not bound/i,
     );
 
-    const published = await access.withStore(workspaceId, "test-publish", (store) => store.publishHeadResult(branchId));
+    const published = await access.withBranchStore(workspaceId, "test-publish", (store) => store.publishHeadResult(branchId));
     assert.equal(published.root?.startsWith("sha256-"), true);
 
     await fs.writeFile(path.join(workspace, "mode.txt"), "base body\n");
-    const reverted = await access.withStore(workspaceId, "test-revert", (store) => store.publishDirectoryResult(branchId, workspace));
+    const reverted = await access.withBranchStore(workspaceId, "test-revert", (store) => store.publishDirectoryResult(branchId, workspace));
     assert.deepEqual(reverted.changedPaths, []);
     await access.withBranchStore(workspaceId, "test-reverted-root", async (store) => {
       const branch = await store.getBranchRoot(branchId);
@@ -182,9 +209,6 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
       assert.equal(reverted.root, branch.root);
       assert.equal((await store.readPath(branchId, "mode.txt"))?.origin, "base");
       assert.equal((await store.readPath(branchId, "new/deep/file.ts"))?.state.kind, "missing");
-    }, "shared");
-    await access.withStore(workspaceId, "test-reverted-projection", (store) => {
-      assert.deepEqual(store.getBranch(branchId)?.deltas, {});
     }, "shared");
     assert.ok(resolvedActorHints.some((hint) => hint.sessionId === sessionId && hint.threadId === "working-state" && hint.runId === "run-working-state"));
   } finally {
@@ -209,17 +233,6 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     inspectDirtyBuffers: async () => [],
     runResourceOperation: async (_workspace, _resources, operation) => operation(),
   };
-  const baseEngine = createWorkspaceRecoveryEngine({
-    authorityId: "kernel-integration-test",
-    dataDir,
-    documents,
-    sessionNavigation: {
-      prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-      prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-      commit: async () => ({}),
-      commitLeaf: async () => ({}),
-    },
-  });
   const client = createKernelClient({
     hostId: "kernel-integration-test-host",
     storageRoot,
@@ -236,11 +249,23 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
   const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
   adapter.bindFileStore(content);
   const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const baseEngine = createWorkspaceRecoveryEngine({
+    authorityId: "kernel-integration-test",
+    dataDir,
+    documents,
+    durableRecoveryStore: kernelRecoveryStore,
+    sessionNavigation: {
+      prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
+      prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
+      commit: async () => ({}),
+      commitLeaf: async () => ({}),
+    },
+  });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
-    const result = await access.withStore(workspaceId, "integration-setup", async (store) => {
+    const result = await access.withBranchStore(workspaceId, "integration-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "parent-branch", base, "base");
       await store.createBranch(workspaceId, "child-branch", base, "parent-branch@0");
@@ -259,13 +284,12 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
       parentAuthority: { kind: "branch", branchId: "parent-branch" },
     });
     assert.equal(merged.status, "applied");
-    await access.withStore(workspaceId, "integration-assert", async (store, context) => {
-      assert.equal(await context.resourceOperationGate.run([], async () => "documents-gate"), "documents-gate");
+    await access.withBranchStore(workspaceId, "integration-assert", async (store) => {
       const durable = await kernelRecoveryStore.getOperation(workspaceId, merged.operationId);
       assert.equal(durable?.state, "complete");
-      const state = store.effectiveState("parent-branch")?.["child.txt"];
-      assert.equal(state?.kind, "regular-file");
-      if (state?.kind === "regular-file") assert.equal((await store.getObject(state.objectHash))?.toString("utf8"), "child\n");
+      const entry = await store.readPath("parent-branch", "child.txt");
+      assert.equal(entry?.state.kind, "regular-file");
+      if (entry?.state.kind === "regular-file") assert.equal((await store.readContent(entry))?.toString("utf8"), "child\n");
     }, "shared");
   } finally {
     await adapter.dispose().catch(() => undefined);
@@ -290,23 +314,24 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
     inspectDirtyBuffers: async () => [],
     runResourceOperation: async (_workspace, _resources, operation) => operation(),
   };
-  const baseEngine = createWorkspaceRecoveryEngine({
-    authorityId: "kernel-surface-test",
-    dataDir,
-    documents,
-    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
-  });
   const client = createKernelClient({ hostId: "kernel-surface-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "kernel-surface-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
   const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
   adapter.bindFileStore(content);
   const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const baseEngine = createWorkspaceRecoveryEngine({
+    authorityId: "kernel-surface-test",
+    dataDir,
+    documents,
+    durableRecoveryStore: kernelRecoveryStore,
+    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
+  });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   const surfaceHash = (value: string) => `sha256-${createHash("sha256").update(value, "utf8").digest("hex")}`;
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
-    const result = await access.withStore(workspaceId, "surface-setup", async (store) => {
+    const result = await access.withBranchStore(workspaceId, "surface-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "surface-parent", base, "base");
       await store.createBranch(workspaceId, "surface-child", base, "surface-parent@0");
@@ -357,7 +382,7 @@ it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a c
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter);
-    await access.withStore(workspaceId, "publish-race-setup", async (store) => {
+    await access.withBranchStore(workspaceId, "publish-race-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "publish-race", base, "base");
       const object = await store.putObject(Buffer.from("one\n"));
@@ -412,22 +437,23 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
     inspectDirtyBuffers: async () => [],
     runResourceOperation: async (_workspace, _resources, operation) => operation(),
   };
-  const baseEngine = createWorkspaceRecoveryEngine({
-    authorityId: "kernel-branch-reconcile-test",
-    dataDir,
-    documents,
-    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
-  });
   const client = createKernelClient({ hostId: "kernel-branch-reconcile-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
   const adapter = new KernelStorageAdapter({ client, hostId: "kernel-branch-reconcile-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
   const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
   adapter.bindFileStore(content);
   const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const baseEngine = createWorkspaceRecoveryEngine({
+    authorityId: "kernel-branch-reconcile-test",
+    dataDir,
+    documents,
+    durableRecoveryStore: kernelRecoveryStore,
+    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
+  });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   try {
     await client.start();
     const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
-    const result = await access.withStore(workspaceId, "branch-reconcile-setup", async (store) => {
+    const result = await access.withBranchStore(workspaceId, "branch-reconcile-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "reconcile-parent", base, "base");
       await store.createBranch(workspaceId, "reconcile-child", base, "reconcile-parent@0");

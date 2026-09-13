@@ -72,34 +72,53 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     operationId: "op-create",
     branchId: "branch-test",
     workspaceId: "workspace-test",
+    parentRef: "workspace-head:1",
+    draftBasePaths: ["src/file.txt"],
+    captureScopes: ["vendor/cache"],
     entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 }, ownerId: first.ownerId }],
   });
   const forked = await client.createBranch({
     operationId: "op-fork",
     branchId: "branch-fork",
     workspaceId: "workspace-test",
-    entries: [],
+    draftBasePaths: [], captureScopes: [], entries: [],
     baseRef: String(created.root),
   });
   assert.equal(forked.root, created.root);
   const initial = await client.readBranch({ branchId: "branch-test", includeEntries: true });
   assert.equal(initial.entries.length, 1);
   assert.equal(initial.entries[0]?.path, "src/file.txt");
+  assert.equal(initial.parentRef, "workspace-head:1");
+  assert.deepEqual(initial.draftBasePaths, ["src/file.txt"]);
+  assert.deepEqual(initial.captureScopes, ["vendor/cache"]);
+  assert.equal(Number.isSafeInteger(initial.createdAt), true);
+  assert.equal(Number.isSafeInteger(initial.updatedAt), true);
+  const reopenedCreate = await client.createBranch({
+    operationId: "op-create-semantic-retry",
+    branchId: "branch-test",
+    workspaceId: "workspace-test",
+    parentRef: "workspace-head:1",
+    draftBasePaths: ["src/file.txt"],
+    captureScopes: ["vendor/cache"],
+    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } }],
+  });
+  assert.equal(reopenedCreate.created, false);
+  assert.equal(reopenedCreate.root, created.root);
   const normalized = await client.readBranch({ branchId: "branch-test", paths: ["src\\file.txt"] });
   assert.equal(normalized.entries[0]?.path, "src/file.txt");
   assert.equal((await client.health({ deep: false })).integrity, "ok");
   await assert.rejects(
-    client.createBranch({ operationId: "op-create", branchId: "operation-reuse", workspaceId: "workspace-test", entries: [] }),
+    client.createBranch({ operationId: "op-create", branchId: "operation-reuse", workspaceId: "workspace-test", draftBasePaths: [], captureScopes: [], entries: [] }),
     /operationId.*reused|different parameters/i,
   );
-  await assert.rejects(client.createBranch({ operationId: "op-create-different", branchId: "branch-test", workspaceId: "workspace-test", entries: [] }), /creation parameters/i);
+  await assert.rejects(client.createBranch({ operationId: "op-create-different", branchId: "branch-test", workspaceId: "workspace-test", draftBasePaths: [], captureScopes: [], entries: [] }), /creation parameters/i);
   assert.equal((await client.health({ deep: true })).integrity, "ok");
   await assert.rejects(
     client.createBranch({
       operationId: "op-invalid-state",
       branchId: "invalid-state",
       workspaceId: "workspace-test",
-      entries: [{ path: "a", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash } } as never],
+      draftBasePaths: [], captureScopes: [], entries: [{ path: "a", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash } } as never],
     }),
     /invalid path state|mode/i,
   );
@@ -108,7 +127,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
       operationId: "op-invalid-tree",
       branchId: "invalid-tree",
       workspaceId: "workspace-test",
-      entries: [
+      draftBasePaths: [], captureScopes: [], entries: [
         { path: "a", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } },
         { path: "a/b", state: { kind: "directory", mode: 0o755 } },
       ],
@@ -120,7 +139,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     operationId: "op-tree-invariant",
     branchId: "tree-invariant",
     workspaceId: "workspace-test",
-    entries: [
+    draftBasePaths: [], captureScopes: [], entries: [
       { path: "a", state: { kind: "directory", mode: 0o755 } },
       { path: "a/b", state: { kind: "regular-file", byteLength: treeBlob.byteLength, objectHash: treeBlob.hash, mode: 0o644 }, ownerId: treeBlob.ownerId },
     ],
@@ -325,7 +344,7 @@ test("GC distinguishes durable release from physical cleanup failure and retries
     operationId: "gc-create",
     branchId: "gc-branch",
     workspaceId: "gc-workspace",
-    entries: [{ path: "file", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 }, ownerId: blob.ownerId }],
+    draftBasePaths: [], captureScopes: [], entries: [{ path: "file", state: { kind: "regular-file", byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 }, ownerId: blob.ownerId }],
   });
   await faulted.deleteBranch({ operationId: "gc-delete", branchId: "gc-branch" });
   const failed = await faultedMaintenance.gc("gc-run");
@@ -373,7 +392,7 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     operationId: "grant-branch-ok",
     branchId: "grant-branch",
     workspaceId: "workspace-a",
-    entries: [
+    draftBasePaths: [], captureScopes: [], entries: [
       { path: "src/public/a.txt", state: { kind: "regular-file", byteLength: publicBlob.byteLength, objectHash: publicBlob.hash, mode: 0o644 }, ownerId: publicBlob.ownerId },
       { path: "src/private/secret.txt", state: { kind: "regular-file", byteLength: privateBlob.byteLength, objectHash: privateBlob.hash, mode: 0o644 }, ownerId: privateBlob.ownerId },
     ],
@@ -390,9 +409,31 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     capabilities: ["storage.read", "storage.write"],
     pathScopes: ["src/public"],
   }));
-  await assert.rejects(client.createBranch({ operationId: "grant-branch-other", branchId: "grant-other", workspaceId: "workspace-b", entries: [] }), /workspace|grant/i);
+  await assert.rejects(client.createBranch({ operationId: "grant-branch-other", branchId: "grant-other", workspaceId: "workspace-b", draftBasePaths: [], captureScopes: [], entries: [] }), /workspace|grant/i);
   const scopedRead = await client.readBranch({ branchId: "grant-branch", includeEntries: true });
   assert.deepEqual(scopedRead.entries.map((entry) => entry.path), ["src/public/a.txt"]);
+  const scopedRootRead = await client.readBranch({ branchId: "grant-branch", roots: ["src"], includeEntries: true });
+  assert.deepEqual(scopedRootRead.entries.map((entry) => entry.path), ["src/public/a.txt"]);
+  await assert.rejects(client.branchObjects({ branchId: "grant-branch" }), /storage\.maintenance|capability/i);
+  const maintenance = host.scoped(await host.issueGrant({
+    grantId: "grant-object-maintenance",
+    hostGeneration: "grant-generation",
+    sessionId: null,
+    threadId: null,
+    runId: null,
+    owningWorkspace: "workspace-a",
+    executionWorkspace: "workspace-a",
+    storageIdentity: host.handshake?.storageRoot,
+    capabilities: ["storage.maintenance"],
+    pathScopes: [""],
+  }));
+  const branchObjects = await maintenance.branchObjects({ branchId: "grant-branch", pageSize: 1 });
+  assert.equal((branchObjects.objects as unknown[]).length, 1);
+  assert.equal(typeof branchObjects.nextCursor, "number");
+  await assert.rejects(
+    client.readBranch({ branchId: "grant-branch", roots: ["src/private"], includeEntries: true }),
+    /scope|path root/i,
+  );
   const publicSlice = await client.getBlob(publicBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" });
   assert.equal(Buffer.from(publicSlice.bytesBase64, "base64").toString("utf8"), "PUBLIC");
   await assert.rejects(
@@ -435,6 +476,12 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
   const pin = await owner.pinBranch({ operationId: "grant-pin", branchId: "grant-branch", revision: Number(published.revision), pinId: "grant-pin" });
   const scopedPin = await client.readPin({ pinId: String(pin.pinId), includeEntries: true });
   assert.deepEqual((scopedPin.entries as Array<{ path: string }>).map((entry) => entry.path), ["src/public/a.txt"]);
+  const scopedPinRoot = await client.readPin({ pinId: String(pin.pinId), roots: ["src"], includeEntries: true });
+  assert.deepEqual((scopedPinRoot.entries as Array<{ path: string }>).map((entry) => entry.path), ["src/public/a.txt"]);
+  await assert.rejects(
+    client.readPin({ pinId: String(pin.pinId), roots: ["src/private"], includeEntries: true }),
+    /scope|path root/i,
+  );
   const other = host.scoped(await issueActor(host, "workspace-b-actor", "workspace-b"));
   await assert.rejects(
     other.getBlob(publicBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" }),
@@ -447,6 +494,10 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     expectedWriteRevision: liveBeforeRevoke.writeRevision,
     expectedRoot: liveBeforeRevoke.root,
   });
+  await assert.rejects(
+    owner.getBlob(publicBlob.hash, { pinId: String(queryPin.pinId), path: "src/public/a.txt" }),
+    /query pin|another actor/i,
+  );
   await host.revokeGrant("scoped-grant");
   await assert.rejects(client.readBranch({ branchId: "grant-branch", includeEntries: true }), /revoked|grant/i);
   await assert.rejects(owner.readPin({ pinId: String(queryPin.pinId) }), /pin not found/i);
@@ -469,7 +520,7 @@ test("queued long branch build observes cancellation and leaves the kernel usabl
     state: { kind: "regular-file" as const, byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 },
   }));
   const controller = new AbortController();
-  const request = client.createBranch({ operationId: "cancel-build", branchId: "cancel-branch", workspaceId: "cancel-workspace", entries }, controller.signal);
+  const request = client.createBranch({ operationId: "cancel-build", branchId: "cancel-branch", workspaceId: "cancel-workspace", draftBasePaths: [], captureScopes: [], entries }, controller.signal);
   void request.catch(() => undefined);
   const pending = request.then(
     () => assert.fail("cancelled branch build unexpectedly committed"),
@@ -493,12 +544,12 @@ test("grant revoke cancels queued side effects before admission", { timeout: 30_
   await host.start();
   const actor = host.scoped(await issueActor(host, "revoke-actor", "revoke-workspace"));
   const blob = await actor.putBlob(Buffer.from("revoke"), "revoke-blob");
-  await actor.createBranch({ operationId: "revoke-base", branchId: "revoke-base", workspaceId: "revoke-workspace", entries: [] });
+  await actor.createBranch({ operationId: "revoke-base", branchId: "revoke-base", workspaceId: "revoke-workspace", draftBasePaths: [], captureScopes: [], entries: [] });
   const entries = Array.from({ length: 20_000 }, (_, index) => ({
     path: `wide/${String(index).padStart(6, "0")}.txt`,
     state: { kind: "regular-file" as const, byteLength: blob.byteLength, objectHash: blob.hash, mode: 0o644 },
   }));
-  const long = actor.createBranch({ operationId: "revoke-long", branchId: "revoke-long", workspaceId: "revoke-workspace", entries });
+  const long = actor.createBranch({ operationId: "revoke-long", branchId: "revoke-long", workspaceId: "revoke-workspace", draftBasePaths: [], captureScopes: [], entries });
   const queued = actor.writeBranch({ operationId: "revoke-queued", branchId: "revoke-base", expectedWriteRevision: 0, changes: [{ path: "queued.txt", state: { kind: "missing" } }] });
   const revoke = host.revokeGrant("revoke-actor");
   const [longResult, queuedResult, revokeResult] = await Promise.allSettled([long, queued, revoke]);
@@ -531,7 +582,7 @@ test("temporary blob owners are independent and have explicit release", async (t
     operationId: "owner-create",
     branchId: "owner-branch",
     workspaceId: "owner-workspace",
-    entries: [{
+    draftBasePaths: [], captureScopes: [], entries: [{
       path: "file.txt",
       state: { kind: "regular-file", objectHash: first.hash, byteLength: first.byteLength, mode: 0o644 },
       ownerId: first.ownerId,
@@ -573,7 +624,7 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   assert.equal(record.recordId, "record-1");
   const read = await client.getBlob(body.hash, { recordId: "record-1", slot: "body" });
   assert.equal(Buffer.from(read.bytesBase64, "base64").toString("utf8"), "record-body");
-  await client.createBranch({ operationId: "record-source-branch-create", branchId: "record-source-branch", workspaceId: "record-workspace", entries: [] });
+  await client.createBranch({ operationId: "record-source-branch-create", branchId: "record-source-branch", workspaceId: "record-workspace", draftBasePaths: [], captureScopes: [], entries: [] });
   await assert.rejects(
     client.writeBranch({
       operationId: "record-source-branch-write",
@@ -588,18 +639,22 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
     client.putRecord({ operationId: "record-malformed-turn", recordId: "bad-turn", workspaceId: "record-workspace", recordType: "recovery.turn", state: "ready", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
     /turn executionId|identity is incomplete/i,
   );
-  const cas = await client.putRecord({ operationId: "record-cas-create", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] });
+  await assert.rejects(
+    client.putRecord({ operationId: "record-working-bypass", recordId: "working-result:bypass@1", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "bypass", resultRevision: 1 }), ownerIds: [], references: [] }),
+    /typed working record method/i,
+  );
+  const cas = await client.putRecord({ operationId: "record-cas-create", recordId: "record-cas", workspaceId: "record-workspace", recordType: "retrieval.artifact", state: "published", revision: 1, payloadJson: JSON.stringify({ artifactId: "record-cas" }), ownerIds: [], references: [] });
   assert.equal(cas.revision, 1);
   assert.equal(cas.recordRevision, 1);
-  const casUpdated = await client.putRecord({ operationId: "record-cas-update", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, changed: true }), ownerIds: [], references: [] });
+  const casUpdated = await client.putRecord({ operationId: "record-cas-update", recordId: "record-cas", workspaceId: "record-workspace", recordType: "retrieval.artifact", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ artifactId: "record-cas", changed: true }), ownerIds: [], references: [] });
   assert.equal(casUpdated.revision, 1);
   assert.equal(casUpdated.recordRevision, 2);
   await assert.rejects(
-    client.putRecord({ operationId: "record-cas-blind", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, blind: true }), ownerIds: [], references: [] }),
+    client.putRecord({ operationId: "record-cas-blind", recordId: "record-cas", workspaceId: "record-workspace", recordType: "retrieval.artifact", state: "published", revision: 1, payloadJson: JSON.stringify({ artifactId: "record-cas", blind: true }), ownerIds: [], references: [] }),
     /expectedRecordRevision|record update/i,
   );
   await assert.rejects(
-    client.putRecord({ operationId: "record-cas-stale", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] }),
+    client.putRecord({ operationId: "record-cas-stale", recordId: "record-cas", workspaceId: "record-workspace", recordType: "retrieval.artifact", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ artifactId: "record-cas" }), ownerIds: [], references: [] }),
     /revision conflict/i,
   );
   await client.releaseRecord("record-release-op", "record-workspace", "record-1");
@@ -614,7 +669,7 @@ test("typed working result boundary stores root identity without state maps", { 
   clients.push(host);
   await host.start();
   const client = host.scoped(await issueActor(host, "working-record-actor", "working-record-workspace"));
-  const created = await client.createBranch({ operationId: "working-result-branch-create", branchId: "branch-1", workspaceId: "working-record-workspace", entries: [] });
+  const created = await client.createBranch({ operationId: "working-result-branch-create", branchId: "branch-1", workspaceId: "working-record-workspace", draftBasePaths: [], captureScopes: [], entries: [] });
   const publishedBranch = await client.publishBranch({ operationId: "working-result-branch-publish", branchId: "branch-1", expectedWriteRevision: Number(created.writeRevision ?? 0), expectedRoot: String(created.root) });
   const publishedRoot = String(publishedBranch.root);
   const value = await client.workingResultPut({
@@ -633,11 +688,75 @@ test("typed working result boundary stores root identity without state maps", { 
   });
   assert.equal((value.record as { root: string }).root.startsWith("sha256-"), true);
   assert.equal(JSON.stringify(value.record).includes("pathStates"), false);
+  const verificationClient = host.scoped(await host.issueGrant({
+    grantId: "working-record-verification-actor",
+    hostGeneration: host.handshake?.hostGeneration,
+    sessionId: "working-record-session",
+    threadId: "thread-1",
+    runId: null,
+    owningWorkspace: "working-record-workspace",
+    executionWorkspace: "working-record-workspace",
+    storageIdentity: host.handshake?.storageRoot,
+    capabilities: ["storage.read", "storage.write"],
+    pathScopes: [""],
+  }));
+  await assert.rejects(
+    verificationClient.workingVerificationPut({
+      operationId: "working-verification-malformed",
+      recordId: "working-verification:child:thread-1:1",
+      workspaceId: "working-record-workspace",
+      kind: "child",
+      threadId: "thread-1",
+      branchId: "branch-1",
+      resultRevision: 1,
+      root: publishedRoot,
+      document: { recordedAt: Date.now(), binding: "bound", checks: [] },
+      ownerIds: [],
+      references: [],
+    }),
+    /child verification|result identity/i,
+  );
+  await verificationClient.workingVerificationPut({
+    operationId: "working-verification-valid",
+    recordId: "working-verification:child:thread-1:1",
+    workspaceId: "working-record-workspace",
+    kind: "child",
+    threadId: "thread-1",
+    branchId: "branch-1",
+    resultRevision: 1,
+    root: publishedRoot,
+    document: { resultRevision: 1, branchId: "branch-1", resultTreeHash: publishedRoot, recordedAt: Date.now(), binding: "bound", checks: [] },
+    ownerIds: [],
+    references: [],
+  });
+  await verificationClient.workingReviewPut({
+    operationId: "working-review-valid",
+    recordId: "working-review:thread-1:1",
+    workspaceId: "working-record-workspace",
+    threadId: "thread-1",
+    branchId: "branch-1",
+    resultRevision: 1,
+    root: publishedRoot,
+    document: { resultRevision: 1, status: "completed", recordedAt: Date.now() },
+    ownerIds: [],
+    references: [],
+  });
   const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
   assert.equal((listed.records as unknown[]).length, 1);
+  await assert.rejects(
+    client.releaseRecord("working-result-generic-release", "working-record-workspace", "working-result:branch-1@1"),
+    /typed working release method/i,
+  );
+  await assert.rejects(
+    client.workingResultRelease({ operationId: "working-result-release-head", workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" }),
+    /branch head/i,
+  );
+  await client.publishBranch({ operationId: "working-result-branch-publish-2", branchId: "branch-1", expectedWriteRevision: Number(created.writeRevision ?? 0), expectedRoot: publishedRoot });
   const released = await client.workingResultRelease({ operationId: "working-result-release", workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" });
   assert.equal(released.released, true);
   assert.equal(await client.workingResultGet({ workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" }), null);
+  assert.equal(((await verificationClient.workingVerificationList({ workspaceId: "working-record-workspace", threadId: "thread-1", kind: "child" })).records as unknown[]).length, 0);
+  assert.equal(((await verificationClient.workingReviewList({ workspaceId: "working-record-workspace", threadId: "thread-1" })).records as unknown[]).length, 0);
   const gc = await client.gc("working-result-gc");
   assert.ok(Number(gc.deletedBlobs ?? 0) >= 0);
 });
@@ -671,6 +790,118 @@ test("Rust rejects malformed and mismatched typed working result DTOs", { timeou
     client.workingResultPut({ ...common, operationId: "working-dto-reject-mismatch", recordId: "working-result:missing@1", document: { branchId: "missing", resultRevision: 1, root: common.root, changedPaths: [], diffStats: common.diffStats, createdAt: common.createdAt } as never }),
     /revision is not published|branch|root/i,
   );
+});
+
+test("releasing a non-head result drops its revision while an explicit pin alone retains its objects", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-result-release-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "result-release-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "result-release-actor", "result-release-workspace"));
+  const base = await client.putBlob(Buffer.from("base\n"), "result-release-base");
+  const first = await client.putBlob(Buffer.from("first\n"), "result-release-first");
+  const second = await client.putBlob(Buffer.from("second\n"), "result-release-second");
+  const created = await client.createBranch({
+    operationId: "result-release-create",
+    branchId: "result-release-branch",
+    workspaceId: "result-release-workspace",
+    draftBasePaths: [],
+    captureScopes: [],
+    entries: [{ path: "file.txt", state: { kind: "regular-file", objectHash: base.hash, byteLength: base.byteLength, mode: 0o644 }, ownerId: base.ownerId }],
+  });
+  const firstWrite = await client.writeBranch({
+    operationId: "result-release-write-first",
+    branchId: "result-release-branch",
+    expectedWriteRevision: Number(created.writeRevision),
+    changes: [{ path: "file.txt", state: { kind: "regular-file", objectHash: first.hash, byteLength: first.byteLength, mode: 0o644 }, ownerId: first.ownerId }],
+  });
+  const firstPublished = await client.publishBranch({
+    operationId: "result-release-publish-first",
+    branchId: "result-release-branch",
+    expectedWriteRevision: firstWrite.writeRevision,
+    expectedRoot: firstWrite.root,
+  });
+  const firstRevision = Number(firstPublished.revision);
+  await assert.rejects(client.workingResultPut({
+    operationId: "result-release-record-missing-refs",
+    recordId: `working-result:result-release-branch@${firstRevision}`,
+    workspaceId: "result-release-workspace",
+    branchId: "result-release-branch",
+    resultRevision: firstRevision,
+    root: String(firstPublished.root),
+    changedPaths: ["file.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: {
+      branchId: "result-release-branch",
+      resultRevision: firstRevision,
+      root: String(firstPublished.root),
+      changedPaths: ["file.txt"],
+      diffStats: { files: 1, insertions: 0, deletions: 0 },
+      createdAt: new Date().toISOString(),
+    },
+    ownerIds: [],
+    references: [],
+  }), /references.*published|base\/result/i);
+  await client.workingResultPut({
+    operationId: "result-release-record-first",
+    recordId: `working-result:result-release-branch@${firstRevision}`,
+    workspaceId: "result-release-workspace",
+    branchId: "result-release-branch",
+    resultRevision: firstRevision,
+    root: String(firstPublished.root),
+    changedPaths: ["file.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: {
+      branchId: "result-release-branch",
+      resultRevision: firstRevision,
+      root: String(firstPublished.root),
+      changedPaths: ["file.txt"],
+      diffStats: { files: 1, insertions: 0, deletions: 0 },
+      createdAt: new Date().toISOString(),
+    },
+    ownerIds: [],
+    references: [
+      { slot: "base:file.txt", objectHash: base.hash },
+      { slot: "result:file.txt", objectHash: first.hash },
+    ],
+  });
+  const pin = await client.pinBranch({
+    operationId: "result-release-pin-first",
+    branchId: "result-release-branch",
+    revision: firstRevision,
+    pinId: "result-release-pin",
+  });
+  const secondWrite = await client.writeBranch({
+    operationId: "result-release-write-second",
+    branchId: "result-release-branch",
+    expectedWriteRevision: firstWrite.writeRevision,
+    changes: [{ path: "file.txt", state: { kind: "regular-file", objectHash: second.hash, byteLength: second.byteLength, mode: 0o644 }, ownerId: second.ownerId }],
+  });
+  await client.publishBranch({
+    operationId: "result-release-publish-second",
+    branchId: "result-release-branch",
+    expectedWriteRevision: secondWrite.writeRevision,
+    expectedRoot: secondWrite.root,
+  });
+  const beforeRelease = await client.health();
+  assert.equal(beforeRelease.blobs, 3);
+  await client.workingResultRelease({
+    operationId: "result-release-record-drop",
+    workspaceId: "result-release-workspace",
+    recordId: `working-result:result-release-branch@${firstRevision}`,
+  });
+  await client.gc("result-release-gc-pinned");
+  assert.equal((await client.health()).blobs, 3);
+  const pinned = await client.readPin({ pinId: String(pin.pinId), paths: ["file.txt"] });
+  const pinnedEntries = pinned.entries as Array<{ state?: { objectHash?: string } }>;
+  assert.equal(pinnedEntries[0]?.state?.objectHash, first.hash);
+  await client.unpinBranch({ operationId: "result-release-unpin", branchId: "result-release-branch", pinId: String(pin.pinId) });
+  await client.gc("result-release-gc-unpinned");
+  assert.equal((await client.health()).blobs, 2);
 });
 
 test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 }, async (t) => {
@@ -736,7 +967,7 @@ test("branch creation streams a normal input larger than one control frame", { t
     state: { kind: "symlink" as const, symlinkTarget: target },
   }));
   assert.ok(Buffer.byteLength(JSON.stringify(entries), "utf8") > 16 * 1024 * 1024);
-  const created = await client.createBranch({ operationId: "large-branch-create", branchId: "large-branch", workspaceId: "large-branch-workspace", entries });
+  const created = await client.createBranch({ operationId: "large-branch-create", branchId: "large-branch", workspaceId: "large-branch-workspace", draftBasePaths: [], captureScopes: [], entries });
   assert.equal(created.created, true);
   assert.equal((await client.readBranch({ branchId: "large-branch" })).writeRevision, 0);
   const added = await client.writeBranch({
@@ -841,14 +1072,16 @@ test("real kernel typed recovery storage persists checkpoints, operation files, 
       commit: async () => ({}),
       commitLeaf: async () => ({}),
     };
+    const store = new KernelRecoveryStore(adapter, content);
     const engine = createWorkspaceRecoveryEngine({
       authorityId: "kernel-recovery-host",
       dataDir: path.join(root, "host-data"),
       documents: documents as never,
+      durableRecoveryStore: store,
       sessionNavigation: navigation as never,
       fileStore: content,
     });
-    return { adapter, client, engine: createKernelRecoveryDirectFacade(engine, new KernelRecoveryStore(adapter, content)) };
+    return { adapter, client, engine: createKernelRecoveryDirectFacade(engine, store) };
   };
 
   const first = await makeEngine();

@@ -1,9 +1,8 @@
 import { randomUUID, createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument, KernelWorkingReviewDocument, KernelWorkingResultDocument, KernelWorkingVerificationDocument } from "./protocol.generated.js";
+import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
-import type { SqliteDatabase } from "../recovery/journal-catalog.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
 import { type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
@@ -17,10 +16,10 @@ import type {
   RecoveryState,
   ResultReviewRecord,
   ResultVerificationBundle,
-  WorkingBranch,
   WorkingBranchRoot,
   WorkingResult,
   WorkingStatePin,
+  WorkingStatePinnedRoot,
   WorkingStateContentSource,
   WorkingStateReadOptions,
   WorkingStateRootStore,
@@ -28,7 +27,6 @@ import type {
   WorkingStateTreeRead,
   WorkspaceWorkingStateRootAccess,
 } from "../harness/working-state/types.js";
-import { type CreateDraftBaselinePath, type WorkspaceWorkingStateAccess } from "../harness/working-state/working-state-store.js";
 import { assertVirtualWriteTree } from "../harness/working-state/virtual-write-tree.js";
 
 type Mode = "exclusive" | "shared";
@@ -53,8 +51,6 @@ export interface KernelStorageReference {
 
 export interface KernelStorageContext {
   client: KernelScopedClient;
-  /** Kept only for local test-only recovery adapters. Production kernel paths do not populate it. */
-  database?: SqliteDatabase;
   actor?: KernelActorIdentity;
   identity: RecoveryIdentity;
   root: string;
@@ -101,23 +97,6 @@ export interface KernelStorageContext {
   };
 }
 
-interface BranchProjection {
-  branchId: string;
-  workspaceId: string;
-  baseRef?: string;
-  baseState: Record<string, RecoveryState>;
-  deltas: Record<string, RecoveryState>;
-  headRevision: number;
-  writeRevision: number;
-  root: string;
-  baseRoot: string;
-  createdAt: string;
-  updatedAt: string;
-  draftBasePaths: string[];
-  captureScopes: string[];
-}
-
-const clone = <T>(value: T): T => structuredClone(value);
 const nowIso = (): string => new Date().toISOString();
 const normalize = (value: string): string => {
   const raw = value.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -154,21 +133,11 @@ const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
 
-const parsePayload = <T>(record: KernelRecordResult): T => JSON.parse(record.payloadJson) as T;
-
 const checkRead = (options?: { signal?: AbortSignal; deadlineAt?: number }): void => {
   options?.signal?.throwIfAborted();
   if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
     throw new DOMException("Explore query deadline exceeded", "AbortError");
   }
-};
-
-const transientStateIdentity = (states: Record<string, RecoveryState>): string => {
-  const hash = createHash("sha256");
-  for (const [path, state] of Object.entries(states).sort(([left], [right]) => left.localeCompare(right))) {
-    hash.update(path).update("\0").update(JSON.stringify(state)).update("\0");
-  }
-  return `sha256-${hash.digest("hex")}`;
 };
 
 const compactTreeWrites = (writes: Record<string, RecoveryState>): Record<string, RecoveryState> => {
@@ -229,21 +198,33 @@ const parsePinTreeRead = (value: Record<string, unknown>): KernelPinTreeRead => 
 /** Rust-kernel root/path authority. It retains no expanded branch or result tree. */
 export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly ownerByHash = new Map<string, string>();
-  private readonly sourceByHash = new Map<string, { branchId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
+  private readonly sourceByHash = new Map<string, { branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
 
-  private async metadata(branchId: string): Promise<{ baseRef?: string; draftBasePaths: string[]; captureScopes: string[]; createdAt: string; updatedAt: string }> {
-    const record = await this.context.records.get(`working-branch:${branchId}`);
-    const payload = record ? asRecord(parsePayload(record)) : {};
-    const createdAt = typeof payload.createdAt === "string" ? payload.createdAt : "";
-    return {
-      ...(typeof payload.baseRef === "string" ? { baseRef: payload.baseRef } : {}),
-      draftBasePaths: Array.isArray(payload.draftBasePaths) ? payload.draftBasePaths.filter((item): item is string => typeof item === "string") : [],
-      captureScopes: Array.isArray(payload.captureScopes) ? payload.captureScopes.filter((item): item is string => typeof item === "string") : [],
-      createdAt,
-      updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : createdAt,
-    };
+  private assertPinForBranch(branchId: string, pin: WorkingStatePinnedRoot): void {
+    if (pin.branchId !== branchId || pin.workspaceId !== this.context.identity.workspaceId) {
+      throw new Error(`Working-state pin ${pin.pinId} does not belong to ${this.context.identity.workspaceId}/${branchId}`);
+    }
+    if (pin.branch.branchId !== branchId || pin.branch.workspaceId !== pin.workspaceId) {
+      throw new Error(`Working-state pin ${pin.pinId} has inconsistent branch provenance`);
+    }
+  }
+
+  private assertPinRead(pin: WorkingStatePinnedRoot, read: KernelPinTreeRead | KernelBranchReadResult): asserts read is KernelPinTreeRead {
+    this.assertPinForBranch(pin.branchId, pin);
+    if (!("pinId" in read)) throw new Error(`Working-state pin ${pin.pinId} returned a live branch view`);
+    const readIdentity = read.view === "current" ? read.writeRevision : read.revision;
+    const pinIdentity = pin.view === "current" ? pin.writeRevision : pin.revision;
+    if (read.pinId !== pin.pinId
+      || read.branchId !== pin.branchId
+      || read.workspaceId !== pin.workspaceId
+      || read.view !== pin.view
+      || read.revision !== pin.revision
+      || readIdentity !== pinIdentity
+      || read.root !== pin.root) {
+      throw new Error(`Working-state pin ${pin.pinId} returned inconsistent provenance`);
+    }
   }
 
   private async readRoot(branchId: string, revision: number | undefined, signal?: AbortSignal): Promise<KernelBranchReadResult | null> {
@@ -256,35 +237,77 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null> {
-    const [current, base, metadata] = await Promise.all([
+    const [current, base] = await Promise.all([
       this.readRoot(branchId, undefined, options?.signal),
       this.readRoot(branchId, 0, options?.signal),
-      this.metadata(branchId),
     ]);
     if (!current || !base) return null;
+    if (current.branchId !== branchId || base.branchId !== branchId
+      || current.workspaceId !== this.context.identity.workspaceId || base.workspaceId !== current.workspaceId
+      || current.view !== "current" || base.view !== "revision" || base.revision !== 0) {
+      throw new Error(`Kernel returned inconsistent identity for working branch ${branchId}`);
+    }
+    const draftBasePaths = Array.isArray(current.draftBasePaths) && current.draftBasePaths.every((item) => typeof item === "string")
+      ? current.draftBasePaths.map(normalize).sort()
+      : null;
+    const captureScopes = Array.isArray(current.captureScopes) && current.captureScopes.every((item) => typeof item === "string")
+      ? current.captureScopes.map(normalize).sort()
+      : null;
+    const createdAt = Number(current.createdAt);
+    const updatedAt = Number(current.updatedAt);
+    if (!draftBasePaths || !captureScopes || !Number.isSafeInteger(createdAt) || createdAt < 0
+      || !Number.isSafeInteger(updatedAt) || updatedAt < createdAt
+      || base.parentRef !== current.parentRef
+      || JSON.stringify(base.draftBasePaths) !== JSON.stringify(current.draftBasePaths)
+      || JSON.stringify(base.captureScopes) !== JSON.stringify(current.captureScopes)
+      || base.createdAt !== current.createdAt) {
+      throw new Error(`Kernel returned invalid creation metadata for working branch ${branchId}`);
+    }
     return {
       branchId,
       workspaceId: current.workspaceId,
-      ...metadata,
+      ...(current.parentRef ? { baseRef: current.parentRef } : {}),
       baseRoot: base.root,
       root: current.root,
       headRevision: current.headRevision,
       writeRevision: current.writeRevision,
+      draftBasePaths,
+      captureScopes,
+      createdAt,
+      updatedAt,
     };
   }
 
   async readStateSlice(branchId: string, paths: readonly string[], options?: WorkingStateReadOptions): Promise<Record<string, RecoveryState> | null> {
     checkRead(options);
-    const read = await this.context.client.readBranch({
-      branchId,
-      ...(options?.revision === undefined ? {} : { revision: options.revision }),
-      paths: paths.map(normalizeViewPath),
-      includeEntries: true,
-    }, options?.signal);
+    const normalizedPaths = paths.map(normalizeViewPath);
+    if (options?.pin) this.assertPinForBranch(branchId, options.pin);
+    const read = options?.pin
+      ? await this.selectedPin(options.pin, normalizedPaths, options.signal)
+      : await this.context.client.readBranch({
+        branchId,
+        ...(options?.revision === undefined ? {} : { revision: options.revision }),
+        paths: normalizedPaths,
+        includeEntries: true,
+      }, options?.signal);
+    if (options?.pin) this.assertPinRead(options.pin, read);
+    else if (read.branchId !== branchId || read.workspaceId !== this.context.identity.workspaceId
+      || (options?.revision === undefined
+        ? read.view !== "current"
+        : read.view !== "revision" || read.revision !== options.revision)) {
+      throw new Error(`Working-state read returned inconsistent provenance for ${branchId}`);
+    }
     const result: Record<string, RecoveryState> = {};
     for (const entry of read.entries) {
       checkRead(options);
-      result[normalize(entry.path)] = fromKernelState(entry.state);
+      const path = normalize(entry.path);
+      const state = fromKernelState(entry.state);
+      result[path] = state;
+      if (state.kind === "regular-file") {
+        this.sourceByHash.set(state.objectHash, options?.pin
+          ? { pinId: options.pin.pinId, path }
+          : { branchId, path, ...(options?.revision === undefined ? {} : { revision: options.revision }) });
+      }
     }
     return result;
   }
@@ -299,7 +322,17 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }, options?.signal),
       this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }, options?.signal),
     ]);
-    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    if (base.branchId !== branchId || fixed.branchId !== branchId
+      || base.workspaceId !== this.context.identity.workspaceId || fixed.workspaceId !== base.workspaceId
+      || base.view !== "revision" || base.revision !== 0
+      || fixed.view !== "revision" || fixed.revision !== revision
+      || fixed.root !== document.root) {
+      throw new Error(`Working result ${branchId}@${revision} returned inconsistent provenance`);
+    }
+    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => {
+      const byPath = new Map(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+      return Object.fromEntries(changedPaths.map((file) => [file, byPath.get(file) ?? { kind: "missing" as const }]));
+    };
     const resultRecordId = `working-result:${branchId}@${revision}`;
     for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
     for (const [file, state] of Object.entries(states(base))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
@@ -349,21 +382,19 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> {
     const result = await this.getResult(bundle.branchId, bundle.resultRevision);
     if (!result?.root) throw new Error(`Working result ${bundle.branchId}@${bundle.resultRevision} is unavailable`);
-    await this.context.working.verificationPut({ operationId: `working-verification-child:${threadId}:${bundle.resultRevision}:${randomUUID()}`, recordId: `working-verification:child:${threadId}:${bundle.resultRevision}`, threadId, kind: "child", branchId: bundle.branchId, resultRevision: bundle.resultRevision, root: result.root, document: bundle as never, ownerIds: [], references: [] });
+    await this.context.working.verificationPut({ operationId: `working-verification-child:${threadId}:${bundle.resultRevision}:${randomUUID()}`, recordId: `working-verification:child:${threadId}:${bundle.resultRevision}`, threadId, kind: "child", branchId: bundle.branchId, resultRevision: bundle.resultRevision, root: result.root, document: bundle, ownerIds: [], references: [] });
   }
 
-  async putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void> {
-    const resultRecords = await this.context.working.resultList();
-    const result = resultRecords.map((entry) => asRecord(entry.record)).find((entry) => Number(entry.resultRevision) === bundle.mergedResultRevision);
-    if (!result || typeof result.branchId !== "string" || typeof result.root !== "string") throw new Error(`Working result ${bundle.mergedResultRevision} is unavailable`);
-    await this.context.working.verificationPut({ operationId: `working-verification-parent:${threadId}:${bundle.mergedResultRevision}:${randomUUID()}`, recordId: `working-verification:parent:${threadId}:${bundle.mergedResultRevision}`, threadId, kind: "parent", branchId: result.branchId, resultRevision: bundle.mergedResultRevision, root: result.root, document: bundle as never, ownerIds: [], references: [] });
+  async putParentVerification(threadId: string, branchId: string, bundle: ParentVerificationBundle): Promise<void> {
+    const result = await this.getResult(branchId, bundle.mergedResultRevision);
+    if (!result?.root) throw new Error(`Working result ${branchId}@${bundle.mergedResultRevision} is unavailable`);
+    await this.context.working.verificationPut({ operationId: `working-verification-parent:${threadId}:${bundle.mergedResultRevision}:${randomUUID()}`, recordId: `working-verification:parent:${threadId}:${bundle.mergedResultRevision}`, threadId, kind: "parent", branchId, resultRevision: bundle.mergedResultRevision, root: result.root, document: bundle, ownerIds: [], references: [] });
   }
 
-  async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> {
-    const resultRecords = await this.context.working.resultList();
-    const result = resultRecords.map((entry) => asRecord(entry.record)).find((entry) => Number(entry.resultRevision) === record.resultRevision);
-    if (!result || typeof result.branchId !== "string" || typeof result.root !== "string") throw new Error(`Working result ${record.resultRevision} is unavailable`);
-    await this.context.working.reviewPut({ operationId: `working-review:${threadId}:${record.resultRevision}:${randomUUID()}`, recordId: `working-review:${threadId}:${record.resultRevision}`, threadId, branchId: result.branchId, resultRevision: record.resultRevision, root: result.root, document: record as never, ownerIds: [], references: [] });
+  async putReviewRecord(threadId: string, branchId: string, record: ResultReviewRecord): Promise<void> {
+    const result = await this.getResult(branchId, record.resultRevision);
+    if (!result?.root) throw new Error(`Working result ${branchId}@${record.resultRevision} is unavailable`);
+    await this.context.working.reviewPut({ operationId: `working-review:${threadId}:${record.resultRevision}:${randomUUID()}`, recordId: `working-review:${threadId}:${record.resultRevision}`, threadId, branchId, resultRevision: record.resultRevision, root: result.root, document: record, ownerIds: [], references: [] });
   }
 
   private async selected(branchId: string, paths: readonly string[], revision: number | undefined, signal?: AbortSignal): Promise<KernelBranchReadResult | null> {
@@ -379,8 +410,11 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     }
   }
 
-  private async selectedPin(pinId: string, paths: readonly string[], signal?: AbortSignal): Promise<KernelPinTreeRead> {
-    return parsePinTreeRead(await this.context.client.readPin({ pinId, paths: [...paths] }, signal));
+  private async selectedPin(pin: WorkingStatePinnedRoot, paths: readonly string[], signal?: AbortSignal): Promise<KernelPinTreeRead> {
+    this.assertPinForBranch(pin.branchId, pin);
+    const read = parsePinTreeRead(await this.context.client.readPin({ pinId: pin.pinId, paths: [...paths] }, signal));
+    this.assertPinRead(pin, read);
+    return read;
   }
 
   private contentSource(branchId: string, path: string, revision: number | undefined, pin?: WorkingStateReadOptions["pin"]): WorkingStateContentSource {
@@ -398,18 +432,17 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     checkRead(options);
     const path = normalizeViewPath(rawPath);
     const revision = options?.revision;
+    if (options?.pin) this.assertPinForBranch(branchId, options.pin);
     const branch = options?.pin?.branch ?? await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);
     if (!branch) return null;
     const [current, base] = await Promise.all([
       options?.pin
-        ? this.selectedPin(options.pin.pinId, path ? [path] : [], options.signal)
+        ? this.selectedPin(options.pin, path ? [path] : [], options.signal)
         : path ? this.selected(branchId, [path], revision, options?.signal) : this.readRoot(branchId, revision, options?.signal),
       path ? this.selected(branchId, [path], 0, options?.signal) : this.readRoot(branchId, 0, options?.signal),
     ]);
     if (!current) return null;
-    if (options?.pin && current.root !== options.pin.root) {
-      throw new Error(`Working-state pin root mismatch for ${branchId}@${options.pin.revision}`);
-    }
+    if (options?.pin) this.assertPinRead(options.pin, current);
     const state = path ? fromKernelState(current.entries[0]?.state ?? { kind: "missing" }) : { kind: "directory" as const };
     const baseState = base
       ? path ? fromKernelState(base.entries[0]?.state ?? { kind: "missing" }) : { kind: "directory" as const }
@@ -464,7 +497,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   private async pagedPinEntries(
-    pinId: string,
+    pin: WorkingStatePinnedRoot,
     roots: readonly string[],
     options?: { signal?: AbortSignal; deadlineAt?: number },
   ): Promise<{ read: KernelPinTreeRead; entries: KernelEntry[] }> {
@@ -474,13 +507,15 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     do {
       checkRead(options);
       const page = parsePinTreeRead(await this.context.client.readPin({
-        pinId,
+        pinId: pin.pinId,
+        roots: [...roots],
         includeEntries: true,
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 256,
       }, options?.signal));
+      this.assertPinRead(pin, page);
       first ??= page;
-      if (page.root !== first.root) throw new Error(`Working-state pin ${pinId} changed identity`);
+      if (page.root !== first.root) throw new Error(`Working-state pin ${pin.pinId} changed identity`);
       for (const entry of page.entries) {
         const path = normalize(entry.path);
         if (roots.some((root) => !root || path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`))) {
@@ -489,23 +524,22 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       }
       cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
     } while (cursor !== undefined);
-    if (!first) throw new Error(`Working-state pin is unavailable: ${pinId}`);
+    if (!first) throw new Error(`Working-state pin is unavailable: ${pin.pinId}`);
     return { read: first, entries };
   }
 
   async listPaths(branchId: string, rawRoots: readonly string[], options?: WorkingStateReadOptions): Promise<WorkingStateTreeRead | null> {
     const roots = (rawRoots.length ? rawRoots : [""]).map(normalizeViewPath);
     const revision = options?.revision;
+    if (options?.pin) this.assertPinForBranch(branchId, options.pin);
     const branch = options?.pin?.branch ?? await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);
     if (!branch) return null;
     const [current, base] = await Promise.all([
-      options?.pin ? this.pagedPinEntries(options.pin.pinId, roots, options) : this.pagedEntries(branchId, revision, roots, options),
+      options?.pin ? this.pagedPinEntries(options.pin, roots, options) : this.pagedEntries(branchId, revision, roots, options),
       this.pagedEntries(branchId, 0, roots, options),
     ]);
     if (!current) return null;
-    if (options?.pin && current.read.root !== options.pin.root) {
-      throw new Error(`Working-state pin root mismatch for ${branchId}@${options.pin.revision}`);
-    }
+    if (options?.pin) this.assertPinRead(options.pin, current.read);
     const baseByPath = new Map((base?.entries ?? current.entries).map((entry) => [entry.path, fromKernelState(entry.state)]));
     return {
       branch,
@@ -545,17 +579,25 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   async getObject(hash: string): Promise<Buffer | null> {
     const ownerId = this.ownerByHash.get(hash);
     const source = this.sourceByHash.get(hash);
-    if (!ownerId && !source?.branchId) return null;
-    const slice = await this.context.client.getBlob(hash, ownerId ? { ownerId } : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) });
+    if (!ownerId && !source?.pinId && !source?.branchId && !source?.recordId) return null;
+    const slice = await this.context.client.getBlob(hash, ownerId
+      ? { ownerId }
+      : source?.pinId
+        ? { pinId: source.pinId, path: source.path! }
+      : source?.recordId
+        ? { recordId: source.recordId, slot: source.slot ?? "" }
+        : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) });
     return Buffer.from(slice.bytesBase64, "base64");
   }
 
   async getObjectSlice(hash: string, _byteLength: number, offset: number, length: number): Promise<Buffer | null> {
     const ownerId = this.ownerByHash.get(hash);
     const source = this.sourceByHash.get(hash);
-    if (!ownerId && !source?.branchId && !source?.recordId) return null;
+    if (!ownerId && !source?.pinId && !source?.branchId && !source?.recordId) return null;
     const slice = await this.context.client.getBlob(hash, ownerId
       ? { ownerId }
+      : source?.pinId
+        ? { pinId: source.pinId, path: source.path! }
       : source?.recordId
         ? { recordId: source.recordId, slot: source.slot ?? "" }
         : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) }, { offset, length });
@@ -580,13 +622,15 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       throw new Error(`Working branch changed while pinning ${branchId}; current write revision is ${String(raw.writeRevision)}`);
     }
     const pinId = String(raw.pinId ?? "");
+    const pinnedBranchId = String(raw.branchId ?? "");
     const workspaceId = String(raw.workspaceId ?? "");
     const revision = Number(raw.revision);
     const view = raw.view;
     const rawWriteRevision = Number(raw.writeRevision);
     const writeRevision = view === "current" ? rawWriteRevision : revision;
     const root = String(raw.root ?? "");
-    if (!pinId || !workspaceId || !Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(writeRevision)
+    if (!pinId || pinnedBranchId !== branchId || workspaceId !== this.context.identity.workspaceId
+      || !Number.isSafeInteger(revision) || revision < 0 || !Number.isSafeInteger(writeRevision)
       || writeRevision < 0 || (view !== "current" && view !== "revision") || !root) {
       throw new Error(`Kernel returned an invalid pin for ${branchId}`);
     }
@@ -599,6 +643,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       pinId,
       branchId,
       workspaceId,
+      view,
       revision,
       writeRevision,
       root,
@@ -617,13 +662,145 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
     const value = await this.context.client.putBlob(bytes, `blob:${randomUUID()}`);
+    const existingOwner = this.ownerByHash.get(value.hash);
+    if (existingOwner) {
+      await this.context.client.releaseBlob(value.ownerId);
+      return { hash: value.hash, byteLength: value.byteLength };
+    }
     this.ownerByHash.set(value.hash, value.ownerId);
     return { hash: value.hash, byteLength: value.byteLength };
+  }
+
+  private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; ownerId?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
+    const source = state.kind === "regular-file" ? this.sourceByHash.get(state.objectHash) : undefined;
+    return {
+      path: normalize(file),
+      state: toKernelState(state),
+      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
+        ? { ownerId: this.ownerByHash.get(state.objectHash)! }
+        : state.kind === "regular-file" && source?.recordId && source.slot
+          ? { sourceRecordId: source.recordId, sourceSlot: source.slot }
+          : state.kind === "regular-file" && source?.path
+            ? { sourcePath: source.path }
+            : {}),
+    };
+  }
+
+  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = []): Promise<WorkingBranchRoot> {
+    if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
+    const kernelBaseRef = baseRef && (/^sha256-[a-f0-9]+$/i.test(baseRef) || baseRef.startsWith("pin:") || /^.+@\d+$/.test(baseRef)) ? baseRef : undefined;
+    const normalizedDraftPaths = [...new Set(draftBasePaths.map(normalize))].sort();
+    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalize))].sort();
+    const entries = Object.entries(baseState).map(([file, state]) => this.kernelEntry(file, state));
+    const pendingOwners = new Map(Object.values(baseState).flatMap((state) => {
+      if (state.kind !== "regular-file") return [];
+      const ownerId = this.ownerByHash.get(state.objectHash);
+      return ownerId ? [[state.objectHash, ownerId] as const] : [];
+    }));
+    const forgetPendingOwners = (): void => {
+      for (const [hash, ownerId] of pendingOwners) if (this.ownerByHash.get(hash) === ownerId) this.ownerByHash.delete(hash);
+    };
+    const releasePendingOwners = async (bestEffort = false): Promise<void> => {
+      const releases = [...new Set(pendingOwners.values())].map((ownerId) => this.context.client.releaseBlob(ownerId));
+      if (bestEffort) await Promise.allSettled(releases);
+      else await Promise.all(releases);
+      forgetPendingOwners();
+    };
+    let created: Record<string, unknown>;
+    try {
+      created = await this.context.client.createBranch({
+        operationId: `branch-create:${branchId}`,
+        branchId,
+        workspaceId,
+        entries,
+        ...(kernelBaseRef ? { baseRef: kernelBaseRef } : {}),
+        ...(baseRef ? { parentRef: baseRef } : {}),
+        draftBasePaths: normalizedDraftPaths,
+        captureScopes: normalizedCaptureScopes,
+      });
+    } catch (error) {
+      await releasePendingOwners(true);
+      throw error;
+    }
+    if (created.created === true) forgetPendingOwners();
+    else await releasePendingOwners();
+    try {
+      for (const [file, state] of Object.entries(baseState)) if (state.kind === "regular-file") {
+        this.sourceByHash.set(state.objectHash, { branchId, path: normalize(file), revision: 0 });
+      }
+      const branch = await this.getBranchRoot(branchId);
+      if (!branch) throw new Error(`Working branch not found after creation: ${branchId}`);
+      if (branch.baseRef !== baseRef
+        || JSON.stringify(branch.draftBasePaths) !== JSON.stringify(normalizedDraftPaths)
+        || JSON.stringify(branch.captureScopes) !== JSON.stringify(normalizedCaptureScopes)
+        || String(created.root ?? "") !== branch.root) {
+        throw new Error(`Working branch has different creation identity: ${branchId}`);
+      }
+      return branch;
+    } catch (error) {
+      if (created.created === true) {
+        await this.context.client.deleteBranch({ operationId: `branch-delete-failed-create:${branchId}:${randomUUID()}`, branchId }).catch(() => undefined);
+      }
+      throw error;
+    }
+  }
+
+  async createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes: string[] = []): Promise<WorkingBranchRoot> {
+    if (pin.workspaceId !== workspaceId) throw new Error("Parent working-state pin belongs to another workspace");
+    this.assertPinForBranch(pin.branchId, pin);
+    const draft = draftBaselineId ? await this.getDraftBaseline(draftBaselineId) : null;
+    if (draftBaselineId && !draft) throw new Error(`Thread draft baseline not found: ${draftBaselineId}`);
+    const directDraftPaths = draft ? Object.keys(draft.pathStates).map(normalize) : [];
+    const parentEntries = directDraftPaths.length > 0 ? await this.listPaths(pin.branchId, directDraftPaths, { pin }) : null;
+    const draftClosure = new Set(directDraftPaths);
+    for (const file of directDraftPaths) {
+      let parent = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
+      while (parent) { draftClosure.add(parent); parent = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : ""; }
+    }
+    for (const entry of parentEntries?.entries ?? []) if (directDraftPaths.some((file) => entry.path.startsWith(`${file}/`))) draftClosure.add(entry.path);
+    const normalizedDraftPaths = [...draftClosure].sort();
+    const normalizedCaptureScopes = [...new Set(captureScopes.map(normalize))].sort();
+    const created = await this.context.client.createBranch({
+      operationId: `branch-create:${branchId}`,
+      branchId,
+      workspaceId,
+      entries: [],
+      baseRef: pin.root,
+      parentRef,
+      draftBasePaths: normalizedDraftPaths,
+      captureScopes: normalizedCaptureScopes,
+    });
+    try {
+      if (created.created === true && draft && directDraftPaths.length > 0) {
+        const committed = await this.commitVirtualWrites(branchId, Number(created.writeRevision ?? 0), draft.pathStates);
+        if (committed.status !== "committed") throw new Error(`Working branch changed while restoring draft baseline: ${branchId}`);
+      }
+      const branch = await this.getBranchRoot(branchId);
+      if (!branch) throw new Error(`Working branch not found after creation: ${branchId}`);
+      if (branch.baseRoot !== pin.root || branch.baseRef !== parentRef
+        || JSON.stringify(branch.draftBasePaths) !== JSON.stringify(normalizedDraftPaths)
+        || JSON.stringify(branch.captureScopes) !== JSON.stringify(normalizedCaptureScopes)) {
+        throw new Error(`Working branch has different creation identity: ${branchId}`);
+      }
+      if (draft) {
+        const current = await this.readStateSlice(branchId, directDraftPaths);
+        if (!current || directDraftPaths.some((file) => !sameState(current[file] ?? { kind: "missing" }, draft.pathStates[file] ?? { kind: "missing" }))) {
+          throw new Error(`Existing working branch does not contain its draft baseline: ${branchId}`);
+        }
+      }
+      return branch;
+    } catch (error) {
+      if (created.created === true) {
+        await this.context.client.deleteBranch({ operationId: `branch-delete-failed-create:${branchId}:${randomUUID()}`, branchId }).catch(() => undefined);
+      }
+      throw error;
+    }
   }
 
   async createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline> {
     if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
     const id = `draft-${randomUUID()}`;
+    const branchId = `working-draft:${id}`;
     const pathStates: Record<string, RecoveryState> = {};
     const provenance: Record<string, DraftBaselinePathProvenance> = {};
     const ownerIds: string[] = [];
@@ -638,19 +815,84 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       references.push({ slot: `draft:${file}`, objectHash: object.hash });
     }
     const baseline: DraftBaseline = { id, workspaceId, createdAt: nowIso(), pathStates, provenance };
-    const document: KernelWorkingDraftDocument = {
-      id,
-      workspaceId,
-      createdAt: baseline.createdAt,
-      root: transientStateIdentity(pathStates),
-      provenance: Object.entries(provenance).map(([file, value]) => ({ path: file, ...value })),
-    };
-    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document, createdAt: baseline.createdAt, ownerIds, references });
-    for (const state of Object.values(pathStates)) if (state.kind === "regular-file") {
-      this.ownerByHash.delete(state.objectHash);
-      this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` });
+    let branchCreated = false;
+    try {
+      const created = await this.context.client.createBranch({
+        operationId: `draft-branch-create:${id}`,
+        branchId,
+        workspaceId,
+        entries: Object.entries(pathStates).map(([file, state]) => this.kernelEntry(file, state)),
+        draftBasePaths: [],
+        captureScopes: [],
+      });
+      branchCreated = created.created === true;
+      for (const state of Object.values(pathStates)) if (state.kind === "regular-file") this.ownerByHash.delete(state.objectHash);
+      const published = await this.context.client.publishBranch({
+        operationId: `draft-branch-publish:${id}`,
+        branchId,
+        expectedWriteRevision: Number(created.writeRevision ?? 0),
+        expectedRoot: String(created.root ?? ""),
+      });
+      if (published.status === "conflict") throw new Error(`Draft branch changed while publishing: ${id}`);
+      const revision = Number(published.revision);
+      const root = String(published.root ?? "");
+      if (!Number.isSafeInteger(revision) || revision < 1 || !root) throw new Error(`Kernel returned an invalid draft identity: ${id}`);
+      const document: KernelWorkingDraftDocument = {
+        id,
+        workspaceId,
+        branchId,
+        revision,
+        createdAt: baseline.createdAt,
+        root,
+        provenance: Object.entries(provenance).map(([file, value]) => ({ path: file, ...value })),
+      };
+      await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, branchId, revision, document, root, createdAt: baseline.createdAt, ownerIds: [], references });
+      for (const [file, state] of Object.entries(pathStates)) if (state.kind === "regular-file") {
+        this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${file}`, branchId, path: file, revision });
+      }
+    } catch (error) {
+      if (branchCreated) await this.context.client.deleteBranch({ operationId: `draft-branch-delete-failed:${id}`, branchId }).catch(() => undefined);
+      for (const ownerId of ownerIds) await this.context.client.releaseBlob(ownerId).catch(() => undefined);
+      throw error;
     }
     return structuredClone(baseline);
+  }
+
+  async getDraftBaseline(id: string): Promise<DraftBaseline | null> {
+    const raw = await this.context.working.draftGet(id);
+    if (!raw) return null;
+    const document = asRecord(raw.record);
+    if (document.id !== id || document.workspaceId !== this.context.identity.workspaceId || typeof document.branchId !== "string"
+      || !Number.isSafeInteger(document.revision) || typeof document.root !== "string" || !Array.isArray(document.provenance)) return null;
+    const provenance: Record<string, DraftBaselinePathProvenance> = {};
+    for (const item of document.provenance) {
+      const value = asRecord(item);
+      if (typeof value.path !== "string" || typeof value.encoding !== "string" || typeof value.bom !== "boolean"
+        || !Number.isSafeInteger(value.localEditRevision) || typeof value.revision !== "string"
+        || (value.baseRevision !== null && typeof value.baseRevision !== "string")) throw new Error(`Draft baseline provenance is malformed: ${id}`);
+      provenance[normalize(value.path)] = {
+        baseRevision: value.baseRevision as string | null,
+        encoding: value.encoding,
+        bom: value.bom,
+        localEditRevision: Number(value.localEditRevision),
+        revision: value.revision,
+      };
+    }
+    const files = Object.keys(provenance).sort();
+    const fixed = await this.context.client.readBranch({ branchId: document.branchId, revision: Number(document.revision), paths: files, includeEntries: true });
+    if (fixed.branchId !== document.branchId || fixed.workspaceId !== this.context.identity.workspaceId
+      || fixed.view !== "revision" || fixed.revision !== Number(document.revision) || fixed.root !== document.root) {
+      throw new Error(`Draft baseline fixed revision has inconsistent provenance: ${id}`);
+    }
+    const byPath = new Map(fixed.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    const pathStates: Record<string, RecoveryState> = {};
+    for (const file of files) {
+      const state = byPath.get(file);
+      if (!state || state.kind !== "regular-file") throw new Error(`Draft baseline content is unavailable for ${file}`);
+      pathStates[file] = state;
+      this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${file}`, branchId: document.branchId, path: file, revision: Number(document.revision) });
+    }
+    return { id, workspaceId: this.context.identity.workspaceId, createdAt: typeof document.createdAt === "string" ? document.createdAt : nowIso(), pathStates, provenance };
   }
 
   async deleteDraftBaseline(id: string): Promise<void> {
@@ -659,6 +901,15 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
 
   async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
     const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalize(file), state]));
+    const releaseInputOwners = async (): Promise<void> => {
+      const owned = new Map(Object.values(normalized).flatMap((state) => {
+        if (state.kind !== "regular-file") return [];
+        const ownerId = this.ownerByHash.get(state.objectHash);
+        return ownerId ? [[state.objectHash, ownerId] as const] : [];
+      }));
+      await Promise.all([...new Set(owned.values())].map((ownerId) => this.context.client.releaseBlob(ownerId)));
+      for (const [hash, ownerId] of owned) if (this.ownerByHash.get(hash) === ownerId) this.ownerByHash.delete(hash);
+    };
     const ancestorPaths = new Set<string>();
     for (const file of Object.keys(normalized)) {
       let parent = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
@@ -673,7 +924,10 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       this.selected(branchId, selectedPaths, 0),
     ]);
     if (!currentRead || !baseRead) throw new Error(`Working branch not found: ${branchId}`);
-    if (currentRead.writeRevision !== expectedWriteRevision) return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
+    if (currentRead.writeRevision !== expectedWriteRevision) {
+      await releaseInputOwners();
+      return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
+    }
     const current = Object.fromEntries(currentRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     const base = Object.fromEntries(baseRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     assertVirtualWriteTree(current, normalized);
@@ -714,7 +968,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const result = await this.context.client.writeBranch({ operationId: `branch-write:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`, branchId, expectedWriteRevision, changes });
     if (result.status === "committed") {
       for (const state of Object.values(committedWrites)) if (state.kind === "regular-file") this.ownerByHash.delete(state.objectHash);
-    }
+    } else await releaseInputOwners();
     return { status: result.status, writeRevision: result.writeRevision, root: result.root };
   }
 
@@ -750,7 +1004,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     });
   }
 
-  private async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
+  async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
     const files = relativePaths?.map(normalize) ?? await this.scanDirectory(directory);
     const result: Record<string, RecoveryState> = {};
     let done = 0;
@@ -781,16 +1035,60 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return output.sort();
   }
 
+  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
+    const output = new Set<string>();
+    for (const rawScope of scopes) {
+      const scope = normalize(rawScope);
+      const absolute = path.join(directory, ...scope.split("/"));
+      let stat: fs.Stats;
+      try { stat = await fs.promises.lstat(absolute); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+        throw error;
+      }
+      output.add(scope);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) for (const child of await this.scanDirectory(absolute, directory)) output.add(child);
+    }
+    return [...output].sort();
+  }
+
+  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> { return this.scanDirectory(directory); }
+
   private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[], fixedPin?: WorkingStatePin): Promise<WorkingResult> {
     const branch = await this.getBranchRoot(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const candidates = (changedPaths?.map(normalize) ?? Object.keys(captured).map(normalize)).sort();
+    const currentDiff = changedPaths
+      ? null
+      : asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: fixedPin?.root ?? branch.root }));
+    const candidates = [...new Set([
+      ...(changedPaths?.map(normalize) ?? Object.keys(captured).map(normalize)),
+      ...(currentDiff
+        ? [
+            ...(Array.isArray(currentDiff.added) ? currentDiff.added : []),
+            ...(Array.isArray(currentDiff.removed) ? currentDiff.removed : []),
+            ...(Array.isArray(currentDiff.changed) ? currentDiff.changed : []),
+          ].filter((value): value is string => typeof value === "string").map(normalize)
+        : []),
+    ])].sort();
     const base = await this.context.client.readBranch({ branchId, revision: 0, paths: candidates, includeEntries: true });
     const current = fixedPin ? undefined : await this.context.client.readBranch({ branchId, paths: candidates, includeEntries: true });
     const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     const baseStates = states(base);
     const currentStates = current ? states(current) : {};
     const writes = fixedPin ? {} : Object.fromEntries(candidates.filter((file) => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" })).map((file) => [file, captured[file] ?? { kind: "missing" as const}]));
+    const requiredOwnerHashes = new Set(Object.entries(writes).flatMap(([file, state]) => (
+      state.kind === "regular-file" && !sameState(state, baseStates[file] ?? { kind: "missing" }) ? [state.objectHash] : []
+    )));
+    for (const [file, state] of Object.entries(captured)) {
+      if (state.kind !== "regular-file" || requiredOwnerHashes.has(state.objectHash)) continue;
+      const ownerId = this.ownerByHash.get(state.objectHash);
+      if (ownerId) {
+        await this.context.client.releaseBlob(ownerId);
+        this.ownerByHash.delete(state.objectHash);
+      }
+      if (sameState(state, baseStates[file] ?? { kind: "missing" })) {
+        this.sourceByHash.set(state.objectHash, { branchId, path: file, revision: 0 });
+      }
+    }
     let fixedRoot = fixedPin?.root ?? current!.root;
     let fixedWriteRevision = fixedPin?.writeRevision ?? current!.writeRevision;
     if (Object.keys(writes).length > 0) {
@@ -811,7 +1109,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...(Array.isArray(rootDiff.removed) ? rootDiff.removed : []),
         ...(Array.isArray(rootDiff.changed) ? rootDiff.changed : []),
       ].filter((value): value is string => typeof value === "string").map(normalize).sort();
-      const fixed = await this.selectedPin(pin.pinId, changed);
+      const fixed = await this.selectedPin(pin, changed);
       const pathStates = Object.fromEntries(fixed.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
       const resultBase = Object.fromEntries(changed.map((file) => [file, baseStates[file] ?? { kind: "missing" as const }]));
       const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: pin.writeRevision, expectedRoot: pin.root });
@@ -843,7 +1141,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...(Array.isArray(diff.removed) ? diff.removed : []),
         ...(Array.isArray(diff.changed) ? diff.changed : []),
       ].filter((value): value is string => typeof value === "string").map(normalize);
-      const read = await this.selectedPin(pin.pinId, changedPaths);
+      const read = await this.selectedPin(pin, changedPaths);
       return await this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])), changedPaths, pin);
     } finally {
       await pin.release();
@@ -867,509 +1165,106 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     hash.update(branch.root);
     return `sha256-${hash.digest("hex")}`;
   }
-}
 
-/**
- * Compatibility adapter for consumers that have not yet moved to the async root API.
- * It is intentionally callback-scoped and is not a storage authority. Production paths that have
- * migrated use `withBranchStore`; this adapter remains only for the bounded migration surface.
- */
-class KernelWorkingStateCompatibilityAdapter {
-  private readonly branches = new Map<string, BranchProjection>();
-  private readonly results = new Map<string, WorkingResult>();
-  private readonly drafts = new Map<string, DraftBaseline>();
-  private readonly verifications = new Map<string, ResultVerificationBundle[]>();
-  private readonly parentVerifications = new Map<string, ParentVerificationBundle[]>();
-  private readonly reviews = new Map<string, ResultReviewRecord[]>();
-  private readonly ownerByHash = new Map<string, string>();
-  private readonly sourceByHash = new Map<string, { branchId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
-  private readonly fileStore: RecoveryFileStore;
-
-  private constructor(private readonly context: KernelStorageContext) {
-    this.fileStore = context.fileStore;
-  }
-
-  static async open(context: KernelStorageContext): Promise<KernelWorkingStateCompatibilityAdapter> {
-    const store = new KernelWorkingStateCompatibilityAdapter(context);
-    const snapshot = await context.client.snapshot(context.identity.workspaceId);
-    const branches = Array.isArray(asRecord(snapshot).branches) ? asRecord(snapshot).branches as unknown[] : [];
-    for (const item of branches) await store.loadBranch(asRecord(item));
-    const typedRecord = (record: Record<string, unknown>): KernelRecordResult => ({
-      recordId: String(record.recordId ?? ""), workspaceId: String(record.workspaceId ?? context.identity.workspaceId),
-      recordType: "working.record", state: "recorded", recordRevision: Number(record.recordRevision ?? 1),
-      payloadJson: JSON.stringify(record.record ?? {}), references: Array.isArray(record.references) ? record.references as KernelRecordResult["references"] : [],
-      createdAt: 0, updatedAt: 0,
-    });
-    for (const record of await context.working.resultList()) await store.loadResultRecord(typedRecord(record));
-    for (const record of await context.working.draftList()) store.loadDraftRecord(typedRecord(record));
-    for (const record of await context.working.verificationList(context.actor?.threadId ?? "", "child")) store.loadVerificationRecord(typedRecord(record), "child");
-    for (const record of await context.working.verificationList(context.actor?.threadId ?? "", "parent")) store.loadVerificationRecord(typedRecord(record), "parent");
-    for (const record of await context.working.reviewList(context.actor?.threadId ?? "")) store.loadVerificationRecord(typedRecord(record), "review");
-    for (const record of await context.records.list({})) {
-      for (const reference of record.references) store.sourceByHash.set(reference.objectHash, { recordId: record.recordId, slot: reference.slot });
+  async captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string> {
+    const hash = createHash("sha256").update(seed).update("\0");
+    for (const file of [...new Set(changedPaths.map(normalize))].sort()) {
+      const captured = await this.context.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
+      hash.update(file).update("\0").update(JSON.stringify(captured.state)).update("\0");
     }
-    return store;
+    return `sha256-${hash.digest("hex")}`;
   }
 
-  private async readAll(branchId: string, revision?: number): Promise<Record<string, RecoveryState>> {
-    const states: Record<string, RecoveryState> = {};
+  async listResults(branchId?: string): Promise<WorkingResult[]> {
+    const rows = await this.context.working.resultList(branchId);
+    const results: WorkingResult[] = [];
+    for (const row of rows) {
+      const document = asRecord(row.record);
+      if (typeof document.branchId !== "string" || !Number.isSafeInteger(document.resultRevision)) continue;
+      const result = await this.getResult(document.branchId, Number(document.resultRevision));
+      if (result) results.push(result);
+    }
+    return results.sort((left, right) => left.resultRevision - right.resultRevision);
+  }
+
+  async deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]> {
+    const removed: number[] = [];
+    for (const revision of [...new Set(revisions)]) {
+      const recordId = `working-result:${branchId}@${revision}`;
+      if (!await this.context.working.resultGet(recordId)) continue;
+      await this.context.working.resultRelease(`result-release:${branchId}@${revision}`, recordId);
+      removed.push(revision);
+    }
+    return removed;
+  }
+
+  async deleteBranch(branchId: string): Promise<void> {
+    if (!await this.getBranchRoot(branchId)) return;
+    await this.context.client.deleteBranch({ operationId: `branch-delete:${branchId}`, branchId });
+  }
+
+  async collectUnreachableObjects(): Promise<{ byteLengthReclaimed: number; objectsDeleted: number }> {
+    if (!this.context.collectUnreachableObjects) throw new Error("Object cleanup is unavailable");
+    return this.context.collectUnreachableObjects();
+  }
+
+  async listDurableOperations(kind?: string): Promise<Record<string, unknown>[]> {
+    if (!this.context.durableRecoveryStore) throw new Error("Durable recovery operation storage is unavailable");
+    return this.context.durableRecoveryStore.listOperations(this.context.identity.workspaceId, kind);
+  }
+
+  async listBranchObjectReferences(branchId: string): Promise<Array<{ hash: string; byteLength: number | null }>> {
+    const objects: Array<{ hash: string; byteLength: number | null }> = [];
     let cursor: number | undefined;
     do {
-      const page = await this.context.client.readBranch({ branchId, ...(revision === undefined ? {} : { revision }), includeEntries: true, ...(cursor === undefined ? {} : { cursor }), pageSize: 256 });
+      const page = asRecord(await this.context.client.branchObjects({ branchId, includeRevisions: true, ...(cursor === undefined ? {} : { cursor }), pageSize: 256 }));
+      if (page.branchId !== branchId) throw new Error(`Kernel returned object references for another branch: ${branchId}`);
+      for (const raw of Array.isArray(page.objects) ? page.objects : []) {
+        const object = asRecord(raw);
+        if (typeof object.hash !== "string" || !Number.isSafeInteger(object.byteLength) || Number(object.byteLength) < 0) {
+          throw new Error(`Kernel returned an invalid object reference for ${branchId}`);
+        }
+        objects.push({ hash: object.hash, byteLength: Number(object.byteLength) });
+      }
+      cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : Number(page.nextCursor);
+    } while (cursor !== undefined);
+    return objects;
+  }
+
+  async listDraftObjectReferences(id: string): Promise<Array<{ hash: string; byteLength: number | null }>> {
+    const raw = await this.context.working.draftGet(id);
+    if (!raw) return [];
+    const document = asRecord(raw.record);
+    if (typeof document.branchId !== "string") throw new Error(`Draft baseline branch identity is malformed: ${id}`);
+    return this.listBranchObjectReferences(document.branchId);
+  }
+
+  async measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement> {
+    this.assertPinForBranch(pin.branchId, pin);
+    let logical = 0;
+    let unknown = false;
+    let cursor: number | undefined;
+    do {
+      const page = parsePinTreeRead(await this.context.client.readPin({ pinId: pin.pinId, roots: [""], includeEntries: true, ...(cursor === undefined ? {} : { cursor }), pageSize: 256 }));
+      this.assertPinRead(pin, page);
       for (const entry of page.entries) {
         const state = fromKernelState(entry.state);
-        states[normalize(entry.path)] = state;
-        if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { branchId, path: normalize(entry.path), ...(revision === undefined ? {} : { revision }) });
+        if (state.kind === "regular-file") logical += state.byteLength;
+        else if (state.kind === "symlink") logical += Buffer.byteLength(state.symlinkTarget, "utf8");
+        else if (state.kind === "unsupported") unknown = true;
       }
       cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
     } while (cursor !== undefined);
-    return states;
+    return { logicalBytes: unknown ? null : logical, allocatedBytes: null, unknown };
   }
 
-  private async loadBranch(row: Record<string, unknown>): Promise<void> {
-    const branchId = String(row.branchId ?? "");
-    const baseRoot = String(row.baseRoot ?? "");
-    const root = String(row.headRoot ?? "");
-    if (!branchId || !baseRoot || !root) return;
-    const [baseState, effective] = await Promise.all([
-      this.readAll(branchId, 0),
-      this.readAll(branchId),
-    ]);
-    const deltas: Record<string, RecoveryState> = {};
-    for (const [file, state] of Object.entries(effective)) {
-      if (!sameState(baseState[file] ?? { kind: "missing" }, state)) deltas[file] = state;
-    }
-    const meta = await this.context.records.get(`working-branch:${branchId}`);
-    const payload = meta ? asRecord(parsePayload(meta)) : {};
-    const createdAt = typeof payload.createdAt === "string" ? payload.createdAt : nowIso();
-    this.branches.set(branchId, {
-      branchId,
-      workspaceId: this.context.identity.workspaceId,
-      ...(typeof payload.baseRef === "string" ? { baseRef: payload.baseRef } : {}),
-      baseState,
-      deltas,
-      headRevision: Number(row.headRevision ?? 0),
-      writeRevision: Number(row.writeRevision ?? 0),
-      root,
-      baseRoot,
-      createdAt,
-      updatedAt: typeof payload.updatedAt === "string" ? payload.updatedAt : createdAt,
-      draftBasePaths: Array.isArray(payload.draftBasePaths) ? payload.draftBasePaths.filter((item): item is string => typeof item === "string") : [],
-      captureScopes: Array.isArray(payload.captureScopes) ? payload.captureScopes.filter((item): item is string => typeof item === "string") : [],
-    });
-  }
-
-  private async loadResultRecord(record: KernelRecordResult): Promise<void> {
-    const payload = asRecord(parsePayload(record));
-    const branchId = typeof payload.branchId === "string" ? payload.branchId : record.branchId;
-    const revision = Number(payload.resultRevision ?? record.resultRevision ?? 0);
-    if (!branchId || !Number.isSafeInteger(revision) || revision <= 0) return;
-    let result = payload as unknown as WorkingResult;
-    if (result.branchId !== branchId || result.resultRevision !== revision || typeof result.root !== "string" || !result.root) return;
-    if (!result.pathStates || !result.baseStates) {
-      const changedPaths = Array.isArray(result.changedPaths) ? result.changedPaths : [];
-      const [base, fixed] = await Promise.all([
-        this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }),
-        this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }),
-      ]);
-      const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-      result = { ...result, baseStates: states(base), pathStates: states(fixed) };
-    }
-    this.results.set(`${branchId}@${revision}`, clone(result));
-    for (const [file, state] of Object.entries(result.pathStates ?? {})) if (state.kind === "regular-file") {
-      const reference = record.references.find((item) => item.slot === `result:${file}`);
-      if (reference) this.sourceByHash.set(state.objectHash, { recordId: record.recordId, slot: reference.slot });
-    }
-    for (const [file, state] of Object.entries(result.baseStates ?? {})) if (state.kind === "regular-file") {
-      const reference = record.references.find((item) => item.slot === `base:${file}`);
-      if (reference) this.sourceByHash.set(state.objectHash, { recordId: record.recordId, slot: reference.slot });
-    }
-  }
-
-  private loadDraftRecord(record: KernelRecordResult): void {
-    const payload = parsePayload<DraftBaseline>(record);
-    if (payload?.id) {
-      this.drafts.set(payload.id, clone(payload));
-      for (const [file, state] of Object.entries(payload.pathStates)) if (state.kind === "regular-file") {
-        const reference = record.references.find((item) => item.slot === `draft:${file}`);
-        this.sourceByHash.set(state.objectHash, reference ? { recordId: record.recordId, slot: reference.slot } : {});
-      }
-    }
-  }
-
-  private loadVerificationRecord(record: KernelRecordResult, kind: "child" | "parent" | "review"): void {
-    const payload = parsePayload<Record<string, unknown>>(record);
-    const threadId = typeof record.threadId === "string" ? record.threadId : typeof payload.threadId === "string" ? payload.threadId : "";
-    if (!threadId) return;
-    if (kind === "child") this.verifications.set(threadId, [...(this.verifications.get(threadId) ?? []), payload as unknown as ResultVerificationBundle]);
-    else if (kind === "parent") this.parentVerifications.set(threadId, [...(this.parentVerifications.get(threadId) ?? []), payload as unknown as ParentVerificationBundle]);
-    else this.reviews.set(threadId, [...(this.reviews.get(threadId) ?? []), payload as unknown as ResultReviewRecord]);
-  }
-
-  private branchEntries(branch: BranchProjection): Array<{ path: string; state: KernelBranchState; ownerId?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string }> {
-    return Object.entries(branch.deltas).map(([file, state]) => {
-      const entry = { path: file, state: toKernelState(state) } as { path: string; state: KernelBranchState; ownerId?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string };
-      if (state.kind === "regular-file") {
-        const ownerId = this.ownerByHash.get(state.objectHash);
-        if (ownerId) entry.ownerId = ownerId;
-        else {
-          const source = this.sourceByHash.get(state.objectHash);
-          if (source?.path) entry.sourcePath = source.path;
-          else if (source?.recordId && source.slot) {
-            entry.sourceRecordId = source.recordId;
-            entry.sourceSlot = source.slot;
-          }
-        }
-      }
-      return entry;
-    });
-  }
-
-  private async putMetadata(branch: BranchProjection): Promise<void> {
-    const recordId = `working-branch:${branch.branchId}`;
-    const existing = await this.context.records.get(recordId);
-    await this.context.records.put({
-      operationId: `branch-meta:${branch.branchId}:${existing ? existing.recordRevision + 1 : 1}:${randomUUID()}`,
-      recordId,
-      recordType: "working.branch",
-      state: "active",
-      branchId: branch.branchId,
-      ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
-      payloadJson: JSON.stringify({ baseRef: branch.baseRef, draftBasePaths: branch.draftBasePaths, captureScopes: branch.captureScopes, createdAt: branch.createdAt, updatedAt: branch.updatedAt }),
-    });
-  }
-
-  getBranch(branchId: string): WorkingBranch | null {
-    const branch = this.branches.get(branchId);
-    if (!branch) return null;
-    return clone({ branchId: branch.branchId, workspaceId: branch.workspaceId, ...(branch.baseRef ? { baseRef: branch.baseRef } : {}), baseState: branch.baseState, draftBasePaths: branch.draftBasePaths, captureScopes: branch.captureScopes, deltas: branch.deltas, headRevision: branch.headRevision, writeRevision: branch.writeRevision, createdAt: branch.createdAt, updatedAt: branch.updatedAt });
-  }
-
-  getDraftBaselineRecord(id: string): DraftBaseline | null { const value = this.drafts.get(id); return value ? clone(value) : null; }
-  async getDraftBaseline(id: string): Promise<DraftBaseline | null> { return this.getDraftBaselineRecord(id); }
-  listResults(branchId?: string): WorkingResult[] { return [...this.results.values()].filter((result) => branchId === undefined || result.branchId === branchId).map(clone); }
-  getResult(branchId: string, revision: number): WorkingResult | null { const value = this.results.get(`${branchId}@${revision}`); return value ? clone(value) : null; }
-  resultState(branchId: string, revision: number): Record<string, RecoveryState> | null { const branch = this.branches.get(branchId); const result = this.results.get(`${branchId}@${revision}`); return branch && result ? { ...clone(branch.baseState), ...clone(result.pathStates) } : null; }
-  effectiveState(branchId: string, revision?: number): Record<string, RecoveryState> | null {
-    const branch = this.branches.get(branchId);
-    if (!branch) return null;
-    if (revision !== undefined && revision > 0) return this.resultState(branchId, revision);
-    return { ...clone(branch.baseState), ...clone(branch.deltas) };
-  }
-  effectiveStateSlice(branchId: string, prefixes: readonly string[], revision?: number, options?: { signal?: AbortSignal; deadlineAt?: number }): Record<string, RecoveryState> | null {
-    const state = this.effectiveState(branchId, revision);
-    if (!state) return null;
-    const roots = prefixes.length ? prefixes.map(normalize) : [""];
-    const result: Record<string, RecoveryState> = {};
-    for (const [file, value] of Object.entries(state)) {
-      options?.signal?.throwIfAborted();
-      if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) throw new DOMException("Explore query deadline exceeded", "AbortError");
-      if (roots.some((root) => !root || file === root || file.startsWith(`${root}/`) || root.startsWith(`${file}/`))) result[file] = clone(value);
-    }
-    return result;
-  }
-  branchWriteRevision(branchId: string): number | null { return this.branches.get(branchId)?.writeRevision ?? null; }
-  pathOrigin(branchId: string, file: string): "base" | "delta" | "draft-base" | null {
-    const branch = this.branches.get(branchId); if (!branch) return null; const normalized = normalize(file);
-    if (Object.hasOwn(branch.deltas, normalized)) return "delta";
-    if (branch.draftBasePaths.includes(normalized)) return "draft-base";
-    if (Object.hasOwn(branch.baseState, normalized)) return "base";
-    return null;
-  }
-  resultTreeIdentity(branchId: string, revision: number): string | null { return this.results.get(`${branchId}@${revision}`)?.root ?? null; }
-
-  async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
-    const operationId = `blob:${randomUUID()}`;
-    const value = await this.context.client.putBlob(bytes, operationId);
-    this.ownerByHash.set(value.hash, value.ownerId);
-    this.sourceByHash.set(value.hash, { ownerId: value.ownerId });
-    return { hash: value.hash, byteLength: value.byteLength };
-  }
-  ownerIdForObject(hash: string): string | undefined { return this.ownerByHash.get(hash); }
-
-  private async objectSource(hash: string): Promise<{ branchId: string; path: string; revision?: number } | { recordId: string; slot: string } | { ownerId: string }> {
-    const source = this.sourceByHash.get(hash);
-    if (source?.ownerId) return { ownerId: source.ownerId };
-    if (source?.recordId && source.slot) return { recordId: source.recordId, slot: source.slot };
-    if (source?.branchId && source.path) return { branchId: source.branchId, path: source.path, ...(source.revision === undefined ? {} : { revision: source.revision }) };
-    const owner = this.ownerByHash.get(hash);
-    if (owner) return { ownerId: owner };
-    const records = await this.context.records.list({});
-    for (const record of records) {
-      const reference = record.references.find((item) => item.objectHash === hash);
-      if (reference) {
-        this.sourceByHash.set(hash, { recordId: record.recordId, slot: reference.slot });
-        return { recordId: record.recordId, slot: reference.slot };
-      }
-    }
-    throw new Error(`Kernel object ${hash} has no durable source identity`);
-  }
-
-  async getObject(hash: string): Promise<Buffer | null> {
-    try {
-      const slice = await this.context.client.getBlob(hash, await this.objectSource(hash));
-      return Buffer.from(slice.bytesBase64, "base64");
-    } catch (error) {
-      if ((error as { code?: string }).code === "object-not-found") return null;
-      throw error;
-    }
-  }
-  async getObjectSlice(hash: string, _expectedByteLength: number, offset: number, length: number): Promise<Buffer | null> {
-    const slice = await this.context.client.getBlob(hash, await this.objectSource(hash), { offset, length });
-    return Buffer.from(slice.bytesBase64, "base64");
-  }
-
-  async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
-    const files = relativePaths?.map(normalize) ?? await this.scanDirectory(directory);
-    const result: Record<string, RecoveryState> = {};
-    let done = 0;
-    for (const file of files) {
-      options?.signal?.throwIfAborted();
-      const captured = await this.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
-      let state = captured.state;
-      if (state.kind === "regular-file" && options?.store !== false) {
-        const object = await this.putObject(await fs.promises.readFile(path.join(directory, ...file.split("/"))));
-        state = { ...state, objectHash: object.hash, byteLength: object.byteLength };
-      }
-      result[file] = state;
-      done += 1; options?.onProgress?.(done, files.length);
-    }
-    return applyIndexModes(result, options?.indexModes);
-  }
-
-  private async scanDirectory(directory: string, base = directory): Promise<string[]> {
-    const output: string[] = [];
-    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === ".piarium") continue;
-      const absolute = path.join(directory, entry.name); const relative = normalize(path.relative(base, absolute));
-      output.push(relative); if (entry.isDirectory()) output.push(...await this.scanDirectory(absolute, base));
-    }
-    return output.sort();
-  }
-  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
-    const output = new Set<string>();
-    for (const rawScope of scopes) {
-      const scope = normalize(rawScope);
-      const absolute = path.join(directory, ...scope.split("/"));
-      let stat: fs.Stats;
-      try { stat = await fs.promises.lstat(absolute); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
-      output.add(scope);
-      if (stat.isDirectory() && !stat.isSymbolicLink()) for (const child of await this.scanDirectory(absolute, directory)) output.add(child);
-    }
-    return [...output].sort();
-  }
-  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> { return this.scanDirectory(directory); }
-
-  async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = []): Promise<WorkingBranch> {
-    if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
-    const existing = this.getBranch(branchId);
-    if (existing) {
-      const paths = new Set([...Object.keys(existing.baseState), ...Object.keys(baseState)]);
-      if ([...paths].some((file) => !sameState(existing.baseState[file] ?? { kind: "missing" }, baseState[file] ?? { kind: "missing" }))) {
-        throw new Error(`Working branch ${branchId} already exists with another baseline`);
-      }
-      const requestedDraftBasePaths = draftBasePaths.map(normalize);
-      const requestedCaptureScopes = captureScopes.map(normalize);
-      const metadata = await this.context.records.get(`working-branch:${branchId}`);
-      if (metadata) {
-        const payload = asRecord(parsePayload(metadata));
-        const storedBaseRef = typeof payload.baseRef === "string" ? payload.baseRef : undefined;
-        const storedDraftBasePaths = Array.isArray(payload.draftBasePaths)
-          ? payload.draftBasePaths.filter((item): item is string => typeof item === "string")
-          : [];
-        const storedCaptureScopes = Array.isArray(payload.captureScopes)
-          ? payload.captureScopes.filter((item): item is string => typeof item === "string")
-          : [];
-        if (
-          storedBaseRef !== baseRef
-          || JSON.stringify(storedDraftBasePaths) !== JSON.stringify(requestedDraftBasePaths)
-          || JSON.stringify(storedCaptureScopes) !== JSON.stringify(requestedCaptureScopes)
-        ) {
-          throw new Error(`Working branch ${branchId} already exists with different metadata`);
-        }
-        return existing;
-      }
-      const row = this.branches.get(branchId)!;
-      if (baseRef === undefined) delete row.baseRef;
-      else row.baseRef = baseRef;
-      row.draftBasePaths = requestedDraftBasePaths;
-      row.captureScopes = requestedCaptureScopes;
-      row.updatedAt = nowIso();
-      await this.putMetadata(row);
-      return this.getBranch(branchId)!;
-    }
-    const branchRefSplit = baseRef?.lastIndexOf("@") ?? -1;
-    const parentId = baseRef && branchRefSplit > 0 ? baseRef.slice(0, branchRefSplit) : "";
-    const parentRevision = baseRef && branchRefSplit > 0 ? Number(baseRef.slice(branchRefSplit + 1)) : undefined;
-    const parent = parentId && Number.isSafeInteger(parentRevision) ? this.effectiveState(parentId, parentRevision) : null;
-    const kernelBaseRef = baseRef && (/^sha256-[a-f0-9]+$/i.test(baseRef) || baseRef.startsWith("pin:") || parent) ? baseRef : undefined;
-    let entriesState = baseState;
-    if (parent) entriesState = Object.fromEntries(Object.entries(baseState).filter(([file, state]) => !sameState(parent[file] ?? { kind: "missing" }, state)));
-    const entries = Object.entries(entriesState).map(([file, state]) => {
-      const source = state.kind === "regular-file" ? this.sourceByHash.get(state.objectHash) : undefined;
-      return {
-        path: normalize(file),
-        state: toKernelState(state),
-        ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash) ? { ownerId: this.ownerByHash.get(state.objectHash)! } : {}),
-        ...(state.kind === "regular-file" && !this.ownerByHash.has(state.objectHash) && source?.path ? { sourcePath: source.path } : {}),
-        ...(state.kind === "regular-file" && !this.ownerByHash.has(state.objectHash) && !source?.path && source?.recordId && source.slot
-          ? { sourceRecordId: source.recordId, sourceSlot: source.slot }
-          : {}),
-      };
-    });
-    const created = await this.context.client.createBranch({ operationId: `branch-create:${branchId}`, branchId, workspaceId, entries, ...(kernelBaseRef ? { baseRef: kernelBaseRef } : {}) });
-    const now = nowIso();
-    let baseRoot = String(asRecord(created).root);
-    if (kernelBaseRef) {
-      const split = kernelBaseRef.lastIndexOf("@");
-      if (split > 0) baseRoot = (await this.context.client.readBranch({ branchId: kernelBaseRef.slice(0, split), revision: Number(kernelBaseRef.slice(split + 1)) })).root;
-    }
-    const row: BranchProjection = { branchId, workspaceId, ...(baseRef ? { baseRef } : {}), baseState: clone(baseState), deltas: {}, headRevision: Number(asRecord(created).headRevision ?? 0), writeRevision: Number(asRecord(created).writeRevision ?? 0), root: String(asRecord(created).root), baseRoot, createdAt: now, updatedAt: now, draftBasePaths: draftBasePaths.map(normalize), captureScopes: captureScopes.map(normalize) };
-    this.branches.set(branchId, row); await this.putMetadata(row); for (const [file, state] of Object.entries(baseState)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { branchId, path: file }); }
-    return this.getBranch(branchId)!;
-  }
-
-  async createDraftBaseline(workspaceId: string, paths: readonly CreateDraftBaselinePath[]): Promise<DraftBaseline> {
-    if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
-    const id = `draft-${randomUUID()}`; const pathStates: Record<string, RecoveryState> = {}; const provenance: Record<string, DraftBaselinePathProvenance> = {}; const ownerIds: string[] = []; const references: KernelStorageReference[] = [];
-    for (const input of paths) { const file = normalize(input.path); const bytes = typeof input.content === "string" ? Buffer.from(input.content, "utf8") : input.content; const object = await this.putObject(bytes); pathStates[file] = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(input.mode === undefined ? {} : { mode: input.mode }) }; provenance[file] = clone(input.provenance); const owner = this.ownerByHash.get(object.hash); if (owner) ownerIds.push(owner); references.push({ slot: `draft:${file}`, objectHash: object.hash }); }
-    const baseline: DraftBaseline = { id, workspaceId, createdAt: nowIso(), pathStates, provenance };
-    const draftDocument: KernelWorkingDraftDocument = {
-      id,
-      workspaceId,
-      createdAt: baseline.createdAt,
-      root: transientStateIdentity(pathStates),
-      provenance: Object.entries(provenance).map(([file, value]) => ({ path: file, ...value })),
-    };
-    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document: draftDocument, createdAt: baseline.createdAt, ownerIds, references }); this.drafts.set(id, baseline); for (const state of Object.values(pathStates)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` }); } return clone(baseline);
-  }
-
-  async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
-    const branch = this.branches.get(branchId); if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    if (branch.writeRevision !== expectedWriteRevision) return { status: "conflict", writeRevision: branch.writeRevision };
-    const current = { ...branch.baseState, ...branch.deltas };
-    const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalize(file), state]));
-    assertVirtualWriteTree(current, normalized);
-    const closed = { ...normalized };
-    for (const [file, state] of Object.entries(normalized)) {
-      if (state.kind === "missing") continue;
-      let parent = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
-      while (parent) {
-        const visible = closed[parent] ?? current[parent];
-        if (!visible || visible.kind === "missing") {
-          closed[parent] = branch.baseState[parent]?.kind === "directory" ? branch.baseState[parent]! : { kind: "directory" };
-        }
-        parent = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : "";
-      }
-    }
-    const committedWrites = compactTreeWrites(closed);
-    const changes = Object.entries(committedWrites).map(([file, state]) => {
-      const source = state.kind === "regular-file" ? this.sourceByHash.get(state.objectHash) : undefined;
-      return {
-        path: file,
-        state: toKernelState(state),
-        ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash) ? { ownerId: this.ownerByHash.get(state.objectHash)! } : {}),
-        ...(state.kind === "regular-file" && !this.ownerByHash.has(state.objectHash) && source?.path ? { sourcePath: source.path } : {}),
-        ...(state.kind === "regular-file" && !this.ownerByHash.has(state.objectHash) && !source?.path && source?.recordId && source.slot
-          ? { sourceRecordId: source.recordId, sourceSlot: source.slot }
-          : {}),
-      };
-    });
-    const result = await this.context.client.writeBranch({ operationId: `branch-write:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`, branchId, expectedWriteRevision, changes });
-    if (result.status === "conflict") return { status: "conflict", writeRevision: result.writeRevision };
-    for (const [file, state] of Object.entries(committedWrites)) {
-      const normalized = normalize(file);
-      if (state.kind !== "directory") for (const existing of Object.keys(branch.deltas)) if (existing.startsWith(`${normalized}/`)) delete branch.deltas[existing];
-      if (state.kind === "missing" && !Object.hasOwn(branch.baseState, normalized)) delete branch.deltas[normalized]; else branch.deltas[normalized] = clone(state);
-      if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { branchId, path: normalized }); }
-    }
-    branch.writeRevision = result.writeRevision; branch.root = result.root; branch.updatedAt = nowIso(); this.branches.set(branchId, branch); await this.putMetadata(branch); return { status: "committed", writeRevision: result.writeRevision };
-  }
-  async commitVirtualWrite(branchId: string, expectedWriteRevision: number, file: string, state: RecoveryState) { return this.commitVirtualWrites(branchId, expectedWriteRevision, { [file]: state }); }
-
-  async publishStates(branchId: string, capturedState: Record<string, RecoveryState>, knownChangedPaths?: string[]): Promise<WorkingResult> {
-    const branch = this.branches.get(branchId); if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const candidates = knownChangedPaths?.map(normalize) ?? [...new Set([...Object.keys(branch.baseState), ...Object.keys(branch.deltas), ...Object.keys(capturedState)])];
-    const changedPaths = candidates.filter((file) => !sameState(branch.baseState[file] ?? { kind: "missing" }, capturedState[file] ?? { kind: "missing" })).sort();
-    const clearedDeltaPaths = candidates.filter((file) => Object.hasOwn(branch.deltas, file) && sameState(branch.baseState[file] ?? { kind: "missing" }, capturedState[file] ?? { kind: "missing" }));
-    const baseStates = Object.fromEntries(changedPaths.map((file) => [file, branch.baseState[file] ?? { kind: "missing" as const}]));
-    const pathStates = Object.fromEntries(changedPaths.map((file) => [file, capturedState[file] ?? { kind: "missing" as const}]));
-    const currentState = { ...branch.baseState, ...branch.deltas };
-    const kernelChanges = Object.fromEntries(candidates
-      .filter((file) => !sameState(currentState[file] ?? { kind: "missing" }, capturedState[file] ?? { kind: "missing" }))
-      .map((file) => [file, capturedState[file] ?? { kind: "missing" as const}]));
-    const written = Object.keys(kernelChanges).length > 0 ? await this.commitVirtualWrites(branchId, branch.writeRevision, kernelChanges) : { status: "committed" as const, writeRevision: branch.writeRevision };
-    if (written.status === "conflict") throw new Error("Working branch changed while publishing result");
-    for (const file of clearedDeltaPaths) delete branch.deltas[file];
-    if (clearedDeltaPaths.length > 0) await this.putMetadata(branch);
-    const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: written.writeRevision, expectedRoot: branch.root });
-    if (asRecord(published).status === "conflict") throw new Error("Working branch publish CAS conflict");
-    const revision = Number(asRecord(published).revision); const publishedRoot = String(asRecord(published).root ?? "");
-    if (!Number.isSafeInteger(revision) || revision <= 0 || !publishedRoot) throw new Error("Kernel returned an invalid published branch identity");
-    const result: WorkingResult = { resultRevision: revision, branchId, ...(branch.baseRef ? { parentRef: branch.baseRef } : {}), changedPaths, baseStates, pathStates, diffStats: { files: changedPaths.length, insertions: 0, deletions: 0 }, createdAt: nowIso(), root: publishedRoot };
-    branch.headRevision = revision; branch.root = publishedRoot; branch.updatedAt = result.createdAt; this.branches.set(branchId, branch); this.results.set(`${branchId}@${revision}`, result);
-    const refs = [
-      ...Object.entries(baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
-      ...Object.entries(pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
-    ];
-    const persistedResult = { resultRevision: result.resultRevision, branchId: result.branchId, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, root: result.root };
-    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root: publishedRoot, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, document: { ...persistedResult, root: publishedRoot } as KernelWorkingResultDocument, ownerIds: [], references: refs });
-    for (const reference of refs) this.sourceByHash.set(reference.objectHash, { recordId: `working-result:${branchId}@${revision}`, slot: reference.slot });
-    return clone(result);
-  }
-  async publishHeadResult(branchId: string): Promise<WorkingResult> { const states = this.effectiveState(branchId); if (!states) throw new Error(`Working branch not found: ${branchId}`); return this.publishStates(branchId, states); }
-  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {
-    const branch = this.branches.get(branchId); if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const requested = changedPaths?.map(normalize);
-    const ancestors = requested?.flatMap((file) => {
-      const paths: string[] = [];
-      let parent = file.includes("/") ? file.slice(0, file.lastIndexOf("/")) : "";
-      while (parent) { paths.push(parent); parent = parent.includes("/") ? parent.slice(0, parent.lastIndexOf("/")) : ""; }
-      return paths;
-    }) ?? [];
-    const candidates = requested ? [...new Set([...requested, ...ancestors, ...branch.draftBasePaths, ...Object.keys(branch.deltas)])] : undefined;
-    const captured = await this.captureDirectory(directory, candidates, options);
-    if (options?.validateFixedSource && !await options.validateFixedSource()) throw new Error("Working-state source changed while it was being captured");
-    return this.publishStates(branchId, captured, candidates);
-  }
-  async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> { const captured = await this.captureDirectory(directory, changedPaths); const branch = this.branches.get(branchId); if (!branch) return null; return transientStateIdentity({ ...branch.baseState, ...captured }); }
-  async captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string> { const captured = await this.captureDirectory(directory, changedPaths); return `sha256-${createHash("sha256").update(seed).update("\0").update(transientStateIdentity(captured)).digest("hex")}`; }
-
-  async materializeResult(branchId: string, revision: number, directory: string): Promise<MaterializeResult> { const states = this.resultState(branchId, revision); if (!states) throw new Error(`Working result not found: ${branchId}@${revision}`); return this.materializeStates(states, directory); }
-  async materializeStates(states: Record<string, RecoveryState>, directory: string): Promise<MaterializeResult> { return materializeWorkingState({ targetDir: directory, states, readContent: async (state) => state.kind === "regular-file" ? this.getObject(state.objectHash) : null, objectPathFor: () => null, cleanUnreferenced: true }); }
-  async directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean> { const expected = this.resultState(branchId, revision); if (!expected) return false; const actual = await this.captureDirectory(directory); const files = new Set([...Object.keys(expected), ...Object.keys(actual)]); return [...files].every((file) => sameState(actual[file] ?? { kind: "missing" }, expected[file] ?? { kind: "missing" })); }
-
-  async deleteBranch(branchId: string): Promise<void> { if (!this.branches.has(branchId)) return; await this.context.client.deleteBranch({ operationId: `branch-delete:${branchId}`, branchId }); await this.context.records.release(`branch-release:${branchId}`, `working-branch:${branchId}`); this.branches.delete(branchId); }
-  async deleteDraftBaseline(id: string): Promise<void> { await this.context.working.draftRelease(`draft-release:${id}`, id); this.drafts.delete(id); }
-  async deleteResult(branchId: string, revision: number): Promise<void> { await this.deleteResults(branchId, [revision]); }
-  async deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]> { const removed: number[] = []; for (const revision of revisions) { if (!this.results.has(`${branchId}@${revision}`)) continue; await this.context.working.resultRelease(`result-release:${branchId}@${revision}`, `working-result:${branchId}@${revision}`); this.results.delete(`${branchId}@${revision}`); removed.push(revision); } return removed; }
-  async reconcileObjectReferences(): Promise<void> { await this.context.client.health({ deep: true }); }
-  async listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]> { return (this.parentVerifications.get(threadId) ?? []).map(clone); }
-  async listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]> { return (this.verifications.get(threadId) ?? []).map(clone); }
-  async listReviewRecords(threadId: string): Promise<ResultReviewRecord[]> { return (this.reviews.get(threadId) ?? []).map(clone); }
-  getChildVerification(threadId: string, revision: number): ResultVerificationBundle | null { return (this.verifications.get(threadId) ?? []).find((item) => item.resultRevision === revision) ?? null; }
-  getParentVerification(threadId: string, revision?: number): ParentVerificationBundle | null { const list = this.parentVerifications.get(threadId) ?? []; return revision === undefined ? list.at(-1) ?? null : list.find((item) => item.mergedResultRevision === revision) ?? null; }
-  getReviewRecord(threadId: string, revision: number): ResultReviewRecord | null { return (this.reviews.get(threadId) ?? []).find((item) => item.resultRevision === revision) ?? null; }
-  async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> { await this.putVerification("working.verification.child", threadId, bundle.resultRevision, bundle); const list = (this.verifications.get(threadId) ?? []).filter((item) => item.resultRevision !== bundle.resultRevision); this.verifications.set(threadId, [...list, clone(bundle)]); }
-  async putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void> { await this.putVerification("working.verification.parent", threadId, bundle.mergedResultRevision, bundle); const list = (this.parentVerifications.get(threadId) ?? []).filter((item) => item.mergedResultRevision !== bundle.mergedResultRevision); this.parentVerifications.set(threadId, [...list, clone(bundle)]); }
-  async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> { await this.putVerification("working.review", threadId, record.resultRevision, record); const list = (this.reviews.get(threadId) ?? []).filter((item) => item.resultRevision !== record.resultRevision); this.reviews.set(threadId, [...list, clone(record)]); }
-  private async putVerification(recordType: string, threadId: string, revision: number, payload: unknown): Promise<void> {
-    const recordId = `${recordType}:${threadId}:${revision}`;
-    const document = asRecord(payload);
-    const resultRecords = await this.context.working.resultList();
-    const matchingResult = resultRecords.find((entry) => Number(asRecord(entry.record).resultRevision) === revision);
-    if (!matchingResult) throw new Error(`Working result ${revision} is not available for ${recordType}`);
-    const result = asRecord(matchingResult.record);
-    const branchId = typeof result.branchId === "string" && result.branchId ? result.branchId : (() => { throw new Error(`Working result ${revision} has no branch identity`); })();
-    const root = typeof result.root === "string" && result.root ? result.root : (() => { throw new Error(`Working result ${revision} has no root identity`); })();
-    if (typeof document.branchId === "string" && document.branchId !== branchId) throw new Error(`Verification ${recordId} branch identity does not match result`);
-    if (typeof document.resultTreeHash === "string" && document.resultTreeHash !== root) throw new Error(`Verification ${recordId} root identity does not match result`);
-    if (typeof document.parentTreeHash === "string" && document.parentTreeHash !== root) throw new Error(`Verification ${recordId} parent root does not match result`);
-    if (recordType === "working.review") {
-      await this.context.working.reviewPut({ operationId: `${recordId}:${randomUUID()}`, recordId, threadId, branchId, resultRevision: revision, root, document: document as unknown as KernelWorkingReviewDocument, ownerIds: [], references: [] });
-    } else {
-      await this.context.working.verificationPut({ operationId: `${recordId}:${randomUUID()}`, recordId, kind: recordType.endsWith("child") ? "child" : "parent", threadId, branchId, resultRevision: revision, root, document: document as unknown as KernelWorkingVerificationDocument, ownerIds: [], references: [] });
-    }
+  async directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean> {
+    const expectedRead = await this.listPaths(branchId, [""], { revision });
+    if (!expectedRead) return false;
+    const actual = await this.captureDirectory(directory, undefined, { store: false });
+    const expected = Object.fromEntries(expectedRead.entries.map((entry) => [entry.path, entry.state]));
+    const paths = new Set([...Object.keys(expected), ...Object.keys(actual)]);
+    return [...paths].every((file) => sameState(actual[file] ?? { kind: "missing" }, expected[file] ?? { kind: "missing" }));
   }
 }
 
@@ -1514,24 +1409,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
   adapter: KernelStorageAdapter,
   recoveryEngine?: WorkspaceRecoveryEngine,
   durableRecoveryStore?: RecoveryDurableOperationPort,
-): WorkspaceWorkingStateAccess & WorkspaceWorkingStateRootAccess => {
-  const withStore: WorkspaceWorkingStateAccess["withStore"] = async (workspaceId, purpose, operation, mode: Mode = "exclusive") => {
-    const context = await adapter.context(workspaceId, purpose, { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.maintenance"] });
-    const projection = await KernelWorkingStateCompatibilityAdapter.open(context);
-    if (!recoveryEngine) return Reflect.apply(operation, undefined, [projection, context]);
-    return recoveryEngine.withWorkspaceStorage(
-      workspaceId,
-      { mode, purpose, create: true },
-      (recoveryContext) => Reflect.apply(operation, undefined, [projection, {
-        ...context,
-        ...(durableRecoveryStore ? {} : { database: recoveryContext.database }),
-        ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
-        resourceOperationGate: recoveryContext.resourceOperationGate,
-      } as unknown as import("../recovery/journal-engine.js").WorkspaceRecoveryStorageContext]),
-    );
-  };
-  return {
-    withStore,
+): WorkspaceWorkingStateRootAccess => ({
     withBranchStore: async (workspaceId, purpose, operation, _mode: Mode = "exclusive", actor) => {
       const context = await adapter.context(workspaceId, purpose, {
         owningWorkspace: workspaceId,
@@ -1540,10 +1418,22 @@ export const createKernelWorkspaceWorkingStateAccess = (
         ...(actor ?? {}),
         capabilities: actor ? [] : ["storage.maintenance"],
       });
-      return operation(new KernelWorkingStateRootStore(context), {
+      const store = new KernelWorkingStateRootStore(context);
+      if (!recoveryEngine) return operation(store, {
         ...context,
         ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
       });
+      return recoveryEngine.withWorkspaceStorage(
+        workspaceId,
+        { mode: _mode, purpose, create: true },
+        (recoveryContext) => operation(store, {
+          ...context,
+          fileStore: recoveryContext.fileStore,
+          resourceOperationGate: recoveryContext.resourceOperationGate,
+          ...(recoveryContext.collectUnreachableObjects ? { collectUnreachableObjects: recoveryContext.collectUnreachableObjects } : {}),
+          ...(recoveryContext.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: recoveryContext.resolveDirectoryApplyContext } : {}),
+          ...(durableRecoveryStore ? { durableRecoveryStore } : recoveryContext.durableRecoveryStore ? { durableRecoveryStore: recoveryContext.durableRecoveryStore } : {}),
+        }),
+      );
     },
-  };
-};
+  });

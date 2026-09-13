@@ -7,7 +7,7 @@ import type { HarnessActorContext, HarnessServiceMap, SessionSnapshot, SessionSt
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createRecoveryFileStore } from "../recovery/journal-files.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
-import type { WorkspaceRecoveryStorageContext } from "../recovery/journal-engine.js";
+import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createHarnessRouter } from "./router.js";
 import { createHarnessServiceHost } from "./service-host.js";
@@ -16,7 +16,8 @@ import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "./thread-runtime.js";
 import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 import { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import { WorkingStateStore } from "./working-state/working-state-store.js";
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 import { projectZone2Threads } from "./zone2-threads.js";
 
 const git = (cwd: string, args: string[]): string => (
@@ -69,9 +70,10 @@ describe("owning vs execution workspace identity", () => {
       },
       resourceOperationGate: { run: async (_resources, operation) => operation() },
     };
-    const workingStates: WorkspaceWorkingStateAccess = {
+    const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
       withStore: async (_workspaceId, _purpose, operation) => operation(await WorkingStateStore.open(context), context),
     };
+    const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
     const registry = createThreadRegistry({ hostId: "host", dataDir: join(root, "threads") });
     const worktrees = createThreadWorktreeRuntime({
       createWorktree: async () => { throw new Error("named Git worktree create is not used for virtual materialize"); },

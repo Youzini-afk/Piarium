@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
+import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createRecoveryFileStore } from "../recovery/journal-files.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime } from "./thread-runtime.js";
 import { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
 import type { RecoveryState } from "./working-state/types.js";
-import { createWorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import { createTestWorkingStateRootAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 
 const PARENT = { kind: "session" as const, id: "root-session" };
 const roots: string[] = [];
@@ -51,7 +51,7 @@ describe("nested thread production chain", () => {
         commitLeaf: async () => ({}),
       },
     });
-    const workingStates = createWorkspaceWorkingStateAccess(engine);
+    const workingStates = createTestWorkingStateRootAccess(engine);
     const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "host-1" });
     const runtime = createThreadRuntime({
       registry,
@@ -208,7 +208,7 @@ describe("nested thread production chain", () => {
         commitLeaf: async () => ({}),
       },
     });
-    const workingStates = createWorkspaceWorkingStateAccess(engine);
+    const workingStates = createTestWorkingStateRootAccess(engine);
     const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "host-1" });
     let copyIgnored = ["secret.env"];
     let materializedParentRoot = "";

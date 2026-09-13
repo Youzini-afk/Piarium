@@ -19,7 +19,8 @@ import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchLookups } from "./working-branch-lookups.js";
 import { createWorkingBranchWriteServices } from "./working-branch-writes.js";
 import { VirtualWriteGate } from "./virtual-write-gate.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { WorkingStateStore } from "./working-state-store.js";
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state-root-adapter.test-helper.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
@@ -54,9 +55,10 @@ async function fixture() {
     root: recoveryRoot,
   };
   const store = await WorkingStateStore.open(context);
-  const workingStates: WorkspaceWorkingStateAccess = {
+  const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
     withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
   };
+  const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
   const views = new ThreadExecutionViewRegistry();
   const writeGate = new VirtualWriteGate();
   const lookups = createWorkingBranchLookups({ views, workingStates });

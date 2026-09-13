@@ -41,8 +41,8 @@ async function fixture() {
     documentReadSource: (sessionId, context, resourceId) => (
       documents.readAgentInputSnapshot(sessionId, context, resourceId)
     ),
-    documentSurfaceWrite: (sessionId, context, changes, signal) => (
-      documents.applyAgentSurfaceWrite(sessionId, context, changes, signal)
+    documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => (
+      documents.applyAgentSurfaceWrite(sessionId, workspaceId, context, changes, signal)
     ),
   });
   let response: unknown;

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { AgentInputContext, DocumentSurfaceWritePathResult } from "@piarium/protocol";
 import type { DirtyBufferPublication, DocumentSurfaceOperationRequest, DocumentSurfaceOperationResult } from "./authority.js";
 import { applyAgentSurfaceMutation, applyTextEdits } from "./surface-mutation.js";
-import { reconcileInterruptedAgentMutations } from "./agent-mutation-operation.js";
+import { beginAgentMutationOperationAsync, compensateAgentMutationDiskPath, finalizeAgentMutationOperation, reconcileInterruptedAgentMutations, type PersistedAgentMutationData } from "./agent-mutation-operation.js";
 import type { SurfaceSnapshotInspectResult } from "./surface-snapshot-store.js";
 import type { DurableFileOperationContext } from "../recovery/durable-file-operation.js";
 import type { RecoveryState } from "../recovery/journal-files.js";
@@ -617,6 +617,106 @@ describe("applyAgentSurfaceMutation", () => {
 });
 
 describe("durable agent mutation ordering", () => {
+  it("aborts after a later intent CAS fails before any side effect", async () => {
+    const safety: RecoveryState = { kind: "missing" };
+    const target: RecoveryState = { kind: "regular-file", objectHash: `sha256-${"c".repeat(64)}`, byteLength: 1 };
+    let operationState = "applying";
+    let failSecondIntent = true;
+    const files = ["first.ts", "second.ts"].map((path) => ({
+      path, phase: "pending", revision: 1, targetJson: JSON.stringify(target), safetyJson: null as string | null,
+    }));
+    let data: PersistedAgentMutationData | undefined;
+    const port = {
+      async createOperation(input: { data: Record<string, unknown> }) {
+        data = input.data as PersistedAgentMutationData;
+        return { operationId: data.operationId, state: operationState, revision: 1, data, files };
+      },
+      async getOperation() { return data ? { operationId: data.operationId, state: operationState, revision: 1, data, files } : null; },
+      async listOperations() { return data ? [{ operationId: data.operationId, state: operationState, sessionId: data.sessionId }] : []; },
+      async updateOperationFile(input: { path: string; phase: string; safety?: RecoveryState }) {
+        if (input.path === "second.ts" && input.phase === "apply-intent" && failSecondIntent) throw new Error("injected second intent CAS failure");
+        const file = files.find((entry) => entry.path === input.path)!;
+        file.phase = input.phase;
+        file.revision += 1;
+        if (input.safety) file.safetyJson = JSON.stringify(input.safety);
+        return { revision: file.revision };
+      },
+      async completeOperation(input: { state: string }) { operationState = input.state; return { revision: 2, state: input.state }; },
+      async releaseOperation() { return { released: true }; },
+    };
+    const durable: DurableFileOperationContext = {
+      durableRecoveryStore: port,
+      fileStore: { captureState: async (_identity: unknown, _root: string, path: string) => ({ path, state: safety }) } as never,
+      identity: { authorityId: "host", canonicalRoot: "", filesystemProfile: "test", workspaceId: "ws" },
+      root: "",
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+    };
+    await expect(beginAgentMutationOperationAsync(durable, {
+      operationId: "partial-intent", sessionId: "s1", workspaceId: "ws",
+      targetKinds: { "first.ts": "disk", "second.ts": "disk" },
+      targets: { "first.ts": { expected: safety, target }, "second.ts": { expected: safety, target } },
+      safety: { "first.ts": safety, "second.ts": safety },
+    })).rejects.toThrow(/second intent/i);
+    failSecondIntent = false;
+    expect(await reconcileInterruptedAgentMutations(durable)).toEqual({ compensated: [], needsAttention: [], aborted: ["partial-intent"] });
+    expect(operationState).toBe("aborted");
+  });
+
+  it("compensates an earlier disk path without a database and persists the terminal state", async () => {
+    const safety: RecoveryState = { kind: "regular-file", objectHash: `sha256-${"a".repeat(64)}`, byteLength: 4, mode: 0o644 };
+    const target: RecoveryState = { kind: "regular-file", objectHash: `sha256-${"b".repeat(64)}`, byteLength: 6, mode: 0o644 };
+    let current: RecoveryState = target;
+    let operationState = "applying";
+    const file = { path: "first.ts", phase: "target-observed", revision: 2, targetJson: JSON.stringify(target), safetyJson: JSON.stringify(safety) };
+    const data: PersistedAgentMutationData = {
+      operationId: "mixed-agent-operation",
+      sessionId: "s1",
+      workspaceId: "ws",
+      intent: "agent-surface-write",
+      targetKinds: { "first.ts": "disk", "second.ts": "disk" },
+      surfaceBindings: {},
+      diskIdentities: {},
+      targets: { "first.ts": { expected: safety, target }, "second.ts": { expected: safety, target } },
+      safety: { "first.ts": safety, "second.ts": safety },
+      appliedPaths: ["first.ts"],
+      compensatedPaths: [],
+      needsAttentionPaths: [],
+      results: [],
+      failure: "second.ts failed",
+    };
+    const durable = {
+      async createOperation() { return {}; },
+      async listOperations() { return []; },
+      async getOperation() { return { operationId: data.operationId, workspaceId: "ws", state: operationState, revision: 1, data, files: [file] }; },
+      async updateOperationFile(input: { phase: string }) {
+        file.phase = input.phase;
+        file.revision += 1;
+        return { revision: file.revision };
+      },
+      async completeOperation(input: { state: string }) {
+        operationState = input.state;
+        return { revision: 2, state: input.state };
+      },
+      async releaseOperation() { return { released: true }; },
+    };
+    const context: DurableFileOperationContext = {
+      durableRecoveryStore: durable,
+      fileStore: {
+        captureState: async () => ({ path: "first.ts", state: current }),
+        applyState: async (_identity: unknown, _root: string, _path: string, state: RecoveryState) => { current = state; },
+      } as never,
+      identity: { authorityId: "host", canonicalRoot: "", filesystemProfile: "test", workspaceId: "ws" },
+      root: "",
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+    };
+    expect("database" in context).toBe(false);
+    expect(await compensateAgentMutationDiskPath(context, data, "first.ts")).toBe("compensated");
+    await finalizeAgentMutationOperation(context, data, []);
+    expect(current).toEqual(safety);
+    expect(file.phase).toBe("safety-observed");
+    expect(operationState).toBe("compensated");
+  });
+
   it("waits for Rust intent CAS before the editor and for terminal CAS before returning", async () => {
     const inspect: SurfaceSnapshotInspectResult = {
       status: "ready",

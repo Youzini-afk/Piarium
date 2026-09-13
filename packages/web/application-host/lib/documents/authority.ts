@@ -1773,12 +1773,24 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
 
   const applyAgentSurfaceWrite = async (
     sessionId: string,
+    workspaceId: string,
     context: AgentInputContext,
     changes: readonly AgentSurfaceWriteChange[],
     signal?: AbortSignal,
   ): Promise<DocumentSurfaceWriteResult> => {
-    const workspaceId = context.source === 'surface' ? context.workspaceId : '';
-    const run = async (durable?: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
+    if (context.source === 'surface' && context.workspaceId !== workspaceId) {
+      return {
+        status: 'unavailable',
+        results: changes.map((change) => ({ path: change.resourceId, target: 'surface', status: 'unavailable', message: 'Document surface workspace identity changed.' })),
+      };
+    }
+    if (!durableMutationStorage) {
+      return {
+        status: 'unavailable',
+        results: changes.map((change) => ({ path: change.resourceId, target: 'disk', status: 'unavailable', message: 'Durable mutation storage is unavailable; nothing was written.' })),
+      };
+    }
+    const run = async (durable: DurableFileOperationContext): Promise<DocumentSurfaceWriteResult> => {
       const { result } = await applyAgentSurfaceMutation({
         inspectSnapshot: surfaceSnapshots.inspect,
         surfaceOwner: surfaceSnapshots.owner,
@@ -1835,14 +1847,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           if (deleted.status === 'missing') return { status: 'missing' };
           return { status: 'conflict', message: `${request.resourceId} could not be deleted on disk.` };
         },
-        ...(durable ? { durable } : {}),
+        durable,
       }, { sessionId, context, changes, ...(signal ? { signal } : {}) });
       return result;
     };
-    if (durableMutationStorage && workspaceId) {
-      return durableMutationStorage(workspaceId, (durable) => run(durable));
-    }
-    return run();
+    return durableMutationStorage(workspaceId, (durable) => run(durable));
   };
 
   /**

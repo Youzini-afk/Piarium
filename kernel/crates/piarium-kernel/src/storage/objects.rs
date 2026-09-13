@@ -533,18 +533,25 @@ impl Storage {
                     "revision is only valid for a branch content source".to_string(),
                 ));
             }
-            self.conn
+            let (root, owner_grant, ephemeral): (String, String, bool) = self
+                .conn
                 .query_row(
-                    "SELECT root_hash FROM pins WHERE pin_id = ?1",
+                    "SELECT root_hash, grant_id, ephemeral FROM pins WHERE pin_id = ?1",
                     params![pin_id.expect("source count checked")],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .map_err(|error| match error {
                     rusqlite::Error::QueryReturnedNoRows => {
                         KernelError::Operation("pin not found".to_string())
                     }
                     other => other.into(),
-                })?
+                })?;
+            if ephemeral && owner_grant != grant_id && !storage_admin {
+                return Err(KernelError::Authorization(
+                    "query pin belongs to another actor".to_string(),
+                ));
+            }
+            root
         };
         let state = self.root_get(&root, &path)?;
         if state.as_ref().and_then(PathState::object_hash) != Some(hash) {

@@ -1,8 +1,6 @@
 import type { Thread, ThreadRun } from "@piarium/protocol";
 import type { ThreadResultHistory, ThreadResultRetentionReason } from "@piarium/application-client";
-import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
-import type { WorkingStateStore } from "./working-state-store.js";
-import type { WorkingResult } from "./types.js";
+import type { WorkingResult, WorkingStateRootStore } from "./types.js";
 
 export type RetentionThreadSnapshot = { thread: Thread; activeRun: ThreadRun | null };
 
@@ -18,19 +16,18 @@ const referencedBytes = (result: WorkingResult): number => {
 };
 
 /** Called while the owning storage is leased. It never changes Registry state. */
-export function projectThreadResultHistory(input: {
+export async function projectThreadResultHistory(input: {
   workspaceId: string;
   thread: Thread;
   snapshots: RetentionThreadSnapshot[];
-  store: WorkingStateStore;
-  context: WorkspaceRecoveryStorageContext;
-}): ThreadResultHistory {
-  const { thread, store, context, workspaceId, snapshots } = input;
+  store: WorkingStateRootStore;
+}): Promise<ThreadResultHistory> {
+  const { thread, store, workspaceId, snapshots } = input;
   const branchId = thread.workBranchId;
   if (!branchId) return { workspaceId, threadId: thread.id, branchId: null, results: [] };
-  const branch = store.getBranch(branchId);
+  const branch = await store.getBranchRoot(branchId);
   if (!branch) throw new Error("The Thread's working-state metadata is unavailable");
-  const results = store.listResults(branchId).sort((left, right) => right.resultRevision - left.resultRevision);
+  const results = (await store.listResults(branchId)).sort((left, right) => right.resultRevision - left.resultRevision);
   const retained = new Map<number, Set<ThreadResultRetentionReason>>();
   const keep = (revision: number | undefined, reason: ThreadResultRetentionReason) => {
     if (revision === undefined) return;
@@ -56,18 +53,12 @@ export function projectThreadResultHistory(input: {
   }
   // Completed operations hold their own safety/target references; undo does not
   // need the original WorkingResult. Conflicts still need their selected input.
-  const operations = context.database.prepare(`SELECT data_json FROM operations
-    WHERE workspace_id = ? AND kind = 'integration'
-    AND state NOT IN ('complete', 'compensated', 'aborted', 'undone')`).all(workspaceId) as Array<{ data_json: string }>;
+  const operations = (await store.listDurableOperations("integration")).filter((operation) => (
+    !["complete", "compensated", "aborted", "undone"].includes(String(operation.state ?? ""))
+  ));
   for (const row of operations) {
-    let data: Record<string, unknown>;
-    try {
-      const value: unknown = JSON.parse(row.data_json);
-      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid integration record");
-      data = value as Record<string, unknown>;
-    } catch {
-      throw new Error("An unfinished integration record cannot be read; history retention is unknown");
-    }
+    if (!row.data || typeof row.data !== "object" || Array.isArray(row.data)) throw new Error("An unfinished integration record cannot be read; history retention is unknown");
+    const data = row.data as Record<string, unknown>;
     if (typeof data.threadId !== "string") throw new Error("An unfinished integration has no owning Thread");
     if (!ownerIds.has(data.threadId)) continue;
     const retry = data.retryBinding;

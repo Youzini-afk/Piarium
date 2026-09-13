@@ -37,7 +37,9 @@ describe("materialization switch recovery", () => {
     await fs.promises.mkdir(staging);
     await fs.promises.writeFile(path.join(staging, "next.txt"), "staging\n");
     await rollbackMaterializationSwitch(worktree, {
+      revision: 0,
       writeRevision: 1,
+      root: "sha256-staging-root",
       stagingPath: staging,
       backupPath: backup,
       stage: "staging-ready",
@@ -54,7 +56,9 @@ describe("materialization switch recovery", () => {
     await fs.promises.writeFile(path.join(staging, "next.txt"), "staging\n");
     await fs.promises.rename(live, backup);
     await rollbackMaterializationSwitch(worktree, {
+      revision: 0,
       writeRevision: 1,
+      root: "sha256-backup-root",
       stagingPath: staging,
       backupPath: backup,
       stage: "live-backed-up",
@@ -71,7 +75,9 @@ describe("materialization switch recovery", () => {
     await fs.promises.mkdir(live);
     await fs.promises.writeFile(path.join(live, "next.txt"), "promoted\n");
     const journal = {
+      revision: 1,
       writeRevision: 2,
+      root: "sha256-promoted-root",
       stagingPath: staging,
       backupPath: backup,
       stage: "staging-promoted" as const,

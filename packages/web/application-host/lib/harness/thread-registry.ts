@@ -259,8 +259,12 @@ const MATERIALIZATION_SWITCH_STAGES = new Set<NonNullable<ThreadWorktree["materi
 
 const isMaterializationSwitch = (value: unknown): value is NonNullable<ThreadWorktree["materializationSwitch"]> => (
   isRecord(value)
+  && Number.isSafeInteger(value.revision)
+  && Number(value.revision) >= 0
   && Number.isSafeInteger(value.writeRevision)
   && Number(value.writeRevision) >= 0
+  && isString(value.root)
+  && value.root.length > 0
   && isString(value.stagingPath)
   && isString(value.backupPath)
   && MATERIALIZATION_SWITCH_STAGES.has(value.stage as NonNullable<ThreadWorktree["materializationSwitch"]>["stage"])

@@ -319,7 +319,10 @@ export interface ThreadWorktree {
    * live path. Caller abort rolls the switch back to virtual.
    */
   materializationSwitch?: {
+    revision: number;
     writeRevision: number;
+    /** Immutable WorkingState root reconstructed into staging. */
+    root: string;
     stagingPath: string;
     backupPath: string;
     stage: "staging-ready" | "live-backed-up" | "staging-promoted";

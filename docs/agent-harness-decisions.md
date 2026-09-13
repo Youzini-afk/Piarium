@@ -6017,3 +6017,19 @@ D-267–D-272 的“wired”表述不代表生产 consumer 已迁移。返工必
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-273 | acceptance correction / implementation required | supersedes D-267–D-272 delivery claims where they said wired/proven | status 阶段 R1；plan 阶段 R1；architecture；kernel/application-host/recovery module documentation |
+
+### D-274 · 2026-09-14 · R1 production metadata cutover uses immutable roots and one Rust recovery writer
+
+类型：D-273 验收收口；只追加，不改写 D-273 正文
+
+R1 的生产 WorkingState consumer 统一使用异步 immutable root/path/domain API；Application Host 不再提供 callback 全树 compatibility adapter。branch metadata 在 branch create 事务内发布，draft 是固定 branch/revision/root，result/verification/review 明确绑定 branch 与 revision。scope 在 Rust 遍历前执行；pin/diff/blob read 核验来源。result/draft/branch release 与 revision、依赖记录和对象引用由 Rust 事务协调，独立 pin 保留仍可达的 root。
+
+combined Recovery/Integration/agent-mutation 的唯一生产耐久元数据 writer 是 `KernelRecoveryStore`。TS Documents/Registry 和文件副作用只在对应 Rust operation/file phase CAS 后执行；phase 和 terminal Promise 必须等待。导航提交的响应丢失时，启动对账以同 operationId 重放幂等导航；无法确认时进入 needs-attention，不得补偿文件并造成会话/磁盘分裂。旧 WorkingState 与 local SQLite recovery engine 仅可作为测试 helper，生产 import graph 不可达，不保留 dual write 或 fallback。
+
+Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Partial：storage location 的产品语义、macOS/Linux 与签名包、断电级故障窗口尚无证据；Documents/Registry、真实磁盘 apply 和物化资源后端属于 R2/R3，不能因元数据切换而冒充完成。
+
+## D-274 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-274 | implemented / wired / targeted local evidence；R1 remains Partial | supersedes D-273 implementation-required status | status 阶段 R1；plan 阶段 R1；architecture；rust-kernel-design；kernel module documentation |

@@ -2,6 +2,54 @@
 use super::*;
 
 impl Storage {
+    fn working_reference_map(params: &Value) -> Result<BTreeMap<String, String>, KernelError> {
+        let references = params
+            .get("references")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                KernelError::Operation("working record references are required".to_string())
+            })?;
+        let mut mapped = BTreeMap::new();
+        for reference in references {
+            let slot = reference
+                .get("slot")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Operation("working record reference slot is malformed".to_string())
+                })?;
+            let hash = reference
+                .get("objectHash")
+                .and_then(Value::as_str)
+                .filter(|value| value.starts_with("sha256-"))
+                .ok_or_else(|| {
+                    KernelError::Operation("working record reference hash is malformed".to_string())
+                })?;
+            if mapped.insert(slot.to_string(), hash.to_string()).is_some() {
+                return Err(KernelError::Operation(
+                    "working record reference slots must be unique".to_string(),
+                ));
+            }
+        }
+        Ok(mapped)
+    }
+
+    fn require_no_working_owner_ids(params: &Value) -> Result<(), KernelError> {
+        let owners = params
+            .get("ownerIds")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                KernelError::Operation("working record ownerIds are required".to_string())
+            })?;
+        if !owners.is_empty() {
+            return Err(KernelError::Operation(
+                "working records reference published roots and cannot consume temporary owners"
+                    .to_string(),
+            ));
+        }
+        Ok(())
+    }
+
     pub(super) fn validate_domain_record_identity(
         &self,
         params_value: &Value,
@@ -291,6 +339,15 @@ impl Storage {
         params_value: &Value,
         grant_id: &str,
     ) -> Result<Value, KernelError> {
+        self.domain_record_put_inner(params_value, grant_id, false)
+    }
+
+    fn domain_record_put_inner(
+        &mut self,
+        params_value: &Value,
+        grant_id: &str,
+        allow_working_record: bool,
+    ) -> Result<Value, KernelError> {
         let workspace_id = self.validate_domain_record_identity(params_value, grant_id)?;
         let record_id = params_value
             .get("recordId")
@@ -303,7 +360,6 @@ impl Storage {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("recordType is required".to_string()))?;
         const KNOWN_RECORD_TYPES: &[&str] = &[
-            "working.branch",
             "working.draft",
             "working.result",
             "working.verification.child",
@@ -325,6 +381,20 @@ impl Storage {
         {
             return Err(KernelError::Operation(format!(
                 "recordType is not supported: {record_type}"
+            )));
+        }
+        if !allow_working_record
+            && matches!(
+                record_type,
+                "working.draft"
+                    | "working.result"
+                    | "working.verification.child"
+                    | "working.verification.parent"
+                    | "working.review"
+            )
+        {
+            return Err(KernelError::Operation(format!(
+                "{record_type} must use its typed working record method"
             )));
         }
         let state = params_value
@@ -664,6 +734,15 @@ impl Storage {
         params_value: &Value,
         grant_id: &str,
     ) -> Result<Value, KernelError> {
+        self.domain_record_release_inner(params_value, grant_id, false)
+    }
+
+    fn domain_record_release_inner(
+        &mut self,
+        params_value: &Value,
+        grant_id: &str,
+        allow_working_record: bool,
+    ) -> Result<Value, KernelError> {
         let workspace_id = self.validate_domain_record_identity(params_value, grant_id)?;
         let record_id = params_value
             .get("recordId")
@@ -675,12 +754,188 @@ impl Storage {
                     "record belongs to another actor".to_string(),
                 ));
             }
+            let record_type = value
+                .get("recordType")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !allow_working_record
+                && matches!(
+                    record_type,
+                    "working.draft"
+                        | "working.result"
+                        | "working.verification.child"
+                        | "working.verification.parent"
+                        | "working.review"
+                )
+            {
+                return Err(KernelError::Operation(format!(
+                    "{record_type} must use its typed working release method"
+                )));
+            }
         }
         let deleted = self.conn.execute(
             "DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
             params![record_id, workspace_id],
         )?;
         Ok(json!({"recordId": record_id, "released": deleted > 0}))
+    }
+
+    pub(super) fn working_record_release(
+        &mut self,
+        params_value: &Value,
+        grant_id: &str,
+        expected_type: &str,
+    ) -> Result<Value, KernelError> {
+        let workspace_id = self.validate_domain_record_identity(params_value, grant_id)?;
+        let record_id = params_value
+            .get("recordId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("recordId is required".to_string()))?;
+        let Some(value) = self.domain_record_value(&workspace_id, record_id)? else {
+            return Ok(json!({"recordId": record_id, "released": false}));
+        };
+        let actual_type = value
+            .get("recordType")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let type_matches = actual_type == expected_type
+            || (expected_type == "working.verification"
+                && matches!(
+                    actual_type,
+                    "working.verification.child" | "working.verification.parent"
+                ));
+        if !type_matches {
+            return Err(KernelError::Operation(
+                "working record type mismatch".to_string(),
+            ));
+        }
+        if !self.grant_can_access_domain_record(&value, grant_id)? {
+            return Err(KernelError::Authorization(
+                "record belongs to another actor".to_string(),
+            ));
+        }
+        if expected_type == "working.result" {
+            let branch_id = value
+                .get("branchId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Storage("working result branch identity is missing".to_string())
+                })?;
+            let revision = value
+                .get("resultRevision")
+                .and_then(Value::as_i64)
+                .ok_or_else(|| {
+                    KernelError::Storage("working result revision identity is missing".to_string())
+                })?;
+            let head_revision: i64 = self
+                .conn
+                .query_row(
+                    "SELECT head_revision FROM branches WHERE branch_id = ?1 AND workspace_id = ?2",
+                    params![branch_id, workspace_id],
+                    |row| row.get(0),
+                )
+                .optional()?
+                .ok_or_else(|| {
+                    KernelError::Operation("working result branch is unavailable".to_string())
+                })?;
+            if head_revision == revision {
+                return Err(KernelError::Operation(
+                    "the branch head result cannot be released".to_string(),
+                ));
+            }
+            let released_dependents = self.conn.execute(
+                "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND result_revision = ?3 AND record_type IN ('working.verification.child', 'working.verification.parent', 'working.review')",
+                params![workspace_id, branch_id, revision],
+            )?;
+            self.conn.execute(
+                "DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
+                params![record_id, workspace_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                params![branch_id, revision],
+            )?;
+            return Ok(
+                json!({"recordId": record_id, "released": true, "releasedDependents": released_dependents, "branchId": branch_id, "resultRevision": revision}),
+            );
+        }
+        if expected_type == "working.draft" {
+            let branch_id = value
+                .get("branchId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Storage("working draft branch identity is missing".to_string())
+                })?;
+            if !branch_id.starts_with("working-draft:") {
+                return Err(KernelError::Storage(
+                    "working draft branch identity is invalid".to_string(),
+                ));
+            }
+            self.conn.execute(
+                "DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
+                params![record_id, workspace_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM branches WHERE branch_id = ?1 AND workspace_id = ?2",
+                params![branch_id, workspace_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM revisions WHERE branch_id = ?1",
+                params![branch_id],
+            )?;
+            return Ok(json!({"recordId": record_id, "released": true, "branchId": branch_id}));
+        }
+        self.domain_record_release_inner(params_value, grant_id, true)
+    }
+
+    fn published_revision_root(
+        &self,
+        workspace_id: &str,
+        branch_id: &str,
+        revision: i64,
+    ) -> Result<String, KernelError> {
+        self.conn
+            .query_row(
+                "SELECT r.root_hash FROM revisions r JOIN branches b ON b.branch_id = r.branch_id WHERE r.branch_id = ?1 AND r.revision = ?2 AND b.workspace_id = ?3",
+                params![branch_id, revision, workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| KernelError::Operation(format!(
+                "published working revision is unavailable: {branch_id}@{revision}"
+            )))
+    }
+
+    fn validate_result_binding(
+        &self,
+        workspace_id: &str,
+        branch_id: &str,
+        result_revision: i64,
+        root: &str,
+    ) -> Result<(), KernelError> {
+        let revision_root =
+            self.published_revision_root(workspace_id, branch_id, result_revision)?;
+        if revision_root != root {
+            return Err(KernelError::Operation(
+                "working record root does not match its published revision".to_string(),
+            ));
+        }
+        let result_record = format!("working-result:{branch_id}@{result_revision}");
+        let retained: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM domain_records WHERE workspace_id = ?1 AND record_id = ?2 AND record_type = 'working.result' AND branch_id = ?3 AND result_revision = ?4 LIMIT 1",
+                params![workspace_id, result_record, branch_id, result_revision],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if retained.is_none() {
+            return Err(KernelError::Operation(
+                "working record must bind a retained result".to_string(),
+            ));
+        }
+        Ok(())
     }
 
     /// Product-facing records deliberately use domain-shaped wire methods.  The catalog keeps a
@@ -858,6 +1113,206 @@ impl Storage {
                     "working.result diffStats.files does not match changedPaths".to_string(),
                 ));
             }
+            Self::require_no_working_owner_ids(params_value)?;
+            let supplied_references = Self::working_reference_map(params_value)?;
+            let mut expected_references = BTreeMap::new();
+            for path in &expected_paths {
+                if let Some(hash) = self
+                    .root_get(&base_root, path)?
+                    .as_ref()
+                    .and_then(PathState::object_hash)
+                {
+                    expected_references.insert(format!("base:{path}"), hash.to_string());
+                }
+                if let Some(hash) = self
+                    .root_get(&expected_root, path)?
+                    .as_ref()
+                    .and_then(PathState::object_hash)
+                {
+                    expected_references.insert(format!("result:{path}"), hash.to_string());
+                }
+            }
+            if supplied_references != expected_references {
+                return Err(KernelError::Operation(
+                    "working.result references do not match the published base/result states"
+                        .to_string(),
+                ));
+            }
+        } else if record_type == "working.draft" {
+            let id = object
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Operation("working.draft id is required".to_string())
+                })?;
+            let branch_id = params_value
+                .get("branchId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Operation("working.draft branchId is required".to_string())
+                })?;
+            let revision = params_value
+                .get("revision")
+                .and_then(Value::as_i64)
+                .filter(|value| *value > 0)
+                .ok_or_else(|| {
+                    KernelError::Operation("working.draft revision is required".to_string())
+                })?;
+            let root = params_value
+                .get("root")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Operation("working.draft root is required".to_string())
+                })?;
+            if record_id != id || branch_id != format!("working-draft:{id}") {
+                return Err(KernelError::Operation(
+                    "working.draft record and branch identities do not match its id".to_string(),
+                ));
+            }
+            for (field, expected) in [
+                ("workspaceId", workspace_id),
+                ("branchId", branch_id),
+                ("root", root),
+            ] {
+                if object.get(field).and_then(Value::as_str) != Some(expected) {
+                    return Err(KernelError::Operation(format!(
+                        "working.draft {field} does not match its identity"
+                    )));
+                }
+            }
+            if object.get("revision").and_then(Value::as_i64) != Some(revision) {
+                return Err(KernelError::Operation(
+                    "working.draft revision does not match its identity".to_string(),
+                ));
+            }
+            if self.published_revision_root(workspace_id, branch_id, revision)? != root {
+                return Err(KernelError::Operation(
+                    "working.draft root does not match its published revision".to_string(),
+                ));
+            }
+            Self::require_no_working_owner_ids(params_value)?;
+            let provenance = object
+                .get("provenance")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    KernelError::Operation("working.draft provenance is required".to_string())
+                })?;
+            let mut expected_references = BTreeMap::new();
+            let mut paths = BTreeSet::new();
+            for item in provenance {
+                let path = item.get("path").and_then(Value::as_str).ok_or_else(|| {
+                    KernelError::Operation("working.draft provenance path is malformed".to_string())
+                })?;
+                let canonical = Self::validate_path(path)?.join("/");
+                if canonical != path || !paths.insert(canonical.clone()) {
+                    return Err(KernelError::Operation(
+                        "working.draft provenance paths must be canonical and unique".to_string(),
+                    ));
+                }
+                let state = self.root_get(root, &canonical)?.ok_or_else(|| {
+                    KernelError::Operation(format!(
+                        "working.draft provenance path is absent from its root: {canonical}"
+                    ))
+                })?;
+                let hash = state.object_hash().ok_or_else(|| {
+                    KernelError::Operation(format!(
+                        "working.draft provenance path is not a regular file: {canonical}"
+                    ))
+                })?;
+                expected_references.insert(format!("draft:{canonical}"), hash.to_string());
+            }
+            for (path, state) in self.root_entries(root)? {
+                if state.object_hash().is_some() && !paths.contains(&path) {
+                    return Err(KernelError::Operation(format!(
+                        "working.draft root contains a file without provenance: {path}"
+                    )));
+                }
+            }
+            if Self::working_reference_map(params_value)? != expected_references {
+                return Err(KernelError::Operation(
+                    "working.draft references do not match its fixed revision".to_string(),
+                ));
+            }
+        } else if matches!(
+            record_type,
+            "working.verification.child" | "working.verification.parent" | "working.review"
+        ) {
+            let thread_id = params_value
+                .get("threadId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| KernelError::Operation(format!("{method} threadId is required")))?;
+            let branch_id = params_value
+                .get("branchId")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| KernelError::Operation(format!("{method} branchId is required")))?;
+            let result_revision = params_value
+                .get("resultRevision")
+                .and_then(Value::as_i64)
+                .filter(|value| *value > 0)
+                .ok_or_else(|| {
+                    KernelError::Operation(format!("{method} resultRevision is required"))
+                })?;
+            let root = params_value
+                .get("root")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| KernelError::Operation(format!("{method} root is required")))?;
+            self.validate_result_binding(workspace_id, branch_id, result_revision, root)?;
+            Self::require_no_working_owner_ids(params_value)?;
+            if !Self::working_reference_map(params_value)?.is_empty() {
+                return Err(KernelError::Operation(
+                    "verification and review records cannot attach unrelated content references"
+                        .to_string(),
+                ));
+            }
+            let expected_record_id = match record_type {
+                "working.verification.child" => {
+                    if object.get("resultRevision").and_then(Value::as_i64) != Some(result_revision)
+                        || object.get("branchId").and_then(Value::as_str) != Some(branch_id)
+                        || object.get("resultTreeHash").and_then(Value::as_str) != Some(root)
+                    {
+                        return Err(KernelError::Operation(
+                            "child verification does not match its result identity".to_string(),
+                        ));
+                    }
+                    format!("working-verification:child:{thread_id}:{result_revision}")
+                }
+                "working.verification.parent" => {
+                    if object.get("mergedResultRevision").and_then(Value::as_i64)
+                        != Some(result_revision)
+                    {
+                        return Err(KernelError::Operation(
+                            "parent verification does not match its result identity".to_string(),
+                        ));
+                    }
+                    format!("working-verification:parent:{thread_id}:{result_revision}")
+                }
+                _ => {
+                    if object.get("resultRevision").and_then(Value::as_i64) != Some(result_revision)
+                    {
+                        return Err(KernelError::Operation(
+                            "review does not match its result identity".to_string(),
+                        ));
+                    }
+                    let status = object.get("status").and_then(Value::as_str).unwrap_or("");
+                    if !matches!(status, "running" | "completed" | "failed" | "cancelled") {
+                        return Err(KernelError::Operation(
+                            "working review status is invalid".to_string(),
+                        ));
+                    }
+                    format!("working-review:{thread_id}:{result_revision}")
+                }
+            };
+            if record_id != expected_record_id {
+                return Err(KernelError::Operation(format!(
+                    "{method} recordId does not match its identity"
+                )));
+            }
         }
         let mut translated = params_value.clone();
         let translated_object = translated.as_object_mut().ok_or_else(|| {
@@ -872,7 +1327,7 @@ impl Storage {
             "payloadJson".to_string(),
             Value::String(serde_json::to_string(document)?),
         );
-        let value = self.domain_record_put(&translated, grant_id)?;
+        let value = self.domain_record_put_inner(&translated, grant_id, true)?;
         let payload = value
             .get("payloadJson")
             .and_then(Value::as_str)

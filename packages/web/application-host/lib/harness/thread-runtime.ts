@@ -30,8 +30,8 @@ import {
 import { scopePathContainedBy } from "./thread-nesting.js";
 import {
   assembleKeepReasons,
-  collectBranchObjectHashes,
-  collectDraftBaselineHashes,
+  collectBranchObjectHashesFromRoot,
+  collectDraftBaselineHashesFromRoot,
   measureDirectory,
   measurementFromHashes,
   measurementFromStates,
@@ -43,10 +43,8 @@ import {
 import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
-import { withWorkingStateRootStore } from "./working-state/working-state-root-adapter.js";
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
-import type { RecoveryState } from "./working-state/types.js";
+import type { RecoveryState, WorkingStatePin, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./working-state/virtual-write-gate.js";
@@ -131,7 +129,7 @@ export interface ThreadRuntimeOptions {
   stalledAfterMs?(providerId: string | null): number;
   worktreeSettings?: HarnessWorktreeSettings | undefined;
   resolveWorktreeSettings?(workspaceId: string, parent: ThreadParent): Promise<HarnessWorktreeSettings | undefined> | HarnessWorktreeSettings | undefined;
-  workingStates?: WorkspaceWorkingStateAccess | undefined;
+  workingStates?: WorkspaceWorkingStateRootAccess | undefined;
   executionViews?: ThreadExecutionViewRegistry | undefined;
   virtualWriteGate?: VirtualWriteGate | undefined;
   cloneAgentInputSnapshot?(sessionId: string, context: AgentInputContext):
@@ -762,6 +760,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread?.workBranchId) return;
     let worktree = thread.worktree;
+    const recoveredJournal = worktree?.materializationSwitch;
     if (worktree?.materializationSwitch) {
       const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
       worktree = await recoverPersistedSwitch({
@@ -773,15 +772,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         intent: "restart",
       });
     }
-    const bound = await withWorkingStateRootStore(
-      options.workingStates,
-      input.workspaceId,
+    const bound = await options.workingStates.withBranchStore(
+            input.workspaceId,
       "working-branch-view-bind",
       async (store) => {
         const branch = await store.getBranchRoot(thread.workBranchId!);
+        if (recoveredJournal && worktree?.viewMode === "materialized" && branch?.root !== recoveredJournal.root) {
+          throw new Error(`Materialized working root no longer matches ${thread.workBranchId}@${recoveredJournal.writeRevision}`);
+        }
         return {
           draftBasePaths: branch?.draftBasePaths ?? [],
-          writeRevision: branch?.writeRevision ?? 0,
+          writeRevision: recoveredJournal && worktree?.viewMode === "materialized" ? recoveredJournal.writeRevision : branch?.writeRevision ?? 0,
         };
       },
       "shared",
@@ -792,7 +793,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       threadId: input.threadId,
       runId: input.runId,
       branchId: thread.workBranchId,
-      revision: thread.resultRevision ?? 0,
+      revision: recoveredJournal && worktree?.viewMode === "materialized" ? recoveredJournal.revision : thread.resultRevision ?? 0,
       writeRevision: bound.writeRevision,
       mode: isVirtualWorktree(worktree) ? "virtual" : "materialized",
       draftBasePaths: bound.draftBasePaths,
@@ -812,11 +813,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     sourceRoot?: string,
   ): Promise<ReturnType<typeof measurementFromStates>> => {
     if (thread?.workBranchId && thread.resultRevision && options.workingStates) {
-      return withWorkingStateRootStore(options.workingStates, workspaceId, "thread-result-budget-estimate", async (store) => {
+      return options.workingStates.withBranchStore(workspaceId, "thread-result-budget-estimate", async (store) => {
         const result = await store.getResult(thread.workBranchId!, thread.resultRevision!);
         if (!result) return unknownMeasurement();
-        const states = { ...result.baseStates, ...result.pathStates };
-        return measurementFromStates(states);
+        const pin = await store.pinBranch(thread.workBranchId!, { revision: thread.resultRevision! });
+        try { return await store.measurePin(pin); } finally { await pin.release(); }
       }, "shared");
     }
     if (worktree?.resultPath) return measureDirectory(worktree.resultPath).catch(() => unknownMeasurement());
@@ -1042,8 +1043,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       worktree.preparationStage = "materializing";
       await persistWorktree(input.workspaceId, input.threadId, worktree);
       if (input.branchId && input.resultRevision && options.workingStates) {
-        const result = await withWorkingStateRootStore(
-          options.workingStates,
+        const result = await options.workingStates.withBranchStore(
           input.workspaceId,
           "thread-result-materialize",
           (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
@@ -1139,8 +1139,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           return { treeHash: null, reason: "Non-Git command identity is not captured without a full directory scan" };
         }
         const inspected = await options.worktrees.inspect(thread.worktree, "live");
-        const treeHash = await withWorkingStateRootStore(
-          options.workingStates,
+        const treeHash = await options.workingStates.withBranchStore(
           binding.workspaceId,
           "thread-command-input-identity",
           (store) => store.captureBranchCandidateIdentity(
@@ -1250,11 +1249,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (thread?.role === "retrieval") return;
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
     const result = isVirtualWorktree(thread.worktree)
-      ? await withWorkingStateRootStore(options.workingStates, workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
+      ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
       : await (async () => {
         const inspected = await options.worktrees.inspect(thread.worktree!, "live");
         const indexModes = await options.worktrees.inspectIndexModes?.(thread.worktree!.path);
-        return withWorkingStateRootStore(options.workingStates!, workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
+        return options.workingStates!.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
       })();
     let worktree = thread.worktree;
     try {
@@ -1323,7 +1322,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.workingStates) {
       throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for editor drafts");
     }
-    const baseline = await withWorkingStateRootStore(options.workingStates, workspaceId, "thread-draft-baseline-capture", (store) => (
+    const baseline = await options.workingStates.withBranchStore(workspaceId, "thread-draft-baseline-capture", (store) => (
       store.createDraftBaseline(workspaceId, cloned.resources.map((resource) => ({
         path: resource.resource.resourceId,
         content: encodeDocumentText({
@@ -1342,7 +1341,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     ));
     return {
       draftBaselineId: baseline.id,
-      cleanup: () => withWorkingStateRootStore(options.workingStates!, workspaceId, "thread-draft-baseline-create-failed", (store) => store.deleteDraftBaseline(baseline.id)),
+      cleanup: () => options.workingStates!.withBranchStore(workspaceId, "thread-draft-baseline-create-failed", (store) => store.deleteDraftBaseline(baseline.id)),
     };
   };
 
@@ -1376,11 +1375,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       if (input.parent.kind !== "thread") return null;
       const owner = await options.registry.getThreadById(input.workspaceId, input.parent.id);
       if (!owner?.workBranchId || !options.workingStates) return [];
-      return options.workingStates.withStore(
-        input.workspaceId,
+      return options.workingStates.withBranchStore(
+                input.workspaceId,
         "thread-nested-capture-scopes",
-        (store) => {
-          const branch = store.getBranch(owner.workBranchId!);
+        async (store) => {
+          const branch = await store.getBranchRoot(owner.workBranchId!);
           if (!branch) throw new Error(`Parent working branch is unavailable: ${owner.workBranchId}`);
           return [...branch.captureScopes];
         },
@@ -1461,7 +1460,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return options.worktrees.inspectGitBaselineInventory(sourceRoot, preparationSignal);
     };
     const createFromStates = async (
-      store: Parameters<typeof createBranchWithDraftBaseline>[0],
+      store: WorkingStateRootStore,
       states: Record<string, RecoveryState>,
       baseRef: string,
     ): Promise<void> => {
@@ -1497,14 +1496,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         baselineCapture = await options.beginBaselineCapture(captureWorkspaceId);
       }
       await assertNoActiveBaselineWriters();
-      await options.workingStates.withStore(input.workspaceId, "thread-baseline-capture", async (store) => {
+      await options.workingStates.withBranchStore(input.workspaceId, "thread-baseline-capture", async (store) => {
         if (parentVirtualBranchId) {
-          const parentBranch = store.getBranch(parentVirtualBranchId);
-          const parentView = store.effectiveState(parentVirtualBranchId);
-          if (!parentView || !parentBranch) {
+          const parentBranch = await store.getBranchRoot(parentVirtualBranchId);
+          if (!parentBranch) {
             throw new Error(`Parent working branch is unavailable: ${parentVirtualBranchId}`);
           }
-          const beforeRevision = parentBranch.writeRevision ?? 0;
+          const beforeRevision = parentBranch.writeRevision;
           const baseRef = `thread-${input.parent.id}@${beforeRevision}`;
           worktree!.base = baseRef;
           if (typeof options.completeBaselineCapture === "function" && baselineCapture !== undefined) {
@@ -1514,10 +1512,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               throw baselineChanged(`documents capture ${completed.reasons.join(",") || "unstable"}`);
             }
           }
-          await createFromStates(store, parentView, baseRef);
-          const afterRevision = store.getBranch(parentVirtualBranchId)?.writeRevision ?? 0;
-          if (afterRevision !== beforeRevision) {
-            throw baselineChanged(`parent writeRevision ${String(beforeRevision)} -> ${String(afterRevision)}`);
+          const pin = await store.pinBranch(parentVirtualBranchId, { signal: preparationSignal });
+          try {
+            if (pin.writeRevision !== beforeRevision || pin.root !== parentBranch.root) {
+              throw baselineChanged(`parent writeRevision ${String(beforeRevision)} changed before pin`);
+            }
+            await store.createBranchFromPin(input.workspaceId, branchId, pin, baseRef, draftBaselineId, captureScopes);
+          } finally {
+            await pin.release();
+          }
+          const after = await store.getBranchRoot(parentVirtualBranchId);
+          if (!after || after.writeRevision !== beforeRevision || after.root !== parentBranch.root) {
+            throw baselineChanged(`parent writeRevision ${String(beforeRevision)} -> ${String(after?.writeRevision ?? "missing")}`);
           }
           await assertNoActiveBaselineWriters();
           return;
@@ -1547,7 +1553,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
         const baseline = await store.captureDirectory(sourceRoot, relativePaths, {
           signal: preparationSignal,
-          indexModes: beforeInventory?.kind === "git" ? beforeInventory.indexModes : undefined,
+          ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
           onProgress: (done, total) => {
             worktree!.retentionReason = `Capturing baseline ${done}/${total}`;
           },
@@ -1572,7 +1578,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
           const afterScopeStates = await store.captureDirectory(sourceRoot, afterScopePaths, {
             signal: preparationSignal,
-            indexModes: beforeInventory?.kind === "git" ? beforeInventory.indexModes : undefined,
+            ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
             store: false,
           });
           const changedScopePaths = afterScopePaths.filter((file) => !sameState(
@@ -1603,12 +1609,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         : await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
       const bound = latest?.workBranchId === branchId;
       if (!bound && options.workingStates) {
-        await options.workingStates.withStore(
+        await options.workingStates.withBranchStore(
           input.workspaceId,
           "thread-baseline-capture-failed",
-          async (store) => {
-            if (typeof store.deleteBranch === "function") await store.deleteBranch(branchId);
-          },
+          (store) => store.deleteBranch(branchId),
         ).catch(() => undefined);
       }
       if (!bound && worktree.path) {
@@ -2074,10 +2078,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     workspaceId: string,
     threadId: string,
     currentResultRevision: number | undefined,
-    write: (store: import("./working-state/working-state-store.js").WorkingStateStore) => Promise<import("@piarium/protocol").ThreadVerificationProjection>,
+    write: (store: WorkingStateRootStore) => Promise<import("@piarium/protocol").ThreadVerificationProjection>,
   ): Promise<void> => {
     if (!options.workingStates) return;
-    const projection = await options.workingStates.withStore(workspaceId, "thread-verification", write);
+    const projection = await options.workingStates.withBranchStore(workspaceId, "thread-verification", write);
     await options.registry.setVerification(workspaceId, threadId, projection);
   };
 
@@ -2091,6 +2095,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!reviewed || !options.verification || !options.workingStates) return;
     const source = await options.registry.getThread(reviewThread.workspaceId, reviewThread.parent, reviewed.sourceThreadId);
     if (!source) return;
+    if (!source.workBranchId) throw new Error(`Reviewed Thread has no working branch: ${source.id}`);
+    const sourceBranchId = source.workBranchId;
     const status = outcome === "cancelled" ? "cancelled" as const
       : outcome === "success" ? "completed" as const
         : "failed" as const;
@@ -2107,7 +2113,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ...(findings.length > 0 ? { findings } : {}),
         ...(outcome !== "success" && !report ? { error: outcome } : {}),
         ...(report && outcome === "failure" ? { error: report.conclusion } : {}),
-      }, source.resultRevision)
+      }, source.resultRevision, sourceBranchId)
     ));
     const gate = source.waitingFor?.kind === "thread" ? source.waitingFor.review : undefined;
     if (gate
@@ -2143,8 +2149,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         reviewRole,
         settings,
         ...(existing !== undefined ? { existingReview: existing } : {}),
-        formatDiff: async () => options.workingStates!.withStore(source.workspaceId, "thread-review-diff", async (store) => {
-          const published = store.getResult(branchId, resultRevision);
+        formatDiff: async () => options.workingStates!.withBranchStore(source.workspaceId, "thread-review-diff", async (store) => {
+          const published = await store.getResult(branchId, resultRevision);
           if (!published) throw new Error(`Published result is missing: ${branchId}@${resultRevision}`);
           return formatPublishedResultDiff(store, published);
         }),
@@ -2188,7 +2194,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           gate: false,
           ...(reviewAttempt ? reviewAttempt : {}),
           error: error instanceof Error ? error.message : String(error),
-        }, resultRevision)
+        }, resultRevision, branchId)
       ));
       return;
     }
@@ -2202,7 +2208,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         reviewThreadId,
         ...(reviewAttempt ? { reviewRunId: reviewAttempt.reviewRunId } : {}),
         gate: result.blocking,
-      }, resultRevision)
+      }, resultRevision, branchId)
     ));
     if (result.blocking && reviewAttempt) {
       const current = await options.registry.getThread(source.workspaceId, source.parent, source.id);
@@ -2346,8 +2352,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const publishedIndexModes = !isVirtualWorktree(currentWorktree)
             ? await options.worktrees.inspectIndexModes?.(currentWorktree!.path)
             : undefined;
-          const published = await withWorkingStateRootStore(
-            options.workingStates,
+          const published = await options.workingStates.withBranchStore(
             binding.workspaceId,
             "thread-result-publish",
             (store) => isVirtualWorktree(currentWorktree)
@@ -2367,8 +2372,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats = published.diffStats;
           if (options.verification) {
             try {
-              const projection = await withWorkingStateRootStore(
-                options.workingStates,
+              const projection = await options.workingStates.withBranchStore(
                 binding.workspaceId,
                 "thread-result-verify",
                 (store) => options.verification!.bindPublishedResult(store, {
@@ -3161,6 +3165,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
                 parentRoot,
                 parentSessionId,
                 threadId,
+                branchId,
                 mergedResultRevision: resultRevision,
                 mergeOperationId: result.operationId,
                 integrated: fullyIntegrated,
@@ -3281,19 +3286,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // `dirty`/`merge-ready`/`conflict` are projections of a persisted result.
     // Only a still-running integration operation owns the directory.
     if (!options.workingStates) return reasons;
-    const operations = await options.workingStates.withStore(workspaceId, "thread-space-ops", async (_store, context) => {
-      if (!context.records) return [];
-      const rows = await context.records.list({ recordType: "recovery.operation" });
-      return rows.flatMap((row) => {
-        try {
-          const data = JSON.parse(row.payloadJson) as { threadId?: string; kind?: string };
-          return data.kind === "integration" && data.threadId === threadId && !["complete", "conflict", "compensated", "aborted", "undone"].includes(row.state)
-            ? [`Unfinished integration operation ${row.recordId} (${row.state})`] : [];
-        } catch {
-          return [];
-        }
-      });
-    }, "shared");
+    const operations = await options.workingStates.withBranchStore(workspaceId, "thread-space-ops", async (store) => (
+      (await store.listDurableOperations("integration")).flatMap((row) => {
+        const data = row.data && typeof row.data === "object" && !Array.isArray(row.data) ? row.data as Record<string, unknown> : {};
+        const state = String(row.state ?? "");
+        return data.threadId === threadId && !["complete", "conflict", "compensated", "aborted", "undone"].includes(state)
+          ? [`Unfinished integration operation ${String(row.operationId ?? "unknown")} (${state})`] : [];
+      })
+    ), "shared");
     return [...reasons, ...operations];
   };
 
@@ -3304,7 +3304,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const hasPublishedResult = Boolean(thread.workBranchId && thread.resultRevision);
     if (hasPublishedResult && thread.worktree && thread.worktree.materialized !== false && options.workingStates) {
       try {
-        matchesResult = await options.workingStates.withStore(
+        matchesResult = await options.workingStates.withBranchStore(
           workspaceId,
           "thread-result-reclaim-check",
           (store) => store.directoryMatchesResult(thread.workBranchId!, thread.resultRevision!, thread.worktree!.path),
@@ -3364,10 +3364,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       for (const thread of threads) perThread.set(thread.id, new Map());
       return perThread;
     }
-    return options.workingStates.withStore(workspaceId, "thread-space-measure", (store) => {
+    return options.workingStates.withBranchStore(workspaceId, "thread-space-measure", async (store) => {
       for (const thread of threads) {
-        const branchHashes = thread.workBranchId ? collectBranchObjectHashes(store, thread.workBranchId) : new Map();
-        const draftHashes = collectDraftBaselineHashes(store, thread.manifest.draftBaselineId);
+        const branchHashes = thread.workBranchId ? await collectBranchObjectHashesFromRoot(store, thread.workBranchId) : new Map();
+        const draftHashes = await collectDraftBaselineHashesFromRoot(store, thread.manifest.draftBaselineId);
         perThread.set(thread.id, mergeHashMaps(branchHashes, draftHashes));
       }
       return perThread;
@@ -3518,7 +3518,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         };
       }
       if (latest.workBranchId && latest.resultRevision && options.workingStates && !isVirtualWorktree(latest.worktree)) {
-        const matches = await options.workingStates.withStore(
+        const matches = await options.workingStates.withBranchStore(
           workspaceId,
           "thread-result-reclaim-check",
           (store) => store.directoryMatchesResult(latest.workBranchId!, latest.resultRevision!, latest.worktree!.path),
@@ -3756,19 +3756,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const branchId = thread.workBranchId;
     const draftBaselineId = thread.manifest.draftBaselineId ?? null;
     if (options.workingStates) {
-      await options.workingStates.withStore(workspaceId, "thread-delete", async (store, context) => {
-        if (!context.collectUnreachableObjects) {
-          throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
-        }
+      await options.workingStates.withBranchStore(workspaceId, "thread-delete", async (store) => {
         if (branchId) {
-          const revisions = store.listResults(branchId).map((result) => result.resultRevision);
-          await store.reconcileObjectReferences();
-          if (revisions.length > 0) await store.deleteResults(branchId, revisions);
           await store.deleteBranch(branchId);
         }
         if (draftBaselineId) await store.deleteDraftBaseline(draftBaselineId);
         try {
-          await context.collectUnreachableObjects();
+          await store.collectUnreachableObjects();
         } catch (error) {
           // Metadata is the logical authority — rows are gone; unreachable-object
           // collection is opportunistic and retryable by the next cleanup pass.
@@ -4292,9 +4286,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       if (!initial.workBranchId) return { workspaceId, threadId, branchId: null, results: [] };
       if (!options.workingStates) throw new ThreadRuntimeError("unavailable", "Working-state storage is unavailable");
       try {
-        return await options.workingStates.withStore(workspaceId, "thread-history-inspect", async (store, context) => {
+        return await options.workingStates.withBranchStore(workspaceId, "thread-history-inspect", async (store) => {
           const snapshots = await options.registry.listWorkspaceThreadSnapshots(workspaceId);
-          return projectThreadResultHistory({ workspaceId, thread: historyThread(snapshots, parent, threadId), snapshots, store, context });
+          return projectThreadResultHistory({ workspaceId, thread: historyThread(snapshots, parent, threadId), snapshots, store });
         }, "shared");
       } catch (error) {
         if (error instanceof ThreadRuntimeError) throw error;
@@ -4318,14 +4312,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (initial.deletion) throw new ThreadRuntimeError("conflict", "Thread deletion is pending");
     if (!options.workingStates) throw new ThreadRuntimeError("unavailable", "Working-state storage is unavailable");
     const requested = [...new Set(input.resultRevisions)];
-    const result = await options.workingStates.withStore(workspaceId, "thread-history-release", async (store, context): Promise<ThreadResultHistoryReleaseResult> => {
-      if (!context.collectUnreachableObjects) throw new ThreadRuntimeError("unavailable", "Object cleanup requires an exclusive storage lease");
+    const result = await options.workingStates.withBranchStore(workspaceId, "thread-history-release", async (store): Promise<ThreadResultHistoryReleaseResult> => {
       // Lock order: this Thread's lifecycle, storage lease, Registry snapshot.
       // Release the Registry queue before collecting object files.
       const released = await options.registry.withThreadRetentionSnapshot(workspaceId, async (snapshots) => {
         const current = historyThread(snapshots, parent, threadId);
         if (current.workBranchId !== input.branchId) throw new ThreadRuntimeError("conflict", "The Thread's working branch changed; refresh its history");
-        const history = projectThreadResultHistory({ workspaceId, thread: current, snapshots, store, context });
+        const history = await projectThreadResultHistory({ workspaceId, thread: current, snapshots, store });
         const blocked = history.results.filter((entry) => requested.includes(entry.resultRevision) && entry.protectedReasons.length > 0);
         if (blocked.length > 0) {
           throw new ThreadRuntimeError("conflict", `Selected versions are still in use: ${blocked.map((entry) => entry.resultRevision).join(", ")}`);
@@ -4333,14 +4326,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const present = new Set(history.results.map((entry) => entry.resultRevision));
         const expected = requested.filter((revision) => present.has(revision));
         const missingRevisions = requested.filter((revision) => !present.has(revision));
-        await store.reconcileObjectReferences();
         try {
           return { releasedRevisions: await store.deleteResults(input.branchId, requested), missingRevisions };
         } catch (error) {
           // Metadata is the logical authority. If removal landed but cleanup
           // failed, report that observable state and keep all remaining refs.
-          const observed = await WorkingStateStore.open(context);
-          if (expected.some((revision) => observed.getResult(input.branchId, revision))) throw error;
+          const observed = await Promise.all(expected.map((revision) => store.getResult(input.branchId, revision)));
+          if (observed.some(Boolean)) throw error;
           reportError(error);
           return {
             releasedRevisions: expected, missingRevisions,
@@ -4353,7 +4345,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         cleanup: { status: "failed", message: released.failure },
       };
       try {
-        return { ...released, cleanup: { status: "complete", ...await context.collectUnreachableObjects() } };
+        return { ...released, cleanup: { status: "complete", ...await store.collectUnreachableObjects() } };
       } catch (error) {
         reportError(error);
         return { ...released, cleanup: { status: "failed", message: error instanceof Error ? error.message : "Object cleanup did not finish" } };
@@ -4535,6 +4527,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let releaseReservation = async (): Promise<void> => undefined;
     let keepSpawnReservation = false;
     let activeJournal: MaterializationSwitchJournal | undefined;
+    let materializationPin: WorkingStatePin | undefined;
+    let materializationStore: WorkingStateRootStore | undefined;
     let livePath = "";
     let callerAborted = false;
     const markCallerAbort = (): void => {
@@ -4560,6 +4554,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       livePath = worktree.path;
       const sourceRoot = await options.resolveWorkspaceRoot(latest.workspaceId);
       if (worktree.materializationSwitch) {
+        const recoveredJournal = worktree.materializationSwitch;
         worktree = await recoverPersistedSwitch({
           workspaceId: latest.workspaceId,
           threadId: latest.threadId,
@@ -4569,7 +4564,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           intent: callerAborted ? "abort" : "restart",
         });
         if (worktree.viewMode === "materialized") {
-          options.executionViews?.bind({ ...latest, mode: "materialized" });
+          options.executionViews?.bind({
+            ...latest,
+            revision: recoveredJournal.revision,
+            writeRevision: recoveredJournal.writeRevision,
+            mode: "materialized",
+          });
           return { status: "materialized", path: worktree.path };
         }
       } else {
@@ -4577,15 +4577,28 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       switchSignal.throwIfAborted();
       const settings = await resolveEffectiveWorktreeSettings(latest.workspaceId, thread.parent);
-      const footprint = await options.workingStates.withStore(
-        latest.workspaceId,
+      const fixedMaterialization = await options.workingStates.withBranchStore(
+                latest.workspaceId,
         "working-branch-materialize-estimate",
-        (store) => {
-          const states = store.effectiveState(latest.branchId);
-          return states ? measurementFromStates(states) : unknownMeasurement();
+        async (store) => {
+          const pin = await store.pinBranch(latest.branchId, { signal: switchSignal });
+          try {
+            return { store, pin, footprint: await store.measurePin(pin) };
+          } catch (error) {
+            await pin.release().catch(reportError);
+            throw error;
+          }
         },
         "shared",
       );
+      materializationPin = fixedMaterialization.pin;
+      materializationStore = fixedMaterialization.store;
+      if (materializationPin.branchId !== latest.branchId
+        || materializationPin.workspaceId !== latest.workspaceId
+        || materializationPin.view !== "current") {
+        throw new Error(`Kernel pinned the wrong working view for ${latest.branchId}`);
+      }
+      const footprint = fixedMaterialization.footprint;
       const pendingRelease = pendingMaterializeReservations.get(latest.threadId);
       if (pendingRelease) {
         const failure = await withSpaceMutation(latest.workspaceId, () => budgetFailureFor(
@@ -4618,7 +4631,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       const token = randomUUID();
       const journal: MaterializationSwitchJournal = {
-        writeRevision: latest.writeRevision,
+        revision: materializationPin.revision,
+        writeRevision: materializationPin.writeRevision,
+        root: materializationPin.root,
         stagingPath: `${worktree.path}.materializing-${token}`,
         backupPath: `${worktree.path}.virtual-backup-${token}`,
         stage: "staging-ready",
@@ -4628,13 +4643,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         journal.stagingPath,
         journal.backupPath,
       ]);
-      await options.workingStates.withStore(latest.workspaceId, "working-branch-materialize", async (store) => {
-        const states = store.effectiveState(latest.branchId);
-        if (!states) throw new Error(`Working branch ${latest.branchId} is unavailable`);
-        await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
-        const result = await store.materializeStates(states, journal.stagingPath);
-        if (result?.cow) cowByThread.set(latest.threadId, result.cow);
-      });
+      if (!materializationStore || !materializationPin) throw new Error(`Working branch ${latest.branchId} is unavailable`);
+      await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
+      const materialized = await materializationStore.materializePin(materializationPin, journal.stagingPath);
+      if (materialized.cow) cowByThread.set(latest.threadId, materialized.cow);
       switchSignal.throwIfAborted();
       await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: journal });
       switchSignal.throwIfAborted();
@@ -4674,7 +4686,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       delete nextWorktree.materializationFingerprint;
       await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
       activeJournal = undefined;
-      options.executionViews?.bind({ ...latest, mode: "materialized" });
+      options.executionViews?.bind({
+        ...latest,
+        revision: materializationPin.revision,
+        writeRevision: materializationPin.writeRevision,
+        mode: "materialized",
+      });
       await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
       await removeOrphanMaterializationDirs(worktree, ownershipAssertion(worktree));
       keepSpawnReservation = false;
@@ -4721,6 +4738,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         message: aborted ? `Working-branch materialization was cancelled: ${message}` : message,
       };
     } finally {
+      await materializationPin?.release().catch(reportError);
       if (signal) signal.removeEventListener("abort", markCallerAbort);
       gate?.endSwitch(sessionId);
       if (!keepSpawnReservation) await releaseReservation();

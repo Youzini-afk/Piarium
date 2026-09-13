@@ -94,7 +94,11 @@ impl Storage {
                 "working.result",
             ),
             "working.result.release" => idempotent(storage, method, authorized_params, |storage| {
-                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+                storage.working_record_release(
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                    "working.result",
+                )
             }),
             "working.draft.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.working_record_put(
@@ -117,7 +121,11 @@ impl Storage {
                 "working.draft",
             ),
             "working.draft.release" => idempotent(storage, method, authorized_params, |storage| {
-                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+                storage.working_record_release(
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                    "working.draft",
+                )
             }),
             "working.verification.put" => {
                 idempotent(storage, method, authorized_params, |storage| {
@@ -166,7 +174,11 @@ impl Storage {
             }
             "working.verification.release" => {
                 idempotent(storage, method, authorized_params, |storage| {
-                    storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+                    storage.working_record_release(
+                        authorized_params,
+                        grant_id.unwrap_or(""),
+                        "working.verification",
+                    )
                 })
             }
             "working.review.put" => idempotent(storage, method, authorized_params, |storage| {
@@ -185,7 +197,11 @@ impl Storage {
                 "working.review",
             ),
             "working.review.release" => idempotent(storage, method, authorized_params, |storage| {
-                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+                storage.working_record_release(
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                    "working.review",
+                )
             }),
             "branch.create.begin" => {
                 storage.begin_branch_builder(authorized_params, grant_id.unwrap_or(""))
@@ -222,6 +238,7 @@ impl Storage {
                 storage.branch_pin(authorized_params, false, grant_id.unwrap_or(""))
             }),
             "branch.diff" => storage.branch_diff(authorized_params),
+            "branch.objects" => storage.branch_objects(authorized_params),
             "branch.delete" => idempotent(storage, method, authorized_params, |storage| {
                 storage.branch_delete(authorized_params)
             }),
@@ -253,6 +270,9 @@ impl Storage {
             }),
             "recovery.change.get" => {
                 storage.recovery_change_get(authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.change.list" => {
+                storage.recovery_change_list(authorized_params, grant_id.unwrap_or(""))
             }
             "recovery.change.after" => idempotent(storage, method, authorized_params, |storage| {
                 storage.recovery_change_after(authorized_params, grant_id.unwrap_or(""))

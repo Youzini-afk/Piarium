@@ -65,7 +65,7 @@ impl Storage {
         Ok(output)
     }
 
-    fn find_path_node(
+    pub(super) fn find_path_node(
         &self,
         hash: &str,
         segments: &[String],
@@ -623,9 +623,30 @@ impl Storage {
 
     pub(super) fn branch(&self, branch_id: &str) -> Result<BranchRow, KernelError> {
         self.conn.query_row(
-            "SELECT workspace_id, base_root, head_root, head_revision, write_revision FROM branches WHERE branch_id = ?1",
+            "SELECT workspace_id, base_root, head_root, head_revision, write_revision, parent_ref, draft_base_paths_json, capture_scopes_json, created_at, updated_at FROM branches WHERE branch_id = ?1",
             params![branch_id],
-            |row| Ok(BranchRow { workspace_id: row.get(0)?, base_root: row.get(1)?, head_root: row.get(2)?, head_revision: row.get(3)?, write_revision: row.get(4)? }),
+            |row| {
+                let draft_base_paths_json: String = row.get(6)?;
+                let capture_scopes_json: String = row.get(7)?;
+                let draft_base_paths = serde_json::from_str(&draft_base_paths_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(6, rusqlite::types::Type::Text, Box::new(error))
+                })?;
+                let capture_scopes = serde_json::from_str(&capture_scopes_json).map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(7, rusqlite::types::Type::Text, Box::new(error))
+                })?;
+                Ok(BranchRow {
+                    workspace_id: row.get(0)?,
+                    base_root: row.get(1)?,
+                    head_root: row.get(2)?,
+                    head_revision: row.get(3)?,
+                    write_revision: row.get(4)?,
+                    parent_ref: row.get(5)?,
+                    draft_base_paths,
+                    capture_scopes,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            },
         ).map_err(|error| match error { rusqlite::Error::QueryReturnedNoRows => KernelError::Operation(format!("branch not found: {branch_id}")), other => other.into() })
     }
 

@@ -2,9 +2,8 @@ import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { assertAbsolutePathInWorkspace } from "../../workspace/path-safety.js";
-import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
-import { objectPath, replaceObjectReferences, deleteObjectReferences } from "../../recovery/journal-catalog.js";
-import { parseRecoveryState, sameState } from "../../recovery/journal-files.js";
+import { objectPath, replaceObjectReferences, deleteObjectReferences, type SqliteDatabase } from "../../recovery/journal-catalog.js";
+import { parseRecoveryState, sameState, type RecoveryFileStore, type RecoveryIdentity } from "../../recovery/journal-files.js";
 import { applyIndexModes } from "./git-index-mode.js";
 import { EMPTY_STATE_TRIE, trieFromEntries, trieIdentity, trieReachableNodes, trieToRecord, verifyTrie, type StateTrie, type StateTrieNode } from "./state-trie.js";
 import { readRecoveryJsonAtomic, writeRecoveryJsonAtomic } from "../../recovery/locations.js";
@@ -23,6 +22,7 @@ import type {
 import { materializeWorkingState, type MaterializeResult } from "./materializer.js";
 import { assertVirtualWriteTree } from "./virtual-write-tree.js";
 import { defaultNewFileMode as resolveDefaultNewFileMode } from "./workspace-baseline.js";
+import type { HostResourceOperationGate } from "../../recovery/durable-file-operation.js";
 
 const SCHEMA_VERSION = 4;
 const catalogName = (workspaceId: string): string => `${createHash("sha256").update(workspaceId).digest("hex")}.json`;
@@ -43,18 +43,18 @@ export interface CreateDraftBaselinePath {
   provenance: DraftBaselinePathProvenance;
 }
 
-export interface WorkingStateStoreOptions extends WorkspaceRecoveryStorageContext {
-  fsPromises?: typeof fs.promises;
-  pathModule?: typeof path;
+export interface LocalWorkingStateStorageContext {
+  database: SqliteDatabase;
+  fileStore: RecoveryFileStore;
+  identity: RecoveryIdentity;
+  resourceOperationGate: HostResourceOperationGate;
+  root: string;
+  collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
 }
 
-export interface WorkspaceWorkingStateAccess {
-  withStore<T>(
-    workspaceId: string,
-    purpose: string,
-    operation: (store: WorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
-    mode?: "exclusive" | "shared",
-  ): Promise<T>;
+export interface WorkingStateStoreOptions extends LocalWorkingStateStorageContext {
+  fsPromises?: typeof fs.promises;
+  pathModule?: typeof path;
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -395,7 +395,7 @@ const parseVerifications = (value: unknown): WorkingStateVerifications | undefin
 const emptyVerifications = (): WorkingStateVerifications => ({ child: {}, parent: {}, reviews: {} });
 
 export class WorkingStateStore {
-  private readonly context: WorkspaceRecoveryStorageContext;
+  private readonly context: LocalWorkingStateStorageContext;
   private readonly fsPromises: typeof fs.promises;
   private readonly pathModule: typeof path;
   private readonly catalogPath: string;
@@ -1344,11 +1344,3 @@ export class WorkingStateStore {
     return [...result].sort();
   }
 }
-
-export const createWorkspaceWorkingStateAccess = (recovery: Pick<WorkspaceRecoveryEngine, "withWorkspaceStorage">): WorkspaceWorkingStateAccess => ({
-  withStore: (workspaceId, purpose, operation, mode = "exclusive") => recovery.withWorkspaceStorage(
-    workspaceId,
-    { mode, purpose },
-    async (context) => operation(await WorkingStateStore.open(context), context),
-  ),
-});

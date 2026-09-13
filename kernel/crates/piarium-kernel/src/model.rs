@@ -67,6 +67,11 @@ pub(crate) struct BranchRow {
     pub(crate) head_root: String,
     pub(crate) head_revision: i64,
     pub(crate) write_revision: i64,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) draft_base_paths: Vec<String>,
+    pub(crate) capture_scopes: Vec<String>,
+    pub(crate) created_at: i64,
+    pub(crate) updated_at: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -105,6 +110,9 @@ pub(crate) struct BranchBuilder {
     pub(crate) branch_id: String,
     pub(crate) workspace_id: String,
     pub(crate) base_ref: Option<String>,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) draft_base_paths: Vec<String>,
+    pub(crate) capture_scopes: Vec<String>,
     pub(crate) next_sequence: u64,
     pub(crate) entries: Vec<Value>,
     pub(crate) grant_id: String,

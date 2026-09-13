@@ -6,7 +6,7 @@ import path from "node:path";
 import { listObjectReferences, openRecoveryJournalCatalog, replaceObjectReferences } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { WorkingStateStore } from "./working-state-store.js";
-import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
+import type { WorkspaceRecoveryStorageContext } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

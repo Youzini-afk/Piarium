@@ -3,6 +3,156 @@ use super::operations::idempotent;
 use super::*;
 
 impl Storage {
+    fn branch_metadata_paths(params: &Value, field: &str) -> Result<Vec<String>, KernelError> {
+        let values = params
+            .get(field)
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Operation(format!("{field} is required")))?;
+        let mut paths = values
+            .iter()
+            .map(|value| {
+                let path = value.as_str().ok_or_else(|| {
+                    KernelError::Operation(format!("{field} contains a non-string path"))
+                })?;
+                Self::validate_path(path).map(|segments| segments.join("/"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
+    fn branch_creation_identity(&self, params: &Value) -> Result<Value, KernelError> {
+        let operation_id = params
+            .get("operationId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let branch_id = params
+            .get("branchId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let workspace_id = params
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("workspaceId is required".to_string()))?;
+        let parent_ref = params
+            .get("parentRef")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty());
+        if params.get("parentRef").is_some() && parent_ref.is_none() {
+            return Err(KernelError::Operation(
+                "parentRef must be a non-empty string when supplied".to_string(),
+            ));
+        }
+        let draft_base_paths = Self::branch_metadata_paths(params, "draftBasePaths")?;
+        let capture_scopes = Self::branch_metadata_paths(params, "captureScopes")?;
+        let entries = params
+            .get("entries")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Operation("entries are required".to_string()))?;
+        let mut states = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let path = entry
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
+            let segments = Self::validate_path(path)?;
+            let state = entry
+                .get("state")
+                .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
+            states.push((segments, self.parse_state(state)?));
+        }
+        Self::validate_batch_paths(&states)?;
+        let mut entries = states
+            .iter()
+            .map(|(segments, state)| json!({"path": segments.join("/"), "state": state}))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| {
+            left.get("path")
+                .and_then(Value::as_str)
+                .cmp(&right.get("path").and_then(Value::as_str))
+        });
+        let mut identity = json!({
+            "operationId": operation_id,
+            "branchId": branch_id,
+            "workspaceId": workspace_id,
+            "entries": entries,
+            "draftBasePaths": draft_base_paths,
+            "captureScopes": capture_scopes,
+        });
+        if let Some(base_ref) = params.get("baseRef").and_then(Value::as_str) {
+            identity
+                .as_object_mut()
+                .expect("branch creation identity is an object")
+                .insert("baseRef".to_string(), Value::String(base_ref.to_string()));
+        }
+        if let Some(parent_ref) = parent_ref {
+            identity
+                .as_object_mut()
+                .expect("branch creation identity is an object")
+                .insert(
+                    "parentRef".to_string(),
+                    Value::String(parent_ref.to_string()),
+                );
+        }
+        Ok(identity)
+    }
+
+    fn scoped_read_roots(
+        requested: &[String],
+        scopes: Option<&[String]>,
+    ) -> Result<Vec<String>, KernelError> {
+        let requested = requested
+            .iter()
+            .map(|value| {
+                if value.is_empty() {
+                    Ok(String::new())
+                } else {
+                    Self::validate_path(value).map(|segments| segments.join("/"))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let Some(scopes) = scopes else {
+            return Ok(requested);
+        };
+        let scopes = scopes
+            .iter()
+            .map(|value| {
+                if value.is_empty() {
+                    Ok(String::new())
+                } else {
+                    Self::validate_path(value).map(|segments| segments.join("/"))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut effective = Vec::new();
+        for root in requested {
+            let mut overlaps = false;
+            for scope in &scopes {
+                if scope.is_empty() || path_allowed_scopes(std::slice::from_ref(scope), &root) {
+                    effective.push(root.clone());
+                    overlaps = true;
+                    break;
+                }
+                if root.is_empty() || path_allowed_scopes(std::slice::from_ref(&root), scope) {
+                    effective.push(scope.clone());
+                    overlaps = true;
+                }
+            }
+            if !overlaps {
+                return Err(KernelError::Authorization(format!(
+                    "path root is outside grant scope: {root}"
+                )));
+            }
+        }
+        effective.sort();
+        effective.dedup();
+        Ok(effective)
+    }
+
     pub(super) fn validate_batch_paths(
         entries: &[(Vec<String>, PathState)],
     ) -> Result<(), KernelError> {
@@ -129,6 +279,18 @@ impl Storage {
             .get("baseRef")
             .and_then(Value::as_str)
             .map(str::to_string);
+        let parent_ref = params
+            .get("parentRef")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if params.get("parentRef").is_some() && parent_ref.is_none() {
+            return Err(KernelError::Operation(
+                "parentRef must be a non-empty string when supplied".to_string(),
+            ));
+        }
+        let draft_base_paths = Self::branch_metadata_paths(params, "draftBasePaths")?;
+        let capture_scopes = Self::branch_metadata_paths(params, "captureScopes")?;
         if self.branch_write_builders.contains_key(builder_id) {
             return Err(KernelError::Operation(
                 "builderId is already used by a branch mutation".to_string(),
@@ -139,6 +301,9 @@ impl Storage {
                 || existing.branch_id != branch_id
                 || existing.workspace_id != workspace_id
                 || existing.base_ref != base_ref
+                || existing.parent_ref != parent_ref
+                || existing.draft_base_paths != draft_base_paths
+                || existing.capture_scopes != capture_scopes
                 || existing.grant_id != grant_id
             {
                 return Err(KernelError::Operation(
@@ -159,6 +324,9 @@ impl Storage {
                 branch_id: branch_id.to_string(),
                 workspace_id: workspace_id.to_string(),
                 base_ref,
+                parent_ref,
+                draft_base_paths,
+                capture_scopes,
                 next_sequence: 0,
                 entries: Vec::new(),
                 grant_id: grant_id.to_string(),
@@ -264,7 +432,25 @@ impl Storage {
                 .expect("branch creation is an object")
                 .insert("baseRef".to_string(), Value::String(base_ref.clone()));
         }
-        idempotent(self, "branch.create", &creation, |storage| {
+        if let Some(parent_ref) = &builder.parent_ref {
+            creation
+                .as_object_mut()
+                .expect("branch creation is an object")
+                .insert("parentRef".to_string(), Value::String(parent_ref.clone()));
+        }
+        creation
+            .as_object_mut()
+            .expect("branch creation is an object")
+            .insert(
+                "draftBasePaths".to_string(),
+                json!(builder.draft_base_paths),
+            );
+        creation
+            .as_object_mut()
+            .expect("branch creation is an object")
+            .insert("captureScopes".to_string(), json!(builder.capture_scopes));
+        let identity = self.branch_creation_identity(&creation)?;
+        idempotent(self, "branch.create", &identity, |storage| {
             storage.create_branch(&creation, grant_id)
         })
     }
@@ -303,10 +489,23 @@ impl Storage {
             .get("workspaceId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("workspaceId is required".to_string()))?;
-        let mut identity_params = params.clone();
-        if let Some(object) = identity_params.as_object_mut() {
-            object.remove("operationId");
+        let parent_ref = params
+            .get("parentRef")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if params.get("parentRef").is_some() && parent_ref.is_none() {
+            return Err(KernelError::Operation(
+                "parentRef must be a non-empty string when supplied".to_string(),
+            ));
         }
+        let draft_base_paths = Self::branch_metadata_paths(params, "draftBasePaths")?;
+        let capture_scopes = Self::branch_metadata_paths(params, "captureScopes")?;
+        let mut identity_params = self.branch_creation_identity(params)?;
+        identity_params
+            .as_object_mut()
+            .expect("branch creation identity is an object")
+            .remove("operationId");
         let create_params_hash = hash_json(&identity_params)?;
         let existing_identity: Option<(String, String)> = self
             .conn
@@ -449,7 +648,7 @@ impl Storage {
         self.consume_object_owners(workspace_id, grant_id, &owners_to_consume)?;
         self.record_root_parent(&root, &base_root)?;
         let now = now_ms();
-        self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?5)", params![branch_id, workspace_id, create_params_hash, root, now])?;
+        self.conn.execute("INSERT INTO branches(branch_id, workspace_id, create_params_hash, base_root, head_root, head_revision, write_revision, parent_ref, draft_base_paths_json, capture_scopes_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4, 0, 0, ?5, ?6, ?7, ?8, ?8)", params![branch_id, workspace_id, create_params_hash, root, parent_ref, serde_json::to_string(&draft_base_paths)?, serde_json::to_string(&capture_scopes)?, now])?;
         self.conn.execute("INSERT OR IGNORE INTO revisions(branch_id, revision, root_hash, created_at) VALUES (?1, 0, ?2, ?3)", params![branch_id, root, now])?;
         Ok(
             json!({"branchId": branch_id, "root": root, "writeRevision": 0, "headRevision": 0, "created": true}),
@@ -514,12 +713,24 @@ impl Storage {
                 }
             }
             selected
-        } else if let Some(roots) = params.get("roots").and_then(Value::as_array) {
-            let requested = roots
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>();
+        } else if params.get("roots").is_some()
+            || params
+                .get("includeEntries")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+        {
+            let requested = params
+                .get("roots")
+                .and_then(Value::as_array)
+                .map(|roots| {
+                    roots
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_else(|| vec![String::new()]);
+            let requested = Self::scoped_read_roots(&requested, scopes.as_deref())?;
             let scoped = self.root_entries_scoped(&root, &requested)?;
             let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
             let page_size = params
@@ -542,44 +753,17 @@ impl Storage {
                 .cloned()
                 .map(|(path, state)| json!({"path": path, "state": state}))
                 .collect()
-        } else if params
-            .get("includeEntries")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            let all_entries = self.root_entries(&root)?;
-            let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
-            let page_size = params
-                .get("pageSize")
-                .and_then(Value::as_u64)
-                .map(|value| value as usize)
-                .unwrap_or(all_entries.len());
-            if params.get("pageSize").is_some() && page_size == 0 {
-                return Err(KernelError::Operation(
-                    "pageSize must be positive when supplied".to_string(),
-                ));
-            }
-            let start = cursor.min(all_entries.len());
-            let end = start.saturating_add(page_size).min(all_entries.len());
-            if end < all_entries.len() {
-                next_cursor = Some(end as u64);
-            }
-            all_entries[start..end]
-                .iter()
-                .cloned()
-                .filter(|(path, _)| {
-                    scopes
-                        .as_ref()
-                        .is_none_or(|scopes| path_allowed_scopes(scopes, path))
-                })
-                .map(|(path, state)| json!({"path": path, "state": state}))
-                .collect()
         } else {
             Vec::new()
         };
-        Ok(
-            json!({"branchId": branch_id, "workspaceId": branch.workspace_id, "root": root, "revision": revision, "view": view, "currentRoot": branch.head_root, "headRevision": branch.head_revision, "writeRevision": branch.write_revision, "entries": entries, "nextCursor": next_cursor}),
-        )
+        let mut response = json!({"branchId": branch_id, "workspaceId": branch.workspace_id, "root": root, "revision": revision, "view": view, "currentRoot": branch.head_root, "headRevision": branch.head_revision, "writeRevision": branch.write_revision, "draftBasePaths": branch.draft_base_paths, "captureScopes": branch.capture_scopes, "createdAt": branch.created_at, "updatedAt": branch.updated_at, "entries": entries, "nextCursor": next_cursor});
+        if let Some(parent_ref) = branch.parent_ref {
+            response
+                .as_object_mut()
+                .expect("branch read result is an object")
+                .insert("parentRef".to_string(), Value::String(parent_ref));
+        }
+        Ok(response)
     }
 
     pub(super) fn begin_branch_write_builder(
@@ -1100,6 +1284,22 @@ impl Storage {
             .get("branchId")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let workspace_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT workspace_id FROM branches WHERE branch_id = ?1",
+                params![branch_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let released_records = if let Some(workspace_id) = workspace_id.as_deref() {
+            self.conn.execute(
+                "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND record_type LIKE 'working.%'",
+                params![workspace_id, branch_id],
+            )?
+        } else {
+            0
+        };
         let deleted = self.conn.execute(
             "DELETE FROM branches WHERE branch_id = ?1",
             params![branch_id],
@@ -1113,7 +1313,9 @@ impl Storage {
             params![branch_id],
             |row| row.get(0),
         )?;
-        Ok(json!({"branchId": branch_id, "deleted": deleted > 0, "retainedPins": pins}))
+        Ok(
+            json!({"branchId": branch_id, "deleted": deleted > 0, "releasedRecords": released_records, "retainedPins": pins}),
+        )
     }
 
     pub(super) fn pin_read(&self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
@@ -1172,20 +1374,25 @@ impl Storage {
                 }
             }
             selected
-        } else if params
-            .get("includeEntries")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
+        } else if params.get("roots").is_some()
+            || params
+                .get("includeEntries")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
         {
-            let all_entries = self
-                .root_entries(&root)?
-                .into_iter()
-                .filter(|(path, _)| {
-                    scopes
-                        .as_ref()
-                        .is_none_or(|scopes| path_allowed_scopes(scopes, path))
+            let requested = params
+                .get("roots")
+                .and_then(Value::as_array)
+                .map(|roots| {
+                    roots
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>()
                 })
-                .collect::<Vec<_>>();
+                .unwrap_or_else(|| vec![String::new()]);
+            let requested = Self::scoped_read_roots(&requested, scopes.as_deref())?;
+            let all_entries = self.root_entries_scoped(&root, &requested)?;
             let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
             let page_size = params
                 .get("pageSize")
@@ -1218,7 +1425,7 @@ impl Storage {
     pub(super) fn snapshot(&self, params_value: &Value) -> Result<Value, KernelError> {
         let mut branches = Vec::new();
         let requested_workspace = params_value.get("workspaceId").and_then(Value::as_str);
-        let mut statement = self.conn.prepare("SELECT branch_id, workspace_id, base_root, head_root, head_revision, write_revision FROM branches WHERE (?1 IS NULL OR workspace_id = ?1) ORDER BY branch_id")?;
+        let mut statement = self.conn.prepare("SELECT branch_id, workspace_id, base_root, head_root, head_revision, write_revision, parent_ref, draft_base_paths_json, capture_scopes_json, created_at, updated_at FROM branches WHERE (?1 IS NULL OR workspace_id = ?1) ORDER BY branch_id")?;
         for row in statement.query_map(params![requested_workspace], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -1227,14 +1434,102 @@ impl Storage {
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
                 row.get::<_, i64>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, i64>(9)?,
+                row.get::<_, i64>(10)?,
             ))
         })? {
-            let (branch_id, workspace_id, base_root, head_root, head_revision, write_revision) =
-                row?;
+            let (
+                branch_id,
+                workspace_id,
+                base_root,
+                head_root,
+                head_revision,
+                write_revision,
+                parent_ref,
+                draft_base_paths_json,
+                capture_scopes_json,
+                created_at,
+                updated_at,
+            ) = row?;
+            let draft_base_paths = serde_json::from_str::<Vec<String>>(&draft_base_paths_json)
+                .map_err(|error| {
+                    KernelError::Storage(format!("branch draft metadata is corrupt: {error}"))
+                })?;
+            let capture_scopes = serde_json::from_str::<Vec<String>>(&capture_scopes_json)
+                .map_err(|error| {
+                    KernelError::Storage(format!("branch capture metadata is corrupt: {error}"))
+                })?;
             let revisions = self.conn.prepare("SELECT revision, root_hash FROM revisions WHERE branch_id = ?1 ORDER BY revision")?.query_map(params![branch_id], |revision| Ok(json!({"revision": revision.get::<_,i64>(0)?, "root": revision.get::<_,String>(1)?})))?.collect::<Result<Vec<_>, _>>()?;
-            branches.push(json!({"branchId": branch_id, "workspaceId": workspace_id, "baseRoot": base_root, "headRoot": head_root, "headRevision": head_revision, "writeRevision": write_revision, "revisions": revisions}));
+            branches.push(json!({"branchId": branch_id, "workspaceId": workspace_id, "baseRoot": base_root, "headRoot": head_root, "headRevision": head_revision, "writeRevision": write_revision, "parentRef": parent_ref, "draftBasePaths": draft_base_paths, "captureScopes": capture_scopes, "createdAt": created_at, "updatedAt": updated_at, "revisions": revisions}));
         }
         Ok(json!({"workspaceId": requested_workspace, "branches": branches}))
+    }
+
+    pub(super) fn branch_objects(&self, params: &Value) -> Result<Value, KernelError> {
+        let branch_id = params
+            .get("branchId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("branchId is required".to_string()))?;
+        let branch = self.branch(branch_id)?;
+        let include_revisions = params
+            .get("includeRevisions")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let mut roots = BTreeSet::from([branch.base_root, branch.head_root]);
+        if include_revisions {
+            for root in self
+                .conn
+                .prepare("SELECT root_hash FROM revisions WHERE branch_id = ?1")?
+                .query_map(params![branch_id], |row| row.get::<_, String>(0))?
+            {
+                roots.insert(root?);
+            }
+        }
+        let mut nodes = BTreeSet::new();
+        let mut blobs = BTreeSet::new();
+        for root in roots {
+            self.collect_reachable(&root, &mut nodes, &mut blobs)?;
+        }
+        let objects = blobs
+            .into_iter()
+            .map(|hash| {
+                let byte_length: i64 = self
+                    .conn
+                    .query_row(
+                        "SELECT byte_length FROM blobs WHERE hash = ?1",
+                        params![hash],
+                        |row| row.get(0),
+                    )
+                    .map_err(|error| match error {
+                        rusqlite::Error::QueryReturnedNoRows => KernelError::Storage(format!(
+                            "reachable object metadata is missing: {hash}"
+                        )),
+                        other => other.into(),
+                    })?;
+                Ok::<Value, KernelError>(json!({"hash": hash, "byteLength": byte_length}))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let page_size = params
+            .get("pageSize")
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+            .unwrap_or(objects.len());
+        if params.get("pageSize").is_some() && page_size == 0 {
+            return Err(KernelError::Operation(
+                "pageSize must be positive when supplied".to_string(),
+            ));
+        }
+        let start = cursor.min(objects.len());
+        let end = start.saturating_add(page_size).min(objects.len());
+        Ok(json!({
+            "branchId": branch_id,
+            "objects": objects[start..end].to_vec(),
+            "nextCursor": if end < objects.len() { Value::from(end as u64) } else { Value::Null },
+        }))
     }
 
     pub(super) fn branch_diff(&self, params: &Value) -> Result<Value, KernelError> {
@@ -1249,7 +1544,6 @@ impl Storage {
         let mut added = Vec::new();
         let mut removed = Vec::new();
         let mut changed = Vec::new();
-        self.diff_nodes(left, right, "", &mut added, &mut removed, &mut changed)?;
         if let Some(scopes) = params
             .get("__pathScopes")
             .and_then(Value::as_array)
@@ -1261,9 +1555,45 @@ impl Storage {
                     .collect::<Vec<_>>()
             })
         {
-            added.retain(|path| path_allowed_scopes(&scopes, path));
-            removed.retain(|path| path_allowed_scopes(&scopes, path));
-            changed.retain(|path| path_allowed_scopes(&scopes, path));
+            let roots = Self::scoped_read_roots(&[String::new()], Some(&scopes))?;
+            for prefix in roots {
+                let segments = if prefix.is_empty() {
+                    Vec::new()
+                } else {
+                    Self::validate_path(&prefix)?
+                };
+                let left_node = self.find_path_node(left, &segments)?;
+                let right_node = self.find_path_node(right, &segments)?;
+                match (left_node, right_node) {
+                    (Some(left_node), Some(right_node)) => self.diff_nodes(
+                        &left_node,
+                        &right_node,
+                        &prefix,
+                        &mut added,
+                        &mut removed,
+                        &mut changed,
+                    )?,
+                    (None, Some(right_node)) => {
+                        let mut entries = Vec::new();
+                        self.walk_path_entries(&right_node, &prefix, &mut entries)?;
+                        added.extend(entries.into_iter().map(|(path, _)| path));
+                    }
+                    (Some(left_node), None) => {
+                        let mut entries = Vec::new();
+                        self.walk_path_entries(&left_node, &prefix, &mut entries)?;
+                        removed.extend(entries.into_iter().map(|(path, _)| path));
+                    }
+                    (None, None) => {}
+                }
+            }
+            added.sort();
+            added.dedup();
+            removed.sort();
+            removed.dedup();
+            changed.sort();
+            changed.dedup();
+        } else {
+            self.diff_nodes(left, right, "", &mut added, &mut removed, &mut changed)?;
         }
         Ok(
             json!({"leftRoot": left, "rightRoot": right, "added": added, "removed": removed, "changed": changed}),

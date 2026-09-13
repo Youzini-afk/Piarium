@@ -11,12 +11,8 @@ import type {
   ResultReviewRecord,
   VerificationActorIdentity,
   WorkingStateRootStore,
+  WorkspaceWorkingStateRootAccess,
 } from "./working-state/types.js";
-import type {
-  WorkingStateStore,
-  WorkspaceWorkingStateAccess,
-} from "./working-state/working-state-store.js";
-import { isRootAccess, isWorkingStateRootStore } from "./working-state/working-state-root-adapter.js";
 
 export interface CapturedVerificationIdentity {
   treeHash: string | null;
@@ -95,6 +91,7 @@ interface ParentMergeWindow {
   parentRoot: string;
   parentSessionId: string;
   threadId: string;
+  branchId: string;
   mergedResultRevision: number;
   mergeOperationId: string;
   windowOpenedAt: number;
@@ -102,7 +99,7 @@ interface ParentMergeWindow {
 }
 
 export interface VerificationCoordinatorRuntime {
-  workingStates: WorkspaceWorkingStateAccess;
+  workingStates: WorkspaceWorkingStateRootAccess;
   captureParentIdentity(workspaceId: string, parentRoot: string): Promise<CapturedVerificationIdentity>;
   loadParentWindows?(workspaceId: string, parentSessionId: string, parentRoot: string): Promise<Array<{
     parent: ThreadParent;
@@ -307,28 +304,6 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
     };
   };
 
-  const projectFromStore = (
-    store: WorkingStateStore,
-    threadId: string,
-    currentResultRevision?: number,
-  ): ThreadVerificationProjection => {
-    const latestChild = store.listChildVerifications(threadId).at(-1);
-    const effectiveRevision = currentResultRevision ?? latestChild?.resultRevision;
-    const child = effectiveRevision === undefined
-      ? undefined
-      : store.getChildVerification(threadId, effectiveRevision) ?? undefined;
-    const parent = store.getParentVerification(threadId) ?? undefined;
-    const review = effectiveRevision === undefined
-      ? store.listReviewRecords(threadId).at(-1)
-      : store.getReviewRecord(threadId, effectiveRevision) ?? undefined;
-    return projectThreadVerification({
-      ...(effectiveRevision !== undefined ? { currentResultRevision: effectiveRevision } : {}),
-      ...(child ? { child } : {}),
-      ...(parent ? { parent } : {}),
-      ...(review ? { review } : {}),
-    });
-  };
-
   const projectFromRootStore = async (
     store: WorkingStateRootStore,
     threadId: string,
@@ -351,13 +326,12 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
 
   const projectParentCompletion = async (window: ParentMergeWindow, record: CommandVerificationRecord): Promise<void> => {
     if (!runtime) return;
-    const projection = isRootAccess(runtime.workingStates)
-      ? await runtime.workingStates.withBranchStore(window.workspaceId, "thread-parent-verification-complete", async (store) => {
+    const projection = await runtime.workingStates.withBranchStore(window.workspaceId, "thread-parent-verification-complete", async (store) => {
         const existing = await store.getParentVerification(window.threadId, window.mergedResultRevision);
         if (!existing || existing.mergeOperationId !== window.mergeOperationId) return projectFromRootStore(store, window.threadId);
         if (existing.checks.some((check) => check.id === record.id)) return projectFromRootStore(store, window.threadId);
         const checks = [...existing.checks, { ...record, relationToPublished: "post-merge-matching-tree" as const }];
-        await store.putParentVerification(window.threadId, {
+        await store.putParentVerification(window.threadId, window.branchId, {
           ...existing,
           recordedAt: Date.now(),
           binding: "bound",
@@ -365,27 +339,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
           checks,
         });
         return projectFromRootStore(store, window.threadId);
-      })
-      : await runtime.workingStates.withStore(
-        window.workspaceId,
-        "thread-parent-verification-complete",
-        async (store) => {
-        const existing = store.getParentVerification(window.threadId, window.mergedResultRevision);
-        if (!existing || existing.mergeOperationId !== window.mergeOperationId) {
-          return projectFromStore(store, window.threadId);
-        }
-        if (existing.checks.some((check) => check.id === record.id)) return projectFromStore(store, window.threadId);
-        const checks = [...existing.checks, { ...record, relationToPublished: "post-merge-matching-tree" as const }];
-        await store.putParentVerification(window.threadId, {
-          ...existing,
-          recordedAt: Date.now(),
-          binding: "bound",
-          note: "Observed command boundaries matched the post-merge Git identity (HEAD plus tracked, staged, unstaged, and non-ignored untracked paths)",
-          checks,
-        });
-        return projectFromStore(store, window.threadId);
-        },
-      );
+      });
     await runtime.onProjection?.(window.workspaceId, window.threadId, projection);
   };
 
@@ -421,7 +375,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
       const persisted = await runtime.loadParentWindows(observation.binding.workspaceId, parentSessionId, parentRoot);
       for (const item of persisted) {
         const bundle = item.bundle;
-        if (!bundle.mergeOperationId || !bundle.parentTreeHash || bundle.windowOpenedAt === undefined
+        if (!bundle.mergeOperationId || !bundle.branchId || !bundle.parentTreeHash || bundle.windowOpenedAt === undefined
           || bundle.draftUnsaved || bundle.binding === "not-integrated") continue;
         const key = `${observation.binding.workspaceId}\0${item.threadId}\0${bundle.mergedResultRevision}\0${bundle.mergeOperationId}\0${parentSessionId}`;
         if (!parentWindows.has(key)) parentWindows.set(key, {
@@ -431,6 +385,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
           parentRoot,
           parentSessionId,
           threadId: item.threadId,
+          branchId: bundle.branchId,
           mergedResultRevision: bundle.mergedResultRevision,
           mergeOperationId: bundle.mergeOperationId,
           windowOpenedAt: bundle.windowOpenedAt,
@@ -461,7 +416,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
   };
 
   const bindPublishedResult = async (
-    store: WorkingStateStore | WorkingStateRootStore,
+    store: WorkingStateRootStore,
     input: {
       workspaceId: string;
       threadId: string;
@@ -471,9 +426,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
       worktreePath?: string;
     },
   ): Promise<ThreadVerificationProjection> => {
-    if (isWorkingStateRootStore(store)) {
-      const rootStore = store as WorkingStateRootStore;
-      const published = await rootStore.getResult(input.branchId, input.resultRevision);
+      const published = await store.getResult(input.branchId, input.resultRevision);
       const createdAt = published ? Date.parse(published.createdAt) : Number.NaN;
       const publishedAt = Number.isFinite(createdAt) ? createdAt : Date.now();
       const hasPublicationBoundary = Number.isFinite(createdAt);
@@ -498,38 +451,9 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
         ...(resultTreeHash ? { resultTreeHash } : {}),
         ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
       });
-      await rootStore.putChildVerification(input.threadId, bundle);
+      await store.putChildVerification(input.threadId, bundle);
       for (const item of selected) observations.get(item.sessionId)?.delete(item.executionId);
-      return projectFromRootStore(rootStore, input.threadId, input.resultRevision);
-    }
-    const published = store.getResult(input.branchId, input.resultRevision);
-    const createdAt = published ? Date.parse(published.createdAt) : Number.NaN;
-    const publishedAt = Number.isFinite(createdAt) ? createdAt : Date.now();
-    const hasPublicationBoundary = Number.isFinite(createdAt);
-    const resultTreeHash = store.resultTreeIdentity(input.branchId, input.resultRevision) ?? undefined;
-    const selected: Array<{ sessionId: string; executionId: string; record: CommandVerificationRecord }> = [];
-    for (const [sessionId, binding] of sessions) {
-      if (binding.scope !== "child" || binding.workspaceId !== input.workspaceId || binding.threadId !== input.threadId
-        || binding.runId !== input.runId || (binding.branchId && binding.branchId !== input.branchId)) continue;
-      for (const observation of observations.get(sessionId)?.values() ?? []) {
-        if (!hasPublicationBoundary || observation.binding.generation !== binding.generation || observation.endedAt === undefined
-          || observation.endedAt > publishedAt) continue;
-        const record = commandRecord(observation);
-        if (record) selected.push({ sessionId, executionId: observation.executionId, record });
-      }
-    }
-    const bundle = bindCommandsToPublishedResult({
-      branchId: input.branchId,
-      resultRevision: input.resultRevision,
-      runId: input.runId,
-      publishedAt,
-      commands: selected.map((item) => item.record),
-      ...(resultTreeHash ? { resultTreeHash } : {}),
-      ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
-    });
-    await store.putChildVerification(input.threadId, bundle);
-    for (const item of selected) observations.get(item.sessionId)?.delete(item.executionId);
-    return projectFromStore(store, input.threadId, input.resultRevision);
+      return projectFromRootStore(store, input.threadId, input.resultRevision);
   };
 
   const captureParentInput = async (workspaceId: string, parentRoot: string): Promise<CapturedVerificationIdentity> => {
@@ -542,13 +466,14 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
   };
 
   const recordParentMerge = async (
-    store: WorkingStateStore,
+    store: WorkingStateRootStore,
     input: {
       workspaceId: string;
       parent: ThreadParent;
       parentRoot: string;
       parentSessionId: string | null;
       threadId: string;
+      branchId: string;
       mergedResultRevision: number;
       mergeOperationId: string;
       integrated: boolean;
@@ -564,6 +489,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
     const bundle: ParentVerificationBundle = input.draftUnsaved
       ? {
           mergedResultRevision: input.mergedResultRevision,
+          branchId: input.branchId,
           mergeOperationId: input.mergeOperationId,
           windowOpenedAt,
           recordedAt: windowOpenedAt,
@@ -573,8 +499,9 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
           checks: [],
         }
       : !input.integrated
-        ? {
+          ? {
             mergedResultRevision: input.mergedResultRevision,
+            branchId: input.branchId,
             mergeOperationId: input.mergeOperationId,
             windowOpenedAt,
             recordedAt: windowOpenedAt,
@@ -583,8 +510,9 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
             note: "Integration did not completely apply this result revision; no post-merge verification window was opened",
             checks: [],
           }
-      : {
-          mergedResultRevision: input.mergedResultRevision,
+          : {
+            mergedResultRevision: input.mergedResultRevision,
+            branchId: input.branchId,
           mergeOperationId: input.mergeOperationId,
           windowOpenedAt,
           ...(input.parentIdentity.treeHash ? { parentTreeHash: input.parentIdentity.treeHash } : {}),
@@ -596,7 +524,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
             : `Post-merge Git identity is unavailable; parent commands remain uncertain${input.parentIdentity.reason ? `: ${input.parentIdentity.reason}` : ""}`,
           checks: [],
         };
-    await store.putParentVerification(input.threadId, bundle);
+    await store.putParentVerification(input.threadId, input.branchId, bundle);
     if (!input.draftUnsaved && input.integrated && input.parentIdentity.treeHash && input.parentSessionId) {
       const key = `${input.workspaceId}\0${input.threadId}\0${input.mergedResultRevision}\0${input.mergeOperationId}\0${input.parentSessionId}`;
       parentWindows.set(key, {
@@ -606,35 +534,37 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
         parentRoot: input.parentRoot,
         parentSessionId: input.parentSessionId,
         threadId: input.threadId,
+        branchId: input.branchId,
         mergedResultRevision: input.mergedResultRevision,
         mergeOperationId: input.mergeOperationId,
         windowOpenedAt,
         parentTreeHash: input.parentIdentity.treeHash,
       });
     }
-    return projectFromStore(store, input.threadId, input.mergedResultRevision);
+    return projectFromRootStore(store, input.threadId, input.mergedResultRevision);
   };
 
   const putReview = async (
-    store: WorkingStateStore,
+    store: WorkingStateRootStore,
     threadId: string,
     record: ResultReviewRecord,
-    currentResultRevision?: number,
+    currentResultRevision: number | undefined,
+    branchId: string,
   ): Promise<ThreadVerificationProjection> => {
-    const existing = store.getReviewRecord(threadId, record.resultRevision);
+    const existing = await store.getReviewRecord(threadId, record.resultRevision);
     if (existing) {
-      if (existing.status === "completed") return projectFromStore(store, threadId, currentResultRevision);
+      if (existing.status === "completed") return projectFromRootStore(store, threadId, currentResultRevision);
       if (record.status === "running") {
-        if (existing.status === "running") return projectFromStore(store, threadId, currentResultRevision);
+        if (existing.status === "running") return projectFromRootStore(store, threadId, currentResultRevision);
       } else if (existing.status !== "running") {
-        return projectFromStore(store, threadId, currentResultRevision);
+        return projectFromRootStore(store, threadId, currentResultRevision);
       } else if (existing.reviewThreadId || existing.reviewRunId) {
-        if (!reviewIdentityMatches(existing, record)) return projectFromStore(store, threadId, currentResultRevision);
-        if (record.recordedAt < existing.recordedAt) return projectFromStore(store, threadId, currentResultRevision);
+        if (!reviewIdentityMatches(existing, record)) return projectFromRootStore(store, threadId, currentResultRevision);
+        if (record.recordedAt < existing.recordedAt) return projectFromRootStore(store, threadId, currentResultRevision);
       }
     }
-    await store.putReviewRecord(threadId, record);
-    return projectFromStore(store, threadId, currentResultRevision);
+    await store.putReviewRecord(threadId, branchId, record);
+    return projectFromRootStore(store, threadId, currentResultRevision);
   };
 
   return {
@@ -649,7 +579,6 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
     bindPublishedResult,
     captureParentInput,
     recordParentMerge,
-    projectFromStore,
     putReview,
     sessionBinding(sessionId: string): SessionBinding | undefined {
       return sessions.get(sessionId);

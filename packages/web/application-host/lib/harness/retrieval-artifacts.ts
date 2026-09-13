@@ -6,7 +6,7 @@ import type {
   RetrievalUrlReceipt,
   Thread,
 } from "@piarium/protocol";
-import { isRootAccess, type CompatibleWorkingStateAccess } from "./working-state/working-state-root-adapter.js";
+import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
 export const RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND = "retrieval-evidence-pending";
@@ -105,16 +105,17 @@ type ContextLike = {
 };
 
 const withKernel = async <T>(
-  workingStates: CompatibleWorkingStateAccess,
+  workingStates: WorkspaceWorkingStateRootAccess,
   workspaceId: string,
   purpose: string,
   operation: (store: StoreLike, context: ContextLike) => Promise<T> | T,
-): Promise<T> => isRootAccess(workingStates)
-  ? workingStates.withBranchStore(workspaceId, purpose, (store, context) => operation(store as unknown as StoreLike, {
-    records: context?.records as unknown as ContextLike["records"],
-    ...(context?.client ? { client: context.client as unknown as KernelBlobClient } : {}),
-  }), "exclusive")
-  : workingStates.withStore(workspaceId, purpose, (store, context) => operation(store as unknown as StoreLike, context as unknown as ContextLike));
+): Promise<T> => workingStates.withBranchStore(workspaceId, purpose, (store, context) => {
+  if (!context?.records) throw new Error("Kernel record storage is unavailable");
+  return operation(store, {
+    records: context.records as unknown as ContextLike["records"],
+    ...(context.client ? { client: context.client as unknown as KernelBlobClient } : {}),
+  });
+}, "exclusive");
 
 export const collectRetrievalArtifactHashes = hashesForEvidence;
 
@@ -357,8 +358,8 @@ const syncThreadEvidenceInContext = async (
   }
 };
 
-export const createRetrievalArtifactAccess = (workingStates: CompatibleWorkingStateAccess) => {
-  // KernelWorkingStateStore exposes one owner lookup per hash. Serialize all
+export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingStateRootAccess) => {
+  // The kernel root store exposes one owner lookup per hash. Serialize all
   // operations that can put/consume objects so equal hashes cannot make one
   // concurrent caller observe another caller's temporary owner.
   const workspaceTails = new Map<string, Promise<void>>();

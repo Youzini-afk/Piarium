@@ -6,7 +6,7 @@
 pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
      CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, byte_length INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS trie_nodes (hash TEXT PRIMARY KEY, children_json TEXT NOT NULL, state_json TEXT);
-     CREATE TABLE IF NOT EXISTS branches (branch_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, create_params_hash TEXT NOT NULL, base_root TEXT NOT NULL, head_root TEXT NOT NULL, head_revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+     CREATE TABLE IF NOT EXISTS branches (branch_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, create_params_hash TEXT NOT NULL, base_root TEXT NOT NULL, head_root TEXT NOT NULL, head_revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, parent_ref TEXT, draft_base_paths_json TEXT NOT NULL, capture_scopes_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS revisions (branch_id TEXT NOT NULL, revision INTEGER NOT NULL, root_hash TEXT NOT NULL, parent_revision INTEGER, operation_id TEXT, created_at INTEGER NOT NULL, PRIMARY KEY(branch_id, revision));
 	     CREATE TABLE IF NOT EXISTS pins (pin_id TEXT PRIMARY KEY, branch_id TEXT NOT NULL, workspace_id TEXT NOT NULL, revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, root_hash TEXT NOT NULL, grant_id TEXT NOT NULL, ephemeral INTEGER NOT NULL, created_at INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS root_blobs (root_hash TEXT NOT NULL, blob_hash TEXT NOT NULL, PRIMARY KEY(root_hash, blob_hash));
@@ -39,7 +39,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 8;
+pub(crate) const CATALOG_USER_VERSION: i64 = 9;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
@@ -94,6 +94,9 @@ pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "head_root",
             "head_revision",
             "write_revision",
+            "parent_ref",
+            "draft_base_paths_json",
+            "capture_scopes_json",
             "created_at",
             "updated_at",
         ],

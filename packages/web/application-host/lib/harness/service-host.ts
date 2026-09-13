@@ -109,6 +109,7 @@ export type HarnessDocumentWriteGuard = (
 /** Shared surface-aware mutation plan for root-session write/edit/apply_patch (D-225). */
 export type HarnessDocumentSurfaceWrite = (
   sessionId: string,
+  workspaceId: string,
   context: AgentInputContext,
   changes: ReadonlyArray<{
     resourceId: string;

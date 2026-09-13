@@ -46,6 +46,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.verification.release"
         | "working.review.put"
         | "working.review.release" => "storage.write",
+        "branch.objects" => "storage.maintenance",
         "storage.gc" => "storage.gc",
         "recovery.operation.get"
         | "recovery.turn.start"
@@ -56,6 +57,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "recovery.entry.resolve"
         | "recovery.change.before"
         | "recovery.change.get"
+        | "recovery.change.list"
         | "recovery.change.after"
         | "recovery.operation.create"
         | "recovery.operation.file.cas"

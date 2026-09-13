@@ -10,7 +10,7 @@ import {
   type DocumentAuthorityHarness,
 } from '../documents/contract-fixtures.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
-import { createWorkspaceRecoveryEngine } from './engine.js';
+import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine } from './local-sqlite-recovery-engine.test-helper.js';
 
 let runtime: ApplicationExtensionRuntime | undefined;
 let harness: DocumentAuthorityHarness | undefined;
@@ -62,7 +62,7 @@ describe('Web Application Host workspace recovery service', () => {
     });
     activeRuntime.capabilities.register(
       'workspace.recovery-primitives',
-      createWorkspaceRecoveryCapabilityHandler(engine),
+      createWorkspaceRecoveryCapabilityHandler(engine as never),
     );
     await activeRuntime.start();
 

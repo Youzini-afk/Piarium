@@ -50,6 +50,7 @@ export type KernelMethod =
   | "branch.pin"
   | "branch.unpin"
   | "branch.diff"
+  | "branch.objects"
   | "branch.delete"
   | "pin.read"
   | "recovery.operation.get"
@@ -61,6 +62,7 @@ export type KernelMethod =
   | "recovery.entry.resolve"
   | "recovery.change.before"
   | "recovery.change.get"
+  | "recovery.change.list"
   | "recovery.change.after"
   | "recovery.operation.create"
   | "recovery.operation.file.cas"
@@ -224,9 +226,10 @@ export interface KernelDraftProvenance {
 export interface KernelWorkingDraftDocument {
   id: string;
   workspaceId: string;
+  branchId: string;
+  revision: number;
   createdAt: string;
   root: string;
-  pinId?: string;
   provenance: KernelDraftProvenance[];
 }
 
@@ -350,8 +353,9 @@ export interface KernelWorkingDraftPutParams {
   recordId: string;
   workspaceId: string;
   document: KernelWorkingDraftDocument;
-  root?: string;
-  pinId?: string;
+  branchId: string;
+  revision: number;
+  root: string;
   createdAt: string;
   expectedRecordRevision?: number;
   ownerIds: string[];
@@ -435,6 +439,9 @@ export interface KernelCreateBranchBeginParams {
   branchId: string;
   workspaceId: string;
   baseRef?: string;
+  parentRef?: string;
+  draftBasePaths: string[];
+  captureScopes: string[];
 }
 
 export interface KernelCreateBranchAppendParams {
@@ -529,6 +536,13 @@ export interface KernelBranchDiffParams {
   rightRoot: string;
 }
 
+export interface KernelBranchObjectsParams {
+  branchId: string;
+  includeRevisions?: boolean;
+  cursor?: number;
+  pageSize?: number;
+}
+
 export interface KernelBranchDeleteParams {
   operationId: string;
   branchId: string;
@@ -537,6 +551,7 @@ export interface KernelBranchDeleteParams {
 export interface KernelPinReadParams {
   pinId: string;
   paths?: string[];
+  roots?: string[];
   includeEntries?: boolean;
   cursor?: number;
   pageSize?: number;
@@ -574,7 +589,10 @@ export interface KernelRecoveryTurnSettleParams {
   expectedRevision: number;
   status: string;
   observedResourceIds: string[];
+  unrecordedResourceIds: string[];
   observationComplete: boolean;
+  activeWriterScopes: string[];
+  provenance: string;
   assistantEntryId?: string;
   failureJson?: string;
 }
@@ -614,6 +632,13 @@ export interface KernelRecoveryChangeGetParams {
   workspaceId: string;
   checkpointId: string;
   path: string;
+}
+
+export interface KernelRecoveryChangeListParams {
+  workspaceId: string;
+  sessionId?: string;
+  executionId?: string;
+  entryIds?: string[];
 }
 
 export interface KernelRecoveryChangeAfterParams {
@@ -757,6 +782,11 @@ export interface KernelBranchReadResult {
   currentRoot: string;
   headRevision: number;
   writeRevision: number;
+  parentRef?: string;
+  draftBasePaths: string[];
+  captureScopes: string[];
+  createdAt: number;
+  updatedAt: number;
   entries: KernelEntry[];
   nextCursor?: number | null;
 }
@@ -870,6 +900,7 @@ export type KernelMethodParams = {
   "branch.pin": KernelBranchPinParams;
   "branch.unpin": KernelBranchUnpinParams;
   "branch.diff": KernelBranchDiffParams;
+  "branch.objects": KernelBranchObjectsParams;
   "branch.delete": KernelBranchDeleteParams;
   "pin.read": KernelPinReadParams;
   "recovery.operation.get": KernelRecoveryOperationGetParams;
@@ -881,6 +912,7 @@ export type KernelMethodParams = {
   "recovery.entry.resolve": KernelRecoveryEntryResolveParams;
   "recovery.change.before": KernelRecoveryChangeBeforeParams;
   "recovery.change.get": KernelRecoveryChangeGetParams;
+  "recovery.change.list": KernelRecoveryChangeListParams;
   "recovery.change.after": KernelRecoveryChangeAfterParams;
   "recovery.operation.create": KernelRecoveryOperationCreateParams;
   "recovery.operation.file.cas": KernelRecoveryOperationFileCasParams;
@@ -1284,6 +1316,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "branch.objects";
+      params: KernelBranchObjectsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "branch.delete";
       params: KernelBranchDeleteParams;
       epoch?: string;
@@ -1376,6 +1417,15 @@ export type KernelRequest =
       id: string;
       method: "recovery.change.get";
       params: KernelRecoveryChangeGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.change.list";
+      params: KernelRecoveryChangeListParams;
       epoch?: string;
       grantId?: string;
     }

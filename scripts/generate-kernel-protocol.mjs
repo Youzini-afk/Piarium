@@ -90,7 +90,8 @@ const renderRustDto = (name) => {
 const workingDocumentDto = {
   'working.result': 'KernelWorkingResultDocument',
   'working.draft': 'KernelWorkingDraftDocument',
-  'working.verification': 'KernelWorkingVerificationDocument',
+  'working.verification.child': 'KernelWorkingVerificationDocument',
+  'working.verification.parent': 'KernelWorkingVerificationDocument',
   'working.review': 'KernelWorkingReviewDocument',
 };
 const unformattedRust = `// Generated from kernel/protocol/schema.json. Do not hand-edit.\n#![allow(dead_code)]\n\nuse crate::model::PathState;\nuse serde::Deserialize;\nuse serde_json::Value;\n\n#[derive(Clone, Debug, Deserialize)]\n#[serde(transparent)]\npub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);\n\n${[...rustDtoNames].map(renderRustDto).join('\n\n')}\n\npub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {\n    match method {\n${Object.entries(methodParams).map(([method, paramsType]) => `        ${JSON.stringify(method)} => serde_json::from_value::<${paramsType}>(params.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n\npub(crate) fn validate_generated_working_document(record_type: &str, document: &Value) -> Result<(), String> {\n    match record_type {\n${Object.entries(workingDocumentDto).map(([recordType, dto]) => `        ${JSON.stringify(recordType)} => serde_json::from_value::<${dto}>(document.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n`;

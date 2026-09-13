@@ -210,8 +210,9 @@ pub(crate) struct KernelWorkingDraftPutParams {
     pub(crate) record_id: String,
     pub(crate) workspace_id: String,
     pub(crate) document: KernelWorkingDraftDocument,
-    pub(crate) root: Option<String>,
-    pub(crate) pin_id: Option<String>,
+    pub(crate) branch_id: String,
+    pub(crate) revision: i64,
+    pub(crate) root: String,
     pub(crate) created_at: String,
     pub(crate) expected_record_revision: Option<i64>,
     pub(crate) owner_ids: Vec<String>,
@@ -315,6 +316,9 @@ pub(crate) struct KernelCreateBranchBeginParams {
     pub(crate) branch_id: String,
     pub(crate) workspace_id: String,
     pub(crate) base_ref: Option<String>,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) draft_base_paths: Vec<String>,
+    pub(crate) capture_scopes: Vec<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -417,6 +421,15 @@ pub(crate) struct KernelBranchDiffParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchObjectsParams {
+    pub(crate) branch_id: String,
+    pub(crate) include_revisions: Option<bool>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelBranchDeleteParams {
     pub(crate) operation_id: String,
     pub(crate) branch_id: String,
@@ -427,6 +440,7 @@ pub(crate) struct KernelBranchDeleteParams {
 pub(crate) struct KernelPinReadParams {
     pub(crate) pin_id: String,
     pub(crate) paths: Option<Vec<String>>,
+    pub(crate) roots: Option<Vec<String>>,
     pub(crate) include_entries: Option<bool>,
     pub(crate) cursor: Option<i64>,
     pub(crate) page_size: Option<i64>,
@@ -471,7 +485,10 @@ pub(crate) struct KernelRecoveryTurnSettleParams {
     pub(crate) expected_revision: i64,
     pub(crate) status: String,
     pub(crate) observed_resource_ids: Vec<String>,
+    pub(crate) unrecorded_resource_ids: Vec<String>,
     pub(crate) observation_complete: bool,
+    pub(crate) active_writer_scopes: Vec<String>,
+    pub(crate) provenance: String,
     pub(crate) assistant_entry_id: Option<String>,
     pub(crate) failure_json: Option<String>,
 }
@@ -521,6 +538,15 @@ pub(crate) struct KernelRecoveryChangeGetParams {
     pub(crate) workspace_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryChangeListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) session_id: Option<String>,
+    pub(crate) execution_id: Option<String>,
+    pub(crate) entry_ids: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -649,9 +675,10 @@ pub(crate) struct KernelWorkingResultDocument {
 pub(crate) struct KernelWorkingDraftDocument {
     pub(crate) id: String,
     pub(crate) workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) revision: i64,
     pub(crate) created_at: String,
     pub(crate) root: String,
-    pub(crate) pin_id: Option<String>,
     pub(crate) provenance: Vec<KernelDraftProvenance>,
 }
 
@@ -983,6 +1010,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "branch.diff" => serde_json::from_value::<KernelBranchDiffParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "branch.objects" => serde_json::from_value::<KernelBranchObjectsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "branch.delete" => serde_json::from_value::<KernelBranchDeleteParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -1031,6 +1061,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "recovery.change.get" => {
             serde_json::from_value::<KernelRecoveryChangeGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.change.list" => {
+            serde_json::from_value::<KernelRecoveryChangeListParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
@@ -1090,7 +1125,12 @@ pub(crate) fn validate_generated_working_document(
         "working.draft" => serde_json::from_value::<KernelWorkingDraftDocument>(document.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "working.verification" => {
+        "working.verification.child" => {
+            serde_json::from_value::<KernelWorkingVerificationDocument>(document.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.verification.parent" => {
             serde_json::from_value::<KernelWorkingVerificationDocument>(document.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())

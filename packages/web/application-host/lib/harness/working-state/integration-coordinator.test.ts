@@ -4,15 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
+import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { initOperationFiles, openRecoveryJournalCatalog, updateOperationFilePhase, writeOperationRow } from "../../recovery/journal-catalog.js";
-import { createWorkspaceWorkingStateAccess, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state-root-adapter.test-helper.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
-import { applyDurableFileOperation, markDurableExternalDispatched, reconcileInterruptedBranchIntegrations } from "../../recovery/durable-file-operation.js";
+import { applyDurableFileOperation, markDurableExternalDispatched, reconcileInterruptedKernelBranchIntegrations } from "../../recovery/durable-file-operation.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
+import { createInMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
 
 const roots: string[] = [];
 const textHash = (text: string) => `sha256-${createHash("sha256").update(text).digest("hex")}`;
@@ -72,7 +73,7 @@ const createHarness = async (fileStore = createRecoveryFileStore()) => {
     sessionNavigation: navigation,
     resolveDirectoryApplyContext,
   });
-  const workingStates = createWorkspaceWorkingStateAccess(engine);
+  const workingStates = createTestWorkingStateRootAccess(engine);
   return {
     coordinator: new IntegrationCoordinator({ workingStates, resolveDirectoryApplyContext }),
     dataDir,
@@ -695,8 +696,8 @@ describe("IntegrationCoordinator", () => {
       const child = path.join(root, "child-documents-gate");
       await fs.promises.mkdir(child);
       await fs.promises.writeFile(path.join(child, "a.txt"), "child");
-      const workingStates = createWorkspaceWorkingStateAccess(engine);
-      const result = await workingStates.withStore(identity.workspaceId, "test-publish", async (store) => {
+      const workingStates = createTestWorkingStateRootAccess(engine);
+      const result = await workingStates.withBranchStore(identity.workspaceId, "test-publish", async (store) => {
         await store.createBranch(identity.workspaceId, "thread-gated", await store.captureDirectory(workspace), "base");
         return store.publishDirectoryResult("thread-gated", child);
       });
@@ -744,29 +745,15 @@ describe("IntegrationCoordinator", () => {
         const before = (await context.fileStore.captureState(context.identity, context.root, "a.txt", { store: true })).state;
         const object = await store.putObject(Buffer.from("target"));
         const target: RecoveryState = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(before.kind === "regular-file" && before.mode !== undefined ? { mode: before.mode } : {}) };
-        let operationWrites = 0;
-        const database = new Proxy(context.database, {
-          get(db, property) {
-            if (property === "prepare") return (sql: string) => {
-              const statement = db.prepare(sql);
-              if (!sql.includes("INSERT INTO operations")) return statement;
-              return new Proxy(statement, {
-                get(targetStatement, statementProperty) {
-                  if (statementProperty === "run") return (...args: unknown[]) => {
-                    operationWrites += 1;
-                    if (operationWrites === 2) throw new Error("injected final commit failure");
-                    return targetStatement.run(...args);
-                  };
-                  const value = Reflect.get(targetStatement, statementProperty);
-                  return typeof value === "function" ? value.bind(targetStatement) : value;
-                },
-              });
-            };
-            const value = Reflect.get(db, property);
-            return typeof value === "function" ? value.bind(db) : value;
+        const persisted = createInMemoryRecoveryDurablePort();
+        const durableRecoveryStore = {
+          ...persisted,
+          completeOperation: async (input: Parameters<typeof persisted.completeOperation>[0]) => {
+            if (input.state === "complete") throw new Error("injected final commit failure");
+            return persisted.completeOperation(input);
           },
-        });
-        return applyDurableFileOperation({ ...context, database }, {
+        };
+        return applyDurableFileOperation({ ...context, durableRecoveryStore }, {
           id: "final-commit-failure",
           workspaceId: "ws",
           threadId: "thread-1",
@@ -792,7 +779,7 @@ describe("IntegrationCoordinator", () => {
       await fs.promises.writeFile(path.join(child, "a.txt"), "child");
       const result = await prepareResult(h, child);
       let operationWrites = 0;
-      const flakyStates: WorkspaceWorkingStateAccess = {
+      const flakyStates: TestWorkspaceWorkingStateAccess = {
         withStore: (workspaceId, purpose, operation, mode) => (
           h.workingStates.withStore(workspaceId, purpose, (store, context) => {
             const database = new Proxy(context.database, {
@@ -820,7 +807,7 @@ describe("IntegrationCoordinator", () => {
           }, mode)
         ),
       };
-      const flakyCoordinator = new IntegrationCoordinator({ workingStates: flakyStates });
+      const flakyCoordinator = new IntegrationCoordinator({ workingStates: asTestWorkingStateRootAccess(flakyStates) });
       await expect(flakyCoordinator.mergeResult({ workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision })).rejects.toThrow("compensation status could not be persisted");
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("base");
 
@@ -930,7 +917,8 @@ describe("IntegrationCoordinator", () => {
         };
         const surfaceBefore: RecoveryState = { kind: "regular-file", objectHash: surfaceBeforeObject.hash, byteLength: surfaceBeforeObject.byteLength };
         const surfaceTarget: RecoveryState = { kind: "regular-file", objectHash: surfaceTargetObject.hash, byteLength: surfaceTargetObject.byteLength };
-        const pending = await applyDurableFileOperation(context, {
+        const durableContext = { ...context, durableRecoveryStore: createInMemoryRecoveryDurablePort() };
+        const pending = await applyDurableFileOperation(durableContext, {
           id: "crashed-surface-integration", workspaceId: "ws", threadId: "thread-surface-crash", resultRevision: 1,
           targets: { "disk.txt": { expected: before, target: diskTarget } },
           externalTargets: { "surface.txt": { expected: surfaceBefore, target: surfaceTarget } },
@@ -942,7 +930,7 @@ describe("IntegrationCoordinator", () => {
           conflictPaths: [], diffStats: { files: 2, insertions: 2, deletions: 0 },
         });
         expect(pending.status).toBe("pending");
-        markDurableExternalDispatched(context, pending.operationId, ["surface.txt"]);
+        await markDurableExternalDispatched(durableContext, pending.operationId, ["surface.txt"]);
       });
       await h.engine.dispose();
       const restarted = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir: h.dataDir, documents: h.documents, sessionNavigation: h.navigation });
@@ -1617,10 +1605,11 @@ describe("IntegrationCoordinator", () => {
         sessionNavigation: h.navigation,
       });
       await restarted.fenceUnfinishedOperations();
-      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
-      await restartedStates.withStore("ws", "reconcile-crashed-branch", (store, context) => (
-        reconcileInterruptedBranchIntegrations(context, store)
-      ));
+      const restartedStates = createTestWorkingStateRootAccess(restarted);
+      await restartedStates.withBranchStore("ws", "reconcile-crashed-branch", (store, context) => {
+        if (!context?.durableRecoveryStore) throw new Error("durable recovery storage missing");
+        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
+      });
       await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-reconciled-branch", create: false }, ({ database }) => {
         expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(operationId)).toEqual({ state: "complete" });
       });
@@ -1842,10 +1831,11 @@ describe("IntegrationCoordinator", () => {
       });
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
-      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
-      await restartedStates.withStore("ws", "reconcile-materialized-undo-branch", (store, context) => (
-        reconcileInterruptedBranchIntegrations(context, store)
-      ));
+      const restartedStates = createTestWorkingStateRootAccess(restarted);
+      await restartedStates.withBranchStore("ws", "reconcile-materialized-undo-branch", (store, context) => {
+        if (!context?.durableRecoveryStore) throw new Error("durable recovery storage missing");
+        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
+      });
       const branchBytes = await restartedStates.withStore("ws", "inspect-materialized-undo-branch", async (store) => {
         const state = store.effectiveState("thread-parent-crash")?.["a.txt"];
         return state?.kind === "regular-file" ? store.getObject(state.objectHash) : null;

@@ -6,6 +6,7 @@ import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 import { listBranchTextFiles, listBranchView, readBranchFile } from "./branch-view.js";
 import { WorkingStateStore } from "./working-state-store.js";
+import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-helper.js";
 
 const roots: string[] = [];
 
@@ -32,7 +33,7 @@ const harness = async () => {
     root,
   };
   const store = await WorkingStateStore.open(context);
-  return { context, database, store, workspace };
+  return { context, database, store, rootStore: asTestWorkingStateRootStore(store, context), workspace };
 };
 
 afterEach(async () => {
@@ -70,22 +71,22 @@ describe("WorkingState branch view", () => {
       ]));
       expect(listed.some((entry) => entry.path === "deleted.txt")).toBe(false);
 
-      const kept = await readBranchFile(h.store, "thread-1", "kept.txt");
+      const kept = await readBranchFile(h.rootStore, "thread-1", "kept.txt");
       if ("bytes" in kept) {
         expect(kept.bytes.toString("utf8")).toBe("baseline kept\n");
         expect(kept.origin).toBe("base");
       } else {
         throw new Error("kept.txt should remain the fixed base");
       }
-      const changedFile = await readBranchFile(h.store, "thread-1", "changed.txt");
+      const changedFile = await readBranchFile(h.rootStore, "thread-1", "changed.txt");
       if ("bytes" in changedFile) {
         expect(changedFile.bytes.toString("utf8")).toBe("delta changed\n");
         expect(changedFile.origin).toBe("delta");
       } else {
         throw new Error("changed.txt should read the delta");
       }
-      await expect(readBranchFile(h.store, "thread-1", "deleted.txt")).resolves.toMatchObject({ missing: true, origin: "delta" });
-      const texts = await listBranchTextFiles(h.store, "thread-1", [""]);
+      await expect(readBranchFile(h.rootStore, "thread-1", "deleted.txt")).resolves.toMatchObject({ missing: true, origin: "delta" });
+      const texts = await listBranchTextFiles(h.rootStore, "thread-1", [""]);
       expect(texts.map((file) => file.path)).not.toContain("deleted.txt");
       expect(texts.find((file) => file.path === "kept.txt")?.text).toBe("baseline kept\n");
     } finally {
@@ -103,9 +104,9 @@ describe("WorkingState branch view", () => {
         "added.ts": { kind: "regular-file", objectHash: added.hash, byteLength: added.byteLength },
       });
       expect(h.store.getBranch("thread-1")?.headRevision).toBe(0);
-      const file = await readBranchFile(h.store, "thread-1", "added.ts");
+      const file = await readBranchFile(h.rootStore, "thread-1", "added.ts");
       expect(file).toMatchObject({ revision: "working-branch:thread-1@1:delta" });
-      const texts = await listBranchTextFiles(h.store, "thread-1", [""]);
+      const texts = await listBranchTextFiles(h.rootStore, "thread-1", [""]);
       expect(texts.find((entry) => entry.path === "added.ts")?.revision).toBe("working-branch:thread-1@1:delta");
     } finally {
       h.database.close();
@@ -123,7 +124,7 @@ describe("WorkingState branch view", () => {
       });
       expect(listBranchView(h.store.effectiveState("thread-1")!, "", { branchId: "thread-1", revision: 1 })
         .some((entry) => entry.path === "src" || entry.path.startsWith("src/"))).toBe(false);
-      await expect(readBranchFile(h.store, "thread-1", "src/nested.ts")).resolves.toMatchObject({ missing: true });
+      await expect(readBranchFile(h.rootStore, "thread-1", "src/nested.ts")).resolves.toMatchObject({ missing: true });
     } finally {
       h.database.close();
     }

@@ -18,9 +18,14 @@ import type {
   RecoveryIdentity,
   RecoveryState,
 } from "../recovery/journal-files.js";
-import { createRecoveryFileStore, sameState } from "../recovery/journal-files.js";
+import { createRecoveryFileStore, normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
 import { objectPath } from "../recovery/object-path.js";
-import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
+import type {
+  DurableRecoveryChangeSelection,
+  WorkspaceRecoveryEngine,
+  WorkspaceRecoveryStorageContext,
+} from "../recovery/journal-engine.js";
+import type { HostResourceOperationGate, ResolveDirectoryApplyContext } from "../recovery/durable-file-operation.js";
 import type { KernelStorageAdapter, KernelStorageReference } from "./storage-adapter.js";
 
 const asObject = (value: unknown): Record<string, unknown> => (
@@ -222,7 +227,7 @@ export class KernelRecoveryStore {
       workspaceId,
       maintenance ? "recovery-maintenance" : "recovery-actor",
       maintenance
-        ? { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance", "storage.gc"] }
+        ? { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"] }
         : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, ...(sessionId ? { sessionId } : {}), pathScopes: [""] },
     );
   }
@@ -260,6 +265,7 @@ export class KernelRecoveryStore {
       workerId: String(payload.workerId),
       workspaceId: String(payload.workspaceId),
       ...(typeof payload.assistantEntryId === "string" ? { assistantEntryId: payload.assistantEntryId } : {}),
+      ...(payload.failure && typeof payload.failure === "object" ? { failure: payload.failure as NonNullable<WorkspaceRecoveryTurnBinding["failure"]> } : {}),
       ...(typeof payload.settledAt === "string" ? { settledAt: payload.settledAt } : {}),
     };
   }
@@ -348,8 +354,8 @@ export class KernelRecoveryStore {
       ? [{ slot: "before", objectHash: captured.state.objectHash, ...(ownerId ? { ownerId } : {}) }]
       : [];
     try {
-      await context.client.recoveryChangeBefore({
-        operationId: `recovery-before:${input.executionId}:${captured.path}`,
+      const result = await context.client.recoveryChangeBefore({
+        operationId: `recovery-before:${input.executionId}:${input.mutationId}:${captured.path}`,
         workspaceId: input.workspaceId,
         sessionId: turn.sessionId,
         executionId: input.executionId,
@@ -360,6 +366,7 @@ export class KernelRecoveryStore {
         beforeJson: JSON.stringify(captured.state),
         references,
       });
+      if (ownerId && result.existing === true) await context.client.releaseBlob(ownerId).catch(() => undefined);
     } catch (error) {
       if (ownerId) await context.client.releaseBlob(ownerId).catch(() => undefined);
       if (ownerId) this.content.consumeOwner(ownerId);
@@ -399,7 +406,7 @@ export class KernelRecoveryStore {
       return false;
     }
     const before = asObject(prior.before) as unknown as RecoveryState;
-    const operationId = `recovery-after:${input.executionId}:${captured.path}`;
+    const operationId = `recovery-after:${input.executionId}:${input.mutationId}:${captured.path}`;
     if (sameState(before, captured.state)) {
       await context.client.recoveryChangeAfter({
         operationId,
@@ -453,18 +460,95 @@ export class KernelRecoveryStore {
     const row = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
     if (!row || typeof row.sessionId !== "string") throw new Error("checkpoint-missing");
     const context = await this.context(input.workspaceId, row.sessionId);
+    const listed = await context.client.recoveryChangeList({
+      workspaceId: input.workspaceId,
+      executionId: input.executionId,
+      sessionId: row.sessionId,
+    });
+    const changes = Array.isArray(listed.changes) ? listed.changes : [];
+    const recorded = changes.flatMap((value) => {
+      const item = asObject(value);
+      return typeof item.path === "string" ? [normalizeResourceId(item.path)] : [];
+    });
+    const comparison = (value: string): string => process.platform === "win32" ? value.toLowerCase() : value;
+    const recordedKeys = new Set(recorded.map(comparison));
+    const observed = [...new Set(input.observedResourceIds
+      .map(normalizeResourceId)
+      .filter((value): value is string => Boolean(value) && !/\.piarium-(?:tmp|restore|recovery)-/u.test(value)))].sort();
+    const unrecorded = observed.filter((value) => !recordedKeys.has(comparison(value)));
+    const retainedFailure = row.status === "incomplete" && row.failure && typeof row.failure === "object"
+      ? row.failure as Record<string, unknown>
+      : undefined;
+    const exact = !input.failure
+      && !retainedFailure
+      && (!input.mutationObserved || input.observationComplete)
+      && unrecorded.length === 0
+      && !(input.mutationObserved && recorded.length === 0 && observed.length === 0);
+    const failure = input.failure ?? retainedFailure ?? (exact ? undefined : {
+      code: "checkpoint-incomplete",
+      message: unrecorded.length > 0
+        ? `Some changed paths were not captured before mutation: ${unrecorded.join(", ")}`
+        : "Workspace activity was observed outside the exact write/edit journal",
+      origin: "coverage",
+      retryable: false,
+      ...(unrecorded.length > 0 ? { details: { paths: unrecorded } } : {}),
+    });
     const settled = await context.client.recoveryTurnSettle({
       operationId: `recovery-settle:${input.executionId}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
       expectedRevision: Number(row.revision),
-      status: input.failure || !input.observationComplete ? "incomplete" : "ready",
-      observedResourceIds: [...new Set(input.observedResourceIds)],
+      status: exact ? "ready" : "incomplete",
+      observedResourceIds: observed,
+      unrecordedResourceIds: unrecorded,
       observationComplete: input.observationComplete,
+      activeWriterScopes: [...input.activeWriterScopes],
+      provenance: input.provenance,
       ...(input.assistantEntryId ? { assistantEntryId: input.assistantEntryId } : {}),
-      ...(input.failure ? { failureJson: JSON.stringify(input.failure) } : {}),
+      ...(failure ? { failureJson: JSON.stringify(failure) } : {}),
     });
     return this.turn(settled);
+  }
+
+  async listChanges(input: {
+    workspaceId: string;
+    sessionId?: string;
+    executionId?: string;
+    entryIds?: string[];
+  }): Promise<DurableRecoveryChangeSelection> {
+    const context = await this.context(input.workspaceId, undefined, true);
+    const raw = await context.client.recoveryChangeList(input);
+    const changes = (Array.isArray(raw.changes) ? raw.changes : []).map((value) => {
+      const item = asObject(value);
+      const before = parseRecoveryState(item.before);
+      const after = parseRecoveryState(item.after);
+      const recordId = `change:${String(item.checkpointId)}:${String(item.path)}`;
+      if (before.kind === "regular-file") this.content.registerRecord(input.workspaceId, recordId, { slot: "before", objectHash: before.objectHash });
+      if (after.kind === "regular-file") this.content.registerRecord(input.workspaceId, recordId, { slot: "after", objectHash: after.objectHash });
+      return {
+        after,
+        before,
+        checkpointId: String(item.checkpointId),
+        executionId: String(item.executionId),
+        mutationId: String(item.mutationId),
+        path: String(item.path),
+        sequence: Number(item.sequence),
+        toolName: String(item.toolName),
+      };
+    });
+    const turns = (Array.isArray(raw.turns) ? raw.turns : []).map((value) => {
+      const item = asObject(value);
+      return {
+        activeWriterScopes: Array.isArray(item.activeWriterScopes) ? item.activeWriterScopes as string[] : [],
+        checkpointId: String(item.checkpointId),
+        executionId: String(item.executionId),
+        sequence: Number(item.sequence),
+        status: String(item.status),
+        unrecordedResourceIds: Array.isArray(item.unrecordedResourceIds) ? item.unrecordedResourceIds as string[] : [],
+        ...(item.failure && typeof item.failure === "object" ? { failure: item.failure as Record<string, unknown> } : {}),
+      };
+    });
+    return { changes, turns };
   }
 
   private stateReferences(
@@ -504,8 +588,7 @@ export class KernelRecoveryStore {
     runId?: string;
     surfacePaths?: readonly string[];
   }): Promise<Record<string, unknown>> {
-    const maintenance = !input.sessionId && !input.threadId && !input.runId;
-    const context = await this.context(input.workspaceId, input.sessionId, maintenance);
+    const context = await this.context(input.workspaceId, undefined, true);
     const surfacePaths = new Set(input.surfacePaths ?? []);
     const files = Object.entries(input.targets).map(([filePath, states]) => ({
       path: filePath,
@@ -548,7 +631,7 @@ export class KernelRecoveryStore {
     safety?: RecoveryState;
     sessionId?: string;
   }): Promise<Record<string, unknown>> {
-    const context = await this.context(input.workspaceId, input.sessionId, !input.sessionId);
+    const context = await this.context(input.workspaceId, undefined, true);
     const current = await context.client.recoveryOperationGet({
       workspaceId: input.workspaceId,
       operationId: input.operationId,
@@ -598,7 +681,7 @@ export class KernelRecoveryStore {
     failure?: Record<string, unknown>;
     sessionId?: string;
   }): Promise<Record<string, unknown>> {
-    const context = await this.context(input.workspaceId, input.sessionId, !input.sessionId);
+    const context = await this.context(input.workspaceId, undefined, true);
     return context.client.recoveryOperationComplete({
       transitionId: `recovery-complete:${input.operationId}:${input.expectedRevision}:${input.state}`,
       operationId: input.operationId,
@@ -610,9 +693,28 @@ export class KernelRecoveryStore {
     });
   }
 
+  private registerOperationSources(workspaceId: string, operation: Record<string, unknown>): void {
+    const operationId = typeof operation.operationId === "string" ? operation.operationId : "";
+    if (!operationId || !Array.isArray(operation.files)) return;
+    for (const value of operation.files) {
+      const file = asObject(value);
+      if (typeof file.path !== "string") continue;
+      const recordId = `operation-file:${operationId}:${file.path}`;
+      for (const [field, name] of [["expectedJson", "expected"], ["targetJson", "target"], ["safetyJson", "safety"]] as const) {
+        if (typeof file[field] !== "string") continue;
+        const state = parseRecoveryState(JSON.parse(file[field] as string) as unknown);
+        if (state.kind === "regular-file") {
+          this.content.registerRecord(workspaceId, recordId, { slot: `${file.path}.${name}`, objectHash: state.objectHash });
+        }
+      }
+    }
+  }
+
   async getOperation(workspaceId: string, operationId: string, sessionId?: string): Promise<Record<string, unknown> | null> {
-    const context = await this.context(workspaceId, sessionId, !sessionId);
-    return context.client.recoveryOperationGet({ workspaceId, operationId });
+    const context = await this.context(workspaceId, undefined, true);
+    const operation = await context.client.recoveryOperationGet({ workspaceId, operationId });
+    if (operation) this.registerOperationSources(workspaceId, operation);
+    return operation;
   }
 
   async listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]> {
@@ -642,18 +744,53 @@ export class KernelRecoveryStore {
       workspaceId,
     });
   }
+
+  async workspaceStorageContext(
+    workspaceId: string,
+    options: {
+      resourceOperationGate?: HostResourceOperationGate;
+      resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
+    } = {},
+  ): Promise<WorkspaceRecoveryStorageContext> {
+    const context = await this.adapter.context(workspaceId, "recovery-maintenance", {
+      owningWorkspace: workspaceId,
+      executionWorkspace: workspaceId,
+      pathScopes: [""],
+      capabilities: ["recovery.maintenance"],
+    });
+    return {
+      fileStore: context.fileStore,
+      identity: context.identity,
+      resourceOperationGate: options.resourceOperationGate ?? context.resourceOperationGate,
+      root: context.root,
+      ...(context.collectUnreachableObjects ? { collectUnreachableObjects: context.collectUnreachableObjects } : {}),
+      durableRecoveryStore: this,
+      ...(options.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: options.resolveDirectoryApplyContext } : {}),
+      records: context.records,
+    } as unknown as WorkspaceRecoveryStorageContext;
+  }
+
+  health() {
+    return this.adapter.client.health();
+  }
 }
 
 export const createKernelRecoveryDirectFacade = (
   base: WorkspaceRecoveryEngine,
   store: KernelRecoveryStore,
+  options: {
+    authorityId?: string;
+    listWorkspaceRegistrations?: () => Promise<Array<{ canonicalPath: string; workspaceId: string }>>;
+    resourceOperationGateFor?: (workspaceId: string) => HostResourceOperationGate;
+    resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
+  } = {},
 ): WorkspaceRecoveryEngine => {
   const facade = { ...base } as WorkspaceRecoveryEngine;
-  const withWorkspaceStorage = base.withWorkspaceStorage.bind(base);
-  facade.withWorkspaceStorage = (workspaceId, options, operation) => withWorkspaceStorage(
-    workspaceId,
-    options,
-    (context) => operation({ ...context, durableRecoveryStore: store }),
+  facade.withWorkspaceStorage = async (workspaceId, _accessOptions, operation) => operation(
+    await store.workspaceStorageContext(workspaceId, {
+      ...(options.resourceOperationGateFor ? { resourceOperationGate: options.resourceOperationGateFor(workspaceId) } : {}),
+      ...(options.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: options.resolveDirectoryApplyContext } : {}),
+    }),
   );
   facade.recordTurnStart = async (input) => ({ binding: await store.recordTurnStart(input), status: "ready" });
   facade.recordMutationBefore = async (input) => ({ recorded: await store.recordMutationBefore(input), status: "ready" });
@@ -678,5 +815,128 @@ export const createKernelRecoveryDirectFacade = (
     };
   };
   facade.resolveEntry = (input) => store.resolveEntry(input);
+  const unavailable = (message: string) => ({
+    status: "failed" as const,
+    failure: { code: "unavailable" as const, message, origin: "storage" as const, retryable: false },
+  });
+  const storageStatus = async (workspaceId?: string) => {
+    const [health, checkpoints] = await Promise.all([
+      store.health(),
+      workspaceId ? store.listCheckpoints(workspaceId) : Promise.resolve([]),
+    ]);
+    const authorityId = options.authorityId
+      ?? (workspaceId ? (await store.workspaceStorageContext(workspaceId)).identity.authorityId : "kernel");
+    return {
+      authorityId,
+      byteLength: Number(health.catalogBytes ?? 0) + Number(health.walBytes ?? 0),
+      catalog: { currentSchemaVersion: 1, retiredCatalogCount: 0, state: "ready" as const },
+      checkpointCount: checkpoints.length,
+      encryption: { available: false, enabled: false },
+      location: { mode: "application-data" as const },
+      locationSource: "global" as const,
+      objectCount: Number(health.blobs ?? 0),
+      readyCheckpointCount: checkpoints.filter((checkpoint) => checkpoint.state === "ready").length,
+      registryRevision: 1,
+      state: "ready" as const,
+      ...(workspaceId ? { workspaceId } : {}),
+    };
+  };
+  facade.storageStatus = async (workspaceId) => ({ status: "ready", storage: await storageStatus(workspaceId) });
+  facade.listStorageWorkspaces = async () => {
+    const registrations = await options.listWorkspaceRegistrations?.() ?? [];
+    const workspaces = await Promise.all(registrations.map(async (registration) => {
+      const storage = await storageStatus(registration.workspaceId);
+      const operations = await store.listOperations(registration.workspaceId);
+      const lastActivityAt = operations.map((operation) => operation.updatedAt)
+        .filter((value): value is string => typeof value === "string")
+        .sort()
+        .at(-1) ?? null;
+      return {
+        byteLength: storage.byteLength,
+        canonicalRoot: registration.canonicalPath,
+        catalog: storage.catalog,
+        checkpointCount: storage.checkpointCount,
+        lastActivityAt,
+        location: storage.location,
+        locationSource: storage.locationSource,
+        migrationRequired: false,
+        objectCount: storage.objectCount,
+        state: storage.state,
+        storageAvailable: true,
+        workspaceAvailable: true,
+        workspaceId: registration.workspaceId,
+      };
+    }));
+    return { status: "ready", workspaces };
+  };
+  facade.retentionStatus = async (workspaceId) => ({
+    status: "ready",
+    retention: {
+      eligibleCheckpointCount: 0,
+      lastRunAt: null,
+      oldestProtectedOperationAt: null,
+      policy: { maxAgeDays: null, maxByteLength: null, maxCheckpointCount: null, maxOperationCount: null },
+      protectedCheckpointCount: (await store.listCheckpoints(workspaceId)).length,
+      protectedOperationCount: (await store.listOperations(workspaceId)).length,
+      retainedByteLength: 0,
+      terminalOperationCount: (await store.listOperations(workspaceId)).filter((operation) => ["complete", "aborted", "compensated", "undone"].includes(String(operation.state))).length,
+      workspaceId,
+    },
+  });
+  facade.setRetentionPolicy = async () => unavailable("Recovery retention policy is owned by the Rust kernel and is not configurable");
+  facade.setDefaultStorageLocation = async () => unavailable("Rust recovery storage is fixed to the Application Host kernel data directory");
+  facade.setStorageLocation = async () => unavailable("Rust recovery storage cannot be moved independently of kernel storage");
+  facade.clearStorageLocationOverride = async () => unavailable("Rust recovery storage has no workspace location override");
+  facade.getStorageMove = async () => unavailable("Rust recovery storage does not create standalone move operations");
+  facade.cleanupStorage = async (input) => {
+    const context = await store.workspaceStorageContext(input.workspaceId);
+    const collected = await context.collectUnreachableObjects?.() ?? { byteLengthReclaimed: 0, objectsDeleted: 0 };
+    return {
+      status: "ready",
+      result: {
+        byteLengthReclaimed: collected.byteLengthReclaimed,
+        failures: [],
+        objectsDeleted: collected.objectsDeleted,
+        operationId: `kernel-recovery-gc:${input.workspaceId}:${randomUUID()}`,
+        recordsDeleted: 0,
+        status: "complete",
+        workspaceId: input.workspaceId,
+      },
+    };
+  };
+  facade.deleteWorkspaceHistory = async () => unavailable("Deleting typed Rust recovery history is not available");
+  facade.status = async (workspaceId) => {
+    const context = await store.workspaceStorageContext(workspaceId);
+    const attention = (await store.listOperations(workspaceId, "agent-mutation"))
+      .filter((operation) => operation.state === "needs-attention");
+    const retention = await facade.retentionStatus(workspaceId);
+    if (retention.status !== "ready") return retention;
+    return {
+      status: "ready",
+      capabilities: {
+        bindings: true,
+        catalogLifecycle: true,
+        checkpoints: true,
+        combined: true,
+        conflictConfirmation: true,
+        dirtyStateBarrier: true,
+        journal: true,
+        redo: true,
+        retention: false,
+        storageManagement: false,
+        workspaceLease: false,
+      },
+      failures: attention.map((operation) => ({
+        code: "needs-attention" as const,
+        message: `Agent surface mutation ${String(operation.operationId)} requires attention`,
+        operationId: String(operation.operationId),
+        origin: "storage" as const,
+        retryable: false,
+      })),
+      identity: context.identity,
+      retention: retention.retention,
+      storage: await storageStatus(workspaceId),
+    } as never;
+  };
   return facade;
 };

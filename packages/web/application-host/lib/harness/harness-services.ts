@@ -456,6 +456,7 @@ export function createDocumentSurfaceWriteService(
       }));
       return host.documentSurfaceWrite(
         ctx.sessionId,
+        ctx.authorizedPaths[0]!.workspaceId,
         ctx.inputContext ?? { source: "disk" },
         mapped,
         ctx.signal,

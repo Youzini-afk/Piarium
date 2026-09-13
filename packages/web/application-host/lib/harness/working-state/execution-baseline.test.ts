@@ -20,7 +20,7 @@ import { IntegrationCoordinator } from "./integration-coordinator.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchWriteServices } from "./working-branch-writes.js";
 import { VirtualWriteGate } from "./virtual-write-gate.js";
-import { createWorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
@@ -69,7 +69,7 @@ async function fixture() {
   const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
   const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
   if (!database) throw new Error("catalog missing");
-  const workingStates = createWorkspaceWorkingStateAccess({
+  const workingStates = createTestWorkingStateRootAccess({
     withWorkspaceStorage: async (_workspaceId, _options, operation) => operation({
       database,
       fileStore: createRecoveryFileStore(),
@@ -352,7 +352,9 @@ describe("execution Git baseline production chain", () => {
       viewMode: "virtual",
       materialized: false,
       materializationSwitch: {
+        revision: 0,
         writeRevision: 1,
+        root: "sha256-crash-root",
         stagingPath: staging,
         backupPath: backup,
         stage: "staging-promoted",

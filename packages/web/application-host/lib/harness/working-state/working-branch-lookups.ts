@@ -4,8 +4,7 @@ import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";
 import { listBranchTextFiles, listBranchViewFromStore, readBranchFile } from "./branch-view.js";
 import type { ThreadExecutionViewRegistry } from "./execution-view.js";
-import { withWorkingStateRootStore, type CompatibleWorkingStateAccess } from "./working-state-root-adapter.js";
-import type { WorkingStateRootStore } from "./types.js";
+import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./types.js";
 
 export interface WorkingBranchLookups {
   readSource(sessionId: string, resourceId: string): Promise<HarnessDocumentReadLookup | null>;
@@ -45,7 +44,7 @@ const provenanceFor = (
 
 export function createWorkingBranchLookups(options: {
   views: ThreadExecutionViewRegistry;
-  workingStates: CompatibleWorkingStateAccess;
+  workingStates: WorkspaceWorkingStateRootAccess;
 }): WorkingBranchLookups {
   const withView = async <T>(
     sessionId: string,
@@ -53,8 +52,7 @@ export function createWorkingBranchLookups(options: {
   ): Promise<T | null> => {
     const bound = options.views.get(sessionId);
     if (!bound || bound.mode === "materialized") return null;
-    return withWorkingStateRootStore(
-      options.workingStates,
+    return options.workingStates.withBranchStore(
       bound.workspaceId,
       "working-branch-view",
       async (store): Promise<T | null> => {
@@ -169,6 +167,7 @@ export function createWorkingBranchLookups(options: {
           pinId: pin.pinId,
           branchId: pin.branchId,
           workspaceId: pin.workspaceId,
+          view: pin.view,
           revision: pin.revision,
           writeRevision: pin.writeRevision,
           root: pin.root,

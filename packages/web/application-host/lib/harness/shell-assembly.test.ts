@@ -9,8 +9,7 @@ import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-a
 import { discoverShells } from "./shell-discovery.js";
 import { createHarnessServiceHost } from "./service-host.js";
 import { createVerificationCoordinator } from "./verification-coordinator.js";
-import type { ResultVerificationBundle } from "./working-state/types.js";
-import type { WorkingStateStore } from "./working-state/working-state-store.js";
+import type { ResultVerificationBundle, WorkingStateRootStore } from "./working-state/types.js";
 
 const actor = (sessionId: string): HarnessActorIdentity => ({
   authorityInstanceId: "authority-1",
@@ -287,9 +286,10 @@ describe("production shell assembly", () => {
       getChildVerification: () => child,
       listChildVerifications: () => child ? [child] : [],
       getParentVerification: () => null,
+      listParentVerifications: () => [],
       getReviewRecord: () => null,
       listReviewRecords: () => [],
-    } as unknown as WorkingStateStore;
+    } as unknown as WorkingStateRootStore;
     const projection = await host.verification.bindPublishedResult(store, {
       workspaceId: "ws-verification", threadId: "thread-1", runId: "run-1", branchId: "thread-1",
       resultRevision: 1, worktreePath: workspace,

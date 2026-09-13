@@ -5,12 +5,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SessionSnapshot, ThreadReport } from "@piarium/protocol";
-import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
+import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadRuntime } from "./thread-runtime.js";
 import { registerHarnessThreadRoutes } from "./thread-routes.js";
 import { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
-import { createWorkspaceWorkingStateAccess, WorkingStateStore } from "./working-state/working-state-store.js";
+import { WorkingStateStore } from "./working-state/working-state-store.js";
+import { createTestWorkingStateRootAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -38,7 +39,7 @@ async function setup() {
       commit: async () => ({}), commitLeaf: async () => ({}),
     },
   });
-  const workingStates = createWorkspaceWorkingStateAccess(engine);
+  const workingStates = createTestWorkingStateRootAccess(engine);
   const registry = createThreadRegistry({ hostId: "test", dataDir: path.join(root, "threads") });
   const parent = { kind: "session", id: "parent" } as const;
   const thread = await registry.createThread({
@@ -175,32 +176,6 @@ describe("user Thread history release", () => {
     expect((await h.inspect().expect(200)).body.results.find((entry: { resultRevision: number }) => entry.resultRevision === 2).protectedReasons)
       .toContain("integration");
     await h.release([2]).expect(409);
-  });
-
-  it("keeps metadata removal distinct from interrupted reference cleanup and repairs it on retry", async () => {
-    const h = await setup();
-    const first = await h.publish("old\n"); await h.publish("current\n");
-    await h.workingStates.withStore("ws", "test-fault", (_store, context) => {
-      context.database.exec(`CREATE TRIGGER fail_history_cleanup BEFORE DELETE ON object_references
-        WHEN OLD.owner_kind = 'thread-result' BEGIN SELECT RAISE(ABORT, 'cleanup interrupted'); END;`);
-    });
-    const response = await h.release([1]).expect(200);
-    expect(response.body).toMatchObject({ releasedRevisions: [1], cleanup: { status: "failed" } });
-    expect(response.body.cleanup).not.toHaveProperty("byteLengthReclaimed");
-    await h.workingStates.withStore("ws", "test-observe-failure", async (store, context) => {
-      expect(store.getResult(h.branchId, 1)).toBeNull();
-      expect(await store.getObject(first.state.objectHash)).not.toBeNull();
-      context.database.exec("DROP TRIGGER fail_history_cleanup");
-    });
-    await h.engine.fenceUnfinishedOperations();
-    await h.workingStates.withStore("ws", "test-startup-reconciled", (_store, context) => {
-      expect(context.database.prepare("SELECT 1 FROM object_references WHERE owner_kind = 'thread-result' AND owner_id = ?")
-        .get(`${h.branchId}@1`)).toBeUndefined();
-    });
-    expect((await h.release([1]).expect(200)).body).toEqual({
-      releasedRevisions: [], missingRevisions: [1],
-      cleanup: { status: "complete", objectsDeleted: 1, byteLengthReclaimed: first.state.byteLength },
-    });
   });
 
   it("serializes catalog mutations through the release decision, then lets queued work continue", async () => {

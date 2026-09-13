@@ -101,7 +101,7 @@ impl Storage {
             Ok(())
         };
         let mut branches = self.conn.prepare(
-            "SELECT branch_id, workspace_id, base_root, head_root, head_revision FROM branches",
+            "SELECT branch_id, workspace_id, base_root, head_root, head_revision, parent_ref, draft_base_paths_json, capture_scopes_json FROM branches",
         )?;
         for row in branches.query_map([], |row| {
             Ok((
@@ -110,9 +110,52 @@ impl Storage {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, i64>(4)?,
+                row.get::<_, Option<String>>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })? {
-            let (branch_id, _workspace, base_root, head_root, head_revision) = row?;
+            let (
+                branch_id,
+                _workspace,
+                base_root,
+                head_root,
+                head_revision,
+                parent_ref,
+                draft_base_paths_json,
+                capture_scopes_json,
+            ) = row?;
+            if parent_ref.as_deref().is_some_and(str::is_empty) {
+                errors.push(format!("branch parent identity is empty: {branch_id}"));
+            }
+            for (label, raw) in [
+                ("draftBasePaths", draft_base_paths_json),
+                ("captureScopes", capture_scopes_json),
+            ] {
+                match serde_json::from_str::<Vec<String>>(&raw) {
+                    Ok(paths) => {
+                        let mut canonical = Vec::with_capacity(paths.len());
+                        for path in &paths {
+                            match Self::validate_path(path) {
+                                Ok(segments) => canonical.push(segments.join("/")),
+                                Err(error) => errors.push(format!(
+                                    "branch {label} contains an invalid path ({branch_id}/{path}): {error}"
+                                )),
+                            }
+                        }
+                        canonical.sort();
+                        canonical.dedup();
+                        if canonical != paths {
+                            errors.push(format!(
+                                "branch {label} is not canonical and unique: {branch_id}"
+                            ));
+                        }
+                    }
+                    Err(error) => errors.push(format!(
+                        "branch {label} metadata is corrupt ({branch_id}): {error}"
+                    )),
+                }
+            }
             if self
                 .conn
                 .query_row(

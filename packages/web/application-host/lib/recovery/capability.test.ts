@@ -8,9 +8,9 @@ import {
 } from '../documents/contract-fixtures.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
 import {
-  createWorkspaceRecoveryEngine,
+  createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine,
   type RecoverySessionNavigation,
-} from './engine.js';
+} from './local-sqlite-recovery-engine.test-helper.js';
 
 let harness: DocumentAuthorityHarness | undefined;
 
@@ -54,7 +54,7 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       documents: harness.authority,
       sessionNavigation: navigation,
     });
-    const capability = createWorkspaceRecoveryCapabilityHandler(engine);
+    const capability = createWorkspaceRecoveryCapabilityHandler(engine as never);
     const created = await capability('createCheckpoint', {
       name: 'Before refactor',
       workspaceId: harness.identity.workspaceId,

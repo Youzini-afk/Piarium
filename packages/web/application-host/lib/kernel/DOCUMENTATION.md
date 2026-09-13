@@ -18,9 +18,9 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Unsaved editor buffers and grouped undo | Document Registry | remains Registry; surface receipts are not kernel text authority |
 | Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
-| Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `working.*` domain methods own result/draft/verification/review writes; generic `storage.record.*` remains for branch metadata and retrieval until their dedicated cutovers; object reads require branch/pin/record/temporary-owner identity |
+| Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `working.*` owns fixed result/draft/verification/review records; retrieval uses exact record identities; branch metadata is stored atomically with the branch rather than as a generic record |
 | Recovery checkpoint/turn/mutation records | Rust kernel typed recovery tables and references | Production checkpoint/turn/mutation use `KernelRecoveryStore` directly |
-| Combined Recovery/Integration/agent-mutation journal | TS recovery SQLite (current, not a fallback) | Typed Rust operation/file methods exist, but these production consumers have not switched yet |
+| Combined Recovery/Integration/agent-mutation journal | Rust kernel typed recovery operations/files | Production consumers await Rust phase/terminal CAS; TS performs Documents/Registry and disk effects but does not persist a second journal |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
 
 Session-facing root/path calls use an immutable `KernelGrantHandle` obtained for the exact session/Thread/Run. Cross-Thread Host lifecycle work uses an explicit workspace `storage.maintenance` grant; it never borrows an arbitrary live session. The
@@ -46,24 +46,24 @@ cleanup failures remain visible and are retried on the next owner start. `branch
 explicitly requested; ordinary reads walk the root or selected paths. D-256 adds deep health checks for reachable
 nodes and objects.
 
-The working result/draft/verification/review boundary now has generated `working.*` DTOs and Rust domain methods.
-Rust validates nested documents, result record identity, published root/revision and root-diff `changedPaths`; malformed
-or mismatched records are rejected. Result records persist branch/root/revision and changed-path/diff identity; the full
-state is recovered through root/path reads rather than a durable `baseStates/pathStates` payload. The callback projection
-used by older consumers is still a temporary migration seam and is scheduled for the next R1 phase.
+The working result/draft/verification/review boundary has generated `working.*` DTOs and Rust domain methods.
+Rust validates nested documents, explicit branch identity, published root/revision and root-diff `changedPaths`; malformed
+or mismatched records are rejected. Drafts are dedicated fixed branches. Result release removes dependent records and its
+revision atomically while independent pins retain the root. Full state is read through scoped root/path methods rather than
+durable `baseStates/pathStates` payloads or a Host-side compatibility projection.
 
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with
 `node scripts/generate-kernel-protocol.mjs --check`. Request, cancel, and ordered data frames have
-separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage format is v8; startup validates
+separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v9; startup validates
 its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
 
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
-`KernelStorageAdapter` and kernel root/path/range APIs for direct branch reads, writes, pins and materializer input.
-Integration preview, ThreadRuntime result publication and directory apply now use selected root/path reads and the shared Rust durable-operation port; intent and file
-phase CAS are committed before disk effects. Virtual publish pins one exact root through diff/read/publish, and scoped subtree reads are filtered in Rust before paging. ThreadRuntime still has callback paths for publish/materialize/history and branch undo/reconcile,
-and the legacy projection remains only until those consumers are converted. The adapter does not use a transient close-time flush and does
-not fall back to the old WorkingState writer; remaining TS recovery SQLite access is a known unconverted consumer, not compatibility logic.
+`KernelStorageAdapter` and kernel root/path/range APIs for branch reads, writes, pins, history, materializer/delete and result consumers.
+Virtual publish pins one exact root through diff/read/publish, and scoped subtree reads are filtered in Rust before paging.
+Combined Recovery/Integration/agent-mutation uses `KernelRecoveryStore` directly; intent and file/terminal CAS are awaited before
+side effects or public completion. The old local SQLite recovery engine is a test helper and is unreachable from production imports.
+There is no transient close-time flush, WorkingState fallback, or optional durable dual-write path.
 
 ## Rust source ownership
 

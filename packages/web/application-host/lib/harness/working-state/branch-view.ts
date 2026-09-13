@@ -1,6 +1,5 @@
 import type { WorkingBranchPathOrigin } from "@piarium/protocol";
-import type { RecoveryState, WorkingStateReadOptions, WorkingStateTreeEntry } from "./types.js";
-import { asWorkingStateRootStore, type CompatibleWorkingStateStore } from "./working-state-root-adapter.js";
+import type { RecoveryState, WorkingStateReadOptions, WorkingStateRootStore, WorkingStateTreeEntry } from "./types.js";
 
 export interface BranchViewEntry {
   path: string;
@@ -119,17 +118,16 @@ export function listBranchView(
 }
 
 export async function resolveBranchPath(
-  store: CompatibleWorkingStateStore,
+  store: WorkingStateRootStore,
   branchId: string,
   file: string,
   revision?: number,
   readOptions?: Omit<WorkingStateReadOptions, "revision">,
 ): Promise<ResolvedBranchPath | null> {
-  const reader = asWorkingStateRootStore(store);
-  const branch = await reader.getBranchRoot(branchId, readOptions);
+  const branch = await store.getBranchRoot(branchId, readOptions);
   if (!branch) return null;
   const path = normalizeRelative(file);
-  const entry = await reader.readPath(branchId, path, {
+  const entry = await store.readPath(branchId, path, {
     ...(revision === undefined ? {} : { revision }),
     ...readOptions,
   });
@@ -146,14 +144,13 @@ export async function resolveBranchPath(
 }
 
 export async function readBranchFile(
-  store: CompatibleWorkingStateStore,
+  store: WorkingStateRootStore,
   branchId: string,
   file: string,
   revision?: number,
   options?: { followSymlinks?: boolean; seen?: ReadonlySet<string>; read?: Omit<WorkingStateReadOptions, "revision"> },
 ): Promise<BranchViewFile | { missing: true; path: string; revision: string; viewRevision: number; origin: WorkingBranchPathOrigin } | { unavailable: string }> {
-  const reader = asWorkingStateRootStore(store);
-  const resolved = await resolveBranchPath(reader, branchId, file, revision, options?.read);
+  const resolved = await resolveBranchPath(store, branchId, file, revision, options?.read);
   if (!resolved) return { unavailable: `Working branch ${branchId} is unavailable` };
   if (resolved.state.kind === "missing") {
     return { missing: true, path: resolved.path, revision: resolved.revision, viewRevision: resolved.viewRevision, origin: resolved.origin };
@@ -179,13 +176,13 @@ export async function readBranchFile(
     }
     const parent = resolved.path.includes("/") ? resolved.path.slice(0, resolved.path.lastIndexOf("/")) : "";
     const joined = parent ? `${parent}/${target}` : target;
-    return readBranchFile(reader, branchId, joined, revision, {
+    return readBranchFile(store, branchId, joined, revision, {
       followSymlinks: true,
       seen,
       ...(options?.read ? { read: options.read } : {}),
     });
   }
-  const bytes = await reader.readContent(resolved.entry, { ...(options?.read?.signal ? { signal: options.read.signal } : {}) });
+  const bytes = await store.readContent(resolved.entry, { ...(options?.read?.signal ? { signal: options.read.signal } : {}) });
   if (!bytes) return { unavailable: `Working-state object is missing for ${resolved.path}` };
   return {
     path: resolved.path,
@@ -197,15 +194,14 @@ export async function readBranchFile(
 }
 
 export async function listBranchTextFiles(
-  store: CompatibleWorkingStateStore,
+  store: WorkingStateRootStore,
   branchId: string,
   prefixes: readonly string[],
   revision?: number,
   options?: Omit<WorkingStateReadOptions, "revision">,
 ): Promise<Array<BranchViewFile & { text: string }>> {
-  const reader = asWorkingStateRootStore(store);
   const roots = prefixes.length > 0 ? prefixes.map(normalizeRelative) : [""];
-  const read = await reader.listPaths(branchId, roots, {
+  const read = await store.listPaths(branchId, roots, {
     ...(revision === undefined ? {} : { revision }),
     ...options,
   });
@@ -220,7 +216,7 @@ export async function listBranchTextFiles(
     const { path: file, state } = entry;
     if (state.kind !== "regular-file" || hiddenByTombstone(states, file)) continue;
     if (!roots.some((root) => descendantOf(file, root))) continue;
-    const bytes = await reader.readContent(entry, { ...(options?.signal ? { signal: options.signal } : {}) });
+    const bytes = await store.readContent(entry, { ...(options?.signal ? { signal: options.signal } : {}) });
     if (!bytes || !isTextBytes(bytes)) continue;
     files.push({
       path: file,
@@ -235,13 +231,12 @@ export async function listBranchTextFiles(
 }
 
 export async function listBranchViewFromStore(
-  store: CompatibleWorkingStateStore,
+  store: WorkingStateRootStore,
   branchId: string,
   root: string,
   options?: { revision?: number; immediate?: boolean; signal?: AbortSignal },
 ): Promise<BranchViewEntry[] | null> {
-  const reader = asWorkingStateRootStore(store);
-  const read = await reader.listPaths(branchId, [root], {
+  const read = await store.listPaths(branchId, [root], {
     ...(options?.revision === undefined ? {} : { revision: options.revision }),
     ...(options?.signal ? { signal: options.signal } : {}),
   });

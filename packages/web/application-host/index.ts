@@ -80,7 +80,7 @@ import { createWorkingBranchLookups } from './lib/harness/working-state/working-
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
-import { reconcileInterruptedBranchIntegrations } from './lib/recovery/durable-file-operation.js';
+import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
@@ -1174,14 +1174,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       engine = createWorkspaceRecoveryEngine({
         authorityId: extensionRuntime.services.hostId,
         dataDir: PIARIUM_DATA_DIR,
-        defaultRecoveryDir: process.env.PIARIUM_RECOVERY_DIR?.trim() || undefined,
         documents: documentsAuthority,
+        durableRecoveryStore: kernelRecoveryStore,
         sessionNavigation: recoverySessionNavigation,
         resolveDirectoryApplyContext,
-        storageOwnerId,
         fileStore: kernelRecoveryContentStore,
       });
-      engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore);
+      engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore, {
+        authorityId: extensionRuntime.services.hostId,
+        listWorkspaceRegistrations: () => documentsAuthority.listWorkspaceRegistrations(),
+        resourceOperationGateFor: (workspaceId) => ({
+          run: (resources, operation) => documentsAuthority.runResourceOperation(workspaceId, resources, operation),
+        }),
+        resolveDirectoryApplyContext,
+      });
       workspaceRecoveryEngines.set(storageOwnerId, engine);
     }
     return engine;
@@ -1193,7 +1199,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     foundationalRecoveryEngine.withWorkspaceStorage(
       workspaceId,
       { mode: 'exclusive', purpose: 'agent-mutation', create: true },
-      operation,
+      (context) => operation(context),
     )
   ));
   let fencedRecoveryOperations = [];
@@ -1414,10 +1420,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
-    await harnessWorkingStates.withStore(
+    await harnessWorkingStates.withBranchStore(
       workspaceId,
       'startup-branch-integration-reconcile',
-      (store, context) => reconcileInterruptedBranchIntegrations(context, store),
+      (store, context) => {
+        if (!context) throw new Error('Working-state root context is unavailable');
+        if (!context.durableRecoveryStore) throw new Error('Durable recovery operation storage is unavailable');
+        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
+      },
       'exclusive',
     );
     await retrievalArtifacts.reconcileWorkspaceEvidence(
@@ -1441,7 +1451,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     captureParentIdentity: async (workspaceId, parentRoot) => {
       const inspected = await threadWorktreeRuntime.inspectWorkspaceIdentity(parentRoot);
       if (inspected.status !== 'ready') return { treeHash: null, reason: inspected.reason };
-      const treeHash = await harnessWorkingStates.withStore(
+      const treeHash = await harnessWorkingStates.withBranchStore(
         workspaceId,
         'parent-command-input-identity',
         (store) => store.captureSeededPathIdentity(parentRoot, inspected.changedFiles, inspected.baseRef),
@@ -1456,14 +1466,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         ? { kind: 'thread' as const, id: binding.threadId }
         : { kind: 'session' as const, id: parentSessionId };
       const children = await threadRegistry.listThreads(owningWorkspaceId, parent, true);
-      return harnessWorkingStates.withStore(
+      return harnessWorkingStates.withBranchStore(
         owningWorkspaceId,
         'parent-verification-window-restore',
-        (store) => children.flatMap((thread) => store.listParentVerifications(thread.id).map((bundle) => ({
-          parent,
-          threadId: thread.id,
-          bundle,
-        }))),
+        async (store) => (await Promise.all(children.map(async (thread) => (
+          (await store.listParentVerifications(thread.id)).map((bundle) => ({ parent, threadId: thread.id, bundle }))
+        )))).flat(),
         'shared',
       );
     },
@@ -2140,8 +2148,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       context,
       resourceId,
     ),
-    documentSurfaceWrite: (sessionId, context, changes, signal) => documentsAuthority.applyAgentSurfaceWrite(
+    documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => documentsAuthority.applyAgentSurfaceWrite(
       sessionId,
+      workspaceId,
       context,
       changes,
       signal,
@@ -2762,13 +2771,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await runRuntime.dispose();
       await threadRuntime.dispose();
       await piRuntimeGateway.stop();
+      await recoveryTurnCoordinator.dispose();
+      await piWriterTracker.dispose();
+      await documentsAuthority.dispose();
+      await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
+      workspaceRecoveryEngines.clear();
       await kernelStorageAdapter.dispose().catch((error) => console.error('[PiariumKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
       await semanticRuntime.dispose();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
-      await recoveryTurnCoordinator.dispose();
-      await piWriterTracker.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       observeKnowledgeBlockChange = () => undefined;
       await symbolGraphRuntime.dispose();
@@ -2783,8 +2795,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       harnessRouter.dispose();
       await harnessServiceHost.dispose();
       await threadRegistry.dispose();
-      await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
-      workspaceRecoveryEngines.clear();
       realtimeProxyRuntime.stop();
       clearInterval(relayReconcileTimer);
       relayService.stop();

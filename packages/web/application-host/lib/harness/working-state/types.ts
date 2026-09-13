@@ -8,14 +8,21 @@ import type {
   UnsupportedState,
 } from "../../recovery/journal-files.js";
 import type { RecoveryIdentity, RecoveryFileStore } from "../../recovery/journal-files.js";
+import type { RecoveryDurableOperationPort } from "../../recovery/journal-engine.js";
 
 export interface WorkingStateRootContext {
   identity: RecoveryIdentity;
   root: string;
   fileStore: RecoveryFileStore;
-  resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
+  resourceOperationGate: { run<T>(resources: readonly { resourceId: string; scope: "exact" | "subtree" }[], operation: () => Promise<T>): Promise<T> };
   records?: unknown;
   client?: unknown;
+  collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
+  durableRecoveryStore?: RecoveryDurableOperationPort;
+  resolveDirectoryApplyContext?: (directory: string) => Promise<{
+    workspaceId: string;
+    resourceOperationGate: WorkingStateRootContext["resourceOperationGate"];
+  }>;
 }
 
 export type {
@@ -61,8 +68,8 @@ export interface WorkingBranchRoot {
   writeRevision: number;
   draftBasePaths: string[];
   captureScopes: string[];
-  createdAt: string;
-  updatedAt: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type WorkingStatePathOrigin = "base" | "delta" | "draft-base";
@@ -100,6 +107,7 @@ export interface WorkingStatePinnedRoot {
   pinId: string;
   branchId: string;
   workspaceId: string;
+  view: "current" | "revision";
   revision: number;
   writeRevision: number;
   root: string;
@@ -129,17 +137,34 @@ export interface WorkingStateRootStore {
   pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
   putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
   createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline>;
+  getDraftBaseline(id: string): Promise<DraftBaseline | null>;
   deleteDraftBaseline(id: string): Promise<void>;
+  createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths?: string[], captureScopes?: string[]): Promise<WorkingBranchRoot>;
+  createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes?: string[]): Promise<WorkingBranchRoot>;
+  captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>>;
+  listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]>;
+  listWorkspaceBaselinePaths(directory: string): Promise<string[]>;
   commitVirtualWrites(
     branchId: string,
     expectedWriteRevision: number,
     files: Record<string, RecoveryState>,
   ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }>;
   materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
+  materializePin(pin: WorkingStatePin, directory: string): Promise<import("./materializer.js").MaterializeResult>;
+  measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement>;
+  directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
+  captureSeededPathIdentity(directory: string, changedPaths: string[], seed: string): Promise<string>;
   publishHeadResult(branchId: string): Promise<WorkingResult>;
   publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult>;
   resultTreeIdentity(branchId: string, revision: number): Promise<string | null>;
+  listResults(branchId?: string): Promise<WorkingResult[]>;
+  deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]>;
+  deleteBranch(branchId: string): Promise<void>;
+  collectUnreachableObjects(): Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
+  listDurableOperations(kind?: string): Promise<Record<string, unknown>[]>;
+  listBranchObjectReferences(branchId: string): Promise<Array<{ hash: string; byteLength: number | null }>>;
+  listDraftObjectReferences(id: string): Promise<Array<{ hash: string; byteLength: number | null }>>;
   listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]>;
   listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]>;
   listReviewRecords(threadId: string): Promise<ResultReviewRecord[]>;
@@ -147,8 +172,8 @@ export interface WorkingStateRootStore {
   getParentVerification(threadId: string, revision?: number): Promise<ParentVerificationBundle | null>;
   getReviewRecord(threadId: string, revision: number): Promise<ResultReviewRecord | null>;
   putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void>;
-  putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void>;
-  putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void>;
+  putParentVerification(threadId: string, branchId: string, bundle: ParentVerificationBundle): Promise<void>;
+  putReviewRecord(threadId: string, branchId: string, record: ResultReviewRecord): Promise<void>;
 }
 
 export interface WorkspaceWorkingStateRootAccess {
@@ -277,6 +302,7 @@ export interface ResultVerificationBundle {
 
 export interface ParentVerificationBundle {
   mergedResultRevision: number;
+  branchId?: string;
   mergeOperationId?: string;
   parentTreeHash?: string;
   windowOpenedAt?: number;

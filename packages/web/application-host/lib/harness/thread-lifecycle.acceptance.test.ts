@@ -7,12 +7,13 @@ import type { SessionSnapshot, SessionStats } from '@piarium/protocol';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createRecoveryFileStore } from '../recovery/journal-files.js';
 import { openRecoveryJournalCatalog } from '../recovery/journal-catalog.js';
-import type { WorkspaceRecoveryStorageContext } from '../recovery/journal-engine.js';
+import type { WorkspaceRecoveryStorageContext } from '../recovery/local-sqlite-recovery-engine.test-helper.js';
 import { createThreadRegistry } from './thread-registry.js';
 import { createThreadRuntime, type ThreadSessionAdapter } from './thread-runtime.js';
 import { createThreadWorktreeRuntime } from './thread-worktree.js';
 import { createWorktreeReclaimGuard } from './worktree-reclaim-guard.js';
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from './working-state/working-state-store.js';
+import { WorkingStateStore } from './working-state/working-state-store.js';
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from './working-state/working-state-root-adapter.test-helper.js';
 
 const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -40,9 +41,10 @@ it('continues the original session after Git/native archive, reclaim and restore
     identity: { authorityId: 'host', canonicalRoot: repo, filesystemProfile: 'test', workspaceId },
     resourceOperationGate: { run: async (_resources, operation) => operation() },
   };
-  const workingStates: WorkspaceWorkingStateAccess = {
+  const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
     withStore: async (_workspaceId, _purpose, operation) => operation(await WorkingStateStore.open(context), context),
   };
+  const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
   const worktrees = createThreadWorktreeRuntime({
     createWorktree: async (directory, input) => {
       const target = join(worktreeRoot, String(input.worktreeName));

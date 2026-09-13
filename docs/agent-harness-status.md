@@ -163,13 +163,13 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
 
-R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；R1 的 WorkingState root/path、retrieval 与 checkpoint/turn/mutation 已有真实 kernel 路径。combined Recovery/Integration 仍由 TS recovery SQLite 持久化，部分同步消费者仍在每次 callback 临时展开树，因此 R1 继续记为 Partial。
+R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链。R1 的生产 WorkingState consumer 已统一使用 immutable root/path 接口，combined Recovery/Integration/agent-mutation 元数据也统一由 Rust typed recovery writer 持久化；TS 只保留 Documents/Registry 与文件副作用编排。R1 继续记为 Partial，是因为 storage location 产品语义、跨平台发行和硬故障证据尚未完成，不是因为生产仍有第二个元数据写者。
 R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
 | R0 协议与进程 | Partial（implemented / wired） | `kernel/rust-toolchain.toml` 钉住 1.97.1；同一 schema 生成 TS/Rust method DTO；真实 framed 子进程、单 envelope 交接背压、blob 与 branch create/write 流式输入、build/epoch/grant/generation 握手、取消、真实退出等待和 Host 启停已有 Windows release 证据；macOS/Linux、签名安装包、stdout 半帧断线和完整任意 cwd 包内 smoke 仍需验收 |
-| R1 状态与存储 | Partial（root/path、root result publish、产品记录领域 wire、preview、directory 与 agent-mutation operation port 已 wired；完整 consumer cutover 未完成） | 当前唯一格式为 v8。Rust 已拥有 blob、AVL/Merkle root、branch/revision/current pin、typed recovery tables、domain record/reference 与 GC；root/path/range 读写、固定 query pin、materializer 输入、selected-path result publish 和精确 retrieval record ref 已走 kernel。result/draft/child/parent verification/review 已有独立生成 DTO 和领域方法，result 持久 envelope 不再保存完整状态平表；Integration preview、directory apply、agent surface/disk mutation 已消费 Rust durable operation/file CAS，但 ThreadRuntime/IntegrationCoordinator 仍有 callback 级投影、branch undo/reconcile，combined Recovery public engine methods 和部分同步消费者仍需切换，故不能标 R1 proven/default-on |
+| R1 状态与存储 | Partial（生产 consumer cutover implemented / wired；发行与故障证据未完成） | 当前唯一 catalog 格式为 v9，握手报告同一版本。Rust 拥有 blob、AVL/Merkle root、branch metadata/revision/pin、result/draft/verification/review、retrieval records、typed recovery operation/file、reference 与 GC；生产 ThreadRuntime/Integration/verification/review/history/materialize/delete 使用 root/path/domain API，combined Recovery/Integration/agent-mutation 以 Rust 为唯一耐久元数据 writer。旧 WorkingState 与 SQLite recovery engine 仅是测试 helper，生产 import graph 不可达；R2 的 Documents/Registry 与真实文件副作用仍由 TS 编排。storage location 迁移语义、macOS/Linux、签名包和硬故障窗口未验收，故不标 proven/完成 |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -201,17 +201,11 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 单路径更新没有复制完整兄弟集合。D-258 已确认其中 `length(TEXT)` 不是持久写入字节，原 payload 数字撤回；启动/缓存未控制的
 墙钟与 RSS 也不作为性能结论。受控端到端对照仍按 R6 执行。
 
-**R1 责任盘点与尚未迁移项（D-273 当前权威）**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin、typed recovery、domain record/reference 表；
-TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
-`working-state/working-state-store.ts` 仍保留给本地测试；生产 branch read/write/explore pin/materializer 输入和 scoped subtree read 走异步 kernel root/path API，
-结果发布使用固定 pin/root/writeRevision，agent mutation 阶段和 dirty-surface Integration 的 Rust port 已改为逐步 await。ThreadRuntime、部分
-IntegrationCoordinator、verification/review/history 仍依赖 callback 投影，不能宣称已完成 async root consumer cutover。
-retrieval artifact/receipt/evidence 使用精确 record 身份；turn/checkpoint/mutation 直接调用 typed kernel API。combined Recovery/Integration/
-agent-mutation 的真实持久 writer 仍是 TS recovery SQLite，Rust operation/file API 尚未成为这些 consumer 的 writer，故 R1 保持 Partial。
+**R1 当前责任边界（D-274 当前权威）**：Rust kernel storage root 是 WorkingState 与 recovery 元数据的唯一生产 writer。生产 branch read/write、explore pin、result/draft、verification/review、retrieval、history、materialize/delete、Integration 与 agent mutation 全部通过异步 root/path/domain/recovery API；不再展开持久全树，也不再打开 TS recovery SQLite。`working-state-store.ts` 和 local SQLite recovery engine 只服务测试夹具，不能被生产装配导入。
 
-**D-264/D-273 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 已删除；Rust format v8 提供 typed recovery transaction/CAS。新增真实 Windows release 子进程证据覆盖 typed working result DTO 拒绝、result release/GC、固定 publish pin 与并发写、scoped subtree read；`storage-adapter.test.ts` 另走三参数 `createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore)`，覆盖 dirty surface Integration apply/undo。combined Recovery/Integration/agent-mutation 的旧 TS writer 与 compatibility callback 投影尚未全部删除，不能据 typed API 或局部纵切测试写成已接管。
+固定 draft 是独立 branch/revision/root；result、verification 与 review 绑定明确 branch/revision/root。scope 在 Rust 遍历前生效，pin/diff/blob read 核对来源；result release 原子释放相关记录与 revision，独立 pin 继续保留 root。branch metadata 随 branch create 同事务发布，重复相同 blob 不覆盖已有 transient owner。combined 文件操作在 Rust phase/terminal CAS 完成后才执行或返回；导航回执丢失时重启复用同 operationId，而不是补偿文件后留下会话/磁盘分裂。
 
-**D-273 后续纵切（2026-09-13）**：真实 kernel storage adapter 已将 retrieval artifact/receipt、Integration preview/branch CAS、parent verification、result verification publish 与 draft baseline 的新增路径接到 async root access；branch CAS terminal response 丢失后由新的 Rust operation reconciliation 在 Host 重启路径对账。`surface-mutation.test.ts` 以可控 deferred port 证明 intent CAS 和 terminal CAS 未完成前不会触发编辑器/公开返回，并验证磁盘阶段重启对账。旧 ThreadRuntime history/materialize/delete、部分 verification/review callback 与 combined Recovery TS SQLite writer 仍未迁移。
+**D-274 定向证据（2026-09-14）**：真实 Windows release kernel tests 覆盖 fixed revision/pin/scope、typed record 拒绝、result release/GC、branch metadata 幂等与重复对象 owner；`storage-adapter.test.ts` 覆盖真实 branch/root 与 durable operation，`kernel-durable-engine.test.ts` 覆盖 combined recovery 重启、导航回执丢失、undo 且不创建 legacy catalog；surface/authority 定向测试覆盖 Rust durable CAS 先于 Documents 副作用。R1 仍缺 storage location 产品语义、macOS/Linux/签名发行与断电级验证。
 
 **D-266 源码责任边界（2026-09-13）**：原 6483 行 `piarium-kernel/src/main.rs` 已缩为启动入口；crate 装配进入
 `lib.rs`，transport/admission 留在 `runtime.rs`，唯一 `Storage` 的 core/operation/authority/object/tree/branch/recovery/record/

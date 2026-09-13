@@ -19,7 +19,6 @@ import {
   type DocumentLineEnding,
 } from "./line-ending.js";
 import {
-  beginAgentMutationOperation,
   beginAgentMutationOperationAsync,
   compensateAgentMutationDiskPath,
   finalizeAgentMutationOperation,
@@ -434,7 +433,7 @@ export async function applyAgentSurfaceMutation(
     });
   }
 
-  if (planned.every((item) => item.class === "disk")) {
+  if (planned.every((item) => item.class === "disk") && !deps.durable) {
     return { result: { status: "disk" }, record: null };
   }
 
@@ -488,7 +487,7 @@ export async function applyAgentSurfaceMutation(
   const persistIntent = async (): Promise<PersistedAgentMutationData | null> => {
     if (!deps.durable) return durable;
     if (durable) return durable;
-    const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
+    const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context);
     const surfaceBindings: Record<string, AgentMutationSurfaceBinding> = {};
     const diskIdentities: Record<string, AgentMutationDiskIdentity> = {};
     const targets: Record<string, { expected: RecoveryState; target: RecoveryState }> = {};
@@ -564,8 +563,7 @@ export async function applyAgentSurfaceMutation(
     // A stale disk identity is a real conflict, so it must not be included in
     // the durable operation that will be dispatched for the remaining paths.
     if (Object.keys(targets).length === 0) return null;
-    return deps.durable.durableRecoveryStore
-      ? beginAgentMutationOperationAsync(deps.durable, {
+    return beginAgentMutationOperationAsync(deps.durable, {
         operationId,
         sessionId: input.sessionId,
         workspaceId,
@@ -574,17 +572,7 @@ export async function applyAgentSurfaceMutation(
         diskIdentities,
         targets,
         safety,
-      })
-      : beginAgentMutationOperation(deps.durable, {
-      operationId,
-      sessionId: input.sessionId,
-      workspaceId,
-      targetKinds,
-      surfaceBindings,
-      diskIdentities,
-      targets,
-      safety,
-    });
+      });
   };
 
   const compensate = async (): Promise<void> => {
@@ -703,7 +691,7 @@ export async function applyAgentSurfaceMutation(
             };
         continue;
       }
-      const workspaceId = owner?.workspaceId ?? contextWorkspaceId(input.context);
+      const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context);
       if (!entry.before.existed) {
         const removed = await deps.deleteDisk({
           workspaceId,
@@ -868,7 +856,7 @@ export async function applyAgentSurfaceMutation(
   if (failed) await compensate();
 
   if (!failed && toApplyDisk.some((entry) => entry.class === "disk")) {
-    const workspaceId = owner?.workspaceId
+    const workspaceId = owner?.workspaceId ?? deps.durable?.identity.workspaceId
       ?? (input.context.source === "surface" ? input.context.workspaceId : "");
     const token = await diskToken(deps, workspaceId);
         for (const item of toApplyDisk.filter((entry) => entry.class === "disk")) {
@@ -1112,7 +1100,7 @@ export async function applyAgentSurfaceMutation(
   const record: AgentMutationRecord = {
     operationId,
     sessionId: input.sessionId,
-    workspaceId: owner?.workspaceId ?? contextWorkspaceId(input.context),
+    workspaceId: owner?.workspaceId ?? deps.durable?.identity.workspaceId ?? contextWorkspaceId(input.context),
     targetKinds: Object.fromEntries(planned.map((item) => [
       item.change.resourceId,
       item.result?.target ?? (item.class === "disk" ? "disk" : "surface"),

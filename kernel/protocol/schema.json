@@ -52,6 +52,7 @@
     "branch.pin": "KernelBranchPinParams",
     "branch.unpin": "KernelBranchUnpinParams",
     "branch.diff": "KernelBranchDiffParams",
+    "branch.objects": "KernelBranchObjectsParams",
     "branch.delete": "KernelBranchDeleteParams",
     "pin.read": "KernelPinReadParams",
     "recovery.operation.get": "KernelRecoveryOperationGetParams",
@@ -63,6 +64,7 @@
     "recovery.entry.resolve": "KernelRecoveryEntryResolveParams",
     "recovery.change.before": "KernelRecoveryChangeBeforeParams",
     "recovery.change.get": "KernelRecoveryChangeGetParams",
+    "recovery.change.list": "KernelRecoveryChangeListParams",
     "recovery.change.after": "KernelRecoveryChangeAfterParams",
     "recovery.operation.create": "KernelRecoveryOperationCreateParams",
     "recovery.operation.file.cas": "KernelRecoveryOperationFileCasParams",
@@ -143,8 +145,8 @@
       "path": {"type": "string"}, "baseRevision": {"type": "string | null"}, "encoding": {"type": "string"}, "bom": {"type": "boolean"}, "localEditRevision": {"type": "number"}, "revision": {"type": "string"}
     }},
     "KernelWorkingDraftDocument": {"fields": {
-      "id": {"type": "string"}, "workspaceId": {"type": "string"}, "createdAt": {"type": "string"}, "root": {"type": "string"},
-      "pinId": {"type": "string", "optional": true}, "provenance": {"type": "KernelDraftProvenance[]"}
+      "id": {"type": "string"}, "workspaceId": {"type": "string"}, "branchId": {"type": "string"}, "revision": {"type": "number"},
+      "createdAt": {"type": "string"}, "root": {"type": "string"}, "provenance": {"type": "KernelDraftProvenance[]"}
     }},
     "KernelVerificationEnvSummary": {"fields": {"PATH": {"type": "boolean", "optional": true}, "VIRTUAL_ENV": {"type": "string", "optional": true}}},
     "KernelVerificationActor": {"fields": {"authorityInstanceId": {"type": "string"}, "sessionId": {"type": "string"}, "workerId": {"type": "string"}, "workerGeneration": {"type": "number"}, "runId": {"type": "string", "optional": true}}},
@@ -179,7 +181,7 @@
     "KernelWorkingResultReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelWorkingDraftPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "document": {"type": "KernelWorkingDraftDocument"},
-      "root": {"type": "string", "optional": true}, "pinId": {"type": "string", "optional": true}, "createdAt": {"type": "string"},
+      "branchId": {"type": "string"}, "revision": {"type": "number"}, "root": {"type": "string"}, "createdAt": {"type": "string"},
       "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
     "KernelWorkingDraftGetParams": {"fields": {"workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
@@ -201,7 +203,8 @@
     "KernelWorkingReviewReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelCreateBranchBeginParams": {"fields": {
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "workspaceId": {"type": "string"},
-      "baseRef": {"type": "string", "optional": true}
+      "baseRef": {"type": "string", "optional": true}, "parentRef": {"type": "string", "optional": true},
+      "draftBasePaths": {"type": "string[]"}, "captureScopes": {"type": "string[]"}
     }},
     "KernelCreateBranchAppendParams": {"fields": {
       "builderId": {"type": "string"}, "sequence": {"type": "number"}, "entries": {"type": "KernelCreateEntry[]"}
@@ -227,15 +230,16 @@
     }},
     "KernelBranchUnpinParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}, "pinId": {"type": "string"}}},
     "KernelBranchDiffParams": {"fields": {"leftRoot": {"type": "string"}, "rightRoot": {"type": "string"}}},
+    "KernelBranchObjectsParams": {"fields": {"branchId": {"type": "string"}, "includeRevisions": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
     "KernelBranchDeleteParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}}},
-    "KernelPinReadParams": {"fields": {"pinId": {"type": "string"}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
+    "KernelPinReadParams": {"fields": {"pinId": {"type": "string"}, "paths": {"type": "string[]", "optional": true}, "roots": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
     "KernelRecoveryReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}, "ownerId": {"type": "string", "optional": true}}},
     "KernelRecoveryTurnStartParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string"}, "userEntryId": {"type": "string"}, "workerId": {"type": "string"}, "runtimeGeneration": {"type": "number"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "failure": {"type": "boolean", "optional": true}
     }},
     "KernelRecoveryTurnGetParams": {"fields": {"workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string", "optional": true}}},
     "KernelRecoveryTurnSettleParams": {"fields": {
-      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "status": {"type": "string"}, "observedResourceIds": {"type": "string[]"}, "observationComplete": {"type": "boolean"}, "assistantEntryId": {"type": "string", "optional": true}, "failureJson": {"type": "string", "optional": true}
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "status": {"type": "string"}, "observedResourceIds": {"type": "string[]"}, "unrecordedResourceIds": {"type": "string[]"}, "observationComplete": {"type": "boolean"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "assistantEntryId": {"type": "string", "optional": true}, "failureJson": {"type": "string", "optional": true}
     }},
     "KernelRecoveryCheckpointCreateParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "label": {"type": "string"}}},
     "KernelRecoveryCheckpointListParams": {"fields": {"workspaceId": {"type": "string"}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
@@ -244,6 +248,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "toolName": {"type": "string"}, "mutationId": {"type": "string"}, "beforeJson": {"type": "string"}, "references": {"type": "KernelRecoveryReference[]"}
     }},
     "KernelRecoveryChangeGetParams": {"fields": {"workspaceId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}}},
+    "KernelRecoveryChangeListParams": {"fields": {"workspaceId": {"type": "string"}, "sessionId": {"type": "string", "optional": true}, "executionId": {"type": "string", "optional": true}, "entryIds": {"type": "string[]", "optional": true}}},
     "KernelRecoveryChangeAfterParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "afterJson": {"type": "string"}, "succeeded": {"type": "boolean"}, "expectedRevision": {"type": "number"}, "references": {"type": "KernelRecoveryReference[]"}
     }},
@@ -316,6 +321,11 @@
         "currentRoot": {"type": "string"},
         "headRevision": {"type": "number"},
         "writeRevision": {"type": "number"},
+        "parentRef": {"type": "string", "optional": true},
+        "draftBasePaths": {"type": "string[]"},
+        "captureScopes": {"type": "string[]"},
+        "createdAt": {"type": "number"},
+        "updatedAt": {"type": "number"},
         "entries": {"type": "KernelEntry[]"},
         "nextCursor": {"type": "number | null", "optional": true}
       }
@@ -416,6 +426,7 @@
     "branch.pin": "pin an immutable root/revision",
     "branch.unpin": "release a pin",
     "branch.diff": "diff two immutable roots without flattening",
+    "branch.objects": "page content objects reachable from a branch and its retained revisions",
     "branch.delete": "release a branch and its unpublished root",
     "pin.read": "read an immutable pinned root after branch deletion",
     "recovery.operation.get": "read a typed recovery operation and its path stages",
@@ -427,6 +438,7 @@
     "recovery.entry.resolve": "resolve a session entry to a fixed checkpoint",
     "recovery.change.before": "record a mutation before-image with references",
     "recovery.change.get": "read a mutation change by checkpoint and path",
+    "recovery.change.list": "list mutation changes and coverage for selected turns",
     "recovery.change.after": "CAS-record a mutation after-image",
     "recovery.operation.create": "atomically publish an operation and all operation files",
     "recovery.operation.file.cas": "CAS-update one operation file phase",

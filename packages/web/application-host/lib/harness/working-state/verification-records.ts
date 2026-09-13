@@ -13,7 +13,7 @@ import type {
   ResultVerificationBundle,
   WorkingResult,
 } from "./types.js";
-import type { WorkingStateStore } from "./working-state-store.js";
+import type { WorkingStateRootStore } from "./types.js";
 
 const looksBinary = (bytes: Buffer): boolean => bytes.includes(0);
 
@@ -205,7 +205,7 @@ const formatUnified = (file: string, before: string, after: string): string => {
 };
 
 export const formatPublishedResultDiff = async (
-  store: Pick<WorkingStateStore, "getObject">,
+  store: Pick<WorkingStateRootStore, "getObject">,
   result: WorkingResult,
 ): Promise<string> => {
   if (result.changedPaths.length === 0) return "";

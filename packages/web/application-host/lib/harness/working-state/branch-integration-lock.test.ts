@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
+import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { createThreadRegistry } from "../thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../thread-runtime.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { acquireVirtualWriteTicket, VirtualWriteGate } from "./virtual-write-gate.js";
-import { createWorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -52,7 +52,7 @@ describe("branch integration lock order", () => {
         commitLeaf: async () => ({}),
       },
     });
-    const workingStates = createWorkspaceWorkingStateAccess(engine);
+    const workingStates = createTestWorkingStateRootAccess(engine);
     const views = new ThreadExecutionViewRegistry();
     const writeGate = new VirtualWriteGate();
     const coordinator = new IntegrationCoordinator({

@@ -16,6 +16,8 @@ import {
   type LiveSurfaceBuffer,
 } from './contract-fixtures.js';
 import type { WatchPosition, WorkspaceWatchFs } from './watch.js';
+import { createRecoveryFileStore } from '../recovery/journal-files.js';
+import { createInMemoryRecoveryDurablePort } from '../recovery/recovery-durable-port.test-helper.js';
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });
 
@@ -758,6 +760,22 @@ it('stops answering a path from its captured draft once a write is observed', as
 
 it('edits the fixed surface buffer and refuses a later user edit without touching disk', async () => {
   const harness = await createDocumentAuthorityHarness();
+  const durableRecoveryStore = createInMemoryRecoveryDurablePort();
+  const inspected = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+  harness.authority.bindDurableMutationStorage(async (_workspaceId, operation) => operation({
+    durableRecoveryStore,
+    fileStore: createRecoveryFileStore(),
+    identity: {
+      authorityId: harness.authority.hostId,
+      canonicalRoot: inspected.root,
+      filesystemProfile: 'test',
+      workspaceId: harness.identity.workspaceId,
+    },
+    resourceOperationGate: {
+      run: (resources, callback) => harness.authority.runResourceOperation(harness.identity.workspaceId, resources, callback),
+    },
+    root: path.join(harness.dataDir, 'agent-mutation-objects'),
+  }));
   const live = new Map<string, LiveSurfaceBuffer>();
   const surface = attachLiveSurfaceCompleter(harness.authority, {
     generation: 1,
@@ -796,7 +814,7 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
     });
     harness.authority.commitAgentInputSnapshot('session-1', context);
 
-    const first = await harness.authority.applyAgentSurfaceWrite('session-1', context, [{
+    const first = await harness.authority.applyAgentSurfaceWrite('session-1', harness.identity.workspaceId, context, [{
       resourceId: 'draft.ts',
       action: 'edit',
       edits: [{ oldText: 'B\n', newText: 'C\n' }],
@@ -811,7 +829,7 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
       content: 'C\n',
       source: 'surface-draft',
     });
-    const second = await harness.authority.applyAgentSurfaceWrite('session-1', context, [{
+    const second = await harness.authority.applyAgentSurfaceWrite('session-1', harness.identity.workspaceId, context, [{
       resourceId: 'draft.ts',
       action: 'edit',
       edits: [{ oldText: 'C\n', newText: 'E\n' }],
@@ -839,7 +857,7 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
       }],
       workspaceId: harness.identity.workspaceId,
     });
-    const stale = await harness.authority.applyAgentSurfaceWrite('session-1', context, [{
+    const stale = await harness.authority.applyAgentSurfaceWrite('session-1', harness.identity.workspaceId, context, [{
       resourceId: 'draft.ts',
       action: 'edit',
       edits: [{ oldText: 'E\n', newText: 'F\n' }],
@@ -848,13 +866,13 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
     expect(live.get('draft.ts')?.content).toBe('D\n');
     expect(await fs.promises.readFile(path.join(harness.workspaceRoot, 'draft.ts'), 'utf8')).toBe('A\n');
 
-    const diskOnly = await harness.authority.applyAgentSurfaceWrite('session-1', context, [{
+    const diskOnly = await harness.authority.applyAgentSurfaceWrite('session-1', harness.identity.workspaceId, context, [{
       resourceId: 'other.ts',
       action: 'write',
       content: 'from-agent\n',
     }]);
-    expect(diskOnly).toEqual({ status: 'disk' });
-    expect(await fs.promises.readFile(path.join(harness.workspaceRoot, 'other.ts'), 'utf8')).toBe('disk-only\n');
+    expect(diskOnly).toMatchObject({ status: 'applied', results: [{ path: 'other.ts', status: 'applied', target: 'disk' }] });
+    expect(await fs.promises.readFile(path.join(harness.workspaceRoot, 'other.ts'), 'utf8')).toBe('from-agent\n');
   } finally {
     surface.close();
     await harness.cleanup();

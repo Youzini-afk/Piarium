@@ -532,14 +532,54 @@ impl Storage {
                 .cloned()
                 .unwrap_or_else(|| json!([])),
         )?;
+        let unrecorded = serde_json::to_string(
+            &params_value
+                .get("unrecordedResourceIds")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )?;
+        let active = serde_json::to_string(
+            &params_value
+                .get("activeWriterScopes")
+                .cloned()
+                .unwrap_or_else(|| json!([])),
+        )?;
+        let provenance = params_value
+            .get("provenance")
+            .and_then(Value::as_str)
+            .unwrap_or("caused-by");
         let failure = params_value.get("failureJson").and_then(Value::as_str);
         let now = format!("{}", chrono_like_now());
+        let mut changed_path_count = 0_i64;
+        let mut byte_length = 0_i64;
+        {
+            let mut statement = self.conn.prepare("SELECT before_json, after_json FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND after_json IS NOT NULL")?;
+            let rows = statement
+                .query_map(params![workspace_id, checkpoint_id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (before_json, after_json) in rows {
+                let before = serde_json::from_str::<Value>(&before_json)?;
+                let after = serde_json::from_str::<Value>(&after_json)?;
+                if before == after {
+                    continue;
+                }
+                changed_path_count += 1;
+                let before_bytes = before
+                    .get("byteLength")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0);
+                let after_bytes = after.get("byteLength").and_then(Value::as_i64).unwrap_or(0);
+                byte_length += before_bytes.max(after_bytes);
+            }
+        }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
         let result = (|| {
             self.operation_begin(operation_id, "recovery.turn.settle", &identity_hash)?;
             self.record_operation_workspace(operation_id, Some(&workspace_id))?;
-            self.conn.execute("UPDATE recovery_turns SET assistant_entry_id = ?1, status = ?2, observed_resource_ids_json = ?3, failure_json = ?4, settled_at = ?5, revision = revision + 1 WHERE workspace_id = ?6 AND execution_id = ?7 AND revision = ?8", params![params_value.get("assistantEntryId").and_then(Value::as_str), status, observed, failure, now, workspace_id, execution_id, expected])?;
-            self.conn.execute("UPDATE recovery_checkpoints SET state = ?1, revision = revision + 1 WHERE workspace_id = ?2 AND id = ?3", params![status, workspace_id, checkpoint_id])?;
+            self.conn.execute("UPDATE recovery_turns SET assistant_entry_id = ?1, status = ?2, observed_resource_ids_json = ?3, unrecorded_resource_ids_json = ?4, active_writer_scopes_json = ?5, provenance = ?6, failure_json = ?7, settled_at = ?8, revision = revision + 1 WHERE workspace_id = ?9 AND execution_id = ?10 AND revision = ?11", params![params_value.get("assistantEntryId").and_then(Value::as_str), status, observed, unrecorded, active, provenance, failure, now, workspace_id, execution_id, expected])?;
+            self.conn.execute("UPDATE recovery_checkpoints SET state = ?1, changed_path_count = ?2, byte_length = ?3, revision = revision + 1 WHERE workspace_id = ?4 AND id = ?5", params![status, changed_path_count, byte_length, workspace_id, checkpoint_id])?;
             let value = self
                 .recovery_turn_value(&workspace_id, execution_id)?
                 .ok_or_else(|| {
@@ -731,19 +771,15 @@ impl Storage {
         Self::require_recovery_state_reference(&before, "beforeJson", &references)?;
         let now = format!("{}", chrono_like_now());
         let existing: Option<(i64, String, String, String)> = self.conn.query_row("SELECT revision, execution_id, mutation_id, before_json FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3", params![workspace_id, checkpoint_id, path], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).optional()?;
-        if let Some((_, stored_execution, stored_mutation, stored_before)) = &existing {
-            if stored_execution != execution_id
-                || stored_mutation
-                    != params_value
-                        .get("mutationId")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                || serde_json::from_str::<Value>(stored_before)? != before
-            {
+        if let Some((revision, stored_execution, _, _)) = &existing {
+            if stored_execution != execution_id {
                 return Err(KernelError::Operation(
                     "recovery change identity was reused with different input".to_string(),
                 ));
             }
+            return Ok(
+                json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "revision": revision, "recorded": true, "existing": true}),
+            );
         } else {
             self.conn.execute("INSERT INTO recovery_changes(workspace_id, checkpoint_id, path, execution_id, tool_name, mutation_id, before_json, state, created_at, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'before', ?8, ?8, 1)", params![workspace_id, checkpoint_id, path, execution_id, params_value.get("toolName").and_then(Value::as_str).unwrap_or(""), params_value.get("mutationId").and_then(Value::as_str).unwrap_or(""), serde_json::to_string(&before)?, now])?;
         }
@@ -790,6 +826,123 @@ impl Storage {
         Ok(
             json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "executionId": execution_id, "before": serde_json::from_str::<Value>(&before_json)?, "after": after_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "state": state, "updatedAt": updated_at, "revision": revision}),
         )
+    }
+
+    pub(super) fn recovery_change_list(
+        &self,
+        params_value: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let requested_session = params_value.get("sessionId").and_then(Value::as_str);
+        let requested_execution = params_value.get("executionId").and_then(Value::as_str);
+        let requested_entries = params_value
+            .get("entryIds")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<BTreeSet<_>>()
+            })
+            .unwrap_or_default();
+        self.require_recovery_owner(grant_id, requested_session, None, None)?;
+
+        let mut statement = self.conn.prepare(
+            "SELECT t.execution_id, t.checkpoint_id, c.sequence, t.status, t.session_id, t.user_entry_id, t.assistant_entry_id, t.active_writer_scopes_json, t.unrecorded_resource_ids_json, t.failure_json FROM recovery_turns t JOIN recovery_checkpoints c ON c.workspace_id = t.workspace_id AND c.id = t.checkpoint_id WHERE t.workspace_id = ?1 ORDER BY c.sequence ASC",
+        )?;
+        let rows = statement
+            .query_map(params![workspace_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, String>(8)?,
+                    row.get::<_, Option<String>>(9)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        let selected = rows
+            .into_iter()
+            .filter(|row| {
+                requested_session.is_none_or(|session| row.4 == session)
+                    && requested_execution.is_none_or(|execution| row.0 == execution)
+                    && (requested_entries.is_empty()
+                        || requested_entries.contains(row.5.as_str())
+                        || row
+                            .6
+                            .as_deref()
+                            .is_some_and(|entry| requested_entries.contains(entry)))
+            })
+            .collect::<Vec<_>>();
+
+        let mut turns = Vec::new();
+        let mut changes = Vec::new();
+        for (
+            execution_id,
+            checkpoint_id,
+            sequence,
+            status,
+            session_id,
+            user_entry_id,
+            assistant_entry_id,
+            active_json,
+            unrecorded_json,
+            failure_json,
+        ) in selected
+        {
+            turns.push(json!({
+                "executionId": execution_id,
+                "checkpointId": checkpoint_id,
+                "sequence": sequence,
+                "status": status,
+                "sessionId": session_id,
+                "userEntryId": user_entry_id,
+                "assistantEntryId": assistant_entry_id,
+                "activeWriterScopes": serde_json::from_str::<Value>(&active_json)?,
+                "unrecordedResourceIds": serde_json::from_str::<Value>(&unrecorded_json)?,
+                "failure": failure_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()),
+            }));
+            let mut change_statement = self.conn.prepare(
+                "SELECT path, tool_name, mutation_id, before_json, after_json, state, revision FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND after_json IS NOT NULL ORDER BY path",
+            )?;
+            let change_rows = change_statement
+                .query_map(params![workspace_id, checkpoint_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, i64>(6)?,
+                    ))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            for (path, tool_name, mutation_id, before_json, after_json, state, revision) in
+                change_rows
+            {
+                changes.push(json!({
+                    "workspaceId": workspace_id,
+                    "checkpointId": checkpoint_id,
+                    "executionId": execution_id,
+                    "sequence": sequence,
+                    "path": path,
+                    "toolName": tool_name,
+                    "mutationId": mutation_id,
+                    "before": serde_json::from_str::<Value>(&before_json)?,
+                    "after": serde_json::from_str::<Value>(&after_json)?,
+                    "state": state,
+                    "revision": revision,
+                }));
+            }
+        }
+        Ok(json!({"turns": turns, "changes": changes}))
     }
 
     pub(super) fn recovery_change_after(
@@ -846,10 +999,16 @@ impl Storage {
         let now = format!("{}", chrono_like_now());
         let before_value = serde_json::from_str::<Value>(&before_json)?;
         if before_value == after {
-            self.conn.execute("DELETE FROM recovery_refs WHERE workspace_id = ?1 AND owner_kind = 'change' AND owner_id = ?2", params![workspace_id, format!("change:{checkpoint_id}:{path}")])?;
-            self.conn.execute("DELETE FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3 AND revision = ?4", params![workspace_id, checkpoint_id, path, expected])?;
+            self.conn.execute("UPDATE recovery_changes SET after_json = ?1, state = 'unchanged', updated_at = ?2, revision = revision + 1 WHERE workspace_id = ?3 AND checkpoint_id = ?4 AND path = ?5 AND revision = ?6", params![serde_json::to_string(&after)?, now, workspace_id, checkpoint_id, path, expected])?;
+            self.insert_recovery_refs(
+                &workspace_id,
+                "change",
+                &format!("change:{checkpoint_id}:{path}"),
+                &references,
+                grant_id,
+            )?;
             return Ok(
-                json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "released": true, "revision": expected}),
+                json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "before": before_value, "after": after, "unchanged": true, "revision": expected + 1}),
             );
         }
         Self::require_recovery_state_reference(&after, "afterJson", &references)?;
@@ -1136,6 +1295,10 @@ impl Storage {
                         | "needs-attention"
                         | "undoing"
                         | "awaiting-surface"
+                        | "applying-files"
+                        | "files-restored"
+                        | "navigating-conversation"
+                        | "compensating-files"
                 )
             })
             .ok_or_else(|| {
@@ -1201,9 +1364,9 @@ impl Storage {
         }
         let kind = params_value.get("kind").and_then(Value::as_str);
         let (sql, values) = if let Some(kind) = kind {
-            ("SELECT operation_id, kind, state, data_json, revision FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4", vec![Value::String(workspace_id.clone()), Value::String(kind.to_string()), Value::from(page_size + 1), Value::from(cursor)])
+            ("SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4", vec![Value::String(workspace_id.clone()), Value::String(kind.to_string()), Value::from(page_size + 1), Value::from(cursor)])
         } else {
-            ("SELECT operation_id, kind, state, data_json, revision FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3", vec![Value::String(workspace_id.clone()), Value::from(page_size + 1), Value::from(cursor)])
+            ("SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3", vec![Value::String(workspace_id.clone()), Value::from(page_size + 1), Value::from(cursor)])
         };
         let mut statement = self.conn.prepare(sql)?;
         let mut rows = if kind.is_some() {
@@ -1214,7 +1377,7 @@ impl Storage {
         let mut operations = Vec::new();
         while let Some(row) = rows.next()? {
             let operation_id: String = row.get(0)?;
-            operations.push(json!({"operationId": operation_id, "workspaceId": workspace_id, "kind": row.get::<_, String>(1)?, "state": row.get::<_, String>(2)?, "data": serde_json::from_str::<Value>(&row.get::<_, String>(3)?)?, "revision": row.get::<_, i64>(4)?}));
+            operations.push(json!({"operationId": operation_id, "workspaceId": workspace_id, "kind": row.get::<_, String>(1)?, "state": row.get::<_, String>(2)?, "data": serde_json::from_str::<Value>(&row.get::<_, String>(3)?)?, "revision": row.get::<_, i64>(4)?, "sessionId": row.get::<_, Option<String>>(5)?, "threadId": row.get::<_, Option<String>>(6)?, "runId": row.get::<_, Option<String>>(7)?, "createdAt": row.get::<_, String>(8)?, "updatedAt": row.get::<_, String>(9)?}));
         }
         let _ = values;
         let has_more = operations.len() as i64 > page_size;

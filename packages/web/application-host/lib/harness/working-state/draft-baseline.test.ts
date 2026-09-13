@@ -4,13 +4,15 @@ import path from "node:path";
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
 import { overlayDraftsOnBaseline, createBranchWithDraftBaseline } from "./draft-baseline.js";
 import { WorkingStateStore } from "./working-state-store.js";
-import type { RecoveryState, RegularFileState } from "./types.js";
+import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-helper.js";
+import type { RecoveryState, RegularFileState, WorkingStateRootStore } from "./types.js";
 import { openRecoveryJournalCatalog, type SqliteDatabase } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
 
 describe("draft-baseline", () => {
   let tempDir: string;
   let store: WorkingStateStore;
+  let rootStore: WorkingStateRootStore;
   let database: SqliteDatabase;
 
   beforeEach(async () => {
@@ -26,6 +28,7 @@ describe("draft-baseline", () => {
       resourceOperationGate: { run: async (_resources, operation) => operation() },
       root,
     });
+    rootStore = asTestWorkingStateRootStore(store);
   });
 
   afterEach(async () => {
@@ -98,8 +101,8 @@ describe("draft-baseline", () => {
       "helper.ts": "export const y = 100;",
     };
 
-    const branch = await createBranchWithDraftBaseline(
-      store,
+    await createBranchWithDraftBaseline(
+      rootStore,
       "ws-test",
       "branch-feature",
       baseState,
@@ -107,6 +110,7 @@ describe("draft-baseline", () => {
       "main",
     );
 
+    const branch = store.getBranch("branch-feature")!;
     expect(branch.branchId).toBe("branch-feature");
     expect(branch.headRevision).toBe(0);
     expect(branch.deltas).toEqual({});
@@ -157,14 +161,15 @@ describe("draft-baseline", () => {
     expect(result.effectiveState["dir/old.txt"]).toEqual({ kind: "missing" });
     expect(result.effectiveState["file-base"]).toMatchObject({ kind: "directory" });
 
-    const branch = await createBranchWithDraftBaseline(
-      store,
+    await createBranchWithDraftBaseline(
+      rootStore,
       "ws-test",
       "branch-structure",
       baseState,
       drafts,
       "main",
     );
+    const branch = store.getBranch("branch-structure")!;
     expect(branch.draftBasePaths).toEqual(result.changedPaths);
     const child = path.join(tempDir, "materialized-child");
     await store.materializeStates(

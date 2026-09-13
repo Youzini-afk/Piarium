@@ -20,7 +20,8 @@ import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/app
 import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
 import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
 import { createWorkingBranchLookups } from "../../../web/application-host/lib/harness/working-state/working-branch-lookups.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
+import { WorkingStateStore } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-root-adapter.test-helper.js";
 import { openRecoveryJournalCatalog } from "../../../web/application-host/lib/recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/journal-files.js";
 import { projectZone2Threads } from "../../../web/application-host/lib/harness/zone2-threads.js";
@@ -79,9 +80,10 @@ describe("retrieval thread public slice", () => {
       root: recoveryRoot,
     } as never;
     const workingStore = await WorkingStateStore.open(workingContext);
-    const workingStates: WorkspaceWorkingStateAccess = {
+    const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
       withStore: async (_workspaceId, _purpose, operation) => operation(workingStore, workingContext),
     };
+    const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
     const executionViews = new ThreadExecutionViewRegistry();
     const branchLookups = createWorkingBranchLookups({ views: executionViews, workingStates });
     const paths = createHarnessPathAuthority({

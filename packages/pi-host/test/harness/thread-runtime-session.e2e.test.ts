@@ -13,7 +13,7 @@ import { createThreadRegistry } from "../../../web/application-host/lib/harness/
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
 import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
 import { IntegrationCoordinator } from "../../../web/application-host/lib/harness/working-state/integration-coordinator.js";
-import { createWorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
+import { createTestWorkingStateRootAccess } from "../../../web/application-host/lib/harness/working-state/working-state-root-adapter.test-helper.js";
 import { createWorkspaceRecoveryEngine } from "../../../web/application-host/lib/recovery/engine.js";
 import { SessionHost } from "../../src/session-host.js";
 
@@ -352,7 +352,7 @@ describe("thread runtime with native working-state integration", () => {
         commitLeaf: async () => ({ alreadyApplied: false, markerId: "native-undo-leaf-marker", snapshot: {} }),
       },
     });
-    const workingStates = createWorkspaceWorkingStateAccess(recoveryEngine);
+    const workingStates = createTestWorkingStateRootAccess(recoveryEngine);
     const integrationCoordinator = new IntegrationCoordinator({ workingStates });
     const worktrees = createThreadWorktreeRuntime({
       createWorktree: async (_source, input) => {

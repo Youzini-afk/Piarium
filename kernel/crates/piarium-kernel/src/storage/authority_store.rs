@@ -446,7 +446,13 @@ impl Storage {
                 "snapshot requires an unbounded path grant".to_string(),
             ));
         }
-        for field in ["paths", "entries", "changes"] {
+        for field in [
+            "paths",
+            "entries",
+            "changes",
+            "draftBasePaths",
+            "captureScopes",
+        ] {
             if let Some(values) = params.get(field).and_then(Value::as_array) {
                 for value in values {
                     let path = value

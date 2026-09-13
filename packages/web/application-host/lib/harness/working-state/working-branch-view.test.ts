@@ -17,7 +17,8 @@ import type { HarnessServiceContext } from "../router.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { createWorkingBranchLookups } from "./working-branch-lookups.js";
 import type { WorkingBranchQuerySnapshot } from "./working-branch-lookups.js";
-import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state-store.js";
+import { WorkingStateStore } from "./working-state-store.js";
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state-root-adapter.test-helper.js";
 
 const disposes: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of disposes.splice(0).reverse()) await dispose(); });
@@ -52,9 +53,10 @@ async function fixture() {
     root: recoveryRoot,
   };
   const store = await WorkingStateStore.open(context);
-  const workingStates: WorkspaceWorkingStateAccess = {
+  const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
     withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
   };
+  const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
   const views = new ThreadExecutionViewRegistry();
   const lookups = createWorkingBranchLookups({ views, workingStates });
   const actor: HarnessActorContext = {
@@ -199,7 +201,7 @@ describe("WorkingState Host branch view production chain", () => {
     const sharedGate = new Promise<void>((resolve) => { releaseShared = resolve; });
     let sharedWaiting: () => void = () => undefined;
     const sharedWaitingP = new Promise<void>((resolve) => { sharedWaiting = resolve; });
-    const delayed: WorkspaceWorkingStateAccess = {
+    const delayed = asTestWorkingStateRootAccess({
       withStore: async (_workspaceId, _purpose, operation, mode) => {
         if (mode === "shared") {
           sharedWaiting();
@@ -213,7 +215,7 @@ describe("WorkingState Host branch view production chain", () => {
           root: f.workspace,
         });
       },
-    };
+    });
     const lookups = createWorkingBranchLookups({ views: f.views, workingStates: delayed });
     const reading = lookups.readSource(f.actor.sessionId, "kept.txt");
     await sharedWaitingP;
@@ -237,7 +239,7 @@ describe("WorkingState Host branch view production chain", () => {
 
   it("pins explore lexical and original-text reads to the start-time snapshot", async () => {
     const f = await fixture();
-    const lookups = createWorkingBranchLookups({ views: f.views, workingStates: {
+    const lookups = createWorkingBranchLookups({ views: f.views, workingStates: asTestWorkingStateRootAccess({
       withStore: async (_workspaceId, _purpose, operation) => operation(f.store, {
         database: { close() { /* test fixture */ } } as never,
         fileStore: { captureState: async () => ({ state: { kind: "missing" as const } }) } as never,
@@ -245,7 +247,7 @@ describe("WorkingState Host branch view production chain", () => {
         resourceOperationGate: { run: async (_resources, op) => op() },
         root: f.workspace,
       }),
-    } });
+    }) });
     const written = await f.store.putObject(Buffer.from("export const needle = \"pinned-pineapple\";\n"));
     await f.store.commitVirtualWrite("thread-child", 0, "kept.txt", {
       kind: "regular-file",

@@ -730,7 +730,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, checkpoint/turn/mutation and selected Integration/agent operation records; remaining combined Recovery public methods and callback compatibility are still TS-owned; Git/copy directories are materializations | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; remaining combined journal cutover and file apply/materialization remain R1–R3 |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval and all recovery/Integration/agent-mutation durable metadata; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry and disk side effects through the Rust operation stages until R2/R3 move those resource backends |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
@@ -1153,9 +1153,9 @@ an O(scope) lookup remains a future Merkle/index property. These
 refinements are recorded as D-224; 3.4 / 3.4a / 3.6 remain Partial pending real paid nested Pi and
 full desktop restart validation.
 
-D-264/D-265 add the Rust v8 direct recovery authority for checkpoint/turn/change and typed
-operation/operation-file phase records. D-267–D-269 add generated working-record methods, root/path
-preview and Rust durable operation ports for directory and agent mutations. The former Application Host
-memory-catalog facade and close-time flush are deleted. Callback compatibility, branch undo/reconcile
-and the combined Recovery public methods still require cutover; typed methods do not count as consumer
-cutover by themselves, and cross-platform crash evidence remains R1 work.
+D-274 completes the R1 production metadata cutover on catalog format v9. WorkingState consumers use
+immutable root/path/domain methods; branch metadata and fixed draft/result identities publish in Rust
+transactions. Combined Recovery/Integration/agent-mutation uses the Rust typed operation/file stages as
+its only durable writer, while TS coordinates Documents/Registry and disk side effects after the relevant
+CAS. The old WorkingState and SQLite recovery engines are test helpers only. Storage-location product
+semantics and cross-platform, packaged, and hard-power-loss evidence remain R1 work.

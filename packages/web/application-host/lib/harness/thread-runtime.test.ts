@@ -6,10 +6,12 @@ import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary, ThreadWorktree } from "@piarium/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
-import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
+import { createThreadRuntime as createRootThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { WorkingStateStore as DurableWorkingStateStore } from "./working-state/working-state-store.js";
-import type { WorkspaceRecoveryStorageContext } from "../recovery/journal-engine.js";
+import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
+import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state/working-state-root-adapter.test-helper.js";
+import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/journal-files.js";
 import { createDocumentAuthority } from "../documents/authority.js";
@@ -18,6 +20,20 @@ import { createThreadWorktreeRuntime } from "./thread-worktree.js";
 
 const WORKSPACE = "workspace-1";
 const PARENT = { kind: "session", id: "parent-1" } as const;
+
+const createThreadRuntime = (
+  options: Omit<ThreadRuntimeOptions, "workingStates"> & {
+    workingStates?: TestWorkspaceWorkingStateAccess | WorkspaceWorkingStateRootAccess;
+  },
+) => {
+  const { workingStates, ...runtimeOptions } = options;
+  return createRootThreadRuntime({
+    ...runtimeOptions,
+    ...(workingStates
+      ? { workingStates: "withBranchStore" in workingStates ? workingStates : asTestWorkingStateRootAccess(workingStates) }
+      : {}),
+  });
+};
 
 const snapshot = (sessionId: string, cwd = "/workspace/thread"): SessionSnapshot => ({
   activeTools: ["read", "edit"],
@@ -1633,7 +1649,7 @@ describe("thread runtime", () => {
     const thread = await registry.createThread(input);
     const run = await registry.startRun(WORKSPACE, thread.id);
     await orderedRuntime.spawn({ ...input, threadId: thread.id, runId: run.id });
-    expect(order).toEqual(["baseline"]);
+    expect(order).toEqual(["baseline", "baseline"]);
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
       worktree: { viewMode: "virtual", materialized: false, preparationStage: "setup" },
     });
@@ -2755,6 +2771,7 @@ describe("thread runtime", () => {
         const published = {
           resultRevision: 1,
           branchId: "branch",
+          root: "tree-1",
           changedPaths: ["a.ts"],
           baseStates: { "a.ts": { kind: "missing" as const } },
           pathStates: { "a.ts": { kind: "regular-file" as const, objectHash: "sha256-a", byteLength: 4 } },
@@ -3231,7 +3248,7 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, { kind: "thread", id: thread.id }, child.id)).toBeNull();
     expect(deletedSessions).toEqual(expect.arrayContaining(["child-1", "grandchild-session"]));
     expect(released.branches).toEqual(expect.arrayContaining(["branch-child", "branch-thread"]));
-    expect(released.results).toEqual(expect.arrayContaining(["branch-child:4", "branch-thread:1"]));
+    expect(released.results).toEqual([]);
     expect(reclaimed).toContain("/workspace/thread");
     await deleting.dispose();
   });

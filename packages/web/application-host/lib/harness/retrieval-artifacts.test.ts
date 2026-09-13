@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@piarium/protocol";
-import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
 import { createRetrievalArtifactAccess, hashRetrievalText } from "./retrieval-artifacts.js";
 
@@ -67,8 +67,11 @@ const openAccess = () => {
       },
     },
   };
-  const workingStates: WorkspaceWorkingStateAccess = {
-    withStore: async (_workspaceId, _purpose, operation) => operation(store as never, context as never),
+  const workingStates: WorkspaceWorkingStateRootAccess = {
+    withBranchStore: async (_workspaceId, _purpose, operation) => operation(
+      store as unknown as WorkingStateRootStore,
+      context as unknown as WorkingStateRootContext,
+    ),
   };
   return {
     access: createRetrievalArtifactAccess(workingStates),
