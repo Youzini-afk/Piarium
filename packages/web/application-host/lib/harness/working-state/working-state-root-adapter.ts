@@ -214,6 +214,16 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
   captureBranchCandidateIdentity(...args: Parameters<WorkingStateStore["captureBranchCandidateIdentity"]>): ReturnType<WorkingStateStore["captureBranchCandidateIdentity"]> { return this.store.captureBranchCandidateIdentity(...args); }
   publishHeadResult(...args: Parameters<WorkingStateStore["publishHeadResult"]>): ReturnType<WorkingStateStore["publishHeadResult"]> { return this.store.publishHeadResult(...args); }
   publishDirectoryResult(...args: Parameters<WorkingStateStore["publishDirectoryResult"]>): ReturnType<WorkingStateStore["publishDirectoryResult"]> { return this.store.publishDirectoryResult(...args); }
+  async resultTreeIdentity(branchId: string, revision: number): Promise<string | null> { return this.store.resultTreeIdentity(branchId, revision); }
+  async listChildVerifications(threadId: string): Promise<import("./types.js").ResultVerificationBundle[]> { return this.store.listChildVerifications(threadId); }
+  async listParentVerifications(threadId: string): Promise<import("./types.js").ParentVerificationBundle[]> { return this.store.listParentVerifications(threadId); }
+  async listReviewRecords(threadId: string): Promise<import("./types.js").ResultReviewRecord[]> { return this.store.listReviewRecords(threadId); }
+  async getChildVerification(threadId: string, revision: number): Promise<import("./types.js").ResultVerificationBundle | null> { return this.store.getChildVerification(threadId, revision); }
+  async getParentVerification(threadId: string, revision?: number): Promise<import("./types.js").ParentVerificationBundle | null> { return this.store.getParentVerification(threadId, revision); }
+  async getReviewRecord(threadId: string, revision: number): Promise<import("./types.js").ResultReviewRecord | null> { return this.store.getReviewRecord(threadId, revision); }
+  async putChildVerification(threadId: string, bundle: import("./types.js").ResultVerificationBundle): Promise<void> { await this.store.putChildVerification(threadId, bundle); }
+  async putParentVerification(threadId: string, bundle: import("./types.js").ParentVerificationBundle): Promise<void> { await this.store.putParentVerification(threadId, bundle); }
+  async putReviewRecord(threadId: string, record: import("./types.js").ResultReviewRecord): Promise<void> { await this.store.putReviewRecord(threadId, record); }
 }
 
 export const isWorkingStateRootStore = (store: CompatibleWorkingStateStore): store is WorkingStateRootStore => (

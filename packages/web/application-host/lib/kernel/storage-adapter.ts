@@ -316,6 +316,56 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     };
   }
 
+  async resultTreeIdentity(branchId: string, revision: number): Promise<string | null> {
+    const result = await this.getResult(branchId, revision);
+    return result?.root ?? null;
+  }
+
+  async listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]> {
+    return (await this.context.working.verificationList(threadId, "child")).map((entry) => asRecord(entry.record) as unknown as ResultVerificationBundle);
+  }
+
+  async listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]> {
+    return (await this.context.working.verificationList(threadId, "parent")).map((entry) => asRecord(entry.record) as unknown as ParentVerificationBundle);
+  }
+
+  async listReviewRecords(threadId: string): Promise<ResultReviewRecord[]> {
+    return (await this.context.working.reviewList(threadId)).map((entry) => asRecord(entry.record) as unknown as ResultReviewRecord);
+  }
+
+  async getChildVerification(threadId: string, revision: number): Promise<ResultVerificationBundle | null> {
+    return (await this.listChildVerifications(threadId)).find((entry) => entry.resultRevision === revision) ?? null;
+  }
+
+  async getParentVerification(threadId: string, revision?: number): Promise<ParentVerificationBundle | null> {
+    const list = await this.listParentVerifications(threadId);
+    return (revision === undefined ? list.at(-1) : list.find((entry) => entry.mergedResultRevision === revision)) ?? null;
+  }
+
+  async getReviewRecord(threadId: string, revision: number): Promise<ResultReviewRecord | null> {
+    return (await this.listReviewRecords(threadId)).find((entry) => entry.resultRevision === revision) ?? null;
+  }
+
+  async putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void> {
+    const result = await this.getResult(bundle.branchId, bundle.resultRevision);
+    if (!result?.root) throw new Error(`Working result ${bundle.branchId}@${bundle.resultRevision} is unavailable`);
+    await this.context.working.verificationPut({ operationId: `working-verification-child:${threadId}:${bundle.resultRevision}:${randomUUID()}`, recordId: `working-verification:child:${threadId}:${bundle.resultRevision}`, threadId, kind: "child", branchId: bundle.branchId, resultRevision: bundle.resultRevision, root: result.root, document: bundle as never, ownerIds: [], references: [] });
+  }
+
+  async putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void> {
+    const resultRecords = await this.context.working.resultList();
+    const result = resultRecords.map((entry) => asRecord(entry.record)).find((entry) => Number(entry.resultRevision) === bundle.mergedResultRevision);
+    if (!result || typeof result.branchId !== "string" || typeof result.root !== "string") throw new Error(`Working result ${bundle.mergedResultRevision} is unavailable`);
+    await this.context.working.verificationPut({ operationId: `working-verification-parent:${threadId}:${bundle.mergedResultRevision}:${randomUUID()}`, recordId: `working-verification:parent:${threadId}:${bundle.mergedResultRevision}`, threadId, kind: "parent", branchId: result.branchId, resultRevision: bundle.mergedResultRevision, root: result.root, document: bundle as never, ownerIds: [], references: [] });
+  }
+
+  async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> {
+    const resultRecords = await this.context.working.resultList();
+    const result = resultRecords.map((entry) => asRecord(entry.record)).find((entry) => Number(entry.resultRevision) === record.resultRevision);
+    if (!result || typeof result.branchId !== "string" || typeof result.root !== "string") throw new Error(`Working result ${record.resultRevision} is unavailable`);
+    await this.context.working.reviewPut({ operationId: `working-review:${threadId}:${record.resultRevision}:${randomUUID()}`, recordId: `working-review:${threadId}:${record.resultRevision}`, threadId, branchId: result.branchId, resultRevision: record.resultRevision, root: result.root, document: record as never, ownerIds: [], references: [] });
+  }
+
   private async selected(branchId: string, paths: readonly string[], revision: number | undefined, signal?: AbortSignal): Promise<KernelBranchReadResult | null> {
     try {
       return await this.context.client.readBranch({

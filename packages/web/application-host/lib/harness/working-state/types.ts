@@ -137,6 +137,16 @@ export interface WorkingStateRootStore {
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
   publishHeadResult(branchId: string): Promise<WorkingResult>;
   publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult>;
+  resultTreeIdentity(branchId: string, revision: number): Promise<string | null>;
+  listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]>;
+  listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]>;
+  listReviewRecords(threadId: string): Promise<ResultReviewRecord[]>;
+  getChildVerification(threadId: string, revision: number): Promise<ResultVerificationBundle | null>;
+  getParentVerification(threadId: string, revision?: number): Promise<ParentVerificationBundle | null>;
+  getReviewRecord(threadId: string, revision: number): Promise<ResultReviewRecord | null>;
+  putChildVerification(threadId: string, bundle: ResultVerificationBundle): Promise<void>;
+  putParentVerification(threadId: string, bundle: ParentVerificationBundle): Promise<void>;
+  putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void>;
 }
 
 export interface WorkspaceWorkingStateRootAccess {
