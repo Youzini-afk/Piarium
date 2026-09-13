@@ -705,8 +705,16 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async publishHeadResult(branchId: string): Promise<WorkingResult> {
-    const read = await this.context.client.readBranch({ branchId, includeEntries: true });
-    return this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])));
+    const branch = await this.getBranchRoot(branchId);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const diff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: branch.root }));
+    const changedPaths = [
+      ...(Array.isArray(diff.added) ? diff.added : []),
+      ...(Array.isArray(diff.removed) ? diff.removed : []),
+      ...(Array.isArray(diff.changed) ? diff.changed : []),
+    ].filter((value): value is string => typeof value === "string").map(normalize);
+    const read = await this.context.client.readBranch({ branchId, paths: changedPaths, includeEntries: true });
+    return this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])), changedPaths);
   }
 
   async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {
