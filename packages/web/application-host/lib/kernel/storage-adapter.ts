@@ -81,6 +81,22 @@ export interface KernelStorageContext {
     }): Promise<KernelRecordResult>;
     release(operationId: string, recordId: string): Promise<Record<string, unknown>>;
   };
+  working: {
+    resultPut(input: Omit<Parameters<KernelScopedClient["workingResultPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
+    resultGet(recordId: string): Promise<Record<string, unknown> | null>;
+    resultList(branchId?: string): Promise<Record<string, unknown>[]>;
+    resultRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
+    draftPut(input: Omit<Parameters<KernelScopedClient["workingDraftPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
+    draftGet(recordId: string): Promise<Record<string, unknown> | null>;
+    draftList(): Promise<Record<string, unknown>[]>;
+    draftRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
+    verificationPut(input: Omit<Parameters<KernelScopedClient["workingVerificationPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
+    verificationList(threadId: string, kind: "child" | "parent"): Promise<Record<string, unknown>[]>;
+    verificationRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
+    reviewPut(input: Omit<Parameters<KernelScopedClient["workingReviewPut"]>[0], "workspaceId"> & { workspaceId?: string }): Promise<Record<string, unknown>>;
+    reviewList(threadId: string): Promise<Record<string, unknown>[]>;
+    reviewRelease(operationId: string, recordId: string): Promise<Record<string, unknown>>;
+  };
 }
 
 interface BranchProjection {
@@ -594,11 +610,17 @@ class KernelLegacyWorkingStateProjection {
     const snapshot = await context.client.snapshot(context.identity.workspaceId);
     const branches = Array.isArray(asRecord(snapshot).branches) ? asRecord(snapshot).branches as unknown[] : [];
     for (const item of branches) await store.loadBranch(asRecord(item));
-    for (const record of await context.records.list({ recordType: "working.result" })) store.loadResultRecord(record);
-    for (const record of await context.records.list({ recordType: "working.draft" })) store.loadDraftRecord(record);
-    for (const record of await context.records.list({ recordType: "working.verification.child" })) store.loadVerificationRecord(record, "child");
-    for (const record of await context.records.list({ recordType: "working.verification.parent" })) store.loadVerificationRecord(record, "parent");
-    for (const record of await context.records.list({ recordType: "working.review" })) store.loadVerificationRecord(record, "review");
+    const typedRecord = (record: Record<string, unknown>): KernelRecordResult => ({
+      recordId: String(record.recordId ?? ""), workspaceId: String(record.workspaceId ?? context.identity.workspaceId),
+      recordType: "working.record", state: "recorded", recordRevision: Number(record.recordRevision ?? 1),
+      payloadJson: JSON.stringify(record.record ?? {}), references: Array.isArray(record.references) ? record.references as KernelRecordResult["references"] : [],
+      createdAt: 0, updatedAt: 0,
+    });
+    for (const record of await context.working.resultList()) await store.loadResultRecord(typedRecord(record));
+    for (const record of await context.working.draftList()) store.loadDraftRecord(typedRecord(record));
+    for (const record of await context.working.verificationList(context.actor?.threadId ?? "", "child")) store.loadVerificationRecord(typedRecord(record), "child");
+    for (const record of await context.working.verificationList(context.actor?.threadId ?? "", "parent")) store.loadVerificationRecord(typedRecord(record), "parent");
+    for (const record of await context.working.reviewList(context.actor?.threadId ?? "")) store.loadVerificationRecord(typedRecord(record), "review");
     for (const record of await context.records.list({})) {
       for (const reference of record.references) store.sourceByHash.set(reference.objectHash, { recordId: record.recordId, slot: reference.slot });
     }
@@ -653,13 +675,22 @@ class KernelLegacyWorkingStateProjection {
     });
   }
 
-  private loadResultRecord(record: KernelRecordResult): void {
+  private async loadResultRecord(record: KernelRecordResult): Promise<void> {
     const payload = asRecord(parsePayload(record));
     const branchId = typeof payload.branchId === "string" ? payload.branchId : record.branchId;
     const revision = Number(payload.resultRevision ?? record.resultRevision ?? 0);
     if (!branchId || !Number.isSafeInteger(revision) || revision <= 0) return;
-    const result = payload as unknown as WorkingResult;
+    let result = payload as unknown as WorkingResult;
     if (result.branchId !== branchId || result.resultRevision !== revision || typeof result.root !== "string" || !result.root) return;
+    if (!result.pathStates || !result.baseStates) {
+      const changedPaths = Array.isArray(result.changedPaths) ? result.changedPaths : [];
+      const [base, fixed] = await Promise.all([
+        this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }),
+        this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }),
+      ]);
+      const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+      result = { ...result, baseStates: states(base), pathStates: states(fixed) };
+    }
     this.results.set(`${branchId}@${revision}`, clone(result));
     for (const [file, state] of Object.entries(result.pathStates ?? {})) if (state.kind === "regular-file") {
       const reference = record.references.find((item) => item.slot === `result:${file}`);
@@ -919,7 +950,7 @@ class KernelLegacyWorkingStateProjection {
     const id = `draft-${randomUUID()}`; const pathStates: Record<string, RecoveryState> = {}; const provenance: Record<string, DraftBaselinePathProvenance> = {}; const ownerIds: string[] = []; const references: KernelStorageReference[] = [];
     for (const input of paths) { const file = normalize(input.path); const bytes = typeof input.content === "string" ? Buffer.from(input.content, "utf8") : input.content; const object = await this.putObject(bytes); pathStates[file] = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(input.mode === undefined ? {} : { mode: input.mode }) }; provenance[file] = clone(input.provenance); const owner = this.ownerByHash.get(object.hash); if (owner) ownerIds.push(owner); references.push({ slot: `draft:${file}`, objectHash: object.hash }); }
     const baseline: DraftBaseline = { id, workspaceId, createdAt: nowIso(), pathStates, provenance };
-    await this.context.records.put({ operationId: `draft:${id}`, recordId: id, recordType: "working.draft", state: "active", payloadJson: JSON.stringify(baseline), references, ownerIds }); this.drafts.set(id, baseline); for (const state of Object.values(pathStates)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` }); } return clone(baseline);
+    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document: baseline, createdAt: baseline.createdAt, ownerIds, references }); this.drafts.set(id, baseline); for (const state of Object.values(pathStates)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` }); } return clone(baseline);
   }
 
   async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
@@ -990,7 +1021,8 @@ class KernelLegacyWorkingStateProjection {
       ...Object.entries(baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
       ...Object.entries(pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
     ];
-    await this.context.records.put({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, recordType: "working.result", state: "published", branchId, revision, resultRevision: revision, payloadJson: JSON.stringify(result), references: refs });
+    const persistedResult = { resultRevision: result.resultRevision, branchId: result.branchId, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, root: result.root };
+    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root: publishedRoot, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, document: persistedResult, ownerIds: [], references: refs });
     for (const reference of refs) this.sourceByHash.set(reference.objectHash, { recordId: `working-result:${branchId}@${revision}`, slot: reference.slot });
     return clone(result);
   }
@@ -1017,9 +1049,9 @@ class KernelLegacyWorkingStateProjection {
   async directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean> { const expected = this.resultState(branchId, revision); if (!expected) return false; const actual = await this.captureDirectory(directory); const files = new Set([...Object.keys(expected), ...Object.keys(actual)]); return [...files].every((file) => sameState(actual[file] ?? { kind: "missing" }, expected[file] ?? { kind: "missing" })); }
 
   async deleteBranch(branchId: string): Promise<void> { if (!this.branches.has(branchId)) return; await this.context.client.deleteBranch({ operationId: `branch-delete:${branchId}`, branchId }); await this.context.records.release(`branch-release:${branchId}`, `working-branch:${branchId}`); this.branches.delete(branchId); }
-  async deleteDraftBaseline(id: string): Promise<void> { await this.context.records.release(`draft-release:${id}`, id); this.drafts.delete(id); }
+  async deleteDraftBaseline(id: string): Promise<void> { await this.context.working.draftRelease(`draft-release:${id}`, id); this.drafts.delete(id); }
   async deleteResult(branchId: string, revision: number): Promise<void> { await this.deleteResults(branchId, [revision]); }
-  async deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]> { const removed: number[] = []; for (const revision of revisions) { if (!this.results.has(`${branchId}@${revision}`)) continue; await this.context.records.release(`result-release:${branchId}@${revision}`, `working-result:${branchId}@${revision}`); this.results.delete(`${branchId}@${revision}`); removed.push(revision); } return removed; }
+  async deleteResults(branchId: string, revisions: readonly number[]): Promise<number[]> { const removed: number[] = []; for (const revision of revisions) { if (!this.results.has(`${branchId}@${revision}`)) continue; await this.context.working.resultRelease(`result-release:${branchId}@${revision}`, `working-result:${branchId}@${revision}`); this.results.delete(`${branchId}@${revision}`); removed.push(revision); } return removed; }
   async reconcileObjectReferences(): Promise<void> { await this.context.client.health({ deep: true }); }
   async listParentVerifications(threadId: string): Promise<ParentVerificationBundle[]> { return (this.parentVerifications.get(threadId) ?? []).map(clone); }
   async listChildVerifications(threadId: string): Promise<ResultVerificationBundle[]> { return (this.verifications.get(threadId) ?? []).map(clone); }
@@ -1032,17 +1064,14 @@ class KernelLegacyWorkingStateProjection {
   async putReviewRecord(threadId: string, record: ResultReviewRecord): Promise<void> { await this.putVerification("working.review", threadId, record.resultRevision, record); const list = (this.reviews.get(threadId) ?? []).filter((item) => item.resultRevision !== record.resultRevision); this.reviews.set(threadId, [...list, clone(record)]); }
   private async putVerification(recordType: string, threadId: string, revision: number, payload: unknown): Promise<void> {
     const recordId = `${recordType}:${threadId}:${revision}`;
-    const existing = await this.context.records.get(recordId);
-    await this.context.records.put({
-      operationId: `${recordId}:record-rev:${existing ? existing.recordRevision + 1 : 1}:${randomUUID()}`,
-      recordId,
-      recordType,
-      state: "recorded",
-      threadId,
-      resultRevision: revision,
-      ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
-      payloadJson: JSON.stringify(payload),
-    });
+    const document = asRecord(payload);
+    const branchId = typeof document.branchId === "string" ? document.branchId : typeof document.mergedResultRevision === "number" ? `merge:${document.mergedResultRevision}` : "unknown";
+    const root = typeof document.resultTreeHash === "string" ? document.resultTreeHash : typeof document.parentTreeHash === "string" ? document.parentTreeHash : "root:unbound";
+    if (recordType === "working.review") {
+      await this.context.working.reviewPut({ operationId: `${recordId}:${randomUUID()}`, recordId, threadId, branchId, resultRevision: revision, root, document, ownerIds: [], references: [] });
+    } else {
+      await this.context.working.verificationPut({ operationId: `${recordId}:${randomUUID()}`, recordId, kind: recordType.endsWith("child") ? "child" : "parent", threadId, branchId, resultRevision: revision, root, document, ownerIds: [], references: [] });
+    }
   }
 }
 
@@ -1106,6 +1135,34 @@ export class KernelStorageAdapter {
       put: (input: Omit<Parameters<KernelScopedClient["putRecord"]>[0], "ownerIds" | "references"> & { ownerIds?: string[]; references?: KernelStorageReference[] }) => scoped.putRecord({ ...input, workspaceId, ownerIds: input.ownerIds ?? [], references: input.references ?? [] }),
       release: (operationId: string, recordId: string) => scoped.releaseRecord(operationId, workspaceId, recordId),
     };
+    const working = {
+      resultPut: (input: Omit<Parameters<KernelScopedClient["workingResultPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingResultPut({ ...input, workspaceId }),
+      resultGet: async (recordId: string) => scoped.workingResultGet({ workspaceId, recordId }),
+      resultList: async (branchId?: string) => {
+        const result = await scoped.workingResultList({ workspaceId, ...(branchId === undefined ? {} : { branchId }) });
+        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
+      },
+      resultRelease: (operationId: string, recordId: string) => scoped.workingResultRelease({ operationId, workspaceId, recordId }),
+      draftPut: (input: Omit<Parameters<KernelScopedClient["workingDraftPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingDraftPut({ ...input, workspaceId }),
+      draftGet: async (recordId: string) => scoped.workingDraftGet({ workspaceId, recordId }),
+      draftList: async () => {
+        const result = await scoped.workingDraftList({ workspaceId });
+        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
+      },
+      draftRelease: (operationId: string, recordId: string) => scoped.workingDraftRelease({ operationId, workspaceId, recordId }),
+      verificationPut: (input: Omit<Parameters<KernelScopedClient["workingVerificationPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingVerificationPut({ ...input, workspaceId }),
+      verificationList: async (threadId: string, kind: "child" | "parent") => {
+        const result = await scoped.workingVerificationList({ workspaceId, threadId, kind });
+        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
+      },
+      verificationRelease: (operationId: string, recordId: string) => scoped.workingVerificationRelease({ operationId, workspaceId, recordId }),
+      reviewPut: (input: Omit<Parameters<KernelScopedClient["workingReviewPut"]>[0], "workspaceId"> & { workspaceId?: string }) => scoped.workingReviewPut({ ...input, workspaceId }),
+      reviewList: async (threadId: string) => {
+        const result = await scoped.workingReviewList({ workspaceId, threadId });
+        return Array.isArray(result.records) ? result.records as Record<string, unknown>[] : [];
+      },
+      reviewRelease: (operationId: string, recordId: string) => scoped.workingReviewRelease({ operationId, workspaceId, recordId }),
+    };
     return {
       identity,
       root,
@@ -1131,6 +1188,7 @@ export class KernelStorageAdapter {
         return { byteLengthReclaimed: Number(result.byteLengthReclaimed ?? 0), objectsDeleted: Number(result.deletedBlobs ?? result.objectsDeleted ?? 0) };
       },
       records,
+      working,
       client: scoped,
     };
   }

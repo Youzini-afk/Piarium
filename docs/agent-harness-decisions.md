@@ -5929,3 +5929,17 @@ grant、data chunk 和取消所需入口保持 crate 可见。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-266 | implementation / internal architecture | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel documentation |
+
+### D-267 · 2026-09-13 · WorkingState 产品记录使用领域 wire 方法
+
+类型：R1 consumer cutover；只追加，不改写 D-265/D-266 正文
+
+result、draft、child/parent verification、review 现在拥有独立的 protocol method/DTO。Application Host 的 kernel storage context 通过这些方法发布和读取记录；通用 `storage.record.*` 仍仅保留给 branch metadata、retrieval 等尚未拥有专门领域 DTO 的记录。result 的 kernel 持久 envelope 只保存 branch、固定 root/revision、changed paths、diff identity 和时间，重启时按 root/path 读取结果内容，不再把 `baseStates/pathStates` 写入 result payload。
+
+Rust 在领域入口校验 workspace、branch/root/revision、thread/run 绑定和 record CAS，并复用同一 SQLite 事务维护 object references。当前 WorkingState callback 投影仍存在，且 draft/verification/review 的完整 root consumer 尚未完成，因此本决策只标记 A 阶段 wired，不提升 R1 的 proven/default-on 等级。
+
+## D-267 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-267 | implemented / wired for typed product-record boundary | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |

@@ -221,6 +221,21 @@ export class KernelScopedClient {
     return this.owner.putRecord(params, this.grant, signal);
   }
 
+  workingResultPut(params: KernelMethodParams["working.result.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingResultPut(params, this.grant, signal); }
+  workingResultGet(params: KernelMethodParams["working.result.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.owner.workingResultGet(params, this.grant, signal); }
+  workingResultList(params: KernelMethodParams["working.result.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingResultList(params, this.grant, signal); }
+  workingResultRelease(params: KernelMethodParams["working.result.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingResultRelease(params, this.grant, signal); }
+  workingDraftPut(params: KernelMethodParams["working.draft.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftPut(params, this.grant, signal); }
+  workingDraftGet(params: KernelMethodParams["working.draft.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.owner.workingDraftGet(params, this.grant, signal); }
+  workingDraftList(params: KernelMethodParams["working.draft.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftList(params, this.grant, signal); }
+  workingDraftRelease(params: KernelMethodParams["working.draft.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingDraftRelease(params, this.grant, signal); }
+  workingVerificationPut(params: KernelMethodParams["working.verification.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationPut(params, this.grant, signal); }
+  workingVerificationList(params: KernelMethodParams["working.verification.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationList(params, this.grant, signal); }
+  workingVerificationRelease(params: KernelMethodParams["working.verification.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingVerificationRelease(params, this.grant, signal); }
+  workingReviewPut(params: KernelMethodParams["working.review.put"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewPut(params, this.grant, signal); }
+  workingReviewList(params: KernelMethodParams["working.review.list"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewList(params, this.grant, signal); }
+  workingReviewRelease(params: KernelMethodParams["working.review.release"], signal?: AbortSignal): Promise<Record<string, unknown>> { return this.owner.workingReviewRelease(params, this.grant, signal); }
+
   getRecord(workspaceId: string, recordId: string, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.owner.getRecord({ workspaceId, recordId }, this.grant, signal);
   }
@@ -845,6 +860,21 @@ export class KernelClient {
   async putRecord(params: KernelMethodParams["storage.record.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult> {
     return this.requestRaw<KernelRecordResult>("storage.record.put", params, { signal, grant });
   }
+
+  async workingResultPut(params: KernelMethodParams["working.result.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.result.put", params, { signal, grant }); }
+  async workingResultGet(params: KernelMethodParams["working.result.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.requestRaw("working.result.get", params, { signal, grant }); }
+  async workingResultList(params: KernelMethodParams["working.result.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.result.list", params, { signal, grant }); }
+  async workingResultRelease(params: KernelMethodParams["working.result.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.result.release", params, { signal, grant }); }
+  async workingDraftPut(params: KernelMethodParams["working.draft.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.put", params, { signal, grant }); }
+  async workingDraftGet(params: KernelMethodParams["working.draft.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> { return this.requestRaw("working.draft.get", params, { signal, grant }); }
+  async workingDraftList(params: KernelMethodParams["working.draft.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.list", params, { signal, grant }); }
+  async workingDraftRelease(params: KernelMethodParams["working.draft.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.draft.release", params, { signal, grant }); }
+  async workingVerificationPut(params: KernelMethodParams["working.verification.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.put", params, { signal, grant }); }
+  async workingVerificationList(params: KernelMethodParams["working.verification.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.list", params, { signal, grant }); }
+  async workingVerificationRelease(params: KernelMethodParams["working.verification.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.verification.release", params, { signal, grant }); }
+  async workingReviewPut(params: KernelMethodParams["working.review.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.put", params, { signal, grant }); }
+  async workingReviewList(params: KernelMethodParams["working.review.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.list", params, { signal, grant }); }
+  async workingReviewRelease(params: KernelMethodParams["working.review.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> { return this.requestRaw("working.review.release", params, { signal, grant }); }
 
   async getRecord(params: KernelMethodParams["storage.record.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult | null> {
     return this.requestRaw<KernelRecordResult | null>("storage.record.get", params, { signal, grant });

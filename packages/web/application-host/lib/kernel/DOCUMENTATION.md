@@ -18,7 +18,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Unsaved editor buffers and grouped undo | Document Registry | remains Registry; surface receipts are not kernel text authority |
 | Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
-| Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `storage.record.*` is the only production reference/record writer; object reads require branch/pin/record/temporary-owner identity |
+| Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `working.*` domain methods own result/draft/verification/review writes; generic `storage.record.*` remains for branch metadata and retrieval until their dedicated cutovers; object reads require branch/pin/record/temporary-owner identity |
 | Recovery checkpoint/turn/mutation records | Rust kernel typed recovery tables and references | Production checkpoint/turn/mutation use `KernelRecoveryStore` directly |
 | Combined Recovery/Integration/agent-mutation journal | TS recovery SQLite (current, not a fallback) | Typed Rust operation/file methods exist, but these production consumers have not switched yet |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
@@ -45,6 +45,11 @@ a SQLite transaction publishes their references. GC records logical release and 
 cleanup failures remain visible and are retried on the next owner start. `branch.read` only expands entries when
 explicitly requested; ordinary reads walk the root or selected paths. D-256 adds deep health checks for reachable
 nodes and objects.
+
+The working result/draft/verification/review boundary now has generated `working.*` DTOs and Rust domain methods.
+Result records persist branch/root/revision and changed-path/diff identity; the full state is recovered through
+root/path reads rather than a durable `baseStates/pathStates` payload. The callback projection used by older
+consumers is still a temporary migration seam and is scheduled for the next R1 phase.
 
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with

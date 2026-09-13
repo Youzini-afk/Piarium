@@ -73,6 +73,120 @@ impl Storage {
             "storage.record.release" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
             }),
+            "working.result.put" => idempotent(storage, method, authorized_params, |storage| {
+                storage.working_record_put(
+                    method,
+                    "working.result",
+                    "published",
+                    "result",
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                )
+            }),
+            "working.result.get" => storage.working_record_get(
+                authorized_params,
+                grant_id.unwrap_or(""),
+                "working.result",
+            ),
+            "working.result.list" => storage.working_record_list(
+                authorized_params,
+                grant_id.unwrap_or(""),
+                "working.result",
+            ),
+            "working.result.release" => idempotent(storage, method, authorized_params, |storage| {
+                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+            }),
+            "working.draft.put" => idempotent(storage, method, authorized_params, |storage| {
+                storage.working_record_put(
+                    method,
+                    "working.draft",
+                    "active",
+                    "draft",
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                )
+            }),
+            "working.draft.get" => storage.working_record_get(
+                authorized_params,
+                grant_id.unwrap_or(""),
+                "working.draft",
+            ),
+            "working.draft.list" => storage.working_record_list(
+                authorized_params,
+                grant_id.unwrap_or(""),
+                "working.draft",
+            ),
+            "working.draft.release" => idempotent(storage, method, authorized_params, |storage| {
+                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+            }),
+            "working.verification.put" => {
+                idempotent(storage, method, authorized_params, |storage| {
+                    let kind = authorized_params
+                        .get("kind")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            KernelError::Operation("verification kind is required".to_string())
+                        })?;
+                    let record_type = match kind {
+                        "child" => "working.verification.child",
+                        "parent" => "working.verification.parent",
+                        _ => {
+                            return Err(KernelError::Operation(
+                                "verification kind is invalid".to_string(),
+                            ))
+                        }
+                    };
+                    storage.working_record_put(
+                        method,
+                        record_type,
+                        "recorded",
+                        "verification",
+                        authorized_params,
+                        grant_id.unwrap_or(""),
+                    )
+                })
+            }
+            "working.verification.list" => {
+                let kind = authorized_params
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        KernelError::Operation("verification kind is required".to_string())
+                    })?;
+                let record_type = match kind {
+                    "child" => "working.verification.child",
+                    "parent" => "working.verification.parent",
+                    _ => {
+                        return Err(KernelError::Operation(
+                            "verification kind is invalid".to_string(),
+                        ))
+                    }
+                };
+                storage.working_record_list(authorized_params, grant_id.unwrap_or(""), record_type)
+            }
+            "working.verification.release" => {
+                idempotent(storage, method, authorized_params, |storage| {
+                    storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+                })
+            }
+            "working.review.put" => idempotent(storage, method, authorized_params, |storage| {
+                storage.working_record_put(
+                    method,
+                    "working.review",
+                    "recorded",
+                    "review",
+                    authorized_params,
+                    grant_id.unwrap_or(""),
+                )
+            }),
+            "working.review.list" => storage.working_record_list(
+                authorized_params,
+                grant_id.unwrap_or(""),
+                "working.review",
+            ),
+            "working.review.release" => idempotent(storage, method, authorized_params, |storage| {
+                storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
+            }),
             "branch.create.begin" => {
                 storage.begin_branch_builder(authorized_params, grant_id.unwrap_or(""))
             }

@@ -682,4 +682,162 @@ impl Storage {
         )?;
         Ok(json!({"recordId": record_id, "released": deleted > 0}))
     }
+
+    /// Product-facing records deliberately use domain-shaped wire methods.  The catalog keeps a
+    /// compact JSON envelope internally, but callers cannot select an arbitrary record type or
+    /// submit an untyped payload through these methods.
+    pub(super) fn working_record_put(
+        &mut self,
+        method: &str,
+        record_type: &str,
+        state: &str,
+        document_field: &str,
+        params_value: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let document = params_value
+            .get(document_field)
+            .ok_or_else(|| KernelError::Operation(format!("{method} requires {document_field}")))?;
+        let object = document
+            .as_object()
+            .ok_or_else(|| KernelError::Operation(format!("{document_field} must be an object")))?;
+        let workspace_id = params_value
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                KernelError::Operation("working record workspaceId is required".to_string())
+            })?;
+        let record_id = params_value
+            .get("recordId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                KernelError::Operation("working record recordId is required".to_string())
+            })?;
+        let same = |field: &str| -> Result<(), KernelError> {
+            if let Some(value) = object.get(field).and_then(Value::as_str) {
+                if params_value.get(field).and_then(Value::as_str) != Some(value) {
+                    return Err(KernelError::Operation(format!(
+                        "{method} document {field} does not match its identity"
+                    )));
+                }
+            }
+            Ok(())
+        };
+        for field in ["workspaceId", "branchId", "root"] {
+            if params_value.get(field).is_some() {
+                same(field)?;
+            }
+        }
+        if let Some(revision) = params_value.get("resultRevision").and_then(Value::as_i64) {
+            if object
+                .get("resultRevision")
+                .and_then(Value::as_i64)
+                .is_some_and(|value| value != revision)
+            {
+                return Err(KernelError::Operation(format!(
+                    "{method} resultRevision does not match its identity"
+                )));
+            }
+        }
+        if matches!(record_type, "working.result" | "working.draft")
+            && object.keys().any(|key| key == "payloadJson")
+        {
+            return Err(KernelError::Operation(format!(
+                "{method} document cannot contain payloadJson"
+            )));
+        }
+        if record_type == "working.result"
+            && (object.contains_key("baseStates") || object.contains_key("pathStates"))
+        {
+            return Err(KernelError::Operation(
+                "working.result document must use root identity instead of state maps".to_string(),
+            ));
+        }
+        let mut translated = params_value.clone();
+        let translated_object = translated.as_object_mut().ok_or_else(|| {
+            KernelError::Protocol("working record params must be an object".to_string())
+        })?;
+        translated_object.insert(
+            "recordType".to_string(),
+            Value::String(record_type.to_string()),
+        );
+        translated_object.insert("state".to_string(), Value::String(state.to_string()));
+        translated_object.insert(
+            "payloadJson".to_string(),
+            Value::String(serde_json::to_string(document)?),
+        );
+        let value = self.domain_record_put(&translated, grant_id)?;
+        let payload = value
+            .get("payloadJson")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                KernelError::Storage("working record payload disappeared".to_string())
+            })?;
+        let document = serde_json::from_str::<Value>(payload).map_err(|error| {
+            KernelError::Storage(format!("working record payload is corrupt: {error}"))
+        })?;
+        Ok(
+            json!({"record": document, "recordId": record_id, "workspaceId": workspace_id, "recordRevision": value.get("recordRevision"), "references": value.get("references")}),
+        )
+    }
+
+    pub(super) fn working_record_get(
+        &self,
+        params_value: &Value,
+        grant_id: &str,
+        expected_type: &str,
+    ) -> Result<Value, KernelError> {
+        let value = self.domain_record_get(params_value, grant_id)?;
+        if value.is_null() {
+            return Ok(Value::Null);
+        }
+        if value.get("recordType").and_then(Value::as_str) != Some(expected_type) {
+            return Err(KernelError::Operation(
+                "working record type mismatch".to_string(),
+            ));
+        }
+        let payload = value
+            .get("payloadJson")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                KernelError::Storage("working record payload disappeared".to_string())
+            })?;
+        let document = serde_json::from_str::<Value>(payload).map_err(|error| {
+            KernelError::Storage(format!("working record payload is corrupt: {error}"))
+        })?;
+        Ok(
+            json!({"record": document, "recordId": value.get("recordId"), "workspaceId": value.get("workspaceId"), "recordRevision": value.get("recordRevision"), "references": value.get("references")}),
+        )
+    }
+
+    pub(super) fn working_record_list(
+        &self,
+        params_value: &Value,
+        grant_id: &str,
+        expected_type: &str,
+    ) -> Result<Value, KernelError> {
+        let mut query = params_value.clone();
+        query
+            .as_object_mut()
+            .expect("working list params object")
+            .insert(
+                "recordType".to_string(),
+                Value::String(expected_type.to_string()),
+            );
+        let value = self.domain_record_list(&query, grant_id)?;
+        let records = value
+            .get("records")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Storage("working record list is malformed".to_string()))?
+            .iter()
+            .map(|record| {
+                let payload = record.get("payloadJson").and_then(Value::as_str).ok_or_else(|| KernelError::Storage("working record payload disappeared".to_string()))?;
+                let document = serde_json::from_str::<Value>(payload).map_err(|error| KernelError::Storage(format!("working record payload is corrupt: {error}")))?;
+                Ok(json!({"record": document, "recordId": record.get("recordId"), "workspaceId": record.get("workspaceId"), "recordRevision": record.get("recordRevision"), "references": record.get("references")}))
+            })
+            .collect::<Result<Vec<_>, KernelError>>()?;
+        Ok(json!({"records": records, "nextCursor": value.get("nextCursor")}))
+    }
 }

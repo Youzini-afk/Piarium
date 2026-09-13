@@ -11,7 +11,13 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "pin.read"
         | "operation.get"
         | "storage.record.get"
-        | "storage.record.list" => "storage.read",
+        | "storage.record.list"
+        | "working.result.get"
+        | "working.result.list"
+        | "working.draft.get"
+        | "working.draft.list"
+        | "working.verification.list"
+        | "working.review.list" => "storage.read",
         "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
@@ -31,7 +37,15 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.delete"
         | "operation.release"
         | "storage.record.put"
-        | "storage.record.release" => "storage.write",
+        | "storage.record.release"
+        | "working.result.put"
+        | "working.result.release"
+        | "working.draft.put"
+        | "working.draft.release"
+        | "working.verification.put"
+        | "working.verification.release"
+        | "working.review.put"
+        | "working.review.release" => "storage.write",
         "storage.gc" => "storage.gc",
         "recovery.operation.get"
         | "recovery.turn.start"

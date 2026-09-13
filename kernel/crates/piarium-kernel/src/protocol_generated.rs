@@ -159,6 +159,156 @@ pub(crate) struct KernelRecordReleaseParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultPutParams {
+    pub(crate) operation_id: String,
+    pub(crate) record_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) result_revision: i64,
+    pub(crate) root: String,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) changed_paths: Vec<String>,
+    pub(crate) diff_stats: Value,
+    pub(crate) created_at: String,
+    pub(crate) document: Value,
+    pub(crate) session_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) run_id: Option<String>,
+    pub(crate) expected_record_revision: Option<i64>,
+    pub(crate) owner_ids: Vec<String>,
+    pub(crate) references: Vec<KernelRecordReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultGetParams {
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDraftPutParams {
+    pub(crate) operation_id: String,
+    pub(crate) record_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) document: Value,
+    pub(crate) root: Option<String>,
+    pub(crate) pin_id: Option<String>,
+    pub(crate) created_at: String,
+    pub(crate) expected_record_revision: Option<i64>,
+    pub(crate) owner_ids: Vec<String>,
+    pub(crate) references: Vec<KernelRecordReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDraftGetParams {
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDraftListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDraftReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingVerificationPutParams {
+    pub(crate) operation_id: String,
+    pub(crate) record_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) kind: String,
+    pub(crate) thread_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) branch_id: String,
+    pub(crate) result_revision: i64,
+    pub(crate) root: String,
+    pub(crate) document: Value,
+    pub(crate) expected_record_revision: Option<i64>,
+    pub(crate) owner_ids: Vec<String>,
+    pub(crate) references: Vec<KernelRecordReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingVerificationListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) kind: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingVerificationReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingReviewPutParams {
+    pub(crate) operation_id: String,
+    pub(crate) record_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) run_id: Option<String>,
+    pub(crate) branch_id: String,
+    pub(crate) result_revision: i64,
+    pub(crate) root: String,
+    pub(crate) document: Value,
+    pub(crate) expected_record_revision: Option<i64>,
+    pub(crate) owner_ids: Vec<String>,
+    pub(crate) references: Vec<KernelRecordReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingReviewListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) thread_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingReviewReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelCreateBranchBeginParams {
     pub(crate) operation_id: String,
     pub(crate) builder_id: String,
@@ -571,6 +721,76 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map_err(|error| error.to_string()),
         "storage.record.release" => {
             serde_json::from_value::<KernelRecordReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.put" => {
+            serde_json::from_value::<KernelWorkingResultPutParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.get" => {
+            serde_json::from_value::<KernelWorkingResultGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.list" => {
+            serde_json::from_value::<KernelWorkingResultListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.result.release" => {
+            serde_json::from_value::<KernelWorkingResultReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.draft.put" => {
+            serde_json::from_value::<KernelWorkingDraftPutParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.draft.get" => {
+            serde_json::from_value::<KernelWorkingDraftGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.draft.list" => {
+            serde_json::from_value::<KernelWorkingDraftListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.draft.release" => {
+            serde_json::from_value::<KernelWorkingDraftReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.verification.put" => {
+            serde_json::from_value::<KernelWorkingVerificationPutParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.verification.list" => {
+            serde_json::from_value::<KernelWorkingVerificationListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.verification.release" => {
+            serde_json::from_value::<KernelWorkingVerificationReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.review.put" => {
+            serde_json::from_value::<KernelWorkingReviewPutParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.review.list" => {
+            serde_json::from_value::<KernelWorkingReviewListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.review.release" => {
+            serde_json::from_value::<KernelWorkingReviewReleaseParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

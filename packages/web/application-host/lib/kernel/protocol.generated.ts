@@ -23,6 +23,20 @@ export type KernelMethod =
   | "storage.record.get"
   | "storage.record.list"
   | "storage.record.release"
+  | "working.result.put"
+  | "working.result.get"
+  | "working.result.list"
+  | "working.result.release"
+  | "working.draft.put"
+  | "working.draft.get"
+  | "working.draft.list"
+  | "working.draft.release"
+  | "working.verification.put"
+  | "working.verification.list"
+  | "working.verification.release"
+  | "working.review.put"
+  | "working.review.list"
+  | "working.review.release"
   | "branch.create.begin"
   | "branch.create.append"
   | "branch.create.finish"
@@ -177,6 +191,128 @@ export interface KernelRecordListParams {
 }
 
 export interface KernelRecordReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingResultPutParams {
+  operationId: string;
+  recordId: string;
+  workspaceId: string;
+  branchId: string;
+  resultRevision: number;
+  root: string;
+  parentRef?: string;
+  changedPaths: string[];
+  diffStats: unknown;
+  createdAt: string;
+  document: unknown;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  expectedRecordRevision?: number;
+  ownerIds: string[];
+  references: KernelRecordReference[];
+}
+
+export interface KernelWorkingResultGetParams {
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingResultListParams {
+  workspaceId: string;
+  branchId?: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelWorkingResultReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingDraftPutParams {
+  operationId: string;
+  recordId: string;
+  workspaceId: string;
+  document: unknown;
+  root?: string;
+  pinId?: string;
+  createdAt: string;
+  expectedRecordRevision?: number;
+  ownerIds: string[];
+  references: KernelRecordReference[];
+}
+
+export interface KernelWorkingDraftGetParams {
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingDraftListParams {
+  workspaceId: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelWorkingDraftReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingVerificationPutParams {
+  operationId: string;
+  recordId: string;
+  workspaceId: string;
+  kind: string;
+  threadId: string;
+  runId?: string;
+  branchId: string;
+  resultRevision: number;
+  root: string;
+  document: unknown;
+  expectedRecordRevision?: number;
+  ownerIds: string[];
+  references: KernelRecordReference[];
+}
+
+export interface KernelWorkingVerificationListParams {
+  workspaceId: string;
+  threadId: string;
+  kind: string;
+}
+
+export interface KernelWorkingVerificationReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelWorkingReviewPutParams {
+  operationId: string;
+  recordId: string;
+  workspaceId: string;
+  threadId: string;
+  runId?: string;
+  branchId: string;
+  resultRevision: number;
+  root: string;
+  document: unknown;
+  expectedRecordRevision?: number;
+  ownerIds: string[];
+  references: KernelRecordReference[];
+}
+
+export interface KernelWorkingReviewListParams {
+  workspaceId: string;
+  threadId: string;
+}
+
+export interface KernelWorkingReviewReleaseParams {
   operationId: string;
   workspaceId: string;
   recordId: string;
@@ -595,6 +731,20 @@ export type KernelMethodParams = {
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
   "storage.record.release": KernelRecordReleaseParams;
+  "working.result.put": KernelWorkingResultPutParams;
+  "working.result.get": KernelWorkingResultGetParams;
+  "working.result.list": KernelWorkingResultListParams;
+  "working.result.release": KernelWorkingResultReleaseParams;
+  "working.draft.put": KernelWorkingDraftPutParams;
+  "working.draft.get": KernelWorkingDraftGetParams;
+  "working.draft.list": KernelWorkingDraftListParams;
+  "working.draft.release": KernelWorkingDraftReleaseParams;
+  "working.verification.put": KernelWorkingVerificationPutParams;
+  "working.verification.list": KernelWorkingVerificationListParams;
+  "working.verification.release": KernelWorkingVerificationReleaseParams;
+  "working.review.put": KernelWorkingReviewPutParams;
+  "working.review.list": KernelWorkingReviewListParams;
+  "working.review.release": KernelWorkingReviewReleaseParams;
   "branch.create.begin": KernelCreateBranchBeginParams;
   "branch.create.append": KernelCreateBranchAppendParams;
   "branch.create.finish": KernelCreateBranchFinishParams;
@@ -772,6 +922,132 @@ export type KernelRequest =
       id: string;
       method: "storage.record.release";
       params: KernelRecordReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.put";
+      params: KernelWorkingResultPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.get";
+      params: KernelWorkingResultGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.list";
+      params: KernelWorkingResultListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.result.release";
+      params: KernelWorkingResultReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.draft.put";
+      params: KernelWorkingDraftPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.draft.get";
+      params: KernelWorkingDraftGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.draft.list";
+      params: KernelWorkingDraftListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.draft.release";
+      params: KernelWorkingDraftReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.verification.put";
+      params: KernelWorkingVerificationPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.verification.list";
+      params: KernelWorkingVerificationListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.verification.release";
+      params: KernelWorkingVerificationReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.review.put";
+      params: KernelWorkingReviewPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.review.list";
+      params: KernelWorkingReviewListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "working.review.release";
+      params: KernelWorkingReviewReleaseParams;
       epoch?: string;
       grantId?: string;
     }
