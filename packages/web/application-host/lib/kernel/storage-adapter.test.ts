@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,7 +13,7 @@ import { IntegrationCoordinator } from "../harness/working-state/integration-coo
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
 import { createKernelClient } from "./kernel-client.js";
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
-import { KernelRecoveryContentStore } from "./kernel-recovery-store.js";
+import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(here, "../../../../..");
@@ -208,7 +209,7 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     inspectDirtyBuffers: async () => [],
     runResourceOperation: async (_workspace, _resources, operation) => operation(),
   };
-  const engine = createWorkspaceRecoveryEngine({
+  const baseEngine = createWorkspaceRecoveryEngine({
     authorityId: "kernel-integration-test",
     dataDir,
     documents,
@@ -232,10 +233,13 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     storageRoot,
     resolveWorkspaceRoot: async () => workspace,
   });
-  adapter.bindFileStore(new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache")));
+  const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
+  adapter.bindFileStore(content);
+  const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
   try {
     await client.start();
-    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine);
+    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
     const result = await access.withStore(workspaceId, "integration-setup", async (store) => {
       const base = await store.captureDirectory(workspace);
       await store.createBranch(workspaceId, "parent-branch", base, "base");
@@ -257,11 +261,81 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     assert.equal(merged.status, "applied");
     await access.withStore(workspaceId, "integration-assert", async (store, context) => {
       assert.equal(await context.resourceOperationGate.run([], async () => "documents-gate"), "documents-gate");
-      assert.deepEqual(context.database.prepare("SELECT state FROM operations WHERE id = ?").get(merged.operationId), { state: "complete" });
+      const durable = await kernelRecoveryStore.getOperation(workspaceId, merged.operationId);
+      assert.equal(durable?.state, "complete");
       const state = store.effectiveState("parent-branch")?.["child.txt"];
       assert.equal(state?.kind, "regular-file");
       if (state?.kind === "regular-file") assert.equal((await store.getObject(state.objectHash))?.toString("utf8"), "child\n");
     }, "shared");
+  } finally {
+    await adapter.dispose().catch(() => undefined);
+    await client.close().catch(() => undefined);
+    await engine.dispose().catch(() => undefined);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integration and undo", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-surface-integration-"));
+  const workspace = path.join(root, "workspace");
+  const storageRoot = path.join(root, "storage");
+  const dataDir = path.join(root, "data");
+  const workspaceId = "kernel-surface-workspace";
+  await fs.mkdir(workspace, { recursive: true });
+  await fs.writeFile(path.join(workspace, "a.txt"), "base\n");
+  const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
+    inspectWorkspace: async () => ({ root: workspace, workspaceId }),
+    listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
+    beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
+    inspectDirtyBuffers: async () => [],
+    runResourceOperation: async (_workspace, _resources, operation) => operation(),
+  };
+  const baseEngine = createWorkspaceRecoveryEngine({
+    authorityId: "kernel-surface-test",
+    dataDir,
+    documents,
+    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
+  });
+  const client = createKernelClient({ hostId: "kernel-surface-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "kernel-surface-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
+  const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
+  adapter.bindFileStore(content);
+  const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
+  const surfaceHash = (value: string) => `sha256-${createHash("sha256").update(value, "utf8").digest("hex")}`;
+  try {
+    await client.start();
+    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
+    const result = await access.withStore(workspaceId, "surface-setup", async (store) => {
+      const base = await store.captureDirectory(workspace);
+      await store.createBranch(workspaceId, "surface-parent", base, "base");
+      await store.createBranch(workspaceId, "surface-child", base, "surface-parent@0");
+      const object = await store.putObject(Buffer.from("child\n"));
+      const baseMode = base["a.txt"]?.kind === "regular-file" ? base["a.txt"].mode : undefined;
+      await store.commitVirtualWrites("surface-child", 0, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(baseMode === undefined ? {} : { mode: baseMode }) } });
+      return store.publishHeadResult("surface-child");
+    });
+    const baseHash = surfaceHash("base\n");
+    const childHash = surfaceHash("child\n");
+    const requestSurfaceOperation = async (request: { action: string; targets: Array<{ resource: { resourceId: string }; documentInstanceId: string; beforeLocalEditRevision?: number; localEditRevision?: number; beforeHash?: string; bufferHash?: string; afterLocalEditRevision?: number; afterHash?: string }> }) => {
+      return request.targets.map((target) => {
+        const revision = target.beforeLocalEditRevision ?? target.localEditRevision ?? 1;
+        const hash = target.beforeHash ?? target.bufferHash ?? baseHash;
+        if (request.action === "capture") return { resource: target.resource, status: "captured" as const, content: "base\n", documentInstanceId: target.documentInstanceId, beforeLocalEditRevision: revision, beforeHash: hash };
+        if (request.action === "undo") return { resource: target.resource, status: "undone" as const, documentInstanceId: target.documentInstanceId, afterLocalEditRevision: revision, afterHash: baseHash };
+        return { resource: target.resource, status: "applied" as const, documentInstanceId: target.documentInstanceId, beforeLocalEditRevision: revision, beforeHash: hash, afterLocalEditRevision: revision + 1, afterHash: childHash };
+      });
+    };
+    const publication = { ownerId: "surface-owner", generation: 1, registrationId: "surface-registration", resources: [{ baseRevision: null, localEditRevision: 1, resource: { resourceId: "a.txt" }, documentInstanceId: "surface-document", bufferHash: baseHash, encoding: "utf-8", bom: false, lineEnding: "lf" as const }] };
+    const coordinator = new IntegrationCoordinator({ workingStates: access, inspectDirtyBuffers: async () => [publication], requestSurfaceOperation: requestSurfaceOperation as never });
+    const merged = await coordinator.mergeResult({ workspaceId, threadId: "surface-thread", branchId: "surface-child", resultRevision: result.resultRevision, sourceOwner: { ownerId: "surface-owner", generation: 1 } });
+    assert.equal(merged.status, "applied");
+    const operation = await kernelRecoveryStore.getOperation(workspaceId, merged.operationId);
+    assert.equal(operation?.state, "complete");
+    const undone = await coordinator.undoIntegration({ workspaceId, threadId: "surface-thread", operationId: merged.operationId, sourceOwner: { ownerId: "surface-owner", generation: 1 } });
+    assert.equal(undone.status, "compensated");
+    const afterUndo = await kernelRecoveryStore.getOperation(workspaceId, merged.operationId);
+    assert.equal(afterUndo?.state, "undone");
   } finally {
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);

@@ -502,16 +502,18 @@ export class KernelRecoveryStore {
     sessionId?: string;
     threadId?: string;
     runId?: string;
+    surfacePaths?: readonly string[];
   }): Promise<Record<string, unknown>> {
     const maintenance = !input.sessionId && !input.threadId && !input.runId;
     const context = await this.context(input.workspaceId, input.sessionId, maintenance);
+    const surfacePaths = new Set(input.surfacePaths ?? []);
     const files = Object.entries(input.targets).map(([filePath, states]) => ({
       path: filePath,
-      ...(states.expected ? { expectedJson: JSON.stringify(states.expected) } : {}),
-      ...(states.target ? { targetJson: JSON.stringify(states.target) } : {}),
-      ...(states.safety ? { safetyJson: JSON.stringify(states.safety) } : {}),
+      ...(surfacePaths.has(filePath) ? {} : states.expected ? { expectedJson: JSON.stringify(states.expected) } : {}),
+      ...(surfacePaths.has(filePath) ? {} : states.target ? { targetJson: JSON.stringify(states.target) } : {}),
+      ...(surfacePaths.has(filePath) ? {} : states.safety ? { safetyJson: JSON.stringify(states.safety) } : {}),
       phase: "pending",
-      references: this.stateReferences(input.workspaceId, states, filePath),
+      references: surfacePaths.has(filePath) ? [] : this.stateReferences(input.workspaceId, states, filePath),
     }));
     const result = await context.client.recoveryOperationCreate({
       operationId: input.operationId,

@@ -6003,3 +6003,17 @@ The root publication path now tolerates a selected-path read that reports an abs
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-272 | implemented / targeted regression proven | — | status 阶段 R1；kernel/application-host module documentation |
+
+### D-273 · 2026-09-13 · Acceptance correction: Rust-only recovery, ordered phases, pinned publish, and concrete working DTOs
+
+类型：验收退回与返工约束；只追加，不改写 D-265–D-272 正文
+
+D-267–D-272 的“wired”表述不代表生产 consumer 已迁移。返工必须关闭以下事实：surface Integration 的 external/receipt/undo/reconcile 仍可回到 TS SQLite；agent mutation 的 durable phase queue 仍可能 fire-and-forget；result publish 尚未把 current-root pin 贯穿 diff/read/publish；working DTO 仍含 `unknown`；生产 callback compatibility adapter 与 `withStore` 仍能展开全树；combined Recovery/Integration/agent-mutation/startup fence 仍存在双路径。
+
+本轮验收门槛改为：生产 durable context 不要求 database；所有 durable phase/terminal 方法返回并等待 Promise；surface/disk side effect 只能发生在对应 Rust CAS 完成后；result 的 diff、changed-path read 和 publish 必须绑定同一 pin/root/writeRevision；working record 使用生成的具体嵌套 DTO 并核验真实 branch/result identity；生产装配删除 compatibility projection、TS recovery writer、SQLite fallback 和 optional dual path。测试 fake 只能通过同一 `RecoveryDurableOperationPort` 注入。R1 在所有门槛满足前保持 Partial。
+
+## D-273 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-273 | acceptance correction / implementation required | supersedes D-267–D-272 delivery claims where they said wired/proven | status 阶段 R1；plan 阶段 R1；architecture；kernel/application-host/recovery module documentation |

@@ -325,7 +325,7 @@ export interface WorkspaceRecoveryStorageContext {
 }
 
 export interface RecoveryDurableOperationPort {
-  createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; sessionId?: string; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
+  createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; surfacePaths?: readonly string[]; sessionId?: string; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
   updateOperationFile(input: { operationId: string; workspaceId: string; path: string; expectedRevision: number; expectedPhase: string; phase: string; observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState; sessionId?: string }): Promise<Record<string, unknown>>;
   completeOperation(input: { operationId: string; workspaceId: string; expectedRevision: number; state: string; result?: Record<string, unknown>; failure?: Record<string, unknown>; sessionId?: string }): Promise<Record<string, unknown>>;
   getOperation(workspaceId: string, operationId: string, sessionId?: string): Promise<Record<string, unknown> | null>;

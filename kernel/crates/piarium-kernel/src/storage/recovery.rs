@@ -1106,6 +1106,8 @@ impl Storage {
         )
     }
 
+    // R1 accepts non-terminal durable phase markers (awaiting-surface/undoing) so
+    // restart reconciliation can observe them through the same operation identity.
     pub(super) fn recovery_operation_complete(
         &mut self,
         params_value: &Value,
@@ -1126,7 +1128,7 @@ impl Storage {
             .filter(|value| {
                 matches!(
                     *value,
-                    "complete" | "aborted" | "compensated" | "undone" | "needs-attention"
+                    "complete" | "conflict" | "aborted" | "compensated" | "undone" | "needs-attention" | "undoing" | "awaiting-surface"
                 )
             })
             .ok_or_else(|| {
@@ -1159,7 +1161,7 @@ impl Storage {
             }
         }
         recovery_fault("operation-complete")?;
-        let changed = self.conn.execute("UPDATE recovery_operations SET state = ?1, result_json = ?2, failure_json = ?3, revision = revision + 1, updated_at = ?4 WHERE workspace_id = ?5 AND operation_id = ?6 AND revision = ?7 AND state NOT IN ('complete', 'aborted', 'compensated', 'undone', 'needs-attention')", params![state, params_value.get("resultJson").and_then(Value::as_str), params_value.get("failureJson").and_then(Value::as_str), chrono_like_now(), workspace_id, operation_id, expected])?;
+        let changed = self.conn.execute("UPDATE recovery_operations SET state = ?1, result_json = ?2, failure_json = ?3, revision = revision + 1, updated_at = ?4 WHERE workspace_id = ?5 AND operation_id = ?6 AND revision = ?7 AND (state NOT IN ('complete', 'aborted', 'compensated', 'undone', 'needs-attention') OR (?1 = 'undoing' AND state IN ('complete', 'conflict')) OR (?1 = 'needs-attention' AND state IN ('complete', 'conflict')))", params![state, params_value.get("resultJson").and_then(Value::as_str), params_value.get("failureJson").and_then(Value::as_str), chrono_like_now(), workspace_id, operation_id, expected])?;
         if changed == 0 {
             return Err(KernelError::Operation(
                 "operation terminal state conflict".to_string(),

@@ -400,7 +400,7 @@ export class IntegrationCoordinator {
         target: input.afterStates[file] ?? input.beforeStates[file]!,
       },
     ]));
-    writeOperationRow(context.database, {
+    writeOperationRow(context.database!, {
       id: input.operationId,
       workspaceId: input.workspaceId,
       kind: "integration",
@@ -503,7 +503,7 @@ export class IntegrationCoordinator {
         throw new Error("Parent turn recovery binding is required for integration");
       }
       if (input.executionId && !context.durableRecoveryStore) {
-        assertIntegrationTurnBinding(context.database, input.workspaceId, input.executionId);
+        assertIntegrationTurnBinding(context.database!, input.workspaceId, input.executionId);
       }
       if (!context.durableRecoveryStore) {
         await reconcileInterruptedIntegrationOperations(context);
@@ -512,7 +512,7 @@ export class IntegrationCoordinator {
       const blocking = context.durableRecoveryStore
         ? (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
           .find((entry) => !["complete", "conflict", "compensated", "aborted", "undone"].includes(String(entry.state)))
-        : context.database.prepare(`
+        : context.database!.prepare(`
           SELECT id, state FROM operations WHERE workspace_id = ? AND kind = 'integration'
           AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone') LIMIT 1
         `).get(input.workspaceId) as { id: string; state: string } | undefined;
@@ -704,7 +704,7 @@ export class IntegrationCoordinator {
           preview,
         };
       }
-      let applyContext = context;
+      let applyContext: DurableFileOperationContext = context as DurableFileOperationContext;
       let applyExecutionWorkspaceId: string | undefined;
       if (parentAuthority.kind === "directory") {
         try {
@@ -766,7 +766,7 @@ export class IntegrationCoordinator {
           grouped.set(key, group);
           phases[path] = "surface-intent";
         }
-        markDurableExternalDispatched(context, applied.operationId, Object.keys(externalTargets));
+        await markDurableExternalDispatched(context, applied.operationId, Object.keys(externalTargets));
         for (const path of Object.keys(externalTargets)) phases[path] = "surface-dispatched";
         const observed = new Map<string, DocumentSurfaceOperationResult>();
         const uncertain = new Set<string>();
@@ -894,7 +894,7 @@ export class IntegrationCoordinator {
       }
       for (const path of applied.compensatedPaths ?? []) phases[path] = "compensated";
       for (const path of applied.needsAttentionPaths ?? []) phases[path] = "unavailable";
-      persistSurfacePhases(context.database, applied.operationId, phases);
+      if (!context.durableRecoveryStore) persistSurfacePhases(context.database!, applied.operationId, phases);
       const preview = projectPreview(planned.plan, planned.targets, planned.preview.binding, phases, planned.texts);
       this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview });
       const status: IntegrationApplyResult["status"] = preview.unavailablePaths.length > 0 && applied.status === "applied"
@@ -942,12 +942,14 @@ export class IntegrationCoordinator {
     }
     try {
     return await this.workingStates.withStore(input.workspaceId, "thread-result-integration-undo", async (store, context) => {
-      await reconcileInterruptedIntegrationOperations(context);
-      await reconcileInterruptedBranchIntegrations(context, store);
-      const operation = inspectDurableIntegrationOperation(context, input.operationId);
+      if (!context.durableRecoveryStore) {
+        await reconcileInterruptedIntegrationOperations(context);
+        await reconcileInterruptedBranchIntegrations(context, store);
+      }
+      const operation = await inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
       if (operation.state === "undone") {
-        const finalized = finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
+        const finalized = await finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
         this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
         return { ...finalized, status: finalized.status as IntegrationApplyResult["status"] };
       }
@@ -956,7 +958,7 @@ export class IntegrationCoordinator {
         if (heldParentIsDisk || authority?.kind === "directory") {
           if (heldParentIsDisk && authority?.kind !== "directory") {
             return {
-              ...markDurableIntegrationNeedsAttention(
+              ...await markDurableIntegrationNeedsAttention(
                 context,
                 input.operationId,
                 operation.appliedPaths,
@@ -967,7 +969,7 @@ export class IntegrationCoordinator {
           }
           if (authority?.kind !== "directory") {
             return {
-              ...markDurableIntegrationNeedsAttention(
+              ...await markDurableIntegrationNeedsAttention(
                 context,
                 input.operationId,
                 operation.appliedPaths,
@@ -985,7 +987,7 @@ export class IntegrationCoordinator {
           } catch (error) {
             if (!(error instanceof DirectoryApplyUnresolvedError)) throw error;
             return {
-              ...markDurableIntegrationNeedsAttention(context, input.operationId, operation.appliedPaths, error.message),
+              ...await markDurableIntegrationNeedsAttention(context, input.operationId, operation.appliedPaths, error.message),
               status: "needs-attention" as const,
             };
           }
@@ -1002,7 +1004,7 @@ export class IntegrationCoordinator {
             const parentBranch = store.getBranch(operation.parentBranchId);
             if (!parentBranch) {
               return {
-                ...markDurableIntegrationNeedsAttention(
+                ...await markDurableIntegrationNeedsAttention(
                   context,
                   input.operationId,
                   operation.appliedPaths,
@@ -1025,7 +1027,7 @@ export class IntegrationCoordinator {
             ));
             if (branchDrift.length > 0) {
               return {
-                ...markDurableIntegrationNeedsAttention(
+                ...await markDurableIntegrationNeedsAttention(
                   context,
                   input.operationId,
                   branchDrift,
@@ -1045,7 +1047,7 @@ export class IntegrationCoordinator {
               );
               if (synced.status === "conflict") {
                 return {
-                  ...markDurableIntegrationNeedsAttention(
+                  ...await markDurableIntegrationNeedsAttention(
                     context,
                     input.operationId,
                     branchPaths,
@@ -1055,7 +1057,7 @@ export class IntegrationCoordinator {
                 };
               }
             }
-            const finalized = finalizeDurableIntegrationUndone(
+            const finalized = await finalizeDurableIntegrationUndone(
               context,
               input.operationId,
               branchPaths,
@@ -1075,12 +1077,12 @@ export class IntegrationCoordinator {
         const currentView = store.effectiveState(operation.parentBranchId) ?? {};
         if (this.sameParentSlice(currentView, before)) {
           this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
-          const finalized = finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
+          const finalized = await finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
           return { ...finalized, status: finalized.status as IntegrationApplyResult["status"] };
         }
         if (!this.sameParentSlice(currentView, after)) {
           return {
-            ...markDurableIntegrationNeedsAttention(
+            ...await markDurableIntegrationNeedsAttention(
               context,
               input.operationId,
               Object.keys(after),
@@ -1089,7 +1091,7 @@ export class IntegrationCoordinator {
             status: "needs-attention" as const,
           };
         }
-        markDurableIntegrationUndoing(context, input.operationId);
+        await markDurableIntegrationUndoing(context, input.operationId);
         const parentSessionId = this.resolveParentSessionId?.(input.workspaceId, operation.parentBranchId);
         const committed = this.commitParentVirtualWrites
           ? await this.commitParentVirtualWrites({
@@ -1103,7 +1105,7 @@ export class IntegrationCoordinator {
           : await store.commitVirtualWrites(operation.parentBranchId, parentBranch.writeRevision ?? 0, before);
         if (committed.status === "conflict") {
           return {
-            ...markDurableIntegrationNeedsAttention(
+            ...await markDurableIntegrationNeedsAttention(
               context,
               input.operationId,
               Object.keys(after),
@@ -1115,7 +1117,7 @@ export class IntegrationCoordinator {
         const observed = store.effectiveState(operation.parentBranchId) ?? {};
         if (!this.sameParentSlice(observed, before)) {
           return {
-            ...markDurableIntegrationNeedsAttention(
+            ...await markDurableIntegrationNeedsAttention(
               context,
               input.operationId,
               Object.keys(before),
@@ -1124,11 +1126,11 @@ export class IntegrationCoordinator {
             status: "needs-attention" as const,
           };
         }
-        const finalized = finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
+        const finalized = await finalizeDurableIntegrationUndone(context, input.operationId, operation.appliedPaths);
         this.previewByThread.delete(this.previewKey(input.workspaceId, input.threadId));
         return { ...finalized, status: finalized.status as IntegrationApplyResult["status"] };
       }
-      let applyContext = context;
+      let applyContext: DurableFileOperationContext = context as DurableFileOperationContext;
       if (operation.applyCanonicalRoot) {
         try {
           applyContext = (await this.directoryApplyContext(context, {
@@ -1138,7 +1140,7 @@ export class IntegrationCoordinator {
         } catch (error) {
           if (!(error instanceof DirectoryApplyUnresolvedError)) throw error;
           return {
-            ...markDurableIntegrationNeedsAttention(
+            ...await markDurableIntegrationNeedsAttention(
               context,
               input.operationId,
               operation.appliedPaths,
@@ -1178,7 +1180,7 @@ export class IntegrationCoordinator {
             group.paths.push(file);
             grouped.set(key, group);
           }
-          markDurableExternalUndoDispatched(context, input.operationId, surfacePaths);
+          await markDurableExternalUndoDispatched(context, input.operationId, surfacePaths);
           const failed: string[] = [];
           for (const group of grouped.values()) {
             try {
@@ -1218,7 +1220,7 @@ export class IntegrationCoordinator {
             }
           }
           if (failed.length > 0) {
-            const attention = markDurableIntegrationNeedsAttention(
+            const attention = await markDurableIntegrationNeedsAttention(
               context,
               input.operationId,
               failed,

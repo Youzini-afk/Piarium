@@ -78,7 +78,8 @@ export type ResolveDirectoryApplyContext = (directory: string) => Promise<{
 }>;
 
 export interface DurableFileOperationContext {
-  database: SqliteDatabase;
+  /** Present only for isolated legacy test implementations. Production kernel contexts omit it. */
+  database?: SqliteDatabase;
   fileStore: RecoveryFileStore;
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
@@ -114,6 +115,98 @@ interface PersistedIntegrationData extends Record<string, unknown> {
 const stateFromJson = (value: string | null, label: string): RecoveryState => {
   if (!value) throw new Error(`Integration ${label} state is missing`);
   return parseRecoveryState(JSON.parse(value) as unknown);
+};
+
+type KernelRecoveryOperation = Record<string, unknown>;
+
+const kernelOperation = async (context: DurableFileOperationContext, operationId: string): Promise<KernelRecoveryOperation> => {
+  if (!context.durableRecoveryStore) throw new Error("Rust recovery operation port is unavailable");
+  const operation = await context.durableRecoveryStore.getOperation(context.identity.workspaceId, operationId);
+  if (!operation) throw new Error(`Recovery operation not found: ${operationId}`);
+  return operation;
+};
+
+const kernelOperationData = (operation: KernelRecoveryOperation): PersistedIntegrationData => (
+  {
+    ...((operation.data && typeof operation.data === "object" ? operation.data : {}) as PersistedIntegrationData),
+    ...((operation.result && typeof operation.result === "object" ? operation.result : {}) as Partial<PersistedIntegrationData>),
+  } as PersistedIntegrationData
+);
+
+const kernelFile = (operation: KernelRecoveryOperation, path: string): Record<string, unknown> => {
+  const files = Array.isArray(operation.files) ? operation.files : [];
+  const file = files.find((entry) => Boolean(entry) && typeof entry === "object" && (entry as Record<string, unknown>).path === path);
+  if (!file || typeof file !== "object") throw new Error(`Recovery operation path not found: ${path}`);
+  return file as Record<string, unknown>;
+};
+
+const kernelTransition = async (
+  context: DurableFileOperationContext,
+  operationId: string,
+  path: string,
+  phase: string,
+  fields: { observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {},
+): Promise<KernelRecoveryOperation> => {
+  const operation = await kernelOperation(context, operationId);
+  const file = kernelFile(operation, path);
+  const updated = await context.durableRecoveryStore!.updateOperationFile({
+    operationId,
+    workspaceId: context.identity.workspaceId,
+    path,
+    expectedRevision: Number(file.revision ?? 1),
+    expectedPhase: String(file.phase ?? "pending"),
+    phase,
+    ...fields,
+  });
+  return { ...operation, revision: updated.revision ?? operation.revision, files: (Array.isArray(operation.files) ? operation.files : []).map((entry) => (
+    entry && typeof entry === "object" && (entry as Record<string, unknown>).path === path
+      ? { ...(entry as Record<string, unknown>), phase, revision: updated.revision }
+      : entry
+  )) };
+};
+
+const kernelComplete = async (
+  context: DurableFileOperationContext,
+  operationId: string,
+  state: string,
+  data?: Record<string, unknown>,
+  failure?: string,
+): Promise<KernelRecoveryOperation> => {
+  const operation = await kernelOperation(context, operationId);
+  return context.durableRecoveryStore!.completeOperation({
+    operationId,
+    workspaceId: context.identity.workspaceId,
+    expectedRevision: Number(operation.revision ?? 1),
+    state,
+    ...(data ? { result: data } : {}),
+    ...(failure ? { failure: { message: failure } } : {}),
+  });
+};
+
+const kernelCompensateDisk = async (context: DurableFileOperationContext, operationId: string, data: PersistedIntegrationData): Promise<void> => {
+  for (const file of data.appliedPaths ?? []) {
+    if (data.targetKinds?.[file] !== "disk") continue;
+    const target = data.targets?.[file]?.target;
+    const safety = data.safety?.[file];
+    if (!target || !safety) continue;
+    const current = (await capture(context, file, false)).state;
+    if (sameState(current, safety)) {
+      await kernelTransition(context, operationId, file, "safety-observed");
+      if (!data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
+      continue;
+    }
+    if (!sameState(current, target)) {
+      await kernelTransition(context, operationId, file, "needs-attention");
+      if (!data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
+      continue;
+    }
+    await kernelTransition(context, operationId, file, "compensate-intent");
+    await context.fileStore.applyState(context.identity, context.root, file, safety);
+    const restored = (await capture(context, file, false)).state;
+    if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${file}`);
+    await kernelTransition(context, operationId, file, "safety-observed");
+    if (!data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
+  }
 };
 
 const writeRecord = (
@@ -186,6 +279,7 @@ const applyKernelDurableFileOperation = async (
   const durable = context.durableRecoveryStore;
   if (!durable) throw new Error("Rust recovery operation port is unavailable");
   const externalTargets = spec.externalTargets ?? {};
+  const externalPaths = Object.keys(externalTargets).sort();
   const allTargets = { ...spec.targets, ...externalTargets };
   const targetKinds: Record<string, "disk" | "surface"> = Object.fromEntries([
     ...Object.keys(spec.targets).map((file) => [file, "disk" as const]),
@@ -210,7 +304,7 @@ const applyKernelDurableFileOperation = async (
     ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
     ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
   };
-  const created = await durable.createOperation({ operationId: spec.id, workspaceId: spec.workspaceId, kind: "integration", state: "applying", data, targets: allTargets });
+  const created = await durable.createOperation({ operationId: spec.id, workspaceId: spec.workspaceId, kind: "integration", state: "applying", data, targets: allTargets, surfacePaths: externalPaths });
   let revision = Number(created.revision ?? 1);
   const phases = new Map<string, { revision: number; phase: string }>();
   const transition = async (file: string, phase: string, extra: { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {}): Promise<void> => {
@@ -297,21 +391,21 @@ const compensate = async (
     await runPathOperation(applyContext, row.path, "subtree", async () => {
       const current = (await capture(applyContext, row.path, false)).state;
       if (!sameState(current, target)) {
-        updateOperationFilePhase(applyContext.database, data.operationId, row.path, "needs-attention");
+        updateOperationFilePhase(applyContext.database!, data.operationId, row.path, "needs-attention");
         data.needsAttentionPaths.push(row.path);
         return;
       }
-      updateOperationFilePhase(applyContext.database, data.operationId, row.path, "compensate-intent");
+      updateOperationFilePhase(applyContext.database!, data.operationId, row.path, "compensate-intent");
       try {
         await applyContext.fileStore.applyState(applyContext.identity, applyContext.root, row.path, safety);
         const restored = (await capture(applyContext, row.path, false)).state;
         if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${row.path}`);
       } catch {
-        updateOperationFilePhase(context.database, data.operationId, row.path, "needs-attention");
+        updateOperationFilePhase(context.database!, data.operationId, row.path, "needs-attention");
         data.needsAttentionPaths.push(row.path);
         return;
       }
-      updateOperationFilePhase(context.database, data.operationId, row.path, "safety-observed");
+      updateOperationFilePhase(context.database!, data.operationId, row.path, "safety-observed");
       data.compensatedPaths.push(row.path);
     });
   }
@@ -323,9 +417,9 @@ export const applyDurableFileOperation = async (
 ): Promise<DurableFileOperationResult> => {
   if (context.durableRecoveryStore) return applyKernelDurableFileOperation(context, spec);
   if (spec.requireTurnBinding && !spec.executionId) throw new Error("Parent turn recovery binding is required for integration");
-  if (spec.executionId) assertIntegrationTurnBinding(context.database, spec.workspaceId, spec.executionId);
+  if (spec.executionId) assertIntegrationTurnBinding(context.database!, spec.workspaceId, spec.executionId);
   await reconcileInterruptedIntegrationOperations(context);
-  const blocking = context.database.prepare(`
+  const blocking = context.database!.prepare(`
     SELECT id, state FROM operations WHERE workspace_id = ? AND kind = 'integration'
     AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone') LIMIT 1
   `).get(spec.workspaceId) as { id: string; state: string } | undefined;
@@ -382,12 +476,12 @@ export const applyDurableFileOperation = async (
     ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
     ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
   };
-  context.database.transaction(() => {
-    writeRecord(context.database, spec.workspaceId, "applying", data, createdAt);
-    initOperationFiles(context.database, spec.id, allTargets);
+  context.database!.transaction(() => {
+    writeRecord(context.database!, spec.workspaceId, "applying", data, createdAt);
+    initOperationFiles(context.database!, spec.id, allTargets);
     for (const [file, state] of Object.entries(safety)) {
       updateOperationFilePhase(
-        context.database,
+        context.database!,
         spec.id,
         file,
         targetKinds[file] === "surface" ? "external-intent" : "apply-intent",
@@ -407,19 +501,19 @@ export const applyDurableFileOperation = async (
         if (sameState(current, safety[file]!)) return;
         if (!sameState(current, states.target)) {
           data.needsAttentionPaths.push(file);
-          try { updateOperationFilePhase(context.database, spec.id, file, "needs-attention"); } catch { /* The API still reports failure; disk remains untouched. */ }
+          try { updateOperationFilePhase(context.database!, spec.id, file, "needs-attention"); } catch { /* The API still reports failure; disk remains untouched. */ }
           return;
         }
-        try { updateOperationFilePhase(context.database, spec.id, file, "compensate-intent"); } catch { /* Continue with exact in-memory states. */ }
+        try { updateOperationFilePhase(context.database!, spec.id, file, "compensate-intent"); } catch { /* Continue with exact in-memory states. */ }
         try {
           await context.fileStore.applyState(context.identity, context.root, file, safety[file]!);
           const restored = (await capture(context, file, false)).state;
           if (!sameState(restored, safety[file]!)) throw new Error(`Compensation did not restore ${file}`);
           data.compensatedPaths.push(file);
-          try { updateOperationFilePhase(context.database, spec.id, file, "safety-observed"); } catch { /* Final operation state records the compensation when possible. */ }
+          try { updateOperationFilePhase(context.database!, spec.id, file, "safety-observed"); } catch { /* Final operation state records the compensation when possible. */ }
         } catch {
           data.needsAttentionPaths.push(file);
-          try { updateOperationFilePhase(context.database, spec.id, file, "needs-attention"); } catch { /* Preserve the unknown disk state. */ }
+          try { updateOperationFilePhase(context.database!, spec.id, file, "needs-attention"); } catch { /* Preserve the unknown disk state. */ }
         }
       });
     }
@@ -437,7 +531,7 @@ export const applyDurableFileOperation = async (
         await context.fileStore.applyState(context.identity, context.root, file, states.target);
         const observed = (await capture(context, file, false)).state;
         if (!sameState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
-        updateOperationFilePhase(context.database, spec.id, file, "target-observed");
+        updateOperationFilePhase(context.database!, spec.id, file, "target-observed");
         data.appliedPaths.push(file);
       });
     }
@@ -445,7 +539,7 @@ export const applyDurableFileOperation = async (
     data.failure = error instanceof Error ? error.message : String(error);
     await compensateLiveTargets();
     const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
-    writeRecord(context.database, spec.workspaceId, status, data, createdAt);
+    writeRecord(context.database!, spec.workspaceId, status, data, createdAt);
     return {
       operationId: spec.id,
       status,
@@ -459,7 +553,7 @@ export const applyDurableFileOperation = async (
   }
 
   if (Object.keys(externalTargets).length > 0) {
-    writeRecord(context.database, spec.workspaceId, "awaiting-surface", data, createdAt);
+    writeRecord(context.database!, spec.workspaceId, "awaiting-surface", data, createdAt);
     return {
       operationId: spec.id,
       status: "pending",
@@ -472,10 +566,10 @@ export const applyDurableFileOperation = async (
 
   const status = spec.conflictPaths.length > 0 ? "conflict" : "applied";
   try {
-    context.database.transaction(() => {
-      writeRecord(context.database, spec.workspaceId, status === "applied" ? "complete" : "conflict", data, createdAt);
+    context.database!.transaction(() => {
+      writeRecord(context.database!, spec.workspaceId, status === "applied" ? "complete" : "conflict", data, createdAt);
       if (spec.executionId) {
-        bindIntegrationOperationToTurn(context.database, {
+        bindIntegrationOperationToTurn(context.database!, {
           workspaceId: spec.workspaceId,
           executionId: spec.executionId,
           operationId: spec.id,
@@ -487,7 +581,7 @@ export const applyDurableFileOperation = async (
     await compensateLiveTargets();
     const compensatedStatus = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
     try {
-      writeRecord(context.database, spec.workspaceId, compensatedStatus, data, createdAt);
+      writeRecord(context.database!, spec.workspaceId, compensatedStatus, data, createdAt);
     } catch (persistError) {
       throw new Error(`${data.failure}; compensation status could not be persisted: ${persistError instanceof Error ? persistError.message : String(persistError)}`);
     }
@@ -643,11 +737,33 @@ export interface DurableIntegrationInspection {
   safety: Record<string, RecoveryState>;
 }
 
-export const inspectDurableIntegrationOperation = (
+export const inspectDurableIntegrationOperation = async (
   context: DurableFileOperationContext,
   operationId: string,
-): DurableIntegrationInspection => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<DurableIntegrationInspection> => {
+  if (context.durableRecoveryStore) {
+    const operation = await context.durableRecoveryStore.getOperation(context.identity.workspaceId, operationId);
+    if (!operation) throw new Error(`Integration operation not found: ${operationId}`);
+    const data = kernelOperationData(operation);
+    return {
+      operationId,
+      state: String(operation.state ?? "unknown"),
+      threadId: String(data.threadId ?? operation.threadId ?? ""),
+      resultRevision: data.resultRevision ?? 0,
+      targets: structuredClone(data.targets ?? {}),
+      targetKinds: structuredClone(data.targetKinds ?? {}),
+      externalBindings: structuredClone(data.externalBindings ?? {}),
+      appliedPaths: [...(data.appliedPaths ?? [])],
+      safety: structuredClone(data.safety ?? {}),
+      ...(data.applyCanonicalRoot ? { applyCanonicalRoot: data.applyCanonicalRoot } : {}),
+      ...(data.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: data.applyExecutionWorkspaceId } : {}),
+      ...(data.parentBranchId ? { parentBranchId: data.parentBranchId } : {}),
+      ...(data.beforeWriteRevision === undefined ? {} : { beforeWriteRevision: data.beforeWriteRevision }),
+      ...(data.afterWriteRevision === undefined ? {} : { afterWriteRevision: data.afterWriteRevision }),
+      ...(data.retryBinding ? { retryBinding: structuredClone(data.retryBinding) } : {}),
+    };
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   return {
     operationId,
     state: row.state,
@@ -667,30 +783,52 @@ export const inspectDurableIntegrationOperation = (
   };
 };
 
-export const markDurableExternalDispatched = (
+export const markDurableExternalDispatched = async (
   context: DurableFileOperationContext,
   operationId: string,
   paths: readonly string[],
-): void => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<void> => {
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, operationId);
+    const data = kernelOperationData(operation);
+    if (String(operation.state) !== "awaiting-surface") throw new Error(`Integration ${operationId} is not waiting for a surface`);
+    const expected = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
+    const supplied = [...new Set(paths)].sort();
+    if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) throw new Error(`Integration ${operationId} surface path set changed before dispatch`);
+    for (const file of supplied) await kernelTransition(context, operationId, file, "external-dispatched");
+    return;
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   if (row.state !== "awaiting-surface") throw new Error(`Integration ${operationId} is not waiting for a surface`);
   const expected = Object.entries(data.targetKinds).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
   const supplied = [...new Set(paths)].sort();
   if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) {
     throw new Error(`Integration ${operationId} surface path set changed before dispatch`);
   }
-  context.database.transaction(() => {
-    for (const file of supplied) updateOperationFilePhase(context.database, operationId, file, "external-dispatched");
-    writeRecord(context.database, row.workspace_id, "awaiting-surface", data, row.created_at);
+  context.database!.transaction(() => {
+    for (const file of supplied) updateOperationFilePhase(context.database!, operationId, file, "external-dispatched");
+    writeRecord(context.database!, row.workspace_id, "awaiting-surface", data, row.created_at);
   }).immediate();
 };
 
-export const markDurableExternalUndoDispatched = (
+export const markDurableExternalUndoDispatched = async (
   context: DurableFileOperationContext,
   operationId: string,
   paths: readonly string[],
-): void => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<void> => {
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, operationId);
+    const state = String(operation.state);
+    if (state !== "complete" && state !== "conflict" && state !== "undoing") throw new Error(`Integration ${operationId} cannot begin undo from state ${state}`);
+    const data = kernelOperationData(operation);
+    const expected = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
+    const supplied = [...new Set(paths)].sort();
+    if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) throw new Error(`Integration ${operationId} surface undo path set changed`);
+    for (const file of supplied) await kernelTransition(context, operationId, file, "external-compensate-intent");
+    await kernelComplete(context, operationId, "undoing", data);
+    return;
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   if (row.state !== "complete" && row.state !== "conflict") {
     throw new Error(`Integration ${operationId} cannot begin undo from state ${row.state}`);
   }
@@ -699,9 +837,9 @@ export const markDurableExternalUndoDispatched = (
   if (expected.length !== supplied.length || expected.some((file, index) => file !== supplied[index])) {
     throw new Error(`Integration ${operationId} surface undo path set changed`);
   }
-  context.database.transaction(() => {
-    for (const file of supplied) updateOperationFilePhase(context.database, operationId, file, "external-compensate-intent");
-    writeRecord(context.database, row.workspace_id, "undoing", data, row.created_at);
+  context.database!.transaction(() => {
+    for (const file of supplied) updateOperationFilePhase(context.database!, operationId, file, "external-compensate-intent");
+    writeRecord(context.database!, row.workspace_id, "undoing", data, row.created_at);
   }).immediate();
 };
 
@@ -710,12 +848,36 @@ export const markDurableExternalUndoDispatched = (
  * materialized directory.  The operation row is the recovery authority; a
  * file phase alone cannot make a pure-disk undo discoverable after restart.
  */
-export const markDurableIntegrationUndoing = (
+export const markDurableIntegrationUndoing = async (
   context: DurableFileOperationContext,
   operationId: string,
   apply?: { applyCanonicalRoot?: string; applyExecutionWorkspaceId?: string },
-): void => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<void> => {
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, operationId);
+    const data = kernelOperationData(operation);
+    const state = String(operation.state);
+    if (state !== "complete" && state !== "conflict" && state !== "undoing") {
+      throw new Error(`Integration ${operationId} cannot begin undo from state ${state}`);
+    }
+    if (apply?.applyCanonicalRoot && data.applyCanonicalRoot && apply.applyCanonicalRoot !== data.applyCanonicalRoot) {
+      throw new Error(`Integration ${operationId} undo execution directory changed`);
+    }
+    if (apply?.applyExecutionWorkspaceId && data.applyExecutionWorkspaceId
+      && apply.applyExecutionWorkspaceId !== data.applyExecutionWorkspaceId) {
+      throw new Error(`Integration ${operationId} undo execution workspace changed`);
+    }
+    const nextData = {
+      ...data,
+      ...(apply?.applyCanonicalRoot ? { applyCanonicalRoot: apply.applyCanonicalRoot } : {}),
+      ...(apply?.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: apply.applyExecutionWorkspaceId } : {}),
+    };
+    if (state !== "undoing" || apply?.applyCanonicalRoot !== data.applyCanonicalRoot || apply?.applyExecutionWorkspaceId !== data.applyExecutionWorkspaceId) {
+      await kernelComplete(context, operationId, "undoing", nextData);
+    }
+    return;
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   if (row.state === "undoing") {
     if (apply?.applyCanonicalRoot && data.applyCanonicalRoot && apply.applyCanonicalRoot !== data.applyCanonicalRoot) {
       throw new Error(`Integration ${operationId} undo execution directory changed`);
@@ -728,7 +890,7 @@ export const markDurableIntegrationUndoing = (
     const applyExecutionWorkspaceId = apply?.applyExecutionWorkspaceId ?? data.applyExecutionWorkspaceId;
     if (applyCanonicalRoot !== data.applyCanonicalRoot
       || applyExecutionWorkspaceId !== data.applyExecutionWorkspaceId) {
-      writeRecord(context.database, row.workspace_id, "undoing", {
+      writeRecord(context.database!, row.workspace_id, "undoing", {
         ...data,
         ...(applyCanonicalRoot ? { applyCanonicalRoot } : {}),
         ...(applyExecutionWorkspaceId ? { applyExecutionWorkspaceId } : {}),
@@ -739,19 +901,40 @@ export const markDurableIntegrationUndoing = (
   if (row.state !== "complete" && row.state !== "conflict") {
     throw new Error(`Integration ${operationId} cannot begin undo from state ${row.state}`);
   }
-  writeRecord(context.database, row.workspace_id, "undoing", {
+  writeRecord(context.database!, row.workspace_id, "undoing", {
     ...data,
     ...(apply?.applyCanonicalRoot ? { applyCanonicalRoot: apply.applyCanonicalRoot } : {}),
     ...(apply?.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: apply.applyExecutionWorkspaceId } : {}),
   }, row.created_at);
 };
 
-export const finalizeDurableIntegrationUndone = (
+export const finalizeDurableIntegrationUndone = async (
   context: DurableFileOperationContext,
   operationId: string,
   compensatedPaths?: readonly string[],
-): DurableFileOperationResult => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<DurableFileOperationResult> => {
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, operationId);
+    const data = kernelOperationData(operation);
+    const state = String(operation.state);
+    if (state !== "complete" && state !== "conflict" && state !== "undoing" && state !== "undone") {
+      throw new Error(`Integration ${operationId} cannot finish undo from state ${state}`);
+    }
+    const paths = [...new Set([...(data.compensatedPaths ?? []), ...(compensatedPaths ?? data.appliedPaths ?? [])])].sort();
+    const completed = { ...data, compensatedPaths: paths, needsAttentionPaths: [] };
+    delete completed.failure;
+    if (state !== "undone") await kernelComplete(context, operationId, "undone", completed);
+    return {
+      operationId,
+      status: "compensated",
+      appliedPaths: [],
+      conflictPaths: [...(data.conflictPaths ?? [])],
+      compensatedPaths: paths,
+      diffStats: data.diffStats,
+      text: "Integration was undone.",
+    };
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   if (row.state !== "complete" && row.state !== "conflict" && row.state !== "undoing" && row.state !== "undone") {
     throw new Error(`Integration ${operationId} cannot finish undo from state ${row.state}`);
   }
@@ -765,7 +948,7 @@ export const finalizeDurableIntegrationUndone = (
     needsAttentionPaths: [],
   };
   delete completed.failure;
-  writeRecord(context.database, row.workspace_id, "undone", completed, row.created_at);
+  writeRecord(context.database!, row.workspace_id, "undone", completed, row.created_at);
   return {
     operationId,
     status: "compensated",
@@ -777,19 +960,38 @@ export const finalizeDurableIntegrationUndone = (
   };
 };
 
-export const markDurableIntegrationNeedsAttention = (
+export const markDurableIntegrationNeedsAttention = async (
   context: DurableFileOperationContext,
   operationId: string,
   paths: readonly string[],
   failure: string,
-): DurableFileOperationResult => {
-  const { row, data } = loadIntegrationOperation(context.database, operationId);
+): Promise<DurableFileOperationResult> => {
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, operationId);
+    const data = kernelOperationData(operation);
+    data.failure = failure;
+    for (const file of paths) {
+      await kernelTransition(context, operationId, file, "needs-attention");
+      if (!data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
+    }
+    await kernelComplete(context, operationId, "needs-attention", data, failure);
+    return {
+      operationId,
+      status: "needs-attention",
+      appliedPaths: [...data.appliedPaths],
+      conflictPaths: [...data.conflictPaths],
+      needsAttentionPaths: [...data.needsAttentionPaths],
+      diffStats: data.diffStats,
+      text: `Integration requires attention (${failure}).`,
+    };
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, operationId);
   data.failure = failure;
   for (const file of paths) {
-    updateOperationFilePhase(context.database, operationId, file, "needs-attention");
+    updateOperationFilePhase(context.database!, operationId, file, "needs-attention");
     if (!data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
   }
-  writeRecord(context.database, row.workspace_id, "needs-attention", data, row.created_at);
+  writeRecord(context.database!, row.workspace_id, "needs-attention", data, row.created_at);
   return {
     operationId,
     status: "needs-attention",
@@ -810,7 +1012,44 @@ export const finalizeDurableExternalOperation = async (
     failure?: string;
   },
 ): Promise<DurableFileOperationResult> => {
-  const { row, data } = loadIntegrationOperation(context.database, input.operationId);
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, input.operationId);
+    const data = kernelOperationData(operation);
+    if (String(operation.state) !== "awaiting-surface") throw new Error(`Integration ${input.operationId} is not waiting for a surface`);
+    const externalPaths = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
+    const resultPaths = Object.keys(input.results).sort();
+    if (externalPaths.length !== resultPaths.length || externalPaths.some((file, index) => file !== resultPaths[index])) throw new Error(`Integration ${input.operationId} surface result path set is incomplete`);
+    for (const file of externalPaths) {
+      const result = input.results[file]!;
+      await kernelTransition(context, input.operationId, file, result === "applied" ? "external-target-observed" : result === "unchanged" ? "external-safety-observed" : "needs-attention");
+      if (result === "applied" && !data.appliedPaths.includes(file)) data.appliedPaths.push(file);
+      if (result === "applied") {
+        const receipt = input.receipts?.[file];
+        const binding = data.externalBindings?.[file];
+        if (!receipt || !binding) throw new Error(`Integration ${input.operationId} surface receipt is missing: ${file}`);
+        binding.afterLocalEditRevision = receipt.afterLocalEditRevision;
+        binding.afterHash = receipt.afterHash;
+      }
+      if (result === "needs-attention" && !data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
+    }
+    const values = Object.values(input.results);
+    if (values.every((result) => result === "applied")) {
+      const status = data.conflictPaths.length > 0 ? "conflict" : "complete";
+      await kernelComplete(context, input.operationId, status, data);
+      return { operationId: input.operationId, status: status === "complete" ? "applied" : "conflict", appliedPaths: [...data.appliedPaths], conflictPaths: [...data.conflictPaths], diffStats: data.diffStats, text: status === "complete" ? `Integrated ${data.appliedPaths.length} path(s).` : `Integrated ${data.appliedPaths.length} path(s) with ${data.conflictPaths.length} conflict(s).` };
+    }
+    if (values.every((result) => result === "unchanged")) {
+      data.failure = input.failure ?? "The editor surface rejected the integration";
+      await kernelCompensateDisk(context, input.operationId, data);
+      const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
+      await kernelComplete(context, input.operationId, status, data, data.failure);
+      return { operationId: input.operationId, status, appliedPaths: [], conflictPaths: [...data.conflictPaths], compensatedPaths: [...data.compensatedPaths], needsAttentionPaths: [...data.needsAttentionPaths], diffStats: data.diffStats, text: `Integration failed (${data.failure}); ${status}.` };
+    }
+    data.failure = input.failure ?? "The editor surface result could not be determined atomically";
+    await kernelComplete(context, input.operationId, "needs-attention", data, data.failure);
+    return { operationId: input.operationId, status: "needs-attention", appliedPaths: [...data.appliedPaths], conflictPaths: [...data.conflictPaths], needsAttentionPaths: [...data.needsAttentionPaths], diffStats: data.diffStats, text: `Integration requires attention (${data.failure}).` };
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, input.operationId);
   if (row.state !== "awaiting-surface") throw new Error(`Integration ${input.operationId} is not waiting for a surface`);
   const externalPaths = Object.entries(data.targetKinds).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
   const resultPaths = Object.keys(input.results).sort();
@@ -820,7 +1059,7 @@ export const finalizeDurableExternalOperation = async (
   for (const file of externalPaths) {
     const result = input.results[file]!;
     updateOperationFilePhase(
-      context.database,
+      context.database!,
       input.operationId,
       file,
       result === "applied" ? "external-target-observed"
@@ -839,10 +1078,10 @@ export const finalizeDurableExternalOperation = async (
   const values = Object.values(input.results);
   if (values.every((result) => result === "applied")) {
     const status = data.conflictPaths.length > 0 ? "conflict" : "applied";
-    context.database.transaction(() => {
-      writeRecord(context.database, row.workspace_id, status === "applied" ? "complete" : "conflict", data, row.created_at);
+    context.database!.transaction(() => {
+      writeRecord(context.database!, row.workspace_id, status === "applied" ? "complete" : "conflict", data, row.created_at);
       if (data.executionId) {
-        bindIntegrationOperationToTurn(context.database, {
+        bindIntegrationOperationToTurn(context.database!, {
           workspaceId: row.workspace_id,
           executionId: data.executionId,
           operationId: input.operationId,
@@ -862,9 +1101,9 @@ export const finalizeDurableExternalOperation = async (
   }
   if (values.every((result) => result === "unchanged")) {
     data.failure = input.failure ?? "The editor surface rejected the integration";
-    await compensate(context, data, operationFileRows(context.database, input.operationId));
+    await compensate(context, data, operationFileRows(context.database!, input.operationId));
     const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
-    writeRecord(context.database, row.workspace_id, status, data, row.created_at);
+    writeRecord(context.database!, row.workspace_id, status, data, row.created_at);
     return {
       operationId: input.operationId,
       status,
@@ -877,7 +1116,7 @@ export const finalizeDurableExternalOperation = async (
     };
   }
   data.failure = input.failure ?? "The editor surface result could not be determined atomically";
-  writeRecord(context.database, row.workspace_id, "needs-attention", data, row.created_at);
+  writeRecord(context.database!, row.workspace_id, "needs-attention", data, row.created_at);
   return {
     operationId: input.operationId,
     status: "needs-attention",
@@ -893,7 +1132,22 @@ export const undoDurableIntegrationOperation = async (
   context: DurableFileOperationContext,
   input: { operationId: string; surfaceUndonePaths: readonly string[] },
 ): Promise<DurableFileOperationResult> => {
-  const { row, data } = loadIntegrationOperation(context.database, input.operationId);
+  if (context.durableRecoveryStore) {
+    const operation = await kernelOperation(context, input.operationId);
+    const data = kernelOperationData(operation);
+    const state = String(operation.state);
+    if (state !== "complete" && state !== "conflict" && state !== "undoing") throw new Error(`Integration ${input.operationId} cannot be undone from state ${state}`);
+    const surfacePaths = Object.entries(data.targetKinds ?? {}).filter(([, kind]) => kind === "surface").map(([file]) => file).sort();
+    const undone = [...new Set(input.surfaceUndonePaths)].sort();
+    if (surfacePaths.length !== undone.length || surfacePaths.some((file, index) => file !== undone[index])) throw new Error(`Integration ${input.operationId} surface undo is incomplete`);
+    if (state !== "undoing") await kernelComplete(context, input.operationId, "undoing", data);
+    for (const file of surfacePaths) await kernelTransition(context, input.operationId, file, "external-safety-observed");
+    await kernelCompensateDisk(context, input.operationId, data);
+    const terminal = data.needsAttentionPaths.length > 0 ? "needs-attention" : "undone";
+    await kernelComplete(context, input.operationId, terminal, data, data.failure);
+    return { operationId: input.operationId, status: terminal === "undone" ? "compensated" : "needs-attention", appliedPaths: [], conflictPaths: [...(data.conflictPaths ?? [])], compensatedPaths: [...(data.compensatedPaths ?? [])], needsAttentionPaths: [...(data.needsAttentionPaths ?? [])], diffStats: data.diffStats, text: terminal === "undone" ? "Integration was undone." : "Integration undo requires attention." };
+  }
+  const { row, data } = loadIntegrationOperation(context.database!, input.operationId);
   if (row.state !== "complete" && row.state !== "conflict" && row.state !== "undoing") {
     throw new Error(`Integration ${input.operationId} cannot be undone from state ${row.state}`);
   }
@@ -906,10 +1160,10 @@ export const undoDurableIntegrationOperation = async (
   // while disk-only operations arrive here directly.  Both must be visible to
   // restart reconciliation before the first conditional compensation.
   markDurableIntegrationUndoing(context, input.operationId);
-  for (const file of surfacePaths) updateOperationFilePhase(context.database, input.operationId, file, "external-safety-observed");
-  await compensate(context, data, operationFileRows(context.database, input.operationId));
+  for (const file of surfacePaths) updateOperationFilePhase(context.database!, input.operationId, file, "external-safety-observed");
+  await compensate(context, data, operationFileRows(context.database!, input.operationId));
   const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
-  writeRecord(context.database, row.workspace_id, status === "compensated" ? "undone" : status, data, row.created_at);
+  writeRecord(context.database!, row.workspace_id, status === "compensated" ? "undone" : status, data, row.created_at);
   return {
     operationId: input.operationId,
     status,
@@ -932,7 +1186,7 @@ export const undoBranchIntegrationOnDirectory = async (
   context: DurableFileOperationContext,
   input: { operationId: string; applyExecutionWorkspaceId?: string; deferFinalization?: boolean },
 ): Promise<DurableFileOperationResult> => {
-  const { row, data } = loadIntegrationOperation(context.database, input.operationId);
+  const { row, data } = loadIntegrationOperation(context.database!, input.operationId);
   if (!isBranchIntegration(data) || !data.parentBranchId) {
     throw new Error(`Integration ${input.operationId} is not a branch integration`);
   }
@@ -941,7 +1195,7 @@ export const undoBranchIntegrationOnDirectory = async (
   }
   if (row.state === "undoing" && data.applyCanonicalRoot
     && data.applyCanonicalRoot !== context.identity.canonicalRoot) {
-    return markDurableIntegrationNeedsAttention(
+    return await markDurableIntegrationNeedsAttention(
       context,
       input.operationId,
       data.appliedPaths,
@@ -950,7 +1204,7 @@ export const undoBranchIntegrationOnDirectory = async (
   }
   if (row.state === "undoing" && data.applyExecutionWorkspaceId && input.applyExecutionWorkspaceId
     && data.applyExecutionWorkspaceId !== input.applyExecutionWorkspaceId) {
-    return markDurableIntegrationNeedsAttention(
+    return await markDurableIntegrationNeedsAttention(
       context,
       input.operationId,
       data.appliedPaths,
@@ -977,7 +1231,7 @@ export const undoBranchIntegrationOnDirectory = async (
       failure,
       needsAttentionPaths: [...new Set([...data.needsAttentionPaths, ...unique])],
     };
-    writeRecord(context.database, row.workspace_id, "needs-attention", next, row.created_at);
+    writeRecord(context.database!, row.workspace_id, "needs-attention", next, row.created_at);
     return {
       operationId: input.operationId,
       status: "needs-attention",
@@ -1021,7 +1275,7 @@ export const undoBranchIntegrationOnDirectory = async (
           diffStats: data.diffStats,
           text: "Integration disk state was restored; branch synchronization is pending.",
         }
-      : finalizeDurableIntegrationUndone(context, input.operationId, paths);
+      : await finalizeDurableIntegrationUndone(context, input.operationId, paths);
   }
 
   // Write ahead of every directory mutation.  Do not catch apply failures:
@@ -1071,7 +1325,7 @@ export const undoBranchIntegrationOnDirectory = async (
         diffStats: data.diffStats,
         text: "Integration disk state was restored; branch synchronization is pending.",
       }
-    : finalizeDurableIntegrationUndone(context, input.operationId, paths);
+    : await finalizeDurableIntegrationUndone(context, input.operationId, paths);
 };
 
 const sameStateCollection = (
@@ -1095,7 +1349,7 @@ export const findReusableIntegrationConflict = (
     currentParentStates: Record<string, RecoveryState>;
   },
 ): DurableFileOperationResult | null => {
-  const rows = context.database.prepare(`
+  const rows = context.database!.prepare(`
     SELECT * FROM operations
     WHERE workspace_id = ? AND kind = 'integration' AND state = 'conflict'
     ORDER BY updated_at DESC
@@ -1134,7 +1388,7 @@ export const findReusableCompleteIntegration = (
     currentParentStates: Record<string, RecoveryState>;
   },
 ): DurableFileOperationResult | null => {
-  const rows = context.database.prepare(`
+  const rows = context.database!.prepare(`
     SELECT * FROM operations
     WHERE workspace_id = ? AND kind = 'integration' AND state = 'complete'
     ORDER BY updated_at DESC
@@ -1165,7 +1419,42 @@ export const findReusableCompleteIntegration = (
 export const reconcileInterruptedIntegrationOperations = async (
   context: DurableFileOperationContext,
 ): Promise<{ compensated: string[]; needsAttention: string[]; aborted: string[] }> => {
-  const rows = context.database.prepare(`
+  if (context.durableRecoveryStore) {
+    const result = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[] };
+    for (const summary of await context.durableRecoveryStore.listOperations(context.identity.workspaceId, "integration")) {
+      const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+      if (!operationId || ["complete", "aborted", "compensated", "needs-attention", "conflict", "undone"].includes(String(summary.state))) continue;
+      const operation = await kernelOperation(context, operationId);
+      const data = kernelOperationData(operation);
+      if (isBranchIntegration(data)) continue;
+      let unknown = false;
+      const files = Array.isArray(operation.files) ? operation.files.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object") : [];
+      for (const file of files) {
+        const path = String(file.path ?? "");
+        const phase = String(file.phase ?? "pending");
+        if (data.targetKinds?.[path] === "surface") {
+          if (phase !== "external-safety-observed") { await kernelTransition(context, operationId, path, "needs-attention"); unknown = true; }
+          continue;
+        }
+        const parse = (key: string): RecoveryState | undefined => typeof file[key] === "string" ? parseRecoveryState(JSON.parse(String(file[key]))) : undefined;
+        const target = parse("targetJson") ?? data.targets?.[path]?.target;
+        const safety = parse("safetyJson") ?? data.safety?.[path];
+        if (!target || !safety) { await kernelTransition(context, operationId, path, "needs-attention"); unknown = true; continue; }
+        const current = (await capture(context, path, false)).state;
+        if (phase === "apply-intent" && sameState(current, target)) await kernelTransition(context, operationId, path, "target-observed");
+        else if ((phase === "apply-intent" || phase === "target-observed" || phase === "compensate-intent") && sameState(current, safety)) await kernelTransition(context, operationId, path, "safety-observed");
+        else if (!sameState(current, safety) && !sameState(current, target)) { await kernelTransition(context, operationId, path, "needs-attention"); unknown = true; }
+      }
+      const latest = await kernelOperation(context, operationId);
+      const latestFiles = Array.isArray(latest.files) ? latest.files : [];
+      const hasApplied = latestFiles.some((entry) => entry && typeof entry === "object" && (entry as Record<string, unknown>).phase === "target-observed");
+      if (unknown) { await kernelComplete(context, operationId, "needs-attention", data, "Integration restart could not prove disk state"); result.needsAttention.push(operationId); }
+      else if (hasApplied) { await kernelCompensateDisk(context, operationId, data); const state = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated"; await kernelComplete(context, operationId, state, data); (state === "compensated" ? result.compensated : result.needsAttention).push(operationId); }
+      else { await kernelComplete(context, operationId, "aborted", data); result.aborted.push(operationId); }
+    }
+    return result;
+  }
+  const rows = context.database!.prepare(`
     SELECT * FROM operations WHERE kind = 'integration'
     AND workspace_id = ?
     AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict', 'undone')
@@ -1176,7 +1465,7 @@ export const reconcileInterruptedIntegrationOperations = async (
     if (isBranchIntegration(data)) continue;
     const applyContext = await resolvePersistedApplyContext(context, data);
     if (applyContext === "unresolved") {
-      writeRecord(context.database, row.workspace_id, "needs-attention", {
+      writeRecord(context.database!, row.workspace_id, "needs-attention", {
         ...data,
         failure: "Execution directory could not be resolved for directory apply",
       }, row.created_at);
@@ -1184,12 +1473,12 @@ export const reconcileInterruptedIntegrationOperations = async (
       continue;
     }
     let unknown = false;
-    for (const fileRow of operationFileRows(context.database, row.id)) {
+    for (const fileRow of operationFileRows(context.database!, row.id)) {
       if (data.targetKinds[fileRow.path] === "surface") {
         if (fileRow.phase === "external-intent") {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "external-safety-observed");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "external-safety-observed");
         } else if (fileRow.phase !== "external-safety-observed") {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "needs-attention");
           if (!data.needsAttentionPaths.includes(fileRow.path)) data.needsAttentionPaths.push(fileRow.path);
           unknown = true;
         }
@@ -1200,57 +1489,57 @@ export const reconcileInterruptedIntegrationOperations = async (
       const current = (await capture(applyContext, fileRow.path, false)).state;
       if (row.state === "undoing") {
         if (sameState(current, safety)) {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "safety-observed");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "safety-observed");
           if (!data.compensatedPaths.includes(fileRow.path)) data.compensatedPaths.push(fileRow.path);
         } else if (sameState(current, target)) {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "target-observed");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "target-observed");
         } else {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "needs-attention");
           if (!data.needsAttentionPaths.includes(fileRow.path)) data.needsAttentionPaths.push(fileRow.path);
           unknown = true;
         }
         continue;
       }
       if (fileRow.phase === "apply-intent") {
-        if (sameState(current, target)) updateOperationFilePhase(context.database, row.id, fileRow.path, "target-observed");
+        if (sameState(current, target)) updateOperationFilePhase(context.database!, row.id, fileRow.path, "target-observed");
         else if (!sameState(current, safety)) {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "needs-attention");
           unknown = true;
         }
       } else if (fileRow.phase === "target-observed" && !sameState(current, target)) {
-        updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
+        updateOperationFilePhase(context.database!, row.id, fileRow.path, "needs-attention");
         unknown = true;
       } else if (fileRow.phase === "compensate-intent") {
-        if (sameState(current, safety)) updateOperationFilePhase(context.database, row.id, fileRow.path, "safety-observed");
+        if (sameState(current, safety)) updateOperationFilePhase(context.database!, row.id, fileRow.path, "safety-observed");
         else if (!sameState(current, target)) {
-          updateOperationFilePhase(context.database, row.id, fileRow.path, "needs-attention");
+          updateOperationFilePhase(context.database!, row.id, fileRow.path, "needs-attention");
           unknown = true;
         }
       }
     }
     if (unknown) {
-      writeRecord(context.database, row.workspace_id, "needs-attention", data, row.created_at);
+      writeRecord(context.database!, row.workspace_id, "needs-attention", data, row.created_at);
       result.needsAttention.push(row.id);
       continue;
     }
-    const currentRows = operationFileRows(context.database, row.id);
+    const currentRows = operationFileRows(context.database!, row.id);
     if (row.state === "undoing") {
       if (currentRows.some((entry) => entry.phase === "target-observed" || entry.phase === "compensate-intent")) {
         await compensate(applyContext, data, currentRows);
       }
       const state = data.needsAttentionPaths.length > 0 ? "needs-attention" : "undone";
-      if (state === "undone") finalizeDurableIntegrationUndone(context, row.id, data.compensatedPaths);
-      else writeRecord(context.database, row.workspace_id, state, data, row.created_at);
+      if (state === "undone") await finalizeDurableIntegrationUndone(context, row.id, data.compensatedPaths);
+      else writeRecord(context.database!, row.workspace_id, state, data, row.created_at);
       (state === "undone" ? result.compensated : result.needsAttention).push(row.id);
       continue;
     }
     if (currentRows.some((entry) => entry.phase === "target-observed" || entry.phase === "compensate-intent")) {
       await compensate(applyContext, data, currentRows);
       const state = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
-      writeRecord(context.database, row.workspace_id, state, data, row.created_at);
+      writeRecord(context.database!, row.workspace_id, state, data, row.created_at);
       (state === "compensated" ? result.compensated : result.needsAttention).push(row.id);
     } else {
-      writeRecord(context.database, row.workspace_id, "aborted", data, row.created_at);
+      writeRecord(context.database!, row.workspace_id, "aborted", data, row.created_at);
       result.aborted.push(row.id);
     }
   }
@@ -1276,7 +1565,7 @@ export const reconcileInterruptedBranchIntegrations = async (
   context: DurableFileOperationContext,
   store: BranchIntegrationView,
 ): Promise<{ aborted: string[]; completed: string[]; needsAttention: string[] }> => {
-  const rows = context.database.prepare(`
+  const rows = context.database!.prepare(`
     SELECT * FROM operations WHERE kind = 'integration'
     AND workspace_id = ?
     AND state NOT IN ('complete', 'aborted', 'compensated', 'needs-attention', 'conflict', 'undone')
@@ -1288,7 +1577,7 @@ export const reconcileInterruptedBranchIntegrations = async (
     if (row.state === "undoing" && data.applyCanonicalRoot) {
       const applyContext = await resolvePersistedApplyContext(context, data);
       if (applyContext === "unresolved") {
-        writeRecord(context.database, row.workspace_id, "needs-attention", {
+        writeRecord(context.database!, row.workspace_id, "needs-attention", {
           ...data,
           failure: "Execution directory could not be resolved for branch integration undo",
           needsAttentionPaths: Object.keys(data.targets),
@@ -1306,7 +1595,7 @@ export const reconcileInterruptedBranchIntegrations = async (
       if (undone.status === "compensated") {
         const branch = store.getBranch(data.parentBranchId);
         if (!branch) {
-          writeRecord(context.database, row.workspace_id, "needs-attention", {
+          writeRecord(context.database!, row.workspace_id, "needs-attention", {
             ...data,
             failure: "Parent working branch disappeared while reconciling materialized undo",
             needsAttentionPaths: Object.keys(data.targets),
@@ -1328,7 +1617,7 @@ export const reconcileInterruptedBranchIntegrations = async (
           after[file] ?? { kind: "missing" },
         ));
         if (drift.length > 0) {
-          writeRecord(context.database, row.workspace_id, "needs-attention", {
+          writeRecord(context.database!, row.workspace_id, "needs-attention", {
             ...data,
             failure: "Parent working branch changed while synchronizing materialized undo",
             needsAttentionPaths: drift,
@@ -1338,7 +1627,7 @@ export const reconcileInterruptedBranchIntegrations = async (
         }
         const commitVirtualWrites = store.commitVirtualWrites;
         if (syncPaths.length > 0 && !commitVirtualWrites) {
-          writeRecord(context.database, row.workspace_id, "needs-attention", {
+          writeRecord(context.database!, row.workspace_id, "needs-attention", {
             ...data,
             failure: "Parent working branch cannot synchronize materialized undo",
             needsAttentionPaths: syncPaths,
@@ -1357,7 +1646,7 @@ export const reconcileInterruptedBranchIntegrations = async (
             Object.fromEntries(syncPaths.map((file) => [file, before[file] ?? { kind: "missing" }])),
           );
           if (synced.status === "conflict") {
-            writeRecord(context.database, row.workspace_id, "needs-attention", {
+            writeRecord(context.database!, row.workspace_id, "needs-attention", {
               ...data,
               failure: "Parent working branch changed while synchronizing materialized undo",
               needsAttentionPaths: syncPaths,
@@ -1366,14 +1655,14 @@ export const reconcileInterruptedBranchIntegrations = async (
             continue;
           }
         }
-        finalizeDurableIntegrationUndone(context, row.id, paths);
+        await finalizeDurableIntegrationUndone(context, row.id, paths);
       }
       (undone.status === "compensated" ? result.completed : result.needsAttention).push(row.id);
       continue;
     }
     const branch = store.getBranch(data.parentBranchId);
     if (!branch) {
-      writeRecord(context.database, row.workspace_id, "needs-attention", {
+      writeRecord(context.database!, row.workspace_id, "needs-attention", {
         ...data,
         failure: "Parent working branch is unavailable during integration recovery",
         needsAttentionPaths: Object.keys(data.targets),
@@ -1389,12 +1678,12 @@ export const reconcileInterruptedBranchIntegrations = async (
     const revision = branch?.writeRevision ?? 0;
     if (row.state === "undoing") {
       if (parentSliceMatches(current, before)) {
-        finalizeDurableIntegrationUndone(context, row.id, data.appliedPaths);
+        await finalizeDurableIntegrationUndone(context, row.id, data.appliedPaths);
         result.completed.push(row.id);
         continue;
       }
       if (!parentSliceMatches(current, after)) {
-        writeRecord(context.database, row.workspace_id, "needs-attention", {
+        writeRecord(context.database!, row.workspace_id, "needs-attention", {
           ...data,
           failure: "Parent branch matches neither the before nor after undo states",
           needsAttentionPaths: Object.keys(after),
@@ -1404,7 +1693,7 @@ export const reconcileInterruptedBranchIntegrations = async (
       }
       const commitVirtualWrites = store.commitVirtualWrites;
       if (!commitVirtualWrites) {
-        writeRecord(context.database, row.workspace_id, "needs-attention", {
+        writeRecord(context.database!, row.workspace_id, "needs-attention", {
           ...data,
           failure: "Parent branch cannot apply the pending integration undo",
           needsAttentionPaths: Object.keys(after),
@@ -1418,7 +1707,7 @@ export const reconcileInterruptedBranchIntegrations = async (
         before,
       );
       if (committed.status === "conflict") {
-        writeRecord(context.database, row.workspace_id, "needs-attention", {
+        writeRecord(context.database!, row.workspace_id, "needs-attention", {
           ...data,
           failure: "Parent branch changed during integration undo",
           needsAttentionPaths: Object.keys(after),
@@ -1426,12 +1715,12 @@ export const reconcileInterruptedBranchIntegrations = async (
         result.needsAttention.push(row.id);
         continue;
       }
-      finalizeDurableIntegrationUndone(context, row.id, data.appliedPaths);
+      await finalizeDurableIntegrationUndone(context, row.id, data.appliedPaths);
       result.completed.push(row.id);
       continue;
     }
     if (data.beforeWriteRevision !== undefined && revision === data.beforeWriteRevision && parentSliceMatches(current, before)) {
-      writeRecord(context.database, row.workspace_id, "aborted", {
+      writeRecord(context.database!, row.workspace_id, "aborted", {
         ...data,
         failure: "Branch integration did not take effect",
       }, row.created_at);
@@ -1439,14 +1728,14 @@ export const reconcileInterruptedBranchIntegrations = async (
       continue;
     }
     if (data.afterWriteRevision !== undefined && revision === data.afterWriteRevision && parentSliceMatches(current, after)) {
-      writeRecord(context.database, row.workspace_id, "complete", {
+      writeRecord(context.database!, row.workspace_id, "complete", {
         ...data,
         appliedPaths: data.appliedPaths.length > 0 ? data.appliedPaths : Object.keys(after).sort(),
       }, row.created_at);
       result.completed.push(row.id);
       continue;
     }
-    writeRecord(context.database, row.workspace_id, "needs-attention", {
+    writeRecord(context.database!, row.workspace_id, "needs-attention", {
       ...data,
       failure: "Parent branch matches neither the before nor after integration states",
       needsAttentionPaths: Object.keys(after),

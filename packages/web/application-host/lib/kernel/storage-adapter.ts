@@ -1377,10 +1377,10 @@ export const createKernelWorkspaceWorkingStateAccess = (
       { mode, purpose, create: true },
       (recoveryContext) => Reflect.apply(operation, undefined, [projection, {
         ...context,
-        database: recoveryContext.database,
+        ...(durableRecoveryStore ? {} : { database: recoveryContext.database }),
         ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
         resourceOperationGate: recoveryContext.resourceOperationGate,
-      }]),
+      } as unknown as import("../recovery/journal-engine.js").WorkspaceRecoveryStorageContext]),
     );
   };
   return {
