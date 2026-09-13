@@ -18,7 +18,7 @@ Last updated: 2026-09-13
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-252 已采纳 Rust 系统内核架构；D-265 完成当前一轮 R0/R1 返工验收。R0/R1 仍按各自证据记为 partial，阶段 R 整体尚未完成。**
+**D-252 已采纳 Rust 系统内核架构；D-273 纠正了 D-267–D-272 的过度 wired/proven 表述。R0/R1 仍按各自证据记为 Partial，阶段 R 整体尚未完成。**
 目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
 完整 TS consumer cutover、R2–R6 和跨平台/发行证据仍未交付，不把 D-246–D-251 的执行报告视为 Rust 验收通过。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
@@ -201,14 +201,15 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 单路径更新没有复制完整兄弟集合。D-258 已确认其中 `length(TEXT)` 不是持久写入字节，原 payload 数字撤回；启动/缓存未控制的
 墙钟与 RSS 也不作为性能结论。受控端到端对照仍按 R6 执行。
 
-**R1 责任盘点与尚未迁移项（D-265 当前权威）**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin、typed recovery、domain record/reference 表；
+**R1 责任盘点与尚未迁移项（D-273 当前权威）**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin、typed recovery、domain record/reference 表；
 TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
-`working-state/working-state-store.ts` 仍保留给本地测试；生产 branch read/write/explore pin/materializer 输入走异步 kernel root/path API，
-没有 Host 生命周期级的全树缓存。ThreadRuntime/IntegrationCoordinator 尚未改成异步 root consumer，当前每次 `withStore` 临时展开后丢弃。
+`working-state/working-state-store.ts` 仍保留给本地测试；生产 branch read/write/explore pin/materializer 输入和 scoped subtree read 走异步 kernel root/path API，
+结果发布使用固定 pin/root/writeRevision，agent mutation 阶段和 dirty-surface Integration 的 Rust port 已改为逐步 await。ThreadRuntime、部分
+IntegrationCoordinator、verification/review/history 仍依赖 callback 投影，不能宣称已完成 async root consumer cutover。
 retrieval artifact/receipt/evidence 使用精确 record 身份；turn/checkpoint/mutation 直接调用 typed kernel API。combined Recovery/Integration/
 agent-mutation 的真实持久 writer 仍是 TS recovery SQLite，Rust operation/file API 尚未成为这些 consumer 的 writer，故 R1 保持 Partial。
 
-**D-264/D-265 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 已删除；Rust format v8 提供 typed recovery transaction/CAS。`kernel-client.test.ts` 的真实 Windows release 子进程覆盖 fixed/current pin、grant revoke 清理 query pin、recordRevision CAS、actor/session/thread/run 隔离、record-backed source 权限、typed operation 故障回滚及重启。`storage-adapter.test.ts` 另走真实 kernel，覆盖 root/path 读取、未发布 query pin、virtual write/revert 和 kernel branch + TS durable Integration 的生产组合。combined consumer 尚未切到 Rust，不能据 typed API 的测试写成已接管。
+**D-264/D-273 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 已删除；Rust format v8 提供 typed recovery transaction/CAS。新增真实 Windows release 子进程证据覆盖 typed working result DTO 拒绝、result release/GC、固定 publish pin 与并发写、scoped subtree read；`storage-adapter.test.ts` 另走三参数 `createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore)`，覆盖 dirty surface Integration apply/undo。combined Recovery/Integration/agent-mutation 的旧 TS writer 与 compatibility callback 投影尚未全部删除，不能据 typed API 或局部纵切测试写成已接管。
 
 **D-266 源码责任边界（2026-09-13）**：原 6483 行 `piarium-kernel/src/main.rs` 已缩为启动入口；crate 装配进入
 `lib.rs`，transport/admission 留在 `runtime.rs`，唯一 `Storage` 的 core/operation/authority/object/tree/branch/recovery/record/

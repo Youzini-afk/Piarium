@@ -47,9 +47,10 @@ explicitly requested; ordinary reads walk the root or selected paths. D-256 adds
 nodes and objects.
 
 The working result/draft/verification/review boundary now has generated `working.*` DTOs and Rust domain methods.
-Result records persist branch/root/revision and changed-path/diff identity; the full state is recovered through
-root/path reads rather than a durable `baseStates/pathStates` payload. The callback projection used by older
-consumers is still a temporary migration seam and is scheduled for the next R1 phase.
+Rust validates nested documents, result record identity, published root/revision and root-diff `changedPaths`; malformed
+or mismatched records are rejected. Result records persist branch/root/revision and changed-path/diff identity; the full
+state is recovered through root/path reads rather than a durable `baseStates/pathStates` payload. The callback projection
+used by older consumers is still a temporary migration seam and is scheduled for the next R1 phase.
 
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with
@@ -60,7 +61,7 @@ its schema fingerprint plus the complete table/index/column shape and never upgr
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
 `KernelStorageAdapter` and kernel root/path/range APIs for direct branch reads, writes, pins and materializer input.
 Integration preview, ThreadRuntime result publication and directory apply now use selected root/path reads and the shared Rust durable-operation port; intent and file
-phase CAS are committed before disk effects. ThreadRuntime still has callback paths for publish/materialize/history and branch undo/reconcile,
+phase CAS are committed before disk effects. Virtual publish pins one exact root through diff/read/publish, and scoped subtree reads are filtered in Rust before paging. ThreadRuntime still has callback paths for publish/materialize/history and branch undo/reconcile,
 and the legacy projection remains only until those consumers are converted. The adapter does not use a transient close-time flush and does
 not fall back to the old WorkingState writer; remaining TS recovery SQLite access is a known unconverted consumer, not compatibility logic.
 
