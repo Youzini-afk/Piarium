@@ -8,7 +8,7 @@ import type {
   DocumentSurfaceOperationRequest,
   DocumentSurfaceOperationResult,
 } from "../../documents/authority.js";
-import type { IntegrationApplyResult, RecoveryState, ThreeWayMergePlan, ThreeWayPathPlan } from "./types.js";
+import type { IntegrationApplyResult, RecoveryState, ThreeWayMergePlan, ThreeWayPathPlan, WorkingStateRootContext, WorkingStateRootStore } from "./types.js";
 import { buildThreeWayMergePlan } from "./three-way-merge.js";
 import type { WorkspaceWorkingStateAccess, WorkingStateStore } from "./working-state-store.js";
 import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
@@ -44,6 +44,7 @@ import { sameState } from "../../recovery/journal-files.js";
 import { assertIntegrationTurnBinding } from "../../recovery/integration-turn-binding.js";
 import { writeOperationRow, type SqliteDatabase } from "../../recovery/journal-catalog.js";
 import { inspectDocumentBytes } from "../../documents/inspect.js";
+import { isRootAccess, isWorkingStateRootStore } from "./working-state-root-adapter.js";
 
 export class DirectoryApplyUnresolvedError extends Error {
   readonly directory: string;
@@ -137,7 +138,7 @@ export interface IntegrationPlanInput {
 }
 
 const mergeTarget = async (
-  store: WorkingStateStore,
+  store: WorkingStateStore | WorkingStateRootStore,
   pathPlan: ThreeWayPathPlan,
 ): Promise<RecoveryState | null> => {
   if (pathPlan.decision === "apply-child") {
@@ -195,7 +196,7 @@ const contentHash = (content: string): string => `sha256-${createHash("sha256").
 const normalizeEditorText = (content: string): string => content.replace(/\r\n|\r/gu, "\n");
 
 const editorStateFrom = async (
-  store: WorkingStateStore,
+  store: WorkingStateStore | WorkingStateRootStore,
   state: RecoveryState,
 ): Promise<RecoveryState> => {
   if (state.kind !== "regular-file") return state;
@@ -212,7 +213,7 @@ const editorStateFrom = async (
   };
 };
 
-const readableText = async (store: WorkingStateStore, state: RecoveryState): Promise<string | undefined> => {
+const readableText = async (store: WorkingStateStore | WorkingStateRootStore, state: RecoveryState): Promise<string | undefined> => {
   if (state.kind !== "regular-file") return undefined;
   const bytes = await store.getObject(state.objectHash);
   if (bytes === null) return undefined;
@@ -501,15 +502,20 @@ export class IntegrationCoordinator {
       if (input.requireTurnBinding && !input.executionId) {
         throw new Error("Parent turn recovery binding is required for integration");
       }
-      if (input.executionId) {
+      if (input.executionId && !context.durableRecoveryStore) {
         assertIntegrationTurnBinding(context.database, input.workspaceId, input.executionId);
       }
-      await reconcileInterruptedIntegrationOperations(context);
-      await reconcileInterruptedBranchIntegrations(context, store);
-      const blocking = context.database.prepare(`
-        SELECT id, state FROM operations WHERE workspace_id = ? AND kind = 'integration'
-        AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone') LIMIT 1
-      `).get(input.workspaceId) as { id: string; state: string } | undefined;
+      if (!context.durableRecoveryStore) {
+        await reconcileInterruptedIntegrationOperations(context);
+        await reconcileInterruptedBranchIntegrations(context, store);
+      }
+      const blocking = context.durableRecoveryStore
+        ? (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
+          .find((entry) => !["complete", "conflict", "compensated", "aborted", "undone"].includes(String(entry.state)))
+        : context.database.prepare(`
+          SELECT id, state FROM operations WHERE workspace_id = ? AND kind = 'integration'
+          AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone') LIMIT 1
+        `).get(input.workspaceId) as { id: string; state: string } | undefined;
       if (blocking) throw new Error(`Integration ${blocking.id} requires recovery before planning (${blocking.state})`);
       const planned = await this.planFrom(store, context, input);
       if (input.expectedBindingFingerprint
@@ -520,7 +526,7 @@ export class IntegrationCoordinator {
       planned.plan = { ...planned.plan, operationId };
       planned.preview = { ...planned.preview, operationId };
       this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview: planned.preview });
-      const reusable = input.resolutions?.length ? null : findReusableIntegrationConflict(context, {
+      const reusable = context.durableRecoveryStore ? null : input.resolutions?.length ? null : findReusableIntegrationConflict(context, {
         workspaceId: input.workspaceId,
         threadId: input.threadId,
         branchId: input.branchId,
@@ -603,7 +609,7 @@ export class IntegrationCoordinator {
         let afterWriteRevision = expectedWriteRevision;
         if (!failed) {
           afterWriteRevision = expectedWriteRevision + 1;
-          this.persistBranchIntegration(context, {
+          const branchOperation = {
             operationId: planned.plan.operationId,
             workspaceId: input.workspaceId,
             threadId: input.threadId,
@@ -618,9 +624,25 @@ export class IntegrationCoordinator {
             appliedPaths,
             conflictPaths: [],
             diffStats: planned.plan.diffStats,
-            state: "applying",
+            state: "applying" as const,
             createdAt,
-          });
+          };
+          if (context.durableRecoveryStore) {
+            await context.durableRecoveryStore.createOperation({
+              operationId: planned.plan.operationId,
+              workspaceId: input.workspaceId,
+              kind: "integration",
+              state: "applying",
+              data: branchOperation as unknown as Record<string, unknown>,
+              targets: Object.fromEntries(Object.entries(writes).map(([path, target]) => [path, {
+                ...(planned.diskParentStates[path] ? { expected: planned.diskParentStates[path] } : {}),
+                target,
+                ...(planned.diskParentStates[path] ? { safety: planned.diskParentStates[path] } : {}),
+              }])),
+            });
+          } else {
+            this.persistBranchIntegration(context, branchOperation);
+          }
           const committed = this.commitParentVirtualWrites
             ? await this.commitParentVirtualWrites({
               workspaceId: input.workspaceId,
@@ -636,7 +658,8 @@ export class IntegrationCoordinator {
           }
           afterWriteRevision = committed.writeRevision;
         }
-        this.persistBranchIntegration(context, {
+        const terminalState: "conflict" | "complete" = failed ? "conflict" : "complete";
+        const branchTerminal = {
           operationId: planned.plan.operationId,
           workspaceId: input.workspaceId,
           threadId: input.threadId,
@@ -651,9 +674,21 @@ export class IntegrationCoordinator {
           appliedPaths,
           conflictPaths: [...planned.plan.conflictPaths, ...planned.preview.unavailablePaths].sort(),
           diffStats: planned.plan.diffStats,
-          state: failed ? "conflict" : "complete",
+          state: terminalState,
           createdAt,
-        });
+        };
+        if (context.durableRecoveryStore) {
+          const operation = await context.durableRecoveryStore.getOperation(input.workspaceId, planned.plan.operationId);
+          await context.durableRecoveryStore.completeOperation({
+            operationId: planned.plan.operationId,
+            workspaceId: input.workspaceId,
+            expectedRevision: Number(operation?.revision ?? 1),
+            state: terminalState,
+            result: branchTerminal as unknown as Record<string, unknown>,
+          });
+        } else {
+          this.persistBranchIntegration(context, branchTerminal);
+        }
         const preview = { ...planned.preview, operationId: planned.plan.operationId };
         this.previewByThread.set(this.previewKey(input.workspaceId, input.threadId), { workspaceId: input.workspaceId, preview });
         return {
@@ -1216,14 +1251,18 @@ export class IntegrationCoordinator {
     surfaceEdits: PlannedSurfaceTextEdit[];
     texts: Record<string, { parent?: string; child?: string; baseline?: string }>;
   }> {
-    return this.workingStates.withStore(input.workspaceId, "thread-result-preview", (store, context) => (
-      this.planFrom(store, context, input)
-    ));
+    if (isRootAccess(this.workingStates)) {
+      return this.workingStates.withBranchStore(input.workspaceId, "thread-result-preview", (store, context) => {
+        if (!context) throw new Error("Kernel root access did not provide a storage context");
+        return this.planFrom(store, context, input);
+      }, "shared");
+    }
+    return this.workingStates.withStore(input.workspaceId, "thread-result-preview", (store, context) => this.planFrom(store, context, input));
   }
 
   private async planFrom(
-    store: WorkingStateStore,
-    context: WorkspaceRecoveryStorageContext,
+    store: WorkingStateStore | WorkingStateRootStore,
+    context: WorkspaceRecoveryStorageContext | WorkingStateRootContext,
     input: IntegrationPlanInput,
   ): Promise<{
     plan: ThreeWayMergePlan;
@@ -1236,9 +1275,13 @@ export class IntegrationCoordinator {
     surfaceEdits: PlannedSurfaceTextEdit[];
     texts: Record<string, { parent?: string; child?: string; baseline?: string }>;
   }> {
-    const result = store.getResult(input.branchId, input.resultRevision);
+    const result = isWorkingStateRootStore(store)
+      ? await store.getResult(input.branchId, input.resultRevision)
+      : store.getResult(input.branchId, input.resultRevision);
     if (!result) throw new Error(`Working result not found: ${input.branchId}@${input.resultRevision}`);
-    const branch = store.getBranch(input.branchId);
+    const branch = isWorkingStateRootStore(store)
+      ? await store.getBranchRoot(input.branchId)
+      : store.getBranch(input.branchId);
     if (!branch) throw new Error(`Working branch not found: ${input.branchId}`);
     const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
     const barrier = parentAuthority.kind !== "branch" && this.beginDirtyStateBarrier
@@ -1265,7 +1308,9 @@ export class IntegrationCoordinator {
         ? { ...context.identity, canonicalRoot: parentAuthority.directory }
         : context.identity;
       const parentBranchView = parentAuthority.kind === "branch"
-        ? store.effectiveState(parentAuthority.branchId) ?? {}
+        ? isWorkingStateRootStore(store)
+          ? await store.readStateSlice(parentAuthority.branchId, result.changedPaths)
+          : store.effectiveStateSlice(parentAuthority.branchId, result.changedPaths) ?? {}
         : null;
 
       for (const file of result.changedPaths) {

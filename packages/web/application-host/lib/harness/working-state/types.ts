@@ -7,6 +7,15 @@ import type {
   MissingState,
   UnsupportedState,
 } from "../../recovery/journal-files.js";
+import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
+import type { RecoveryIdentity, RecoveryFileStore } from "../../recovery/journal-files.js";
+
+export interface WorkingStateRootContext {
+  identity: RecoveryIdentity;
+  root: string;
+  fileStore: RecoveryFileStore;
+  resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
+}
 
 export type {
   RecoveryState,
@@ -106,9 +115,14 @@ export interface WorkingStatePin extends WorkingStatePinnedRoot {
  */
 export interface WorkingStateRootStore {
   getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null>;
+  /** Read a published result by its immutable branch/revision identity. The returned state maps are
+   * restricted to changedPaths; callers must use readStateSlice for any additional paths. */
+  getResult(branchId: string, revision: number, options?: { signal?: AbortSignal }): Promise<WorkingResult | null>;
+  readStateSlice(branchId: string, paths: readonly string[], options?: WorkingStateReadOptions): Promise<Record<string, RecoveryState> | null>;
   readPath(branchId: string, path: string, options?: WorkingStateReadOptions): Promise<WorkingStateTreeEntry | null>;
   listPaths(branchId: string, roots: readonly string[], options?: WorkingStateReadOptions): Promise<WorkingStateTreeRead | null>;
   readContent(entry: WorkingStateTreeEntry, options?: { offset?: number; length?: number; signal?: AbortSignal }): Promise<Buffer | null>;
+  getObject(hash: string): Promise<Buffer | null>;
   pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
   putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
   commitVirtualWrites(
@@ -122,7 +136,7 @@ export interface WorkspaceWorkingStateRootAccess {
   withBranchStore<T>(
     workspaceId: string,
     purpose: string,
-    operation: (store: WorkingStateRootStore) => Promise<T> | T,
+    operation: (store: WorkingStateRootStore, context?: WorkingStateRootContext) => Promise<T> | T,
     mode?: "exclusive" | "shared",
     actor?: { sessionId: string; threadId?: string; runId?: string },
   ): Promise<T>;

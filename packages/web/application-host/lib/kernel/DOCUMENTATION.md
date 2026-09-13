@@ -59,11 +59,10 @@ its schema fingerprint plus the complete table/index/column shape and never upgr
 
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
 `KernelStorageAdapter` and kernel root/path/range APIs for direct branch reads, writes, pins and materializer input.
-ThreadRuntime and IntegrationCoordinator still need synchronous maps, so `withStore` creates a callback-scoped projection and discards it;
-there is no Host-lifetime expanded tree cache. Combined Recovery/Integration/agent-mutation still use the physical TS recovery SQLite as
-their current durable writer. The adapter composes that journal's Documents gate with the kernel branch authority until the typed Rust
-consumer cutover replaces it. It does not use a transient close-time flush. A kernel failure is surfaced; production does not fall back to
-the old WorkingState writer.
+Integration preview and directory apply now use selected root/path reads and the shared Rust durable-operation port; intent and file
+phase CAS are committed before disk effects. ThreadRuntime still has callback paths for publish/materialize/history and branch undo/reconcile,
+and the legacy projection remains only until those consumers are converted. The adapter does not use a transient close-time flush and does
+not fall back to the old WorkingState writer; remaining TS recovery SQLite access is a known unconverted consumer, not compatibility logic.
 
 ## Rust source ownership
 

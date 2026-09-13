@@ -5943,3 +5943,15 @@ Rust 在领域入口校验 workspace、branch/root/revision、thread/run 绑定�
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-267 | implemented / wired for typed product-record boundary | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |
+
+### D-268 · 2026-09-13 · Root/path consumer seam and durable operation port
+
+类型：R1 consumer cutover；只追加，不改写 D-265–D-267 正文
+
+WorkingState root access now exposes immutable result lookup and selected state slices. The integration preview path and the ThreadRuntime branch-view/footprint reads use the root/path API, so these operations do not open a snapshot or rebuild a complete branch map. The root callback carries only the storage identity/file store context needed for directory inspection. A shared `RecoveryDurableOperationPort` is present on kernel-backed recovery contexts; directory integration intent/file phases/terminal completion use the Rust typed operation API before applying disk effects. Legacy callback consumers and undo/reconcile paths remain to be migrated, so R1 remains Partial.
+
+## D-268 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-268 | partial implementation / wired for preview and directory apply | — | status 阶段 R1；plan 阶段 R1；kernel/application-host module documentation |

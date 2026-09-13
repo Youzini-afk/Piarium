@@ -44,6 +44,7 @@ import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
 import { WorkingStateStore, type WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
+import { withWorkingStateRootStore } from "./working-state/working-state-root-adapter.js";
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
 import type { RecoveryState } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
@@ -772,11 +773,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         intent: "restart",
       });
     }
-    const bound = await options.workingStates.withStore(
+    const bound = await withWorkingStateRootStore(
+      options.workingStates,
       input.workspaceId,
       "working-branch-view-bind",
-      (store) => {
-        const branch = store.getBranch(thread.workBranchId!);
+      async (store) => {
+        const branch = await store.getBranchRoot(thread.workBranchId!);
         return {
           draftBasePaths: branch?.draftBasePaths ?? [],
           writeRevision: branch?.writeRevision ?? 0,
@@ -810,11 +812,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     sourceRoot?: string,
   ): Promise<ReturnType<typeof measurementFromStates>> => {
     if (thread?.workBranchId && thread.resultRevision && options.workingStates) {
-      return options.workingStates.withStore(workspaceId, "thread-result-budget-estimate", (store) => {
-        const states = typeof store.resultState === "function"
-          ? store.resultState(thread.workBranchId!, thread.resultRevision!)
-          : null;
-        return states ? measurementFromStates(states) : unknownMeasurement();
+      return withWorkingStateRootStore(options.workingStates, workspaceId, "thread-result-budget-estimate", async (store) => {
+        const result = await store.getResult(thread.workBranchId!, thread.resultRevision!);
+        if (!result) return unknownMeasurement();
+        const states = { ...result.baseStates, ...result.pathStates };
+        return measurementFromStates(states);
       }, "shared");
     }
     if (worktree?.resultPath) return measureDirectory(worktree.resultPath).catch(() => unknownMeasurement());

@@ -71,6 +71,15 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
     return branch ? rootFromBranch(branch) : null;
   }
 
+  async getResult(branchId: string, revision: number): Promise<import("./types.js").WorkingResult | null> {
+    return this.store.getResult(branchId, revision);
+  }
+
+  async readStateSlice(branchId: string, paths: readonly string[], options?: WorkingStateReadOptions): Promise<Record<string, RecoveryState> | null> {
+    const state = options?.pin ? this.statesFor(branchId, options) : this.store.effectiveStateSlice(branchId, paths, options?.revision, options);
+    return state ? structuredClone(state) : null;
+  }
+
   private statesFor(branchId: string, options?: WorkingStateReadOptions): Record<string, RecoveryState> | null {
     if (options?.pin) {
       const pin = this.pins.get(options.pin.pinId);
@@ -164,6 +173,8 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
     return this.store.getObject(entry.state.objectHash);
   }
 
+  getObject(hash: string): Promise<Buffer | null> { return this.store.getObject(hash); }
+
   async pinBranch(branchId: string, options?: { revision?: number }): Promise<WorkingStatePin> {
     const branch = this.store.getBranch(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
@@ -202,7 +213,7 @@ export const asWorkingStateRootStore = (store: CompatibleWorkingStateStore): Wor
   isWorkingStateRootStore(store) ? store : new LegacyWorkingStateRootAdapter(store)
 );
 
-const isRootAccess = (access: CompatibleWorkingStateAccess): access is WorkspaceWorkingStateRootAccess => (
+export const isRootAccess = (access: CompatibleWorkingStateAccess): access is WorkspaceWorkingStateRootAccess => (
   "withBranchStore" in access && typeof access.withBranchStore === "function"
 );
 

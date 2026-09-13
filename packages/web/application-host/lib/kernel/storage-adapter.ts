@@ -5,6 +5,7 @@ import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelReco
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { SqliteDatabase } from "../recovery/journal-catalog.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
+import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
 import { type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
 import { materializeWorkingState, type MaterializeResult } from "../harness/working-state/materializer.js";
 import { applyIndexModes } from "../harness/working-state/git-index-mode.js";
@@ -60,6 +61,7 @@ export interface KernelStorageContext {
   fileStore: RecoveryFileStore;
   resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
   collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
+  durableRecoveryStore?: RecoveryDurableOperationPort;
   records: {
     get(recordId: string): Promise<KernelRecordResult | null>;
     list(input: { recordType?: string; threadId?: string; runId?: string; branchId?: string }): Promise<KernelRecordResult[]>;
@@ -227,6 +229,7 @@ const parsePinTreeRead = (value: Record<string, unknown>): KernelPinTreeRead => 
 /** Rust-kernel root/path authority. It retains no expanded branch or result tree. */
 export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly ownerByHash = new Map<string, string>();
+  private readonly sourceByHash = new Map<string, { branchId?: string; path?: string; revision?: number; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
 
@@ -267,6 +270,48 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       root: current.root,
       headRevision: current.headRevision,
       writeRevision: current.writeRevision,
+    };
+  }
+
+  async readStateSlice(branchId: string, paths: readonly string[], options?: WorkingStateReadOptions): Promise<Record<string, RecoveryState> | null> {
+    checkRead(options);
+    const read = await this.context.client.readBranch({
+      branchId,
+      ...(options?.revision === undefined ? {} : { revision: options.revision }),
+      paths: paths.map(normalizeViewPath),
+      includeEntries: true,
+    }, options?.signal);
+    const result: Record<string, RecoveryState> = {};
+    for (const entry of read.entries) {
+      checkRead(options);
+      result[normalize(entry.path)] = fromKernelState(entry.state);
+    }
+    return result;
+  }
+
+  async getResult(branchId: string, revision: number, options?: { signal?: AbortSignal }): Promise<WorkingResult | null> {
+    const record = await this.context.working.resultGet(`working-result:${branchId}@${revision}`);
+    if (!record) return null;
+    const document = asRecord(record.record);
+    if (document.branchId !== branchId || Number(document.resultRevision) !== revision || typeof document.root !== "string") return null;
+    const changedPaths = Array.isArray(document.changedPaths) ? document.changedPaths.filter((value): value is string => typeof value === "string") : [];
+    const [base, fixed] = await Promise.all([
+      this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }, options?.signal),
+      this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }, options?.signal),
+    ]);
+    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { branchId, path: file, revision });
+    for (const [file, state] of Object.entries(states(base))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { branchId, path: file, revision: 0 });
+    return {
+      resultRevision: revision,
+      branchId,
+      ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
+      changedPaths,
+      baseStates: states(base),
+      pathStates: states(fixed),
+      diffStats: asRecord(document.diffStats) as unknown as WorkingResult["diffStats"],
+      createdAt: typeof document.createdAt === "string" ? document.createdAt : nowIso(),
+      root: document.root,
     };
   }
 
@@ -443,6 +488,14 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       if ((error as { code?: string }).code === "object-not-found") return null;
       throw error;
     }
+  }
+
+  async getObject(hash: string): Promise<Buffer | null> {
+    const ownerId = this.ownerByHash.get(hash);
+    const source = this.sourceByHash.get(hash);
+    if (!ownerId && !source?.branchId) return null;
+    const slice = await this.context.client.getBlob(hash, ownerId ? { ownerId } : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) });
+    return Buffer.from(slice.bytesBase64, "base64");
   }
 
   async pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
@@ -1083,6 +1136,7 @@ export interface KernelStorageAdapterOptions {
   fileStore?: RecoveryFileStore;
   storageRoot: string;
   resolveActor?: (workspaceId: string, purpose: string, hint?: KernelActorIdentity) => KernelActorIdentity | Promise<KernelActorIdentity>;
+  durableRecoveryStore?: RecoveryDurableOperationPort;
 }
 
 export class KernelStorageAdapter {
@@ -1187,6 +1241,7 @@ export class KernelStorageAdapter {
         const result = await maintenance.client.gc(`kernel-gc:${workspaceId}:${randomUUID()}`);
         return { byteLengthReclaimed: Number(result.byteLengthReclaimed ?? 0), objectsDeleted: Number(result.deletedBlobs ?? result.objectsDeleted ?? 0) };
       },
+      ...(this.options.durableRecoveryStore ? { durableRecoveryStore: this.options.durableRecoveryStore } : {}),
       records,
       working,
       client: scoped,
@@ -1213,6 +1268,7 @@ export class KernelStorageAdapter {
 export const createKernelWorkspaceWorkingStateAccess = (
   adapter: KernelStorageAdapter,
   recoveryEngine?: WorkspaceRecoveryEngine,
+  durableRecoveryStore?: RecoveryDurableOperationPort,
 ): WorkspaceWorkingStateAccess & WorkspaceWorkingStateRootAccess => {
   const withStore: WorkspaceWorkingStateAccess["withStore"] = async (workspaceId, purpose, operation, mode: Mode = "exclusive") => {
     const context = await adapter.context(workspaceId, purpose, { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.maintenance"] });
@@ -1224,6 +1280,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
       (recoveryContext) => Reflect.apply(operation, undefined, [projection, {
         ...context,
         database: recoveryContext.database,
+        ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
         resourceOperationGate: recoveryContext.resourceOperationGate,
       }]),
     );
@@ -1238,7 +1295,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
         ...(actor ?? {}),
         capabilities: actor ? [] : ["storage.maintenance"],
       });
-      return operation(new KernelWorkingStateRootStore(context));
+      return operation(new KernelWorkingStateRootStore(context), context);
     },
   };
 };

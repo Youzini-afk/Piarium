@@ -1,4 +1,5 @@
 import type { RecoveryFileStore, RecoveryIdentity, RecoveryState } from "./journal-files.js";
+import type { RecoveryDurableOperationPort } from "./journal-engine.js";
 import { parseRecoveryState, sameState } from "./journal-files.js";
 import type { OperationFileRow, OperationRow, SqliteDatabase } from "./journal-catalog.js";
 import { initOperationFiles, operationFileRows, updateOperationFilePhase, writeOperationRow } from "./journal-catalog.js";
@@ -83,6 +84,7 @@ export interface DurableFileOperationContext {
   resourceOperationGate: HostResourceOperationGate;
   root: string;
   resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
+  durableRecoveryStore?: RecoveryDurableOperationPort;
 }
 
 interface PersistedIntegrationData extends Record<string, unknown> {
@@ -176,6 +178,91 @@ const runPathOperation = <Result>(
   operation: () => Promise<Result>,
 ): Promise<Result> => context.resourceOperationGate.run([{ resourceId: file, scope }], operation);
 
+/** Production path: persist intent and every file transition through the Rust recovery port. */
+const applyKernelDurableFileOperation = async (
+  context: DurableFileOperationContext,
+  spec: DurableFileOperationSpec,
+): Promise<DurableFileOperationResult> => {
+  const durable = context.durableRecoveryStore;
+  if (!durable) throw new Error("Rust recovery operation port is unavailable");
+  const externalTargets = spec.externalTargets ?? {};
+  const allTargets = { ...spec.targets, ...externalTargets };
+  const targetKinds: Record<string, "disk" | "surface"> = Object.fromEntries([
+    ...Object.keys(spec.targets).map((file) => [file, "disk" as const]),
+    ...Object.keys(externalTargets).map((file) => [file, "surface" as const]),
+  ]);
+  const safety: Record<string, RecoveryState> = {};
+  const drift: string[] = [];
+  for (const [file, states] of Object.entries(spec.targets)) {
+    const current = await capture(context, file, true);
+    safety[file] = current.state;
+    if (!sameState(current.state, states.expected)) drift.push(file);
+  }
+  if (drift.length > 0) {
+    return { operationId: spec.id, status: "conflict", appliedPaths: [], conflictPaths: [...new Set([...spec.conflictPaths, ...drift])], diffStats: spec.diffStats, text: `Parent workspace changed before integration: ${drift.join(", ")}` };
+  }
+  const data: PersistedIntegrationData = {
+    operationId: spec.id, threadId: spec.threadId, resultRevision: spec.resultRevision,
+    targets: allTargets, targetKinds, externalBindings: structuredClone(spec.externalBindings ?? {}), safety,
+    conflictPaths: [...spec.conflictPaths], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: spec.diffStats,
+    ...(spec.executionId ? { executionId: spec.executionId } : {}), ...(spec.requireTurnBinding ? { requireTurnBinding: true } : {}),
+    ...(spec.retryBinding ? { retryBinding: structuredClone(spec.retryBinding) } : {}),
+    ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
+    ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
+  };
+  const created = await durable.createOperation({ operationId: spec.id, workspaceId: spec.workspaceId, kind: "integration", state: "applying", data, targets: allTargets });
+  let revision = Number(created.revision ?? 1);
+  const phases = new Map<string, { revision: number; phase: string }>();
+  const transition = async (file: string, phase: string, extra: { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {}): Promise<void> => {
+    const current = phases.get(file) ?? { revision, phase: "pending" };
+    const next = await durable.updateOperationFile({ operationId: spec.id, workspaceId: spec.workspaceId, path: file, expectedRevision: current.revision, expectedPhase: current.phase, phase, ...extra });
+    revision = Number(next.revision ?? current.revision + 1);
+    phases.set(file, { revision, phase });
+  };
+  for (const [file, state] of Object.entries(safety)) await transition(file, targetKinds[file] === "surface" ? "external-intent" : "apply-intent", { safety: state });
+  const compensateKernel = async (): Promise<void> => {
+    for (const { path: file, states } of orderForStates(Object.entries(spec.targets).map(([path, states]) => ({ path, states })), (entry) => safety[entry.path]!)) {
+      try {
+        const current = (await capture(context, file, false)).state;
+        if (sameState(current, safety[file]!)) continue;
+        if (!sameState(current, states.target)) { data.needsAttentionPaths.push(file); await transition(file, "needs-attention"); continue; }
+        await transition(file, "compensate-intent");
+        await context.fileStore.applyState(context.identity, context.root, file, safety[file]!);
+        const restored = (await capture(context, file, false)).state;
+        if (!sameState(restored, safety[file]!)) throw new Error(`Compensation did not restore ${file}`);
+        data.compensatedPaths.push(file);
+        await transition(file, "safety-observed", { safety: safety[file]! });
+      } catch { data.needsAttentionPaths.push(file); await transition(file, "needs-attention").catch(() => undefined); }
+    }
+  };
+  try {
+    for (const { path: file, states } of orderForStates(Object.entries(spec.targets).map(([path, states]) => ({ path, states })), (entry) => entry.states.target)) {
+      await runPathOperation(context, file, "subtree", async () => {
+        const current = (await capture(context, file, false)).state;
+        if (!sameState(current, safety[file]!)) throw new Error(`Parent workspace changed during integration: ${file}`);
+        await context.fileStore.applyState(context.identity, context.root, file, states.target);
+        const observed = (await capture(context, file, false)).state;
+        if (!sameState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
+        await transition(file, "target-observed", { target: states.target });
+        data.appliedPaths.push(file);
+      });
+    }
+  } catch (error) {
+    data.failure = error instanceof Error ? error.message : String(error);
+    await compensateKernel();
+    const status = data.needsAttentionPaths.length > 0 ? "needs-attention" : "compensated";
+    await durable.completeOperation({ operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: revision, state: status, failure: { message: data.failure } });
+    return { operationId: spec.id, status, appliedPaths: [], conflictPaths: spec.conflictPaths, compensatedPaths: data.compensatedPaths, needsAttentionPaths: data.needsAttentionPaths, diffStats: spec.diffStats, text: `Integration failed (${data.failure}); ${status}.` };
+  }
+  if (Object.keys(externalTargets).length > 0) {
+    await durable.completeOperation({ operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: revision, state: "awaiting-surface", result: data });
+    return { operationId: spec.id, status: "pending", appliedPaths: data.appliedPaths, conflictPaths: spec.conflictPaths, diffStats: spec.diffStats, text: `Integrated ${data.appliedPaths.length} disk path(s); waiting for ${Object.keys(externalTargets).length} editor path(s).` };
+  }
+  const status = spec.conflictPaths.length > 0 ? "conflict" : "complete";
+  await durable.completeOperation({ operationId: spec.id, workspaceId: spec.workspaceId, expectedRevision: revision, state: status, result: data });
+  return { operationId: spec.id, status: status === "complete" ? "applied" : "conflict", appliedPaths: data.appliedPaths, conflictPaths: spec.conflictPaths, diffStats: spec.diffStats, text: status === "complete" ? `Integrated ${data.appliedPaths.length} path(s).` : `Integrated ${data.appliedPaths.length} path(s) with ${spec.conflictPaths.length} conflict(s).` };
+};
+
 const pathDepth = (file: string): number => file.split(/[\\/]/).length;
 const orderForStates = <T extends { path: string }>(
   values: T[],
@@ -234,6 +321,7 @@ export const applyDurableFileOperation = async (
   context: DurableFileOperationContext,
   spec: DurableFileOperationSpec,
 ): Promise<DurableFileOperationResult> => {
+  if (context.durableRecoveryStore) return applyKernelDurableFileOperation(context, spec);
   if (spec.requireTurnBinding && !spec.executionId) throw new Error("Parent turn recovery binding is required for integration");
   if (spec.executionId) assertIntegrationTurnBinding(context.database, spec.workspaceId, spec.executionId);
   await reconcileInterruptedIntegrationOperations(context);
