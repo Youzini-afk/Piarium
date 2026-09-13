@@ -10,11 +10,13 @@ import type {
   ParentVerificationBundle,
   ResultReviewRecord,
   VerificationActorIdentity,
+  WorkingStateRootStore,
 } from "./working-state/types.js";
 import type {
   WorkingStateStore,
   WorkspaceWorkingStateAccess,
 } from "./working-state/working-state-store.js";
+import { isRootAccess } from "./working-state/working-state-root-adapter.js";
 
 export interface CapturedVerificationIdentity {
   treeHash: string | null;
@@ -327,12 +329,47 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
     });
   };
 
+  const projectFromRootStore = async (
+    store: WorkingStateRootStore,
+    threadId: string,
+    currentResultRevision?: number,
+  ): Promise<ThreadVerificationProjection> => {
+    const latestChild = (await store.listChildVerifications(threadId)).at(-1);
+    const effectiveRevision = currentResultRevision ?? latestChild?.resultRevision;
+    const child = effectiveRevision === undefined ? undefined : await store.getChildVerification(threadId, effectiveRevision) ?? undefined;
+    const parent = await store.getParentVerification(threadId) ?? undefined;
+    const review = effectiveRevision === undefined
+      ? (await store.listReviewRecords(threadId)).at(-1)
+      : await store.getReviewRecord(threadId, effectiveRevision) ?? undefined;
+    return projectThreadVerification({
+      ...(effectiveRevision !== undefined ? { currentResultRevision: effectiveRevision } : {}),
+      ...(child ? { child } : {}),
+      ...(parent ? { parent } : {}),
+      ...(review ? { review } : {}),
+    });
+  };
+
   const projectParentCompletion = async (window: ParentMergeWindow, record: CommandVerificationRecord): Promise<void> => {
     if (!runtime) return;
-    const projection = await runtime.workingStates.withStore(
-      window.workspaceId,
-      "thread-parent-verification-complete",
-      async (store) => {
+    const projection = isRootAccess(runtime.workingStates)
+      ? await runtime.workingStates.withBranchStore(window.workspaceId, "thread-parent-verification-complete", async (store) => {
+        const existing = await store.getParentVerification(window.threadId, window.mergedResultRevision);
+        if (!existing || existing.mergeOperationId !== window.mergeOperationId) return projectFromRootStore(store, window.threadId);
+        if (existing.checks.some((check) => check.id === record.id)) return projectFromRootStore(store, window.threadId);
+        const checks = [...existing.checks, { ...record, relationToPublished: "post-merge-matching-tree" as const }];
+        await store.putParentVerification(window.threadId, {
+          ...existing,
+          recordedAt: Date.now(),
+          binding: "bound",
+          note: "Observed command boundaries matched the post-merge Git identity (HEAD plus tracked, staged, unstaged, and non-ignored untracked paths)",
+          checks,
+        });
+        return projectFromRootStore(store, window.threadId);
+      })
+      : await runtime.workingStates.withStore(
+        window.workspaceId,
+        "thread-parent-verification-complete",
+        async (store) => {
         const existing = store.getParentVerification(window.threadId, window.mergedResultRevision);
         if (!existing || existing.mergeOperationId !== window.mergeOperationId) {
           return projectFromStore(store, window.threadId);
@@ -347,8 +384,8 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
           checks,
         });
         return projectFromStore(store, window.threadId);
-      },
-    );
+        },
+      );
     await runtime.onProjection?.(window.workspaceId, window.threadId, projection);
   };
 
