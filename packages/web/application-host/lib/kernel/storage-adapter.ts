@@ -641,9 +641,26 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       cleanUnreferenced: true,
     });
   }
+
+  async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> {
+    const branch = await this.getBranchRoot(branchId);
+    if (!branch) return null;
+    const hash = createHash("sha256");
+    for (const file of [...new Set(changedPaths.map(normalize))].sort()) {
+      const captured = await this.context.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
+      hash.update(file).update("\0").update(JSON.stringify(captured.state)).update("\0");
+    }
+    hash.update(branch.root);
+    return `sha256-${hash.digest("hex")}`;
+  }
 }
 
-class KernelLegacyWorkingStateProjection {
+/**
+ * Compatibility adapter for consumers that have not yet moved to the async root API.
+ * It is intentionally callback-scoped and is not a storage authority. Production paths that have
+ * migrated use `withBranchStore`; this adapter remains only for the bounded migration surface.
+ */
+class KernelWorkingStateCompatibilityAdapter {
   private readonly branches = new Map<string, BranchProjection>();
   private readonly results = new Map<string, WorkingResult>();
   private readonly drafts = new Map<string, DraftBaseline>();
@@ -658,8 +675,8 @@ class KernelLegacyWorkingStateProjection {
     this.fileStore = context.fileStore;
   }
 
-  static async open(context: KernelStorageContext): Promise<KernelLegacyWorkingStateProjection> {
-    const store = new KernelLegacyWorkingStateProjection(context);
+  static async open(context: KernelStorageContext): Promise<KernelWorkingStateCompatibilityAdapter> {
+    const store = new KernelWorkingStateCompatibilityAdapter(context);
     const snapshot = await context.client.snapshot(context.identity.workspaceId);
     const branches = Array.isArray(asRecord(snapshot).branches) ? asRecord(snapshot).branches as unknown[] : [];
     for (const item of branches) await store.loadBranch(asRecord(item));
@@ -1272,7 +1289,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
 ): WorkspaceWorkingStateAccess & WorkspaceWorkingStateRootAccess => {
   const withStore: WorkspaceWorkingStateAccess["withStore"] = async (workspaceId, purpose, operation, mode: Mode = "exclusive") => {
     const context = await adapter.context(workspaceId, purpose, { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.maintenance"] });
-    const projection = await KernelLegacyWorkingStateProjection.open(context);
+    const projection = await KernelWorkingStateCompatibilityAdapter.open(context);
     if (!recoveryEngine) return Reflect.apply(operation, undefined, [projection, context]);
     return recoveryEngine.withWorkspaceStorage(
       workspaceId,

@@ -203,6 +203,9 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
   commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>) {
     return this.store.commitVirtualWrites(branchId, expectedWriteRevision, files);
   }
+
+  materializeResult(...args: Parameters<WorkingStateStore["materializeResult"]>): ReturnType<WorkingStateStore["materializeResult"]> { return this.store.materializeResult(...args); }
+  captureBranchCandidateIdentity(...args: Parameters<WorkingStateStore["captureBranchCandidateIdentity"]>): ReturnType<WorkingStateStore["captureBranchCandidateIdentity"]> { return this.store.captureBranchCandidateIdentity(...args); }
 }
 
 export const isWorkingStateRootStore = (store: CompatibleWorkingStateStore): store is WorkingStateRootStore => (

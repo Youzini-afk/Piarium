@@ -78,7 +78,7 @@ impl Storage {
                     method,
                     "working.result",
                     "published",
-                    "result",
+                    "document",
                     authorized_params,
                     grant_id.unwrap_or(""),
                 )
@@ -101,7 +101,7 @@ impl Storage {
                     method,
                     "working.draft",
                     "active",
-                    "draft",
+                    "document",
                     authorized_params,
                     grant_id.unwrap_or(""),
                 )
@@ -140,7 +140,7 @@ impl Storage {
                         method,
                         record_type,
                         "recorded",
-                        "verification",
+                        "document",
                         authorized_params,
                         grant_id.unwrap_or(""),
                     )
@@ -174,7 +174,7 @@ impl Storage {
                     method,
                     "working.review",
                     "recorded",
-                    "review",
+                    "document",
                     authorized_params,
                     grant_id.unwrap_or(""),
                 )

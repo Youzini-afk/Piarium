@@ -606,6 +606,34 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   await assert.rejects(client.getBlob(body.hash, { recordId: "record-1", slot: "body" }), /content|record|reference|owner/i);
 });
 
+test("typed working result boundary stores root identity without state maps", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-record-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "working-record-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "working-record-actor", "working-record-workspace"));
+  const value = await client.workingResultPut({
+    operationId: "working-result-put",
+    recordId: "working-result:branch-1@1",
+    workspaceId: "working-record-workspace",
+    branchId: "branch-1",
+    resultRevision: 1,
+    root: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    changedPaths: ["a.txt"],
+    diffStats: { files: 1, insertions: 1, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: { branchId: "branch-1", resultRevision: 1, root: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", changedPaths: ["a.txt"], diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() },
+    ownerIds: [],
+    references: [],
+  });
+  assert.equal((value.record as { root: string }).root.startsWith("sha256-"), true);
+  assert.equal(JSON.stringify(value.record).includes("pathStates"), false);
+  const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
+  assert.equal((listed.records as unknown[]).length, 1);
+});
+
 test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");

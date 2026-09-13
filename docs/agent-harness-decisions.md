@@ -5967,3 +5967,15 @@ Kernel-backed `WorkspaceRecoveryStorageContext` now carries a Rust-owned `Recove
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-269 | partial implementation / wired for production agent mutation | — | status 阶段 R1；plan 阶段 R1；recovery/application-host module documentation |
+
+### D-270 · 2026-09-13 · R1 acceptance boundary after consumer slices
+
+类型：验收记录；只追加，不改写 D-265–D-269 正文
+
+本轮新增的生产证据是：生成式 `working.*` DTO 在真实 release 子进程中发布 root-bound result；result envelope 不含 `pathStates`；root preview/selected identity 不调用 branch snapshot；directory Integration 和 agent surface/disk mutation 在 kernel operation intent/file CAS/terminal revision 上运行。旧 `WorkingStateStore` callback 适配器已改名并明确为迁移兼容层，仍有 publish/materialize/history、branch undo/reconcile 和 combined Recovery public methods 尚未完全切换，因此不宣称 R1 完成。R0/R1 仍按实际证据保持 Partial，R2–R6 未变。
+
+## D-270 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-270 | partial acceptance record | — | status 阶段 R1；plan 阶段 R1；architecture；kernel/application-host module documentation |

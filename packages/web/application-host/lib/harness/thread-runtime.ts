@@ -1042,7 +1042,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       worktree.preparationStage = "materializing";
       await persistWorktree(input.workspaceId, input.threadId, worktree);
       if (input.branchId && input.resultRevision && options.workingStates) {
-        const result = await options.workingStates.withStore(
+        const result = await withWorkingStateRootStore(
+          options.workingStates,
           input.workspaceId,
           "thread-result-materialize",
           (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
@@ -1138,7 +1139,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           return { treeHash: null, reason: "Non-Git command identity is not captured without a full directory scan" };
         }
         const inspected = await options.worktrees.inspect(thread.worktree, "live");
-        const treeHash = await options.workingStates.withStore(
+        const treeHash = await withWorkingStateRootStore(
+          options.workingStates,
           binding.workspaceId,
           "thread-command-input-identity",
           (store) => store.captureBranchCandidateIdentity(
@@ -1248,19 +1250,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (thread?.role === "retrieval") return;
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
     const result = isVirtualWorktree(thread.worktree)
-      ? await options.workingStates.withStore(
-        workspaceId,
-        "thread-partial-result-publish",
-        (store) => store.publishHeadResult(thread.workBranchId!),
-      )
+      ? await options.workingStates.withStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
       : await (async () => {
         const inspected = await options.worktrees.inspect(thread.worktree!, "live");
         const indexModes = await options.worktrees.inspectIndexModes?.(thread.worktree!.path);
-        return options.workingStates!.withStore(
-          workspaceId,
-          "thread-partial-result-publish",
-          (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, { indexModes }),
-        );
+        return options.workingStates!.withStore(workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
       })();
     let worktree = thread.worktree;
     try {

@@ -130,6 +130,8 @@ export interface WorkingStateRootStore {
     expectedWriteRevision: number,
     files: Record<string, RecoveryState>,
   ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
+  materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
+  captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
 }
 
 export interface WorkspaceWorkingStateRootAccess {
