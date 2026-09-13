@@ -2371,7 +2371,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats = published.diffStats;
           if (options.verification) {
             try {
-              const projection = await options.workingStates.withStore(
+              const projection = await withWorkingStateRootStore(
+                options.workingStates,
                 binding.workspaceId,
                 "thread-result-verify",
                 (store) => options.verification!.bindPublishedResult(store, {

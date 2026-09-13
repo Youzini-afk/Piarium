@@ -16,7 +16,7 @@ import type {
   WorkingStateStore,
   WorkspaceWorkingStateAccess,
 } from "./working-state/working-state-store.js";
-import { isRootAccess } from "./working-state/working-state-root-adapter.js";
+import { isRootAccess, isWorkingStateRootStore } from "./working-state/working-state-root-adapter.js";
 
 export interface CapturedVerificationIdentity {
   treeHash: string | null;
@@ -461,7 +461,7 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
   };
 
   const bindPublishedResult = async (
-    store: WorkingStateStore,
+    store: WorkingStateStore | WorkingStateRootStore,
     input: {
       workspaceId: string;
       threadId: string;
@@ -471,6 +471,37 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
       worktreePath?: string;
     },
   ): Promise<ThreadVerificationProjection> => {
+    if (isWorkingStateRootStore(store)) {
+      const rootStore = store as WorkingStateRootStore;
+      const published = await rootStore.getResult(input.branchId, input.resultRevision);
+      const createdAt = published ? Date.parse(published.createdAt) : Number.NaN;
+      const publishedAt = Number.isFinite(createdAt) ? createdAt : Date.now();
+      const hasPublicationBoundary = Number.isFinite(createdAt);
+      const resultTreeHash = published?.root;
+      const selected: Array<{ sessionId: string; executionId: string; record: CommandVerificationRecord }> = [];
+      for (const [sessionId, binding] of sessions) {
+        if (binding.scope !== "child" || binding.workspaceId !== input.workspaceId || binding.threadId !== input.threadId
+          || binding.runId !== input.runId || (binding.branchId && binding.branchId !== input.branchId)) continue;
+        for (const observation of observations.get(sessionId)?.values() ?? []) {
+          if (!hasPublicationBoundary || observation.binding.generation !== binding.generation || observation.endedAt === undefined
+            || observation.endedAt > publishedAt) continue;
+          const record = commandRecord(observation);
+          if (record) selected.push({ sessionId, executionId: observation.executionId, record });
+        }
+      }
+      const bundle = bindCommandsToPublishedResult({
+        branchId: input.branchId,
+        resultRevision: input.resultRevision,
+        runId: input.runId,
+        publishedAt,
+        commands: selected.map((item) => item.record),
+        ...(resultTreeHash ? { resultTreeHash } : {}),
+        ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+      });
+      await rootStore.putChildVerification(input.threadId, bundle);
+      for (const item of selected) observations.get(item.sessionId)?.delete(item.executionId);
+      return projectFromRootStore(rootStore, input.threadId, input.resultRevision);
+    }
     const published = store.getResult(input.branchId, input.resultRevision);
     const createdAt = published ? Date.parse(published.createdAt) : Number.NaN;
     const publishedAt = Number.isFinite(createdAt) ? createdAt : Date.now();
