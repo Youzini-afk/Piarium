@@ -1,4 +1,4 @@
-use super::{idempotent, recovery_idempotent, Storage};
+use super::{idempotent, Storage};
 use crate::authority::require_capability;
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
@@ -11,6 +11,34 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use uuid::Uuid;
+
+fn recovery_transition(
+    storage: &mut Storage,
+    method: &str,
+    params: &Value,
+    action: impl FnOnce(&mut Storage) -> Result<Value, KernelError>,
+) -> Result<Value, KernelError> {
+    let transition_id = params
+        .get("transitionId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| KernelError::Operation(format!("{method} requires transitionId")))?;
+    let mut identity = params.clone();
+    let object = identity
+        .as_object_mut()
+        .ok_or_else(|| KernelError::Protocol("request params must be an object".to_string()))?;
+    if let Some(target) = params.get("operationId").and_then(Value::as_str) {
+        object.insert(
+            "targetOperationId".to_string(),
+            Value::String(target.to_string()),
+        );
+    }
+    object.insert(
+        "operationId".to_string(),
+        Value::String(transition_id.to_string()),
+    );
+    idempotent(storage, method, &identity, action)
+}
 
 struct ActiveRequest {
     token: Arc<AtomicBool>,
@@ -311,6 +339,9 @@ impl Kernel {
                 &[
                     "grantId",
                     "hostGeneration",
+                    "authorityInstanceId",
+                    "workerId",
+                    "workerGeneration",
                     "sessionId",
                     "threadId",
                     "runId",
@@ -377,11 +408,17 @@ impl Kernel {
             "storage.record.put" => idempotent(storage, method, &authorized_params, |storage| {
                 storage.domain_record_put(&authorized_params, grant_id.unwrap_or(""))
             }),
-            "storage.record.get" => storage.domain_record_get(&authorized_params, grant_id.unwrap_or("")),
-            "storage.record.list" => storage.domain_record_list(&authorized_params, grant_id.unwrap_or("")),
-            "storage.record.release" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.domain_record_release(&authorized_params, grant_id.unwrap_or(""))
-            }),
+            "storage.record.get" => {
+                storage.domain_record_get(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "storage.record.list" => {
+                storage.domain_record_list(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "storage.record.release" => {
+                idempotent(storage, method, &authorized_params, |storage| {
+                    storage.domain_record_release(&authorized_params, grant_id.unwrap_or(""))
+                })
+            }
             "branch.create.begin" => {
                 storage.begin_branch_builder(&authorized_params, grant_id.unwrap_or(""))
             }
@@ -411,37 +448,70 @@ impl Kernel {
                 storage.branch_publish(&authorized_params)
             }),
             "branch.pin" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.branch_pin(&authorized_params, true)
+                storage.branch_pin(&authorized_params, true, grant_id.unwrap_or(""))
             }),
             "branch.unpin" => idempotent(storage, method, &authorized_params, |storage| {
-                storage.branch_pin(&authorized_params, false)
+                storage.branch_pin(&authorized_params, false, grant_id.unwrap_or(""))
             }),
             "branch.diff" => storage.branch_diff(&authorized_params),
             "branch.delete" => idempotent(storage, method, &authorized_params, |storage| {
                 storage.branch_delete(&authorized_params)
             }),
-            "pin.read" => storage.pin_read(&authorized_params),
+            "pin.read" => storage.pin_read(&authorized_params, grant_id.unwrap_or("")),
             "storage.gc" => idempotent(storage, method, &authorized_params, |storage| storage.gc()),
-            "recovery.operation.begin" | "recovery.operation.update" => {
-                recovery_idempotent(storage, method, &authorized_params, |storage| {
-                    storage.recovery_operation(method, &authorized_params)
+            "recovery.operation.get" => {
+                storage.recovery_operation_get(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.turn.start" => {
+                storage.recovery_turn_start(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.turn.get" => {
+                storage.recovery_turn_get(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.turn.settle" => {
+                storage.recovery_turn_settle(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.checkpoint.create" => {
+                storage.recovery_checkpoint_create(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.checkpoint.list" => {
+                storage.recovery_checkpoint_list(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.entry.resolve" => {
+                storage.recovery_entry_resolve(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.change.before" => {
+                idempotent(storage, method, &authorized_params, |storage| {
+                    storage.recovery_change_before(&authorized_params, grant_id.unwrap_or(""))
                 })
             }
-            "recovery.operation.get" => storage.recovery_get(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.turn.start" => storage.recovery_turn_start(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.turn.get" => storage.recovery_turn_get(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.turn.settle" => storage.recovery_turn_settle(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.checkpoint.create" => storage.recovery_checkpoint_create(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.checkpoint.list" => storage.recovery_checkpoint_list(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.entry.resolve" => storage.recovery_entry_resolve(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.change.before" => storage.recovery_change_before(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.change.get" => storage.recovery_change_get(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.change.after" => storage.recovery_change_after(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.operation.create" => storage.recovery_operation_create(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.operation.file.cas" => storage.recovery_operation_file_cas(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.operation.complete" => storage.recovery_operation_complete(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.operation.list" => storage.recovery_operation_list(&authorized_params, grant_id.unwrap_or("")),
-            "recovery.operation.release" => storage.recovery_operation_release(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.change.get" => {
+                storage.recovery_change_get(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.change.after" => idempotent(storage, method, &authorized_params, |storage| {
+                storage.recovery_change_after(&authorized_params, grant_id.unwrap_or(""))
+            }),
+            "recovery.operation.create" => {
+                storage.recovery_operation_create(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.operation.file.cas" => {
+                recovery_transition(storage, method, &authorized_params, |storage| {
+                    storage.recovery_operation_file_cas(&authorized_params, grant_id.unwrap_or(""))
+                })
+            }
+            "recovery.operation.complete" => {
+                recovery_transition(storage, method, &authorized_params, |storage| {
+                    storage.recovery_operation_complete(&authorized_params, grant_id.unwrap_or(""))
+                })
+            }
+            "recovery.operation.list" => {
+                storage.recovery_operation_list(&authorized_params, grant_id.unwrap_or(""))
+            }
+            "recovery.operation.release" => {
+                recovery_transition(storage, method, &authorized_params, |storage| {
+                    storage.recovery_operation_release(&authorized_params, grant_id.unwrap_or(""))
+                })
+            }
             "operation.get" => storage.operation_get(&authorized_params),
             "operation.release" => storage.operation_release(&authorized_params),
             _ => Err(KernelError::Protocol(format!("unknown method: {method}"))),

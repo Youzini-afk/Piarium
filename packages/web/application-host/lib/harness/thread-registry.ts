@@ -423,6 +423,12 @@ const isArtifactRef = (value: unknown): value is NonNullable<RetrievalFactSource
   && value.durability === "durable"
   && isString(value.hash)
   && Number.isSafeInteger(value.byteLength)
+  && isString(value.recordId)
+  && (value.recordType === "retrieval.artifact" || value.recordType === "retrieval.receipt")
+  && isString(value.workspaceId)
+  && (value.sessionId === undefined || isString(value.sessionId))
+  && (value.threadId === undefined || isString(value.threadId))
+  && (value.runId === undefined || isString(value.runId))
 );
 
 const isFactSource = (value: unknown): value is RetrievalFactSource => (

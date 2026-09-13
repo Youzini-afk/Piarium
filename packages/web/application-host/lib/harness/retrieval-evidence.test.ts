@@ -30,7 +30,14 @@ const memoryArtifacts = () => {
     storeArtifact: async (bytes: Buffer): Promise<RetrievalArtifactRef> => {
       const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
       objects.set(hash, Buffer.from(bytes));
-      return { durability: "durable", hash, byteLength: bytes.byteLength };
+      return {
+        durability: "durable",
+        hash,
+        byteLength: bytes.byteLength,
+        recordId: `artifact:${hash}`,
+        recordType: "retrieval.artifact",
+        workspaceId: "ws",
+      };
     },
   };
 };
@@ -214,7 +221,17 @@ describe("validateRetrievalEvidence", () => {
     const draft = mintWebFetchReceipt("https://example.com/doc", markdown, receiptAuthority);
     const receipt: RetrievalUrlReceipt = {
       ...draft,
-      artifact: { durability: "durable", hash: draft.contentHash, byteLength: Buffer.byteLength(markdown) },
+      artifact: {
+        durability: "durable",
+        hash: draft.contentHash,
+        byteLength: Buffer.byteLength(markdown),
+        recordId: `receipt:${draft.receiptId}`,
+        recordType: "retrieval.receipt",
+        workspaceId: "ws",
+        sessionId: actor.sessionId,
+        threadId: "thread-1",
+        runId: "run-1",
+      },
     };
     const receipts = new Map<string, RetrievalUrlReceipt>([[receipt.receiptId, receipt]]);
     const valid = await validateRetrievalEvidence({

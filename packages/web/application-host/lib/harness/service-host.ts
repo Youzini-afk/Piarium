@@ -290,7 +290,10 @@ export interface HarnessServiceHost {
     bytes: Buffer,
     authority?: import("@piarium/protocol").RetrievalReceiptAuthority,
   ) => Promise<import("@piarium/protocol").RetrievalArtifactRef>;
-  readRetrievalArtifact?: (workspaceId: string, hash: string) => Promise<Buffer | null>;
+  readRetrievalArtifact?: (
+    workspaceId: string,
+    artifact: import("@piarium/protocol").RetrievalArtifactRef,
+  ) => Promise<Buffer | null>;
   readRetrievalArtifactSlice?: (
     workspaceId: string,
     artifact: import("@piarium/protocol").RetrievalArtifactRef,

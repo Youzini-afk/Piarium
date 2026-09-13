@@ -385,14 +385,14 @@ Materialization and the non-Git worktree/baseline
 copies share `workspace/reflink.ts`: a forced reflink shares extents with the
 content-addressed object file where the filesystem supports it (ReFS/APFS/
 Btrfs) and reports the real backend otherwise (`MaterializeResult.cow`).
-Persisted path maps are Merkle tries (`state-trie.ts`, schema 4): every map
-serializes as a `{trie}` root into a shared `stateNodes` pool so equal subtrees
-across branches and results are written once, the pool rebuild from live roots
-reclaims orphans, writes use structural sharing instead of a whole-document
-clone, and `treeIdentityFromStates` is the trie root. The current TS runtime
-still uses flat maps in memory and rewrites the catalog; production root
-authority and incremental node transactions belong to Rust stage R1. Old
-WorkingState schemas and schema-4 flat maps are rejected rather than migrated.
+`state-trie.ts` and the schema-4 TS catalog now remain test fixtures. Production
+WorkingState authority is the Rust format-v8 branch/root store. Direct read,
+grep/find/ls/explore pin, virtual write and materializer inputs use asynchronous
+root/path/range operations and do not retain an expanded workspace tree. The
+still-synchronous ThreadRuntime and IntegrationCoordinator interfaces receive a
+callback-scoped projection which is discarded afterward; removing that projection
+is remaining R1 work rather than a second persistent authority. Old internal
+WorkingState formats are rejected rather than migrated.
 Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
 Spawn recaptures only when no `workBranchId` exists. The child stays on a

@@ -40,6 +40,94 @@ export interface WorkingBranch {
   updatedAt: string;
 }
 
+/** Root identity and CAS metadata. Tree entries stay behind the asynchronous path/range API. */
+export interface WorkingBranchRoot {
+  branchId: string;
+  workspaceId: string;
+  baseRef?: string;
+  baseRoot: string;
+  root: string;
+  headRevision: number;
+  writeRevision: number;
+  draftBasePaths: string[];
+  captureScopes: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type WorkingStatePathOrigin = "base" | "delta" | "draft-base";
+
+export type WorkingStateContentSource =
+  | { kind: "branch"; branchId: string; path: string; revision?: number }
+  | { kind: "pin"; pinId: string; path: string };
+
+export interface WorkingStateTreeEntry {
+  path: string;
+  state: RecoveryState;
+  origin: WorkingStatePathOrigin;
+  root?: string;
+  viewRevision?: number;
+  contentSource?: WorkingStateContentSource;
+}
+
+export interface WorkingStateTreeRead {
+  branch: WorkingBranchRoot;
+  /** The immutable/current root actually read. */
+  root: string;
+  /** Published revision for fixed reads; writeRevision for the current view. */
+  viewRevision: number;
+  entries: WorkingStateTreeEntry[];
+}
+
+export interface WorkingStateReadOptions {
+  revision?: number;
+  pin?: WorkingStatePinnedRoot;
+  signal?: AbortSignal;
+  deadlineAt?: number;
+}
+
+export interface WorkingStatePinnedRoot {
+  pinId: string;
+  branchId: string;
+  workspaceId: string;
+  revision: number;
+  writeRevision: number;
+  root: string;
+  branch: WorkingBranchRoot;
+}
+
+export interface WorkingStatePin extends WorkingStatePinnedRoot {
+  release(): Promise<void>;
+}
+
+/**
+ * Branch roots and paths are asynchronous because the Rust kernel owns them.
+ * Implementations must not retain an expanded workspace tree between operations.
+ */
+export interface WorkingStateRootStore {
+  getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null>;
+  readPath(branchId: string, path: string, options?: WorkingStateReadOptions): Promise<WorkingStateTreeEntry | null>;
+  listPaths(branchId: string, roots: readonly string[], options?: WorkingStateReadOptions): Promise<WorkingStateTreeRead | null>;
+  readContent(entry: WorkingStateTreeEntry, options?: { offset?: number; length?: number; signal?: AbortSignal }): Promise<Buffer | null>;
+  pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
+  putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
+  commitVirtualWrites(
+    branchId: string,
+    expectedWriteRevision: number,
+    files: Record<string, RecoveryState>,
+  ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
+}
+
+export interface WorkspaceWorkingStateRootAccess {
+  withBranchStore<T>(
+    workspaceId: string,
+    purpose: string,
+    operation: (store: WorkingStateRootStore) => Promise<T> | T,
+    mode?: "exclusive" | "shared",
+    actor?: { sessionId: string; threadId?: string; runId?: string },
+  ): Promise<T>;
+}
+
 export interface DraftBaselinePathProvenance {
   baseRevision: string | null;
   encoding: string;
@@ -67,6 +155,8 @@ export interface WorkingResult {
   pathStates: Record<string, RecoveryState>;
   diffStats: ThreadDiffStats;
   createdAt: string;
+  /** Rust-kernel root bound to resultRevision when the kernel is authoritative. */
+  root?: string;
 }
 
 export type ThreeWayPathDecision =

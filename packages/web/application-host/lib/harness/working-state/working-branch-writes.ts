@@ -3,12 +3,17 @@ import type {
   DocumentBranchWriteResult,
   WorkingBranchReadProvenance,
 } from "@piarium/protocol";
-import type { RecoveryState } from "./types.js";
+import type { RecoveryState, WorkingStateRootStore } from "./types.js";
 import { readBranchFile, resolveBranchPath } from "./branch-view.js";
 import type { ThreadExecutionView, ThreadExecutionViewRegistry } from "./execution-view.js";
 import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./virtual-write-gate.js";
 import { assertTextUtf8, VirtualWriteTreeError } from "./virtual-write-tree.js";
-import type { WorkingStateStore, WorkspaceWorkingStateAccess } from "./working-state-store.js";
+import type { WorkingStateStore } from "./working-state-store.js";
+import {
+  asWorkingStateRootStore,
+  withWorkingStateRootStore,
+  type CompatibleWorkingStateAccess,
+} from "./working-state-root-adapter.js";
 
 export interface WorkingBranchWriteChange {
   resourceId: string;
@@ -49,7 +54,7 @@ const symlinkRejected = (file: string, action: DocumentBranchWriteAction): Docum
 
 export function createWorkingBranchWriteServices(options: {
   views: ThreadExecutionViewRegistry;
-  workingStates: WorkspaceWorkingStateAccess;
+  workingStates: CompatibleWorkingStateAccess;
   writeGate: VirtualWriteGate;
 }): {
   branchWrite(
@@ -62,7 +67,7 @@ export function createWorkingBranchWriteServices(options: {
     sessionId: string,
     files: Record<string, RecoveryState>,
     expectedWriteRevision?: number,
-    store?: WorkingStateStore,
+    store?: WorkingStateStore | WorkingStateRootStore,
     signal?: AbortSignal,
   ): Promise<WorkingBranchFilesCommitResult>;
 } {
@@ -97,7 +102,7 @@ export function createWorkingBranchWriteServices(options: {
 
   const persistFiles = async (
     sessionId: string,
-    store: WorkingStateStore,
+    store: WorkingStateRootStore,
     files: Record<string, RecoveryState>,
     expected: number,
   ): Promise<WorkingBranchFilesCommitResult> => {
@@ -112,7 +117,7 @@ export function createWorkingBranchWriteServices(options: {
   return {
     async branchWrite(sessionId, changes, expectedRevision, signal) {
       return runWhenVirtual(sessionId, async (view) => (
-        options.workingStates.withStore(view.workspaceId, "working-branch-write", async (store) => {
+        withWorkingStateRootStore(options.workingStates, view.workspaceId, "working-branch-write", async (store) => {
           const live = options.views.get(sessionId);
           if (!live || live.mode !== "virtual") return { status: "disk" as const };
           const expected = expectedRevision ?? live.writeRevision;
@@ -120,7 +125,7 @@ export function createWorkingBranchWriteServices(options: {
           for (const change of changes) {
             let resolved;
             try {
-              resolved = resolveBranchPath(store, live.branchId, change.resourceId);
+              resolved = await resolveBranchPath(store, live.branchId, change.resourceId);
             } catch (error) {
               return rejected(error instanceof Error ? error.message : String(error));
             }
@@ -129,7 +134,7 @@ export function createWorkingBranchWriteServices(options: {
             const current = await readBranchFile(store, live.branchId, change.resourceId, undefined, {
               followSymlinks: false,
             });
-            const pathState = store.effectiveState(live.branchId)?.[resolved.path];
+            const pathState = resolved.state;
             if (change.action === "delete") {
               if ("unavailable" in current) return rejected(current.unavailable);
               if ("missing" in current) return rejected(`${change.resourceId} is not present in this working branch`);
@@ -204,7 +209,7 @@ export function createWorkingBranchWriteServices(options: {
             revision: committed.writeRevision,
             provenance: { branchId: live.branchId, revision: committed.writeRevision, origin },
           };
-        })
+        }, "exclusive", { sessionId: view.sessionId, threadId: view.threadId, runId: view.runId })
       ), signal);
     },
 
@@ -212,14 +217,14 @@ export function createWorkingBranchWriteServices(options: {
       if (store) {
         const live = options.views.get(sessionId);
         if (!live || live.mode !== "virtual") return { status: "disk" };
-        return persistFiles(sessionId, store, files, expectedWriteRevision ?? live.writeRevision);
+        return persistFiles(sessionId, asWorkingStateRootStore(store), files, expectedWriteRevision ?? live.writeRevision);
       }
       return runWhenVirtual(sessionId, async (view) => (
-        options.workingStates.withStore(view.workspaceId, "working-branch-write", (openStore) => {
+        withWorkingStateRootStore(options.workingStates, view.workspaceId, "working-branch-write", (openStore) => {
           const live = options.views.get(sessionId);
           if (!live || live.mode !== "virtual") return { status: "disk" as const };
           return persistFiles(sessionId, openStore, files, expectedWriteRevision ?? live.writeRevision);
-        })
+        }, "exclusive", { sessionId: view.sessionId, threadId: view.threadId, runId: view.runId })
       ), signal);
     },
   };

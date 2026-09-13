@@ -37,7 +37,17 @@ const fetchContext = {
 };
 const persistReceipt = async (_workspaceId: string, draft: WebFetchReceiptDraft, markdown: string) => ({
   ...draft,
-  artifact: { durability: "durable" as const, hash: draft.contentHash, byteLength: Buffer.byteLength(markdown) },
+  artifact: {
+    durability: "durable" as const,
+    hash: draft.contentHash,
+    byteLength: Buffer.byteLength(markdown),
+    recordId: `receipt:${draft.receiptId}`,
+    recordType: "retrieval.receipt" as const,
+    workspaceId: draft.authority.owningWorkspaceId,
+    sessionId: draft.authority.sessionId,
+    ...(draft.authority.threadId ? { threadId: draft.authority.threadId } : {}),
+    ...(draft.authority.runId ? { runId: draft.authority.runId } : {}),
+  },
 });
 
 describe("web-fetch service", () => {

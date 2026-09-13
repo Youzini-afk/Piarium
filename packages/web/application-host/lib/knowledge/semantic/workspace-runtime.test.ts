@@ -28,6 +28,7 @@ async function setup(hooks: {
   settings?: () => Promise<PiSettingsSnapshot>;
   describe?: () => Promise<HarnessInferenceBindingSnapshot>;
   watch?: (id: string) => Promise<void>;
+  pinQuery?: WorkspaceSemanticRuntimeOptions['workingBranches']['pinQuery'];
 } = {}) {
   const documents = await createDocumentAuthorityHarness();
   disposes.push(() => documents.cleanup());
@@ -59,7 +60,7 @@ async function setup(hooks: {
     dataDir: documents.dataDir, hostId: 'workspace-test', documents: documents.authority,
     structureSource: createStructureSource([]), embedder: local,
     getBroker: () => broker,
-    executionViews, workingBranches: { pinQuery: async () => null },
+    executionViews, workingBranches: { pinQuery: hooks.pinQuery ?? (async () => null) },
   });
   disposes.push(() => runtime.dispose());
   return { runtime, workspaceId: documents.identity.workspaceId, embedded, removedWatches, reranked, executionViews };
@@ -75,6 +76,30 @@ describe('production workspace semantic assembly lifecycle', () => {
     await expect(harness.runtime.semanticRecall(harness.workspaceId, 'needle', 5, { sessionId: 'child' }))
       .rejects.toThrow('Working-branch query view is unavailable');
     expect(harness.embedded).not.toHaveBeenCalled();
+  });
+
+  it('releases the kernel working-state pin after a virtual semantic query', async () => {
+    const release = vi.fn(async () => undefined);
+    const harness = await setup({
+      pinQuery: async (sessionId) => ({
+        sessionId,
+        workspaceId: 'placeholder',
+        branchId: 'branch',
+        writeRevision: 1,
+        revision: 0,
+        root: 'sha256-root',
+        pinId: 'pin-query',
+        files: [],
+        readFile: async () => ({ status: 'unavailable', message: 'not requested' }),
+        release,
+      }),
+    });
+    harness.executionViews.bind({
+      sessionId: 'child', workspaceId: harness.workspaceId, threadId: 'thread', runId: 'run',
+      branchId: 'branch', revision: 0, writeRevision: 1, mode: 'virtual', draftBasePaths: [],
+    });
+    await harness.runtime.semanticRecall(harness.workspaceId, 'needle', 5, { sessionId: 'child' });
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it('does not publish settings that arrive from a retired workspace worker', async () => {

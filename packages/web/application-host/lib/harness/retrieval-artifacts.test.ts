@@ -1,243 +1,237 @@
-import { afterEach, describe, expect, it } from "vitest";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../recovery/journal-files.js";
-import { WorkingStateStore } from "./working-state/working-state-store.js";
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, Thread } from "@piarium/protocol";
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
-import {
-  createRetrievalArtifactAccess,
-  RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-  RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND,
-  RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND,
-  WEB_FETCH_RECEIPT_OWNER_KIND,
-} from "./retrieval-artifacts.js";
 import { mintWebFetchReceipt } from "./web-fetch-receipt.js";
-import type { HostResourceOperation } from "../recovery/durable-file-operation.js";
-import type { RetrievalEvidence } from "@piarium/protocol";
+import { createRetrievalArtifactAccess, hashRetrievalText } from "./retrieval-artifacts.js";
 
-const roots: string[] = [];
-
-const openAccess = async () => {
-  const parent = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-retrieval-artifacts-"));
-  roots.push(parent);
-  const workspace = path.join(parent, "workspace");
-  const root = path.join(parent, "recovery");
-  await fs.promises.mkdir(workspace, { recursive: true });
-  const database = await openRecoveryJournalCatalog(root, { create: true });
-  if (!database) throw new Error("catalog missing");
-  const context = {
-    database,
-    fileStore: createRecoveryFileStore(),
-    identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws" },
-    resourceOperationGate: {
-      run: async <Result>(_resources: readonly HostResourceOperation[], operation: () => Promise<Result>) => operation(),
-    },
-    root,
-  };
-  const store = await WorkingStateStore.open(context);
-  const workingStates: WorkspaceWorkingStateAccess = {
-    withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
-  };
-  return { context, database, parent, root, store, workingStates };
+type TestRecord = {
+  recordId: string;
+  workspaceId: string;
+  recordType: string;
+  state: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  recordRevision: number;
+  payloadJson: string;
+  references: Array<{ slot: string; objectHash: string }>;
 };
 
-afterEach(async () => {
-  for (const root of roots.splice(0)) await fs.promises.rm(root, { recursive: true, force: true });
+const openAccess = () => {
+  const objects = new Map<string, Buffer>();
+  const owners = new Map<string, string>();
+  const records = new Map<string, TestRecord>();
+  const puts: Array<{ operationId: string; recordId: string }> = [];
+  const releases: Array<{ operationId: string; recordId: string }> = [];
+  let objectSequence = 0;
+  const store = {
+    async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
+      const hash = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;
+      objects.set(hash, Buffer.from(bytes));
+      owners.set(hash, `owner-${++objectSequence}`);
+      return { hash, byteLength: bytes.byteLength };
+    },
+    async getObject(hash: string): Promise<Buffer | null> {
+      const bytes = objects.get(hash);
+      return bytes ? Buffer.from(bytes) : null;
+    },
+    async getObjectSlice(hash: string, _byteLength: number, offset: number, length: number): Promise<Buffer | null> {
+      const bytes = objects.get(hash);
+      return bytes ? Buffer.from(bytes.subarray(offset, offset + length)) : null;
+    },
+    ownerIdForObject(hash: string): string | undefined {
+      return owners.get(hash);
+    },
+  };
+  const context = {
+    records: {
+      async get(recordId: string): Promise<TestRecord | null> {
+        return records.get(recordId) ?? null;
+      },
+      async list(input: { recordType?: string }): Promise<TestRecord[]> {
+        return [...records.values()].filter((record) => !input.recordType || record.recordType === input.recordType);
+      },
+      async put(input: Omit<TestRecord, "recordRevision"> & { operationId: string; expectedRecordRevision?: number }): Promise<TestRecord> {
+        puts.push({ operationId: input.operationId, recordId: input.recordId });
+        const existing = records.get(input.recordId);
+        if (existing && input.expectedRecordRevision !== existing.recordRevision) throw new Error("record revision conflict");
+        const record = { ...input, workspaceId: "ws", recordRevision: (existing?.recordRevision ?? 0) + 1, references: [...input.references] };
+        records.set(input.recordId, record);
+        return record;
+      },
+      async release(operationId: string, recordId: string): Promise<Record<string, unknown>> {
+        releases.push({ operationId, recordId });
+        const released = records.delete(recordId);
+        return { recordId, released };
+      },
+    },
+  };
+  const workingStates: WorkspaceWorkingStateAccess = {
+    withStore: async (_workspaceId, _purpose, operation) => operation(store as never, context as never),
+  };
+  return {
+    access: createRetrievalArtifactAccess(workingStates),
+    records,
+    puts,
+    releases,
+  };
+};
+
+const authority = (threadId: string, runId: string, sessionId = `session-${threadId}`): RetrievalReceiptAuthority => ({
+  owningWorkspaceId: "ws",
+  sessionId,
+  threadId,
+  runId,
+});
+
+const retrievalThread = (
+  id: string,
+  lifecycle: "active" | "settled",
+  activeRunId: string | null,
+  pendingEvidence?: RetrievalEvidence,
+  report?: { evidence: RetrievalEvidence; evidenceRunId: string },
+): Thread => ({
+  id,
+  workspaceId: "ws",
+  lifecycle,
+  activeRunId,
+  pendingEvidence,
+  report: report ?? null,
+} as never);
+
+const evidenceFor = (...artifacts: RetrievalArtifactRef[]): RetrievalEvidence => ({
+  question: "fact",
+  scope: [],
+  facts: [{
+    claim: "durable sources",
+    status: "source-checked",
+    sources: artifacts.map((artifact) => ({ kind: "output" as const, check: "source-valid" as const, artifact })),
+  }],
+  unknowns: [],
+  attempted: [],
+  completion: "delivered",
 });
 
 describe("retrieval artifacts", () => {
-  it("lets a parent read a sealed excerpt after the store is reopened", async () => {
-    const first = await openAccess();
-    const access = createRetrievalArtifactAccess(first.workingStates);
-    const artifact = await access.storeArtifact("ws", Buffer.from("child output after close\n"));
-    const evidence: RetrievalEvidence = {
-      question: "What did the child find?",
-      scope: [],
-      facts: [{
-        claim: "child output",
-        status: "source-checked",
-        sources: [{ kind: "output", check: "source-valid", artifact }],
-      }],
-      unknowns: [],
-      attempted: [],
-      completion: "delivered",
-    };
-    await access.promotePendingEvidence({
-      workspaceId: "ws",
-      threadId: "thread-child",
-      runId: "run-child",
-      evidence,
-      receiptAuthority: { owningWorkspaceId: "ws", sessionId: "session-child", threadId: "thread-child", runId: "run-child" },
-    });
-    first.database.close();
+  it("keeps same-hash artifacts independently addressable and releasable", async () => {
+    const opened = openAccess();
+    const firstAuthority = authority("thread-a", "run-a");
+    const secondAuthority = authority("thread-b", "run-b");
+    const [first, second] = await Promise.all([
+      opened.access.storeArtifact("ws", Buffer.from("same body"), firstAuthority),
+      opened.access.storeArtifact("ws", Buffer.from("same body"), secondAuthority),
+    ]);
 
-    const database = await openRecoveryJournalCatalog(first.root, { create: false });
-    if (!database) throw new Error("reopen catalog missing");
-    const context = { ...first.context, database };
-    const store = await WorkingStateStore.open(context);
-    const workingStates: WorkspaceWorkingStateAccess = {
-      withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
-    };
-    try {
-      const reopened = createRetrievalArtifactAccess(workingStates);
-      const bytes = await reopened.readArtifact("ws", artifact.hash);
-      expect(bytes?.toString("utf8")).toBe("child output after close\n");
-    } finally {
-      database.close();
-    }
+    expect(first.hash).toBe(second.hash);
+    expect(first.recordId).not.toBe(second.recordId);
+    expect(opened.puts.map((put) => put.operationId)).toEqual(expect.arrayContaining([
+      `artifact-put:${first.recordId}`,
+      `artifact-put:${second.recordId}`,
+    ]));
+    expect((await opened.access.readArtifact("ws", first))?.toString()).toBe("same body");
+    expect((await opened.access.readArtifactSlice("ws", second, 5, 4))?.toString()).toBe("body");
+    const withoutSession = { ...first };
+    delete withoutSession.sessionId;
+    expect(await opened.access.readArtifact("ws", withoutSession)).toBeNull();
+
+    await opened.access.releaseTemporaryArtifacts("ws", firstAuthority);
+    expect(await opened.access.readArtifact("ws", first)).toBeNull();
+    expect((await opened.access.readArtifact("ws", second))?.toString()).toBe("same body");
+    expect(opened.records.has(second.recordId)).toBe(true);
+
+    await opened.access.releaseTemporaryArtifacts("ws", secondAuthority);
+    expect(opened.records.has(second.recordId)).toBe(false);
   });
 
-  it("binds receipts to one Run and reconciles pending, sealed, stale, and deleted evidence owners", async () => {
-    const opened = await openAccess();
-    const access = createRetrievalArtifactAccess(opened.workingStates);
-    const authority = { owningWorkspaceId: "ws", sessionId: "session-1", threadId: "thread-child", runId: "run-1" };
-    const draft = mintWebFetchReceipt("https://example.com/fact", "web body", authority);
-    const receipt = await access.persistReceipt("ws", draft, "web body");
-    expect(await access.lookupReceipt("ws", authority, receipt.receiptId)).toMatchObject({ receiptId: receipt.receiptId });
-    expect(await access.lookupReceipt("ws", { ...authority, runId: "run-2" }, receipt.receiptId)).toBeNull();
-
-    const artifact = await access.storeArtifact("ws", Buffer.from("local body"), authority);
-    const count = (kind: string): number => Number((opened.database.prepare(`
-      SELECT COUNT(*) AS count FROM object_references WHERE workspace_id = ? AND owner_kind = ?
-    `).get("ws", kind) as { count: number }).count);
-    expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(1);
+  it("releases source records on promotion while evidence refs keep both bodies readable", async () => {
+    const opened = openAccess();
+    const owner = authority("thread-promote", "run-promote");
+    const local = await opened.access.storeArtifact("ws", Buffer.from("local body"), owner);
+    const receipt = await opened.access.persistReceipt(
+      "ws",
+      mintWebFetchReceipt("https://example.com/fact", "web body", owner),
+      "web body",
+    );
     const evidence: RetrievalEvidence = {
-      question: "fact",
-      scope: [],
+      ...evidenceFor(local, receipt.artifact),
       facts: [{
-        claim: "two durable sources",
+        claim: "durable sources",
         status: "source-checked",
         sources: [
-          { kind: "local", path: "fact.ts", check: "source-valid", artifact },
+          { kind: "output", check: "source-valid", artifact: local },
           { kind: "url", url: receipt.finalUrl, receiptId: receipt.receiptId, check: "source-valid", artifact: receipt.artifact },
         ],
       }],
-      unknowns: [],
-      attempted: [],
-      completion: "delivered",
     };
-    await access.promotePendingEvidence({
+
+    await opened.access.promotePendingEvidence({
       workspaceId: "ws",
-      threadId: "thread-child",
-      runId: "run-1",
+      threadId: owner.threadId!,
+      runId: owner.runId!,
       evidence,
-      receiptAuthority: authority,
+      receiptAuthority: owner,
     });
-    expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(0);
-    expect(count(RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND)).toBe(2);
 
-    // Durable catalog intent without refs is rebuilt; stale refs and a late old
-    // Run temporary owner are removed while the sealed Run remains stable.
-    opened.database.prepare(`DELETE FROM object_references WHERE owner_kind = ?`).run(RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND);
-    await access.syncThreadEvidence("ws", {
-      id: "thread-child",
-      workspaceId: "ws",
-      lifecycle: "active",
-      activeRunId: "run-1",
-      pendingEvidence: evidence,
-      report: null,
-    } as never);
-    expect(count(RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND)).toBe(2);
-
-    await access.storeArtifact("ws", Buffer.from("late old run"), authority);
-    await access.syncThreadEvidence("ws", {
-      id: "thread-child",
-      workspaceId: "ws",
-      lifecycle: "active",
-      activeRunId: "run-2",
-      report: {
-        evidence,
-        evidenceRunId: "run-1",
-      },
-    } as never);
-    expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(0);
-    expect(count(RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND)).toBe(0);
-    expect(count(RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND)).toBe(2);
-
-    await access.storeArtifact("ws", Buffer.from("unsubmitted child artifact"), {
-      ...authority,
-      runId: "run-2",
-    });
-    const unsubmittedReceipt = mintWebFetchReceipt("https://example.com/unsubmitted", "pending body", {
-      ...authority,
-      runId: "run-2",
-    });
-    await access.persistReceipt("ws", unsubmittedReceipt, "pending body");
-    const otherAuthority = {
-      ...authority,
-      threadId: "thread-sibling",
-      runId: "run-sibling",
-    };
-    await access.storeArtifact("ws", Buffer.from("sibling temporary artifact"), otherAuthority);
-    const siblingReceipt = mintWebFetchReceipt("https://example.com/sibling", "sibling body", otherAuthority);
-    await access.persistReceipt("ws", siblingReceipt, "sibling body");
-    expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(2);
-    expect(count(WEB_FETCH_RECEIPT_OWNER_KIND)).toBe(4);
-
-    await access.releaseThreadEvidence("ws", "thread-child");
-    expect(count(RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND)).toBe(0);
-    expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(1);
-    expect(count(WEB_FETCH_RECEIPT_OWNER_KIND)).toBe(2);
-    expect(await access.lookupReceipt("ws", otherAuthority, siblingReceipt.receiptId)).not.toBeNull();
-    opened.database.close();
+    expect([...opened.records.values()].filter((record) => record.recordType === "retrieval.artifact")).toHaveLength(0);
+    expect([...opened.records.values()].filter((record) => record.recordType === "retrieval.receipt")).toHaveLength(0);
+    const pending = opened.records.get(`retrieval-evidence:pending:${owner.threadId}:${owner.runId}`);
+    expect(pending?.references.map((reference) => reference.objectHash).sort()).toEqual([
+      local.hash,
+      receipt.artifact.hash,
+    ].sort());
+    expect((await opened.access.readArtifactSlice("ws", local, 0, 5))?.toString()).toBe("local");
+    expect((await opened.access.readArtifact("ws", receipt.artifact))?.toString()).toBe("web body");
   });
 
-  it("preserves active-Run receipts and temporary artifacts across store reopen", async () => {
-    const first = await openAccess();
-    const access = createRetrievalArtifactAccess(first.workingStates);
-    const authority = {
-      owningWorkspaceId: "ws",
-      sessionId: "session-active",
-      threadId: "thread-active",
-      runId: "run-active",
-    };
-    const receipt = await access.persistReceipt(
+  it("uses exact owner fields when releasing a thread", async () => {
+    const opened = openAccess();
+    const prefix = await opened.access.storeArtifact("ws", Buffer.from("prefix"), authority("thread-a", "run-a"));
+    const sibling = await opened.access.storeArtifact("ws", Buffer.from("sibling"), authority("thread-ab", "run-ab"));
+
+    await opened.access.releaseThreadEvidence("ws", "thread-a");
+    expect(opened.records.has(prefix.recordId)).toBe(false);
+    expect(opened.records.has(sibling.recordId)).toBe(true);
+  });
+
+  it("reconciles orphan records even when no corresponding Thread is supplied", async () => {
+    const opened = openAccess();
+    const activeAuthority = authority("thread-live", "run-live");
+    const active = await opened.access.storeArtifact("ws", Buffer.from("live"), activeAuthority);
+    const orphan = await opened.access.storeArtifact("ws", Buffer.from("orphan"), authority("thread-gone", "run-gone"));
+    const orphanReceipt = await opened.access.persistReceipt(
       "ws",
-      mintWebFetchReceipt("https://example.com/active", "active body", authority),
-      "active body",
+      mintWebFetchReceipt("https://example.com/orphan", "orphan receipt", authority("thread-gone", "run-gone")),
+      "orphan receipt",
     );
-    await access.storeArtifact("ws", Buffer.from("active temporary excerpt"), authority);
-    first.database.close();
+    const orphanEvidence = evidenceFor(orphan);
+    await opened.access.syncThreadEvidence("ws", retrievalThread("thread-gone", "active", "run-gone", orphanEvidence));
 
-    const database = await openRecoveryJournalCatalog(first.root, { create: false });
-    if (!database) throw new Error("reopen catalog missing");
-    const context = { ...first.context, database };
-    const store = await WorkingStateStore.open(context);
-    const workingStates: WorkspaceWorkingStateAccess = {
-      withStore: async (_workspaceId, _purpose, operation) => operation(store, context),
-    };
-    const reopened = createRetrievalArtifactAccess(workingStates);
-    const count = (kind: string): number => Number((database.prepare(`
-      SELECT COUNT(*) AS count FROM object_references WHERE workspace_id = ? AND owner_kind = ?
-    `).get("ws", kind) as { count: number }).count);
-    try {
-      await reopened.reconcileWorkspaceEvidence("ws", [{
-        id: authority.threadId,
-        workspaceId: "ws",
-        role: "retrieval",
-        lifecycle: "active",
-        activeRunId: authority.runId,
-        report: null,
-      } as never]);
-      expect(await reopened.lookupReceipt("ws", authority, receipt.receiptId)).not.toBeNull();
-      expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(1);
-      expect(count(WEB_FETCH_RECEIPT_OWNER_KIND)).toBe(2);
+    await opened.access.reconcileWorkspaceEvidence("ws", [retrievalThread("thread-live", "active", "run-live")]);
 
-      await reopened.reconcileWorkspaceEvidence("ws", [{
-        id: authority.threadId,
-        workspaceId: "ws",
-        role: "retrieval",
-        lifecycle: "settled",
-        activeRunId: null,
-        report: null,
-      } as never]);
-      expect(await reopened.lookupReceipt("ws", authority, receipt.receiptId)).toBeNull();
-      expect(count(RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND)).toBe(0);
-      expect(count(WEB_FETCH_RECEIPT_OWNER_KIND)).toBe(0);
-    } finally {
-      database.close();
-    }
+    expect(opened.records.has(active.recordId)).toBe(true);
+    expect(opened.records.has(orphan.recordId)).toBe(false);
+    expect(opened.records.has(`retrieval-receipt:${Buffer.from("ws").toString("base64url")}.${Buffer.from("session-thread-gone").toString("base64url")}.${Buffer.from("thread-gone").toString("base64url")}.${Buffer.from("run-gone").toString("base64url")}:${Buffer.from(orphanReceipt.receiptId).toString("base64url")}`)).toBe(false);
+    expect(opened.records.has(`retrieval-evidence:pending:thread-gone:run-gone`)).toBe(false);
+  });
+
+  it("rebuilds pending and sealed evidence without collapsing equal hashes", async () => {
+    const opened = openAccess();
+    const owner = authority("thread-evidence", "run-evidence");
+    const one = await opened.access.storeArtifact("ws", Buffer.from("equal"), owner);
+    const two = await opened.access.storeArtifact("ws", Buffer.from("equal"), owner);
+    expect(one.recordId).not.toBe(two.recordId);
+    const evidence = evidenceFor(one, two);
+
+    await opened.access.syncThreadEvidence("ws", retrievalThread("thread-evidence", "active", "run-evidence", evidence));
+    await opened.access.syncThreadEvidence("ws", retrievalThread("thread-evidence", "settled", null, undefined, {
+      evidence,
+      evidenceRunId: "run-evidence",
+    }));
+
+    expect([...opened.records.values()].filter((record) => record.recordType === "retrieval.evidence.sealed")).toHaveLength(1);
+    expect((await opened.access.readArtifact("ws", one))?.toString()).toBe("equal");
+    expect((await opened.access.readArtifact("ws", two))?.toString()).toBe("equal");
+    expect(hashRetrievalText("equal")).toBe(one.hash);
   });
 });

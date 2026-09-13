@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, and production WorkingState/retrieval/Recovery durable records now route through typed kernel records; file apply and materialization remain later stages
+Status: accepted architecture; R0/R1 foundations and direct root/path consumers have local release-path evidence. Retrieval and checkpoint/turn/mutation use Rust durability; combined Recovery/Integration still uses the TS recovery journal pending R1 cutover
 
 Last updated: 2026-09-13
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-13
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-本轮已把 WorkingState branch/result/draft/publish/CAS、verification/review、materializer 输入、retrieval artifact/receipt，以及 Recovery checkpoint/turn/change 和 typed operation/operation-file 阶段记录交给 Rust v7 typed API；生产不再使用内存 SQL-shaped catalog 或 close-time flush。TS 仍保留尚未迁移的 combined/Integration 文件编排视图，实际文件 apply/materialize 与 R2–R6 不因本轮实现而完成。
+本轮已把 WorkingState root/path/range、branch publish/CAS、materializer 输入、retrieval artifact/receipt，以及 Recovery checkpoint/turn/change 交给 Rust v8 API；生产不再使用内存 SQL-shaped catalog 或 close-time flush。ThreadRuntime/IntegrationCoordinator 的同步接口仍用 callback 级临时树投影；combined Recovery/Integration/agent-mutation 的耐久 writer 仍是 TS recovery SQLite。Rust typed operation/file 方法是下一步替换 seam，API 存在不等于 consumer 已迁移。实际文件 apply/materialize 与 R2–R6 不因本轮实现而完成。
 
 ## 1. 产品与阶段目标
 

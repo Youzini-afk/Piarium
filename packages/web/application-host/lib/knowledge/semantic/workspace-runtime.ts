@@ -191,34 +191,40 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const sessionId = searchOptions?.sessionId;
     const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
     const execution = sessionId ? options.executionViews.get(sessionId) : undefined;
-    const threadDocuments = searchOptions?.threadDocuments ?? (execution?.mode === 'virtual' && sessionId
-      ? (await options.workingBranches.pinQuery(sessionId, {
+    const threadSnapshot = searchOptions?.threadDocuments || execution?.mode !== 'virtual' || !sessionId
+      ? undefined
+      : await options.workingBranches.pinQuery(sessionId, {
           ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
           ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-        }))?.files.map((file) => ({ path: file.path, content: file.text, revision: file.revision }))
-      : undefined);
-    if (execution?.mode === 'virtual' && !threadDocuments) throw new Error('Working-branch query view is unavailable');
-    const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext)
-      : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
-    const view = await pinSemanticQueryView({
-      inputContext,
-      ...(draftPaths === undefined ? {} : { draftPaths }),
-      ...(threadDocuments ? { threadDocuments } : sessionId ? {
-        readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId),
-      } : {}),
-    });
-    const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
-      ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
-      ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
-      overlays: view.overlays, view: view.view,
-    });
-    return {
-      status: result.status.status, coverage: result.status.coverage,
-      ...(result.status.generation ? { generation: result.status.generation } : {}),
-      ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
-      scope: result.status.scope, lifecycle: result.status.lifecycle, hits: result.hits,
-      ...(result.gaps.length > 0 ? { gaps: result.gaps } : {}),
-    };
+        });
+    try {
+      const threadDocuments = searchOptions?.threadDocuments
+        ?? threadSnapshot?.files.map((file) => ({ path: file.path, content: file.text, revision: file.revision }));
+      if (execution?.mode === 'virtual' && !threadDocuments) throw new Error('Working-branch query view is unavailable');
+      const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext)
+        : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
+      const view = await pinSemanticQueryView({
+        inputContext,
+        ...(draftPaths === undefined ? {} : { draftPaths }),
+        ...(threadDocuments ? { threadDocuments } : sessionId ? {
+          readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId),
+        } : {}),
+      });
+      const result = await state.runtime.search(workspaceScope(workspaceId), question, limit, {
+        ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
+        ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
+        overlays: view.overlays, view: view.view,
+      });
+      return {
+        status: result.status.status, coverage: result.status.coverage,
+        ...(result.status.generation ? { generation: result.status.generation } : {}),
+        ...(result.status.spaceId ? { spaceId: result.status.spaceId } : {}),
+        scope: result.status.scope, lifecycle: result.status.lifecycle, hits: result.hits,
+        ...(result.gaps.length > 0 ? { gaps: result.gaps } : {}),
+      };
+    } finally {
+      await threadSnapshot?.release();
+    }
   };
   const harnessSettings: NonNullable<HarnessServiceHost['harnessSettings']> = async (workspaceId) => (await getWorkspace(workspaceId)).snapshot;
   const rerankExploreViews: NonNullable<HarnessServiceHost['rerankExploreViews']> = async (input) => {

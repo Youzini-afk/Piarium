@@ -222,7 +222,8 @@ describe("thread.facts.set run binding", () => {
       },
       storeRetrievalArtifact: async (_workspaceId: string, bytes: Buffer) => {
         temporaryProtected = true;
-        return { durability: "durable" as const, hash: `sha256-${bytes.toString("hex")}`, byteLength: bytes.byteLength };
+        const hash = `sha256-${bytes.toString("hex")}`;
+        return { durability: "durable" as const, hash, byteLength: bytes.byteLength, recordId: `artifact:${hash}`, recordType: "retrieval.artifact" as const, workspaceId: "workspace-1" };
       },
       releaseRetrievalTemporaryArtifacts: releaseTemporary,
     } as never);
@@ -309,7 +310,14 @@ describe("thread.read retrieval pagination", () => {
   it("reads only requested UTF-8 artifact slices and preserves the page across registry reopen", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-read-page-"));
     const body = Buffer.from("正文🙂".repeat(30_000), "utf8");
-    const artifact = { durability: "durable" as const, hash: "sha256-large-evidence", byteLength: body.byteLength };
+    const artifact = {
+      durability: "durable" as const,
+      hash: "sha256-large-evidence",
+      byteLength: body.byteLength,
+      recordId: "artifact:large-evidence",
+      recordType: "retrieval.artifact" as const,
+      workspaceId: "workspace-1",
+    };
     let registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const thread = await registry.createThread({
       workspaceId: "workspace-1",

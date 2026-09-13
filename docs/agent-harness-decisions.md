@@ -5863,3 +5863,46 @@ catalog/WAL 文件大小观测，尚不据此给性能倍数。
 | D-259 | superseded in part | D-264（Recovery transient seam；WorkingState root cutover 仍保留） | status 阶段 R1 |
 | D-262 | superseded in part | D-264（memory catalog/operation-file facade） | status 阶段 R1；plan 阶段 R1 |
 | D-264 | partial implementation (typed recovery transaction/CAS; old facade deleted) | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |
+
+### D-265 · 2026-09-13 · R1 root、record 与生产编排边界返工
+
+类型：验收修正；部分取代 D-259、D-262、D-264 的交付表述，不改写其历史正文
+
+验收没有接受“已有 typed API”作为生产 consumer 已迁移的证据。实际代码仍有五个会改变行为的错误：未发布
+WorkingState 不能建立真正的 kernel pin，删除新路径会留下 tombstone；`domain_records.revision` 同时承担产品身份和
+记录 CAS，且更新可以无条件覆盖；生产 actor resolver 会任选工作区内第一个 session，而同步 consumer 又绕过 resolver；
+父分支不能消费只由 result record 保留的 child blob；combined Integration 仍读取 TS SQLite，但 kernel WorkingState context
+没有把该 journal 与 Documents gate 接回来，并暴露了可直接写 kernel object 目录的默认 TS file store 和无操作 gate。
+
+决定：
+
+1. kernel catalog 直接使用 format v8。branch 的 revision 0/root 是创建完成后的真实基线；非目录状态写回基线时移除
+   overlay 而不留下 tombstone。`branch.pin` 可用 `expectedWriteRevision + expectedRoot` 原子固定未发布 current root，
+   `pin.read` 支持 path/pagination；query pin 绑定 grant，grant revoke 会释放它，显式 revision pin 仍可独立保留。
+2. `domain_records` 增加独立、单调的 `recordRevision`；产品 `revision/resultRevision` 保持不可变身份。已有记录更新必须携带
+   `expectedRecordRevision`。grant 增加 authority/worker/generation 身份；生产 resolver 只接受准确 session，并从 session binding
+   恢复 owning workspace、Thread、Run、execution workspace 与相对 scope。Host lifecycle 的跨 Thread 操作使用显式
+   `storage.maintenance`，不再伪装成任意一个活跃 session。
+3. retrieval artifact ref 在公开 protocol 中携带 record/workspace/session/thread/run 身份；读取必须与 durable record 全字段一致，
+   相同 hash 的不同 Run 不折叠。record-backed branch write 只允许 Host storage maintenance，并由 Rust 核对 record slot/hash；
+   普通 scoped actor 不能借 record 绕过 path scope。
+4. WorkingState 的 read/grep/find/ls/explore、virtual write 和 materializer 输入改用异步 root/path/range API；Host 不再长期缓存
+   展开的 workspace tree。current query pin 在 semantic/explore 完成后显式 release。尚未异步迁移的 ThreadRuntime/
+   IntegrationCoordinator 每次 callback 临时展开后丢弃，不得写成完整 root consumer cutover。
+5. combined Integration 的 durable journal 尚未迁入 typed Rust operation API。当前生产必须明确组合 kernel branch/object authority
+   与仍属 TS recovery engine 的物理 SQLite journal/真实 Documents gate；启动在 WorkingState 可用后再对账 branch integration。
+   KernelStorageAdapter 必须显式绑定 `KernelRecoveryContentStore`，未绑定 file store 或 resource gate 直接失败，不能出现第二对象写者
+   或绕过 Documents。typed Rust recovery API 保留为下一步替换 seam，不冒充当前 consumer。
+
+状态：R0 的 Windows release 纵切与 R1 root/path 纵切已有反例；R1 仍为 Partial。剩余阻塞是 combined Recovery/Integration/
+agent-mutation consumer 的 typed API 切换、同步 ThreadRuntime/IntegrationCoordinator 的 async root 改造、draft/result/verification/review
+的完整 typed DTO、recovery location 收口，以及跨平台/硬故障证据。没有 feature flag、shadow backend 或旧格式 importer。
+
+## D-265 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-259 | superseded in part | D-265（root/path consumer、record CAS/actor/ref authority） | status 阶段 R1；kernel documentation |
+| D-262 | superseded in part | D-265（combined journal 未迁移，撤回 production kernel persistence 表述） | status 阶段 R1；plan R1 |
+| D-264 | superseded in part | D-265（typed recovery API 与真实 consumer 状态分开） | status 阶段 R1；plan R1 |
+| D-265 | partial implementation / acceptance correction | — | status 阶段 R1；plan R1；kernel documentation |

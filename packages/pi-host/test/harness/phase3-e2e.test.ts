@@ -348,7 +348,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
             kind: "url",
             url: "https://example.com/large",
             check: "source-valid",
-            artifact: { durability: "durable", hash: "sha256-large", byteLength: artifactBody.byteLength },
+            artifact: { durability: "durable", hash: "sha256-large", byteLength: artifactBody.byteLength, recordId: "artifact:large", recordType: "retrieval.artifact", workspaceId: WORKSPACE_ID },
           }],
         }],
         unknowns: [],

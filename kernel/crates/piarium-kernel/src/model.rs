@@ -63,6 +63,7 @@ pub(crate) struct BuildTree {
 #[derive(Clone, Debug)]
 pub(crate) struct BranchRow {
     pub(crate) workspace_id: String,
+    pub(crate) base_root: String,
     pub(crate) head_root: String,
     pub(crate) head_revision: i64,
     pub(crate) write_revision: i64,
@@ -73,6 +74,9 @@ pub(crate) struct Grant {
     pub(crate) grant_id: String,
     pub(crate) host_id: String,
     pub(crate) host_generation: String,
+    pub(crate) authority_instance_id: Option<String>,
+    pub(crate) worker_id: Option<String>,
+    pub(crate) worker_generation: Option<u64>,
     pub(crate) session_id: Option<String>,
     pub(crate) thread_id: Option<String>,
     pub(crate) run_id: Option<String>,

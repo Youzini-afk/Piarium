@@ -13,7 +13,7 @@ const exampleReceipt = {
   finalUrl: "https://example.com/",
   contentHash: "sha256-short",
   revision: "sha256-short",
-  artifact: { durability: "durable" as const, hash: "sha256-short", byteLength: 12 },
+  artifact: { durability: "durable" as const, hash: "sha256-short", byteLength: 12, recordId: "receipt:web-short", recordType: "retrieval.receipt" as const, workspaceId: "workspace-1", sessionId: "test" },
   authority: { owningWorkspaceId: "workspace-1", sessionId: "test" },
 };
 

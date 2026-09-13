@@ -11,7 +11,7 @@ import { createWorkspaceWorkingStateAccess, type WorkspaceWorkingStateAccess } f
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
-import { applyDurableFileOperation, markDurableExternalDispatched } from "../../recovery/durable-file-operation.js";
+import { applyDurableFileOperation, markDurableExternalDispatched, reconcileInterruptedBranchIntegrations } from "../../recovery/durable-file-operation.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
 
 const roots: string[] = [];
@@ -1617,10 +1617,13 @@ describe("IntegrationCoordinator", () => {
         sessionNavigation: h.navigation,
       });
       await restarted.fenceUnfinishedOperations();
+      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
+      await restartedStates.withStore("ws", "reconcile-crashed-branch", (store, context) => (
+        reconcileInterruptedBranchIntegrations(context, store)
+      ));
       await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-reconciled-branch", create: false }, ({ database }) => {
         expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(operationId)).toEqual({ state: "complete" });
       });
-      const restartedStates = createWorkspaceWorkingStateAccess(restarted);
       const retry = await new IntegrationCoordinator({
         workingStates: restartedStates,
       }).mergeResult({
@@ -1840,6 +1843,9 @@ describe("IntegrationCoordinator", () => {
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
       const restartedStates = createWorkspaceWorkingStateAccess(restarted);
+      await restartedStates.withStore("ws", "reconcile-materialized-undo-branch", (store, context) => (
+        reconcileInterruptedBranchIntegrations(context, store)
+      ));
       const branchBytes = await restartedStates.withStore("ws", "inspect-materialized-undo-branch", async (store) => {
         const state = store.effectiveState("thread-parent-crash")?.["a.txt"];
         return state?.kind === "regular-file" ? store.getObject(state.objectHash) : null;

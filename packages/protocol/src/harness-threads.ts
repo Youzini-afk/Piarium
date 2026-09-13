@@ -62,6 +62,13 @@ export interface RetrievalArtifactRef {
   durability: "durable";
   hash: string;
   byteLength: number;
+  /** Exact durable record that authorizes this content read. */
+  recordId: string;
+  recordType: "retrieval.artifact" | "retrieval.receipt";
+  workspaceId: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
 }
 
 export interface RetrievalReceiptAuthority {

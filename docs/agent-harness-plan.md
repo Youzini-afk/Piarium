@@ -699,7 +699,7 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
 | --- | --- | --- |
 | R0 | Partial（implemented + wired）Cargo workspace（`kernel/rust-toolchain.toml` 1.97.1）、私有 kernel 进程、同源 TS/Rust DTO、build/epoch/grant/generation 握手、request/cancel/data 分帧、blob/branch 流式输入与单 envelope 背压、取消/真实退出、Electron/Web staging | Host 已启动真实子进程；Windows release binary 正文/manifest identity 已核对，macOS/Linux 真机、完整 cross-target/签名产物仍需分别验收 |
-| R1 | Partial（WorkingState、retrieval、checkpoint/turn/mutation 与 typed operation phase 已走 direct kernel path；combined operation/integration 与文件 apply/物化仍待接管）format v7、typed path state、AVL immutable root/trie、blob durability/source authority、固定 revision、强制 publish CAS/事务 operation、workspace/actor-scoped record identity、分页 root read、pin/GC/recovery root、durable cleanup retry | Application Host 的 branch/draft/result/publish/CAS/materializer 输入、verification/review、retrieval artifact/receipt/evidence、checkpoint/turn/mutation、operation+operation-files typed transaction/CAS 已直接调用 kernel；combined file apply/Integration journal、root-oriented WorkingState adapter 和尚存的测试 SQL writer 仍待删除，不把 transient facade 当作交付 |
+| R1 | Partial（root/path、retrieval、checkpoint/turn/mutation 已有 direct kernel path；完整 consumer cutover 未完成）format v8、typed path state、AVL immutable root/trie、current/revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped record identity、分页 root read、GC/recovery refs | Application Host 的 branch read/write/explore pin/materializer 输入已使用 root/path API；retrieval ref 与 checkpoint/turn/mutation 已接 kernel。ThreadRuntime/IntegrationCoordinator 仍通过 callback 级临时投影，combined Recovery/Integration/agent-mutation 仍写 TS recovery SQLite；draft/result/verification/review 仍待完整 typed DTO。切换后删除这些旧 writer，不把 Rust API 存在本身当作 consumer 已迁移 |
 | R2 | 磁盘资源 gate、Documents 后端、恢复/Integration/混合 surface 阶段机 | edit/write/apply_patch、保存/文件 CRUD、merge/undo/redo、内置 recovery provider；移除重复锁和文件 apply/补偿实现 |
 | R3 | Git/非 Git 基线、物化切换、执行结果收集、CoW、回收/空间、资源释放 | dispatch/queued/nested/settle/archive/restore/history release/delete；移除旧 thread-worktree 和 materializer 的对应实际操作 |
 | R4 | PTY/命令、外部语言/调试/任务进程和原始输出的统一资源后端 | 用户终端、bash/get_output/write/kill、LSP/DAP/任务/测试启动器；移除对同一进程的旧 provider/进程表 |
@@ -732,7 +732,7 @@ Rust 接管同一 storage location 的所有元数据 writer，TS storage adapte
 验证真实 Host client→Rust→重开后的分支读写、跨分支 sharing、mode/字节身份、固定查询、CAS 冲突、pin 与 GC 并发、
 新格式发布关键窗口故障，以及旧实现/数据移除后从新库启动。复用本轮反例；节点数/读写字节从生产调用计量，不能仅测一个 trie helper。
 
-本轮 D-264 已把恢复阶段的直接 seam 落到 Rust v7：checkpoint+turn、change before/after、operation+operation-file 初始事务、file phase CAS、terminal CAS、typed list/get/release 和 recovery reference GC root。`KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 不再是生产入口；combined 文件 apply、完整 WorkingState root/path adapter、真实 session resolver、location migration、跨平台/断电证据仍保持未完成。
+本轮 D-264/D-265 已把恢复阶段的直接 seam 落到 Rust v8：checkpoint+turn、change before/after、operation+operation-file 初始事务、file phase CAS、terminal CAS、typed list/get/release 和 recovery reference GC root。`KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 不再是生产入口；但 combined Recovery/Integration/agent-mutation consumer 仍写 TS recovery SQLite。D-265 已接上 root/path adapter、准确 session resolver 与 current-root pin；同步消费者改造、typed consumer 切换、location 收口、跨平台/断电证据仍未完成。
 
 ### R2. 文件权威、Documents 与恢复事务
 

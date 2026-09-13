@@ -3,8 +3,15 @@ use crate::model::Grant;
 
 pub(crate) fn required_capability(method: &str) -> &'static str {
     match method {
-        "storage.health" | "storage.snapshot" | "storage.getBlob" | "branch.read"
-        | "branch.diff" | "pin.read" | "operation.get" | "storage.record.get" | "storage.record.list" => "storage.read",
+        "storage.health"
+        | "storage.snapshot"
+        | "storage.getBlob"
+        | "branch.read"
+        | "branch.diff"
+        | "pin.read"
+        | "operation.get"
+        | "storage.record.get"
+        | "storage.record.list" => "storage.read",
         "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
@@ -22,11 +29,11 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.pin"
         | "branch.unpin"
         | "branch.delete"
-        | "operation.release" | "storage.record.put" | "storage.record.release" => "storage.write",
+        | "operation.release"
+        | "storage.record.put"
+        | "storage.record.release" => "storage.write",
         "storage.gc" => "storage.gc",
-        "recovery.operation.begin"
-        | "recovery.operation.update"
-        | "recovery.operation.get"
+        "recovery.operation.get"
         | "recovery.turn.start"
         | "recovery.turn.get"
         | "recovery.turn.settle"
@@ -40,9 +47,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "recovery.operation.file.cas"
         | "recovery.operation.complete"
         | "recovery.operation.list"
-        | "recovery.operation.release" => {
-            "recovery"
-        }
+        | "recovery.operation.release" => "recovery",
         _ => "storage.read",
     }
 }

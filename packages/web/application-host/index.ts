@@ -80,6 +80,7 @@ import { createWorkingBranchLookups } from './lib/harness/working-state/working-
 import { createWorkingBranchWriteServices } from './lib/harness/working-state/working-branch-writes.js';
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
+import { reconcileInterruptedBranchIntegrations } from './lib/recovery/durable-file-operation.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
@@ -998,28 +999,62 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
-  const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number }>();
+  const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number; runId?: string }>();
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
     storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
-    resolveActor: async (workspaceId, purpose) => {
-      if (purpose === 'recovery-maintenance') return { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [''], capabilities: ['recovery.maintenance', 'storage.gc'] };
-      for (const actor of kernelSessionActors.values()) {
-        const resolved = await harnessSessionRegistration.resolveActor(actor).catch(() => null);
-        if (resolved?.workspaceId === workspaceId) {
-          return { sessionId: actor.sessionId, owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: resolved.workspaceScope ? [...resolved.workspaceScope] : [''], capabilities: [...resolved.grantedCapabilities] };
-        }
+    resolveActor: async (workspaceId, purpose, hint) => {
+      const maintenance = hint?.capabilities?.some((capability) => (
+        capability === 'recovery.maintenance' || capability === 'storage.maintenance'
+      ));
+      if (maintenance) {
+        if (hint?.owningWorkspace !== workspaceId) throw new Error(`Kernel maintenance identity does not own workspace ${workspaceId}`);
+        return hint;
       }
-      throw new Error(`No live actor is bound to workspace ${workspaceId}`);
+      const sessionId = hint?.sessionId;
+      if (!sessionId) throw new Error(`Kernel operation ${purpose} requires an exact session actor`);
+      const actor = kernelSessionActors.get(sessionId);
+      if (!actor) throw new Error(`Kernel actor session is not registered: ${sessionId}`);
+      const resolved = await harnessSessionRegistration.resolveActor(actor).catch(() => null);
+      if (!resolved?.workspaceId) throw new Error(`Kernel actor is stale: ${sessionId}`);
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      const owningWorkspace = binding?.owningWorkspaceId ?? resolved.workspaceId;
+      if (owningWorkspace !== workspaceId) throw new Error(`Kernel actor ${sessionId} does not own workspace ${workspaceId}`);
+      const threadId = binding?.threadId;
+      const runId = actor.runId ?? binding?.runId;
+      if (hint.threadId && hint.threadId !== threadId) throw new Error(`Kernel actor thread identity is stale: ${sessionId}`);
+      if (hint.runId && hint.runId !== runId) throw new Error(`Kernel actor run identity is stale: ${sessionId}`);
+      const executionRoot = (await documentsAuthority.inspectWorkspace(resolved.workspaceId)).root;
+      const pathScopes = (resolved.workspaceScope?.length ? resolved.workspaceScope : ['']).map((scope) => {
+        const relative = path.isAbsolute(scope) ? path.relative(executionRoot, scope) : scope;
+        const normalized = relative.replace(/\\/g, '/').replace(/^\.\//, '');
+        if (path.isAbsolute(relative) || normalized === '..' || normalized.startsWith('../')) {
+          throw new Error(`Kernel actor scope is outside its execution workspace: ${scope}`);
+        }
+        return normalized;
+      });
+      return {
+        authorityInstanceId: actor.authorityInstanceId,
+        workerId: actor.workerId,
+        workerGeneration: actor.workerGeneration,
+        sessionId,
+        ...(threadId ? { threadId } : {}),
+        ...(runId ? { runId } : {}),
+        owningWorkspace,
+        executionWorkspace: resolved.workspaceId,
+        pathScopes,
+        capabilities: [...resolved.grantedCapabilities],
+      };
     },
   });
   const kernelRecoveryContentStore = new KernelRecoveryContentStore(
     kernelStorageAdapter,
     path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId, 'recovery-cache'),
   );
+  kernelStorageAdapter.bindFileStore(kernelRecoveryContentStore);
   const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
@@ -1374,11 +1409,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return DEFAULT_SUGGESTIONS_SETTINGS;
     }
   };
-  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
+  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
   for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
+    await harnessWorkingStates.withStore(
+      workspaceId,
+      'startup-branch-integration-reconcile',
+      (store, context) => reconcileInterruptedBranchIntegrations(context, store),
+      'exclusive',
+    );
     await retrievalArtifacts.reconcileWorkspaceEvidence(
       workspaceId,
       await threadRegistry.listWorkspaceThreads(workspaceId),

@@ -28,6 +28,19 @@ const issueActor = async (client: KernelClient, grantId: string, workspaceId: st
   pathScopes,
 });
 
+const issueSessionActor = async (client: KernelClient, grantId: string, workspaceId: string, sessionId: string): Promise<KernelGrantHandle> => client.issueGrant({
+  grantId,
+  hostGeneration: client.handshake?.hostGeneration,
+  sessionId,
+  threadId: null,
+  runId: null,
+  owningWorkspace: workspaceId,
+  executionWorkspace: workspaceId,
+  storageIdentity: client.handshake?.storageRoot,
+  capabilities: ["storage.read", "storage.write", "recovery", "storage.gc"],
+  pathScopes: [""],
+});
+
 afterEach(async () => {
   await Promise.all(clients.splice(0).map((client) => client.close().catch(() => undefined)));
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
@@ -181,6 +194,31 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   assert.equal((fixed.entries[0]?.state as { objectHash?: string }).objectHash, second.hash);
   assert.equal((changed.entries[0]?.state as { objectHash?: string }).objectHash, third.hash);
   assert.equal((changed.entries[0]?.state as { mode?: number }).mode, 0o644);
+  const temporary = await client.putBlob(Buffer.from("temporary\n"), "op-blob-temporary");
+  const withTemporary = await client.writeBranch({
+    operationId: "op-write-temporary",
+    branchId: "branch-test",
+    expectedWriteRevision: 2,
+    changes: [{ path: "src/temporary.txt", state: { kind: "regular-file", byteLength: temporary.byteLength, objectHash: temporary.hash, mode: 0o644 }, ownerId: temporary.ownerId }],
+  });
+  const currentPin = await client.pinBranch({
+    operationId: "op-pin-current",
+    branchId: "branch-test",
+    expectedWriteRevision: withTemporary.writeRevision,
+    expectedRoot: withTemporary.root,
+  });
+  assert.equal(currentPin.view, "current");
+  assert.equal(currentPin.writeRevision, withTemporary.writeRevision);
+  const reverted = await client.writeBranch({
+    operationId: "op-revert-temporary",
+    branchId: "branch-test",
+    expectedWriteRevision: withTemporary.writeRevision,
+    changes: [{ path: "src/temporary.txt", state: { kind: "missing" } }],
+  });
+  assert.equal(reverted.root, changed.root);
+  const pinnedCurrent = await client.readPin({ pinId: String(currentPin.pinId), paths: ["src/temporary.txt"] });
+  assert.equal(((pinnedCurrent.entries as Array<{ state: { objectHash?: string } }>)[0]?.state.objectHash), temporary.hash);
+  await client.unpinBranch({ operationId: "op-unpin-current", branchId: "branch-test", pinId: String(currentPin.pinId) });
   assert.equal((await client.health({ deep: true })).integrity, "ok");
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: changed.root });
   assert.deepEqual(diff.changed, ["src/file.txt"]);
@@ -227,34 +265,40 @@ test("operation finish failure rolls back the durable mutation and permits retry
   });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueActor(faultedHost, "operation-fault-actor", "recovery-workspace"));
+  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   await assert.rejects(faulted.putBlob(Buffer.from("retry-me"), "retry-operation"), /injected operation finish failure|storage error/i);
   await faulted.close();
   const retriedHost = createKernelClient({ hostId: "operation-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retriedHost);
   await retriedHost.start();
-  const retried = retriedHost.scoped(await issueActor(retriedHost, "operation-fault-actor", "recovery-workspace"));
+  const retried = retriedHost.scoped(await issueSessionActor(retriedHost, "operation-fault-actor", "recovery-workspace", "recovery-session"));
   const result = await retried.putBlob(Buffer.from("retry-me"), "retry-operation");
   assert.equal(result.byteLength, 8);
   assert.equal((await retried.getOperation("retry-operation"))?.state, "committed");
-  const recoveryBegin = await retried.beginRecovery({
+  const recovery = await retried.recoveryOperationCreate({
     operationId: "recovery-multi-stage",
-    recordId: "recovery-record",
     workspaceId: "recovery-workspace",
-    state: "started",
-    data: JSON.stringify({ before: "before-state" }),
+    kind: "combined",
+    state: "planned",
+    sessionId: "recovery-session",
+    dataJson: JSON.stringify({ before: "before-state" }),
+    files: [],
   });
-  assert.equal(recoveryBegin.state, "started");
-  const recoveryUpdate = await retried.updateRecovery({
+  assert.equal(recovery.state, "planned");
+  const completed = await retried.recoveryOperationComplete({
+    transitionId: "recovery-multi-stage:complete",
     operationId: "recovery-multi-stage",
-    recordId: "recovery-record",
     workspaceId: "recovery-workspace",
+    expectedRevision: 1,
     state: "complete",
-    data: JSON.stringify({ target: "after-state" }),
+    resultJson: JSON.stringify({ target: "after-state" }),
   });
-  assert.equal(recoveryUpdate.state, "complete");
-  const recovery = await retried.getRecovery({ recordId: "recovery-record" });
-  assert.deepEqual(recovery?.initialData, { before: "before-state" });
+  assert.equal(completed.state, "complete");
+  const loadedRecovery = await retried.recoveryOperationGet({
+    operationId: "recovery-multi-stage",
+    workspaceId: "recovery-workspace",
+  });
+  assert.deepEqual(loadedRecovery?.data, { before: "before-state" });
 });
 
 test("GC distinguishes durable release from physical cleanup failure and retries after restart", { timeout: 30_000 }, async (t) => {
@@ -396,8 +440,16 @@ test("grant workspace/path scope and revocation are enforced by Rust", async (t)
     other.getBlob(publicBlob.hash, { branchId: "grant-branch", path: "src/public/a.txt" }),
     /owned|grant|workspace/i,
   );
+  const liveBeforeRevoke = await client.readBranch({ branchId: "grant-branch" });
+  const queryPin = await client.pinBranch({
+    operationId: "grant-query-pin",
+    branchId: "grant-branch",
+    expectedWriteRevision: liveBeforeRevoke.writeRevision,
+    expectedRoot: liveBeforeRevoke.root,
+  });
   await host.revokeGrant("scoped-grant");
   await assert.rejects(client.readBranch({ branchId: "grant-branch", includeEntries: true }), /revoked|grant/i);
+  await assert.rejects(owner.readPin({ pinId: String(queryPin.pinId) }), /pin not found/i);
 });
 
 test("queued long branch build observes cancellation and leaves the kernel usable", async (t) => {
@@ -521,6 +573,16 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   assert.equal(record.recordId, "record-1");
   const read = await client.getBlob(body.hash, { recordId: "record-1", slot: "body" });
   assert.equal(Buffer.from(read.bytesBase64, "base64").toString("utf8"), "record-body");
+  await client.createBranch({ operationId: "record-source-branch-create", branchId: "record-source-branch", workspaceId: "record-workspace", entries: [] });
+  await assert.rejects(
+    client.writeBranch({
+      operationId: "record-source-branch-write",
+      branchId: "record-source-branch",
+      expectedWriteRevision: 0,
+      changes: [{ path: "copied.txt", state: { kind: "regular-file", objectHash: body.hash, byteLength: body.byteLength, mode: 0o644 }, sourceRecordId: "record-1", sourceSlot: "body" }],
+    }),
+    /storage maintenance|record-backed/i,
+  );
   assert.equal((await client.listRecords({ workspaceId: "record-workspace", recordType: "retrieval.artifact", pageSize: 1 })).records.length, 1);
   await assert.rejects(
     client.putRecord({ operationId: "record-malformed-turn", recordId: "bad-turn", workspaceId: "record-workspace", recordType: "recovery.turn", state: "ready", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
@@ -528,10 +590,16 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   );
   const cas = await client.putRecord({ operationId: "record-cas-create", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] });
   assert.equal(cas.revision, 1);
-  const casUpdated = await client.putRecord({ operationId: "record-cas-update", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", expectedRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, changed: true }), ownerIds: [], references: [] });
-  assert.equal(casUpdated.revision, 2);
+  assert.equal(cas.recordRevision, 1);
+  const casUpdated = await client.putRecord({ operationId: "record-cas-update", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, changed: true }), ownerIds: [], references: [] });
+  assert.equal(casUpdated.revision, 1);
+  assert.equal(casUpdated.recordRevision, 2);
   await assert.rejects(
-    client.putRecord({ operationId: "record-cas-stale", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", expectedRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] }),
+    client.putRecord({ operationId: "record-cas-blind", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, blind: true }), ownerIds: [], references: [] }),
+    /expectedRecordRevision|record update/i,
+  );
+  await assert.rejects(
+    client.putRecord({ operationId: "record-cas-stale", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, expectedRecordRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] }),
     /revision conflict/i,
   );
   await client.releaseRecord("record-release-op", "record-workspace", "record-1");
@@ -549,7 +617,7 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   clients.push(host);
   await host.start();
   const storageIdentity = host.handshake?.storageRoot;
-  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", authorityInstanceId: "authority", workerId: `${sessionId}-worker`, workerGeneration: 3, sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
   const first = await actor("record-scope-a", "workspace-a", "session-a");
   const second = await actor("record-scope-b", "workspace-b", "session-b");
   const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, sessionId }), ownerIds: [], references: [] });
@@ -559,6 +627,11 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   assert.equal((await second.getRecord("workspace-b", "same-record"))?.workspaceId, "workspace-b");
   const wrongActor = await actor("record-scope-wrong", "workspace-a", "session-other");
   await assert.rejects(wrongActor.getRecord("workspace-a", "same-record"), /actor|authorization|record/i);
+  const unbound = host.scoped(await issueActor(host, "record-scope-unbound", "workspace-a"));
+  await assert.rejects(
+    unbound.putRecord({ operationId: "scope-put-impersonated", recordId: "impersonated", workspaceId: "workspace-a", recordType: "working.result", state: "published", sessionId: "session-a", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
+    /actor-bound|actor|authorization/i,
+  );
 });
 
 test("typed recovery turn reads honor actor session identity", { timeout: 30_000 }, async (t) => {
@@ -743,13 +816,14 @@ test("typed recovery operation publishes files atomically and rejects stale phas
   const host = createKernelClient({ hostId: "typed-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(host);
   await host.start();
-  const client = host.scoped(await issueActor(host, "typed-recovery-actor", "typed-recovery-workspace"));
+  const client = host.scoped(await issueSessionActor(host, "typed-recovery-actor", "typed-recovery-workspace", "typed-recovery-session"));
   const body = await client.putBlob(Buffer.from("typed recovery"), "typed-recovery-body");
   const created = await client.recoveryOperationCreate({
     operationId: "typed-recovery-operation",
     workspaceId: "typed-recovery-workspace",
     kind: "combined",
     state: "planned",
+    sessionId: "typed-recovery-session",
     dataJson: JSON.stringify({ workspaceId: "typed-recovery-workspace", affectedPaths: ["file.txt"] }),
     files: [{
       path: "file.txt",
@@ -760,18 +834,18 @@ test("typed recovery operation publishes files atomically and rejects stale phas
     }],
   });
   assert.equal(created.operationId, "typed-recovery-operation");
-  const loaded = await client.getRecovery({ operationId: "typed-recovery-operation" });
+  const loaded = await client.recoveryOperationGet({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace" });
   const loadedFiles = Array.isArray(loaded?.files) ? loaded.files as Array<Record<string, unknown>> : [];
   assert.equal(loadedFiles[0]?.phase, "pending");
   assert.equal(loadedFiles[0]?.revision, 1);
-  await client.recoveryOperationFileCas({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "apply-intent" });
+  await client.recoveryOperationFileCas({ transitionId: "typed-recovery-operation:file:apply-intent", operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "apply-intent" });
   await assert.rejects(
-    client.recoveryOperationFileCas({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "target-observed" }),
+    client.recoveryOperationFileCas({ transitionId: "typed-recovery-operation:file:stale", operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "target-observed" }),
     /phase conflict|revision conflict/i,
   );
-  await client.recoveryOperationComplete({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", expectedRevision: 1, state: "complete" });
-  assert.equal((await client.recoveryOperationRelease({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace" })).released, true);
-  assert.equal(await client.getRecovery({ operationId: "typed-recovery-operation" }), null);
+  await client.recoveryOperationComplete({ transitionId: "typed-recovery-operation:complete", operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", expectedRevision: 1, state: "complete" });
+  assert.equal((await client.recoveryOperationRelease({ transitionId: "typed-recovery-operation:release", operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace" })).released, true);
+  assert.equal(await client.recoveryOperationGet({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace" }), null);
 });
 
 test("typed recovery create fault injection rolls back operation intent and permits retry", { timeout: 30_000 }, async (t) => {
@@ -784,13 +858,13 @@ test("typed recovery create fault injection rolls back operation intent and perm
   const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { PIARIUM_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
   clients.push(faultedHost);
   await faultedHost.start();
-  const faulted = faultedHost.scoped(await issueActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace"));
-  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
+  const faulted = faultedHost.scoped(await issueSessionActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
   await faultedHost.close();
   const retryHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(retryHost);
   await retryHost.start();
-  const retry = retryHost.scoped(await issueActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace"));
-  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
+  const retry = retryHost.scoped(await issueSessionActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
+  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
   assert.equal(result.operationId, "typed-recovery-fault-operation");
 });

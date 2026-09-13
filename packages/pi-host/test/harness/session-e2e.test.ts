@@ -1757,7 +1757,9 @@ describe("session e2e — related", () => {
         workspaceId: fixture.identity.workspaceId,
         serviceHostOptions: {
           resolveWorkspaceRoot: async () => fixture.workspaceRoot,
-          graphRecall: (workspaceId) => workspaceId === fixture.identity.workspaceId ? store : null,
+          graphRecall: async (_sessionId, executionWorkspaceId) => executionWorkspaceId === fixture.identity.workspaceId
+            ? { workspaceId: fixture.identity.workspaceId, store, directFactsCompatible: true }
+            : null,
         },
         authorizeWorkspacePath: (actor, inputPath, options) => fixture.paths.resolve(actor, inputPath, options),
       });

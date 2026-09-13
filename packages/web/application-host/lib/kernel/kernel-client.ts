@@ -53,6 +53,9 @@ export interface KernelGrantHandle {
   readonly grantId: string;
   readonly kernelEpoch: string;
   readonly hostGeneration: string;
+  readonly authorityInstanceId: string | null;
+  readonly workerId: string | null;
+  readonly workerGeneration: number | null;
   readonly sessionId: string | null;
   readonly threadId: string | null;
   readonly runId: string | null;
@@ -118,7 +121,7 @@ export class KernelScopedClient {
     return this.owner.publishBranch(params, this.grant, signal);
   }
 
-  pinBranch(params: { operationId: string; branchId: string; revision?: number; pinId?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  pinBranch(params: { operationId: string; branchId: string; revision?: number; expectedWriteRevision?: number; expectedRoot?: string; pinId?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.pinBranch(params, this.grant, signal);
   }
 
@@ -134,7 +137,7 @@ export class KernelScopedClient {
     return this.owner.deleteBranch(params, this.grant, signal);
   }
 
-  readPin(params: { pinId: string; includeEntries?: boolean }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  readPin(params: { pinId: string; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.readPin(params, this.grant, signal);
   }
 
@@ -146,16 +149,8 @@ export class KernelScopedClient {
     return this.owner.getOperation(operationId, this.grant, signal);
   }
 
-  beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.owner.beginRecovery(params, this.grant, signal);
-  }
-
-  updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.owner.updateRecovery(params, this.grant, signal);
-  }
-
-  getRecovery(params: KernelMethodParams["recovery.operation.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
-    return this.owner.getRecovery(params, this.grant, signal);
+  recoveryOperationGet(params: KernelMethodParams["recovery.operation.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.owner.recoveryOperationGet(params, this.grant, signal);
   }
 
   recoveryTurnStart(params: KernelMethodParams["recovery.turn.start"], signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -395,6 +390,9 @@ export class KernelClient {
       grantId,
       kernelEpoch: epoch,
       hostGeneration: String(value.host_generation ?? ""),
+      authorityInstanceId: typeof value.authority_instance_id === "string" ? value.authority_instance_id : null,
+      workerId: typeof value.worker_id === "string" ? value.worker_id : null,
+      workerGeneration: typeof value.worker_generation === "number" ? value.worker_generation : null,
       sessionId: typeof value.session_id === "string" ? value.session_id : null,
       threadId: typeof value.thread_id === "string" ? value.thread_id : null,
       runId: typeof value.run_id === "string" ? value.run_id : null,
@@ -727,7 +725,7 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("branch.publish", params, { signal, grant });
   }
 
-  async pinBranch(params: { operationId: string; branchId: string; revision?: number; pinId?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async pinBranch(params: { operationId: string; branchId: string; revision?: number; expectedWriteRevision?: number; expectedRoot?: string; pinId?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("branch.pin", params, { signal, grant });
   }
 
@@ -743,7 +741,7 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("branch.delete", params, { signal, grant });
   }
 
-  async readPin(params: { pinId: string; includeEntries?: boolean }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async readPin(params: { pinId: string; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("pin.read", params, { signal, grant });
   }
 
@@ -755,15 +753,7 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown> | null>("operation.get", { operationId }, { signal, grant });
   }
 
-  async beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("recovery.operation.begin", params, { signal, grant });
-  }
-
-  async updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
-    return this.requestRaw<Record<string, unknown>>("recovery.operation.update", params, { signal, grant });
-  }
-
-  async getRecovery(params: KernelMethodParams["recovery.operation.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  async recoveryOperationGet(params: KernelMethodParams["recovery.operation.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.requestRaw<Record<string, unknown> | null>("recovery.operation.get", params, { signal, grant });
   }
 

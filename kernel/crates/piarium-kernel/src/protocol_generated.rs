@@ -35,6 +35,9 @@ pub(crate) struct KernelHealthParams {
 pub(crate) struct KernelGrantIssueParams {
     pub(crate) grant_id: String,
     pub(crate) host_generation: String,
+    pub(crate) authority_instance_id: Option<RequiredNullable<String>>,
+    pub(crate) worker_id: Option<RequiredNullable<String>>,
+    pub(crate) worker_generation: Option<RequiredNullable<i64>>,
     pub(crate) session_id: RequiredNullable<String>,
     pub(crate) thread_id: RequiredNullable<String>,
     pub(crate) run_id: RequiredNullable<String>,
@@ -120,7 +123,7 @@ pub(crate) struct KernelRecordPutParams {
     pub(crate) branch_id: Option<String>,
     pub(crate) revision: Option<i64>,
     pub(crate) result_revision: Option<i64>,
-    pub(crate) expected_revision: Option<i64>,
+    pub(crate) expected_record_revision: Option<i64>,
     pub(crate) payload_json: String,
     pub(crate) owner_ids: Vec<String>,
     pub(crate) references: Vec<KernelRecordReference>,
@@ -241,6 +244,8 @@ pub(crate) struct KernelBranchPinParams {
     pub(crate) operation_id: String,
     pub(crate) branch_id: String,
     pub(crate) revision: Option<i64>,
+    pub(crate) expected_write_revision: Option<i64>,
+    pub(crate) expected_root: Option<String>,
     pub(crate) pin_id: Option<String>,
 }
 
@@ -270,28 +275,17 @@ pub(crate) struct KernelBranchDeleteParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelPinReadParams {
     pub(crate) pin_id: String,
+    pub(crate) paths: Option<Vec<String>>,
     pub(crate) include_entries: Option<bool>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelRecoveryParams {
+pub(crate) struct KernelRecoveryOperationGetParams {
     pub(crate) operation_id: String,
-    pub(crate) record_id: Option<String>,
-    pub(crate) workspace_id: Option<String>,
-    pub(crate) state: Option<String>,
-    pub(crate) data: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct KernelRecoveryGetParams {
-    pub(crate) record_id: Option<String>,
-    pub(crate) operation_id: Option<String>,
-    pub(crate) workspace_id: Option<String>,
-    pub(crate) session_id: Option<String>,
-    pub(crate) thread_id: Option<String>,
-    pub(crate) run_id: Option<String>,
+    pub(crate) workspace_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -360,6 +354,7 @@ pub(crate) struct KernelRecoveryEntryResolveParams {
 pub(crate) struct KernelRecoveryChangeBeforeParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -382,6 +377,7 @@ pub(crate) struct KernelRecoveryChangeGetParams {
 pub(crate) struct KernelRecoveryChangeAfterParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
     pub(crate) execution_id: String,
     pub(crate) checkpoint_id: String,
     pub(crate) path: String,
@@ -400,11 +396,15 @@ pub(crate) struct KernelRecoveryOperationCreateParams {
     pub(crate) state: String,
     pub(crate) data_json: String,
     pub(crate) files: Vec<KernelRecoveryOperationFile>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) run_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryOperationFileCasParams {
+    pub(crate) transition_id: String,
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) path: String,
@@ -421,6 +421,7 @@ pub(crate) struct KernelRecoveryOperationFileCasParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryOperationCompleteParams {
+    pub(crate) transition_id: String,
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) expected_revision: i64,
@@ -441,6 +442,7 @@ pub(crate) struct KernelRecoveryOperationListParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryOperationReleaseParams {
+    pub(crate) transition_id: String,
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
 }
@@ -478,6 +480,8 @@ pub(crate) struct KernelCreateEntry {
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
+    pub(crate) source_record_id: Option<String>,
+    pub(crate) source_slot: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -487,6 +491,8 @@ pub(crate) struct KernelBranchChange {
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
+    pub(crate) source_record_id: Option<String>,
+    pub(crate) source_slot: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -629,18 +635,8 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "pin.read" => serde_json::from_value::<KernelPinReadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "recovery.operation.begin" => {
-            serde_json::from_value::<KernelRecoveryParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
-        "recovery.operation.update" => {
-            serde_json::from_value::<KernelRecoveryParams>(params.clone())
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }
         "recovery.operation.get" => {
-            serde_json::from_value::<KernelRecoveryGetParams>(params.clone())
+            serde_json::from_value::<KernelRecoveryOperationGetParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
