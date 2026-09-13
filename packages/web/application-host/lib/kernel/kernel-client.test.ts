@@ -635,6 +635,11 @@ test("typed working result boundary stores root identity without state maps", { 
   assert.equal(JSON.stringify(value.record).includes("pathStates"), false);
   const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
   assert.equal((listed.records as unknown[]).length, 1);
+  const released = await client.workingResultRelease({ operationId: "working-result-release", workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" });
+  assert.equal(released.released, true);
+  assert.equal(await client.workingResultGet({ workspaceId: "working-record-workspace", recordId: "working-result:branch-1@1" }), null);
+  const gc = await client.gc("working-result-gc");
+  assert.ok(Number(gc.deletedBlobs ?? 0) >= 0);
 });
 
 test("Rust rejects malformed and mismatched typed working result DTOs", { timeout: 30_000 }, async (t) => {
