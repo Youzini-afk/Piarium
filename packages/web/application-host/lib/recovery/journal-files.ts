@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import fs, { type Dirent, type Stats } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { objectPath } from './journal-catalog.js';
+import { objectPath } from './object-path.js';
 import { copyFilePreferReflink } from '../workspace/reflink.js';
 import { RecoveryPrimitiveError } from './errors.js';
 import {

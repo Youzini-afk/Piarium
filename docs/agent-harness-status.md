@@ -206,6 +206,8 @@ TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有
 `working-state/working-state-store.ts` 仍保留为测试/历史实现，生产 dispatch/branchWrite/result/draft/materializer 和 retrieval evidence/receipt
 已由 `KernelStorageAdapter` 切换到 kernel；turn/checkpoint/mutation 已直接调用 kernel record API，`kernel-recovery-store.ts` 不再依赖 transient catalog。combined Recovery/Integration operation-file 仍有旧 SQL-shaped 编排视图，文件 apply、materializer、旧测试夹具清理、跨平台和断电证据仍未完成，故 R1 仍保持 Partial。
 
+**D-264 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、`createRecoveryMemoryCatalog` 及 close-time flush 已删除。Rust catalog format 已升为 v7，并提供 checkpoint+turn 原子创建、change before/after、operation+operation-file 原子发布、file phase CAS、terminal CAS、typed list/get/release 及 `recovery_refs` GC 根；这些入口由 `KernelRecoveryStore` 直接调用。`kernel-client.test.ts` 的真实 release 子进程 **17/17** 通过，包含 typed operation transaction/CAS、actor-bound turn read、malformed typed record、domain record CAS 与 operation fault rollback；protocol generation、cargo check/release build、Application Host type-check 已通过。combined 文件 apply/integration 编排、WorkingState root/path async adapter、完整 session resolver、recovery location migration、跨平台和硬断电阶段仍未完成，R1 不标 wired/proven/default-on。
+
 **R0/R1 当前重新验收边界（D-258，2026-09-13）**：D-257 的 64-envelope queue、hash-only blob read、可选 publish CAS、
 format v5 与 object attachment 表述已由本条取代。
 

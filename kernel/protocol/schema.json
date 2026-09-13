@@ -43,6 +43,20 @@
     "recovery.operation.begin": "KernelRecoveryParams",
     "recovery.operation.update": "KernelRecoveryParams",
     "recovery.operation.get": "KernelRecoveryGetParams",
+    "recovery.turn.start": "KernelRecoveryTurnStartParams",
+    "recovery.turn.get": "KernelRecoveryTurnGetParams",
+    "recovery.turn.settle": "KernelRecoveryTurnSettleParams",
+    "recovery.checkpoint.create": "KernelRecoveryCheckpointCreateParams",
+    "recovery.checkpoint.list": "KernelRecoveryCheckpointListParams",
+    "recovery.entry.resolve": "KernelRecoveryEntryResolveParams",
+    "recovery.change.before": "KernelRecoveryChangeBeforeParams",
+    "recovery.change.get": "KernelRecoveryChangeGetParams",
+    "recovery.change.after": "KernelRecoveryChangeAfterParams",
+    "recovery.operation.create": "KernelRecoveryOperationCreateParams",
+    "recovery.operation.file.cas": "KernelRecoveryOperationFileCasParams",
+    "recovery.operation.complete": "KernelRecoveryOperationCompleteParams",
+    "recovery.operation.list": "KernelRecoveryOperationListParams",
+    "recovery.operation.release": "KernelRecoveryOperationReleaseParams",
     "operation.get": "KernelOperationGetParams",
     "operation.release": "KernelOperationReleaseParams",
     "storage.gc": "KernelGcParams"
@@ -138,7 +152,39 @@
     "KernelRecoveryParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}, "state": {"type": "string", "optional": true}, "data": {"type": "string", "optional": true}
     }},
-    "KernelRecoveryGetParams": {"fields": {"recordId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}}},
+    "KernelRecoveryGetParams": {"fields": {"recordId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}, "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true}}},
+    "KernelRecoveryReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}, "ownerId": {"type": "string", "optional": true}}},
+    "KernelRecoveryTurnStartParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string"}, "userEntryId": {"type": "string"}, "workerId": {"type": "string"}, "runtimeGeneration": {"type": "number"}, "activeWriterScopes": {"type": "string[]"}, "provenance": {"type": "string"}, "failure": {"type": "boolean", "optional": true}
+    }},
+    "KernelRecoveryTurnGetParams": {"fields": {"workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "sessionId": {"type": "string", "optional": true}}},
+    "KernelRecoveryTurnSettleParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "expectedRevision": {"type": "number"}, "status": {"type": "string"}, "observedResourceIds": {"type": "string[]"}, "observationComplete": {"type": "boolean"}, "assistantEntryId": {"type": "string", "optional": true}, "failureJson": {"type": "string", "optional": true}
+    }},
+    "KernelRecoveryCheckpointCreateParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "label": {"type": "string"}}},
+    "KernelRecoveryCheckpointListParams": {"fields": {"workspaceId": {"type": "string"}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
+    "KernelRecoveryEntryResolveParams": {"fields": {"workspaceId": {"type": "string"}, "sessionId": {"type": "string"}, "entryId": {"type": "string"}}},
+    "KernelRecoveryChangeBeforeParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "toolName": {"type": "string"}, "mutationId": {"type": "string"}, "beforeJson": {"type": "string"}, "references": {"type": "KernelRecoveryReference[]"}
+    }},
+    "KernelRecoveryChangeGetParams": {"fields": {"workspaceId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}}},
+    "KernelRecoveryChangeAfterParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "executionId": {"type": "string"}, "checkpointId": {"type": "string"}, "path": {"type": "string"}, "afterJson": {"type": "string"}, "succeeded": {"type": "boolean"}, "expectedRevision": {"type": "number"}, "references": {"type": "KernelRecoveryReference[]"}
+    }},
+    "KernelRecoveryOperationFile": {"fields": {
+      "path": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "targetJson": {"type": "string", "optional": true}, "safetyJson": {"type": "string", "optional": true}, "phase": {"type": "string", "optional": true}, "references": {"type": "KernelRecoveryReference[]", "optional": true}
+    }},
+    "KernelRecoveryOperationCreateParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "kind": {"type": "string"}, "state": {"type": "string"}, "dataJson": {"type": "string"}, "files": {"type": "KernelRecoveryOperationFile[]"}
+    }},
+    "KernelRecoveryOperationFileCasParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "path": {"type": "string"}, "expectedRevision": {"type": "number"}, "expectedPhase": {"type": "string"}, "phase": {"type": "string"}, "observedFingerprint": {"type": "string", "optional": true}, "expectedJson": {"type": "string", "optional": true}, "targetJson": {"type": "string", "optional": true}, "safetyJson": {"type": "string", "optional": true}, "references": {"type": "KernelRecoveryReference[]", "optional": true}
+    }},
+    "KernelRecoveryOperationCompleteParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "expectedRevision": {"type": "number"}, "state": {"type": "string"}, "resultJson": {"type": "string", "optional": true}, "failureJson": {"type": "string", "optional": true}
+    }},
+    "KernelRecoveryOperationListParams": {"fields": {"workspaceId": {"type": "string"}, "kind": {"type": "string", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
+    "KernelRecoveryOperationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}}},
     "KernelOperationGetParams": {"fields": {"operationId": {"type": "string"}}},
     "KernelOperationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}}},
     "KernelGcParams": {"fields": {"operationId": {"type": "string"}}},
@@ -284,6 +330,20 @@
     "recovery.operation.begin": "durably begin an idempotent recovery operation",
     "recovery.operation.update": "advance recovery operation state",
     "recovery.operation.get": "read a recovery operation",
+    "recovery.turn.start": "atomically create a checkpoint and turn binding",
+    "recovery.turn.get": "read a turn binding by execution identity",
+    "recovery.turn.settle": "CAS-settle a turn and its checkpoint",
+    "recovery.checkpoint.create": "create a durable named checkpoint",
+    "recovery.checkpoint.list": "page durable checkpoints",
+    "recovery.entry.resolve": "resolve a session entry to a fixed checkpoint",
+    "recovery.change.before": "record a mutation before-image with references",
+    "recovery.change.get": "read a mutation change by checkpoint and path",
+    "recovery.change.after": "CAS-record a mutation after-image",
+    "recovery.operation.create": "atomically publish an operation and all operation files",
+    "recovery.operation.file.cas": "CAS-update one operation file phase",
+    "recovery.operation.complete": "CAS-commit a terminal recovery operation",
+    "recovery.operation.list": "page typed recovery operations",
+    "recovery.operation.release": "release a terminal recovery operation and references",
     "operation.get": "read the durable state of a persistent operation",
     "operation.release": "release a completed operation after its product owner is gone",
     "storage.gc": "collect unreferenced nodes and objects"

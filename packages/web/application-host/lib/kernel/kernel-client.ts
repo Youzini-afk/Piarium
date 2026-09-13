@@ -154,8 +154,64 @@ export class KernelScopedClient {
     return this.owner.updateRecovery(params, this.grant, signal);
   }
 
-  getRecovery(params: { recordId?: string; operationId?: string }, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  getRecovery(params: KernelMethodParams["recovery.operation.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.owner.getRecovery(params, this.grant, signal);
+  }
+
+  recoveryTurnStart(params: KernelMethodParams["recovery.turn.start"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryTurnStart(params, this.grant, signal);
+  }
+
+  recoveryTurnGet(params: KernelMethodParams["recovery.turn.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.owner.recoveryTurnGet(params, this.grant, signal);
+  }
+
+  recoveryTurnSettle(params: KernelMethodParams["recovery.turn.settle"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryTurnSettle(params, this.grant, signal);
+  }
+
+  recoveryCheckpointCreate(params: KernelMethodParams["recovery.checkpoint.create"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryCheckpointCreate(params, this.grant, signal);
+  }
+
+  recoveryCheckpointList(params: KernelMethodParams["recovery.checkpoint.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryCheckpointList(params, this.grant, signal);
+  }
+
+  recoveryEntryResolve(params: KernelMethodParams["recovery.entry.resolve"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryEntryResolve(params, this.grant, signal);
+  }
+
+  recoveryChangeBefore(params: KernelMethodParams["recovery.change.before"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryChangeBefore(params, this.grant, signal);
+  }
+
+  recoveryChangeGet(params: KernelMethodParams["recovery.change.get"], signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.owner.recoveryChangeGet(params, this.grant, signal);
+  }
+
+  recoveryChangeAfter(params: KernelMethodParams["recovery.change.after"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryChangeAfter(params, this.grant, signal);
+  }
+
+  recoveryOperationCreate(params: KernelMethodParams["recovery.operation.create"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryOperationCreate(params, this.grant, signal);
+  }
+
+  recoveryOperationFileCas(params: KernelMethodParams["recovery.operation.file.cas"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryOperationFileCas(params, this.grant, signal);
+  }
+
+  recoveryOperationComplete(params: KernelMethodParams["recovery.operation.complete"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryOperationComplete(params, this.grant, signal);
+  }
+
+  recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryOperationList(params, this.grant, signal);
+  }
+
+  recoveryOperationRelease(params: KernelMethodParams["recovery.operation.release"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryOperationRelease(params, this.grant, signal);
   }
 
   releaseBlob(ownerId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -707,8 +763,64 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.update", params, { signal, grant });
   }
 
-  async getRecovery(params: { recordId?: string; operationId?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+  async getRecovery(params: KernelMethodParams["recovery.operation.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
     return this.requestRaw<Record<string, unknown> | null>("recovery.operation.get", params, { signal, grant });
+  }
+
+  async recoveryTurnStart(params: KernelMethodParams["recovery.turn.start"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.turn.start", params, { signal, grant });
+  }
+
+  async recoveryTurnGet(params: KernelMethodParams["recovery.turn.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.requestRaw<Record<string, unknown> | null>("recovery.turn.get", params, { signal, grant });
+  }
+
+  async recoveryTurnSettle(params: KernelMethodParams["recovery.turn.settle"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.turn.settle", params, { signal, grant });
+  }
+
+  async recoveryCheckpointCreate(params: KernelMethodParams["recovery.checkpoint.create"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.checkpoint.create", params, { signal, grant });
+  }
+
+  async recoveryCheckpointList(params: KernelMethodParams["recovery.checkpoint.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.checkpoint.list", params, { signal, grant });
+  }
+
+  async recoveryEntryResolve(params: KernelMethodParams["recovery.entry.resolve"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.entry.resolve", params, { signal, grant });
+  }
+
+  async recoveryChangeBefore(params: KernelMethodParams["recovery.change.before"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.change.before", params, { signal, grant });
+  }
+
+  async recoveryChangeGet(params: KernelMethodParams["recovery.change.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    return this.requestRaw<Record<string, unknown> | null>("recovery.change.get", params, { signal, grant });
+  }
+
+  async recoveryChangeAfter(params: KernelMethodParams["recovery.change.after"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.change.after", params, { signal, grant });
+  }
+
+  async recoveryOperationCreate(params: KernelMethodParams["recovery.operation.create"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.operation.create", params, { signal, grant });
+  }
+
+  async recoveryOperationFileCas(params: KernelMethodParams["recovery.operation.file.cas"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.operation.file.cas", params, { signal, grant });
+  }
+
+  async recoveryOperationComplete(params: KernelMethodParams["recovery.operation.complete"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.operation.complete", params, { signal, grant });
+  }
+
+  async recoveryOperationList(params: KernelMethodParams["recovery.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.operation.list", params, { signal, grant });
+  }
+
+  async recoveryOperationRelease(params: KernelMethodParams["recovery.operation.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("recovery.operation.release", params, { signal, grant });
   }
 
   async issueGrant(params: Record<string, unknown>, signal?: AbortSignal): Promise<KernelGrantHandle> {

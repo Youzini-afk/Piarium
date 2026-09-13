@@ -6,8 +6,7 @@ import path from "node:path";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
-import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from "./kernel-recovery-catalog.js";
-import { KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
+import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
@@ -523,6 +522,18 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   const read = await client.getBlob(body.hash, { recordId: "record-1", slot: "body" });
   assert.equal(Buffer.from(read.bytesBase64, "base64").toString("utf8"), "record-body");
   assert.equal((await client.listRecords({ workspaceId: "record-workspace", recordType: "retrieval.artifact", pageSize: 1 })).records.length, 1);
+  await assert.rejects(
+    client.putRecord({ operationId: "record-malformed-turn", recordId: "bad-turn", workspaceId: "record-workspace", recordType: "recovery.turn", state: "ready", payloadJson: JSON.stringify({}), ownerIds: [], references: [] }),
+    /turn executionId|identity is incomplete/i,
+  );
+  const cas = await client.putRecord({ operationId: "record-cas-create", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", revision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] });
+  assert.equal(cas.revision, 1);
+  const casUpdated = await client.putRecord({ operationId: "record-cas-update", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", expectedRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1, changed: true }), ownerIds: [], references: [] });
+  assert.equal(casUpdated.revision, 2);
+  await assert.rejects(
+    client.putRecord({ operationId: "record-cas-stale", recordId: "record-cas", workspaceId: "record-workspace", recordType: "working.result", state: "published", expectedRevision: 1, payloadJson: JSON.stringify({ branchId: "branch", resultRevision: 1 }), ownerIds: [], references: [] }),
+    /revision conflict/i,
+  );
   await client.releaseRecord("record-release-op", "record-workspace", "record-1");
   await assert.rejects(client.getBlob(body.hash, { recordId: "record-1", slot: "body" }), /content|record|reference|owner/i);
 });
@@ -548,6 +559,24 @@ test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 
   assert.equal((await second.getRecord("workspace-b", "same-record"))?.workspaceId, "workspace-b");
   const wrongActor = await actor("record-scope-wrong", "workspace-a", "session-other");
   await assert.rejects(wrongActor.getRecord("workspace-a", "same-record"), /actor|authorization|record/i);
+});
+
+test("typed recovery turn reads honor actor session identity", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-actor-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "recovery-actor-host", hostGeneration: "recovery-actor-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const makeActor = async (grantId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "recovery-actor-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: "recovery-actor-workspace", executionWorkspace: "recovery-actor-workspace", storageIdentity: host.handshake?.storageRoot, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+  const owner = await makeActor("recovery-owner", "session-owner");
+  const other = await makeActor("recovery-other", "session-other");
+  await owner.recoveryTurnStart({ operationId: "recovery-actor-turn", workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner", userEntryId: "entry-owner", workerId: "worker", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await assert.rejects(other.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }), /actor|authorization|session/i);
+  assert.equal((await owner.recoveryTurnGet({ workspaceId: "recovery-actor-workspace", executionId: "recovery-actor-execution", sessionId: "session-owner" }))?.sessionId, "session-owner");
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
@@ -644,7 +673,7 @@ test("the source package finds its kernel independently of process cwd", async (
   }
 });
 
-test("real kernel recovery catalog persists checkpoints, operation files, and objects across restart", { timeout: 30_000 }, async (t) => {
+test("real kernel typed recovery storage persists checkpoints, operation files, and objects across restart", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");
     return;
@@ -659,7 +688,6 @@ test("real kernel recovery catalog persists checkpoints, operation files, and ob
     await client.start();
     const adapter = new KernelStorageAdapter({ hostId: "kernel-recovery-host", storageRoot: root, client, resolveWorkspaceRoot: async () => workspace });
     const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
-    const catalog = new KernelRecoveryCatalogBackend(adapter, content);
     const documents = {
       inspectWorkspace: async () => ({ workspaceId: "workspace-test", root: workspace }),
       listWorkspaceRegistrations: async () => [{ workspaceId: "workspace-test", canonicalPath: workspace }],
@@ -679,7 +707,6 @@ test("real kernel recovery catalog persists checkpoints, operation files, and ob
       documents: documents as never,
       sessionNavigation: navigation as never,
       fileStore: content,
-      catalogBackend: catalog,
     });
     return { adapter, client, engine: createKernelRecoveryDirectFacade(engine, new KernelRecoveryStore(adapter, content)) };
   };
@@ -704,4 +731,66 @@ test("real kernel recovery catalog persists checkpoints, operation files, and ob
   await second.engine.dispose();
   await second.adapter.dispose();
   await second.client.close();
+});
+
+test("typed recovery operation publishes files atomically and rejects stale phase CAS", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-typed-recovery-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "typed-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "typed-recovery-actor", "typed-recovery-workspace"));
+  const body = await client.putBlob(Buffer.from("typed recovery"), "typed-recovery-body");
+  const created = await client.recoveryOperationCreate({
+    operationId: "typed-recovery-operation",
+    workspaceId: "typed-recovery-workspace",
+    kind: "combined",
+    state: "planned",
+    dataJson: JSON.stringify({ workspaceId: "typed-recovery-workspace", affectedPaths: ["file.txt"] }),
+    files: [{
+      path: "file.txt",
+      expectedJson: JSON.stringify({ kind: "missing" }),
+      targetJson: JSON.stringify({ kind: "regular-file", objectHash: body.hash, byteLength: body.byteLength, mode: 0o644 }),
+      phase: "pending",
+      references: [{ slot: "target", objectHash: body.hash, ownerId: body.ownerId }],
+    }],
+  });
+  assert.equal(created.operationId, "typed-recovery-operation");
+  const loaded = await client.getRecovery({ operationId: "typed-recovery-operation" });
+  const loadedFiles = Array.isArray(loaded?.files) ? loaded.files as Array<Record<string, unknown>> : [];
+  assert.equal(loadedFiles[0]?.phase, "pending");
+  assert.equal(loadedFiles[0]?.revision, 1);
+  await client.recoveryOperationFileCas({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "apply-intent" });
+  await assert.rejects(
+    client.recoveryOperationFileCas({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", path: "file.txt", expectedRevision: 1, expectedPhase: "pending", phase: "target-observed" }),
+    /phase conflict|revision conflict/i,
+  );
+  await client.recoveryOperationComplete({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace", expectedRevision: 1, state: "complete" });
+  assert.equal((await client.recoveryOperationRelease({ operationId: "typed-recovery-operation", workspaceId: "typed-recovery-workspace" })).released, true);
+  assert.equal(await client.getRecovery({ operationId: "typed-recovery-operation" }), null);
+});
+
+test("typed recovery create fault injection rolls back operation intent and permits retry", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-fault-"));
+  roots.push(root);
+  const faultedHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false, env: { PIARIUM_KERNEL_FAIL_RECOVERY_PHASE: "operation-before-files" } });
+  clients.push(faultedHost);
+  await faultedHost.start();
+  const faulted = faultedHost.scoped(await issueActor(faultedHost, "typed-recovery-fault-actor", "typed-recovery-fault-workspace"));
+  await assert.rejects(faulted.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] }), /injected recovery failure/i);
+  await faultedHost.close();
+  const retryHost = createKernelClient({ hostId: "typed-recovery-fault-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(retryHost);
+  await retryHost.start();
+  const retry = retryHost.scoped(await issueActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace"));
+  const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
+  assert.equal(result.operationId, "typed-recovery-fault-operation");
 });

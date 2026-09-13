@@ -73,8 +73,7 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
-import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from './lib/kernel/kernel-recovery-catalog.js';
-import { KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
+import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
@@ -999,18 +998,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
+  const kernelSessionActors = new Map<string, { authorityInstanceId: string; sessionId: string; workerId: string; workerGeneration: number }>();
   const kernelStorageAdapter = new KernelStorageAdapter({
     client: kernelClient,
     hostId: extensionRuntime.services.hostId,
     hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
     storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    resolveActor: async (workspaceId, purpose) => {
+      if (purpose === 'recovery-maintenance') return { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [''], capabilities: ['recovery.maintenance', 'storage.gc'] };
+      for (const actor of kernelSessionActors.values()) {
+        const resolved = await harnessSessionRegistration.resolveActor(actor).catch(() => null);
+        if (resolved?.workspaceId === workspaceId) {
+          return { sessionId: actor.sessionId, owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: resolved.workspaceScope ? [...resolved.workspaceScope] : [''], capabilities: [...resolved.grantedCapabilities] };
+        }
+      }
+      throw new Error(`No live actor is bound to workspace ${workspaceId}`);
+    },
   });
   const kernelRecoveryContentStore = new KernelRecoveryContentStore(
     kernelStorageAdapter,
     path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId, 'recovery-cache'),
   );
-  const kernelRecoveryCatalog = new KernelRecoveryCatalogBackend(kernelStorageAdapter, kernelRecoveryContentStore);
   const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
@@ -1136,7 +1145,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         resolveDirectoryApplyContext,
         storageOwnerId,
         fileStore: kernelRecoveryContentStore,
-        catalogBackend: kernelRecoveryCatalog,
       });
       engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore);
       workspaceRecoveryEngines.set(storageOwnerId, engine);
@@ -1366,7 +1374,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return DEFAULT_SUGGESTIONS_SETTINGS;
     }
   };
-  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, kernelRecoveryCatalog);
+  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
@@ -2434,6 +2442,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (event.sessionId) {
         const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
         harnessSessionRegistration.dropSession(event.sessionId, event.actor);
+        void kernelStorageAdapter.revokeSession(event.sessionId);
+        kernelSessionActors.delete(event.sessionId);
         if (ownsRegisteredSession) {
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
@@ -2449,10 +2459,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (envelope.event === 'session.closed' && sessionId) {
       const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
       harnessSessionRegistration.dropSession(sessionId, event.actor);
+      void kernelStorageAdapter.revokeSession(sessionId);
+      kernelSessionActors.delete(sessionId);
       if (ownsRegisteredSession) knowledgeContextRuntime.dropSession(sessionId);
       return;
     }
     if (envelope.event === 'session.snapshot' && sessionId) {
+      if (event.actor) kernelSessionActors.set(sessionId, event.actor);
       sessionSnapshots.set(sessionId, envelopeData);
       const name = typeof envelopeData.name === 'string' ? envelopeData.name.trim() : '';
       if (name) sessionNames.set(sessionId, name);

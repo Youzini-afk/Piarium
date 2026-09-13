@@ -427,7 +427,21 @@ impl Kernel {
                     storage.recovery_operation(method, &authorized_params)
                 })
             }
-            "recovery.operation.get" => storage.recovery_get(&authorized_params),
+            "recovery.operation.get" => storage.recovery_get(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.turn.start" => storage.recovery_turn_start(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.turn.get" => storage.recovery_turn_get(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.turn.settle" => storage.recovery_turn_settle(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.checkpoint.create" => storage.recovery_checkpoint_create(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.checkpoint.list" => storage.recovery_checkpoint_list(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.entry.resolve" => storage.recovery_entry_resolve(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.change.before" => storage.recovery_change_before(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.change.get" => storage.recovery_change_get(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.change.after" => storage.recovery_change_after(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.operation.create" => storage.recovery_operation_create(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.operation.file.cas" => storage.recovery_operation_file_cas(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.operation.complete" => storage.recovery_operation_complete(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.operation.list" => storage.recovery_operation_list(&authorized_params, grant_id.unwrap_or("")),
+            "recovery.operation.release" => storage.recovery_operation_release(&authorized_params, grant_id.unwrap_or("")),
             "operation.get" => storage.operation_get(&authorized_params),
             "operation.release" => storage.operation_release(&authorized_params),
             _ => Err(KernelError::Protocol(format!("unknown method: {method}"))),

@@ -89,7 +89,6 @@ import {
   type RecoveryIdentity,
   type RecoveryState,
 } from './journal-files.js';
-import type { RecoveryCatalogBackend } from '../kernel/kernel-recovery-catalog.js';
 import {
   createRecoveryLocationRegistry,
   readRecoveryJsonAtomic,
@@ -98,7 +97,6 @@ import {
 } from './locations.js';
 import { createRecoveryWorkspaceLeaseManager } from './workspace-lease.js';
 import {
-  reconcileInterruptedBranchIntegrations,
   reconcileInterruptedIntegrationOperations,
   type HostResourceOperation,
   type HostResourceOperationGate,
@@ -203,6 +201,15 @@ export interface CreateWorkspaceRecoveryEngineOptions {
   catalogBackend?: RecoveryCatalogBackend | undefined;
 }
 
+/** Test-only extension point for the local recovery engine. Production kernel
+ * hosts do not provide this adapter; durable recovery calls use the typed Rust
+ * API through KernelRecoveryStore. */
+export interface RecoveryCatalogBackend {
+  open(workspaceId: string, root: string, options: { create: boolean; purpose: string }): Promise<SqliteDatabase | null>;
+  close(database: SqliteDatabase): Promise<void>;
+  gc?(workspaceId: string, operationId: string): Promise<Record<string, unknown>>;
+}
+
 interface RecoveryTargetStates {
   expected: RecoveryState;
   target: RecoveryState;
@@ -302,6 +309,10 @@ export interface WorkspaceRecoveryEngine {
 
 export interface WorkspaceRecoveryStorageContext {
   database: SqliteDatabase;
+  /** Present on the Rust kernel adapter; omitted by the local fixture context. */
+  records?: {
+    list(input: { recordType?: string; threadId?: string; runId?: string; branchId?: string }): Promise<Array<{ recordId: string; state: string; payloadJson: string }>>;
+  };
   fileStore: RecoveryFileStore;
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
@@ -2704,18 +2715,9 @@ export const createWorkspaceRecoveryEngine = (
             'needs-attention',
           );
         }
-        if (!catalogBackend) {
-          try {
-            const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
-            const workingState = await WorkingStateStore.open(integrationContext);
-            await workingState.reconcileObjectReferences();
-            await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
-          } catch (error) {
-            // Preserve unknown ownership and expose this workspace's failure;
-            // other workspaces still need their startup reconciliation.
-            rememberFailure(workspaceId, error, 'needs-attention');
-          }
-        }
+        // Branch roots and object ownership are reconciled by the Rust kernel
+        // on startup. The local WorkingStateStore reader is intentionally not
+        // a production fallback.
       } finally {
         await closeCatalog(database);
         await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));

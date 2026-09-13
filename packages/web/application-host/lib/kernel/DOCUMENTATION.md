@@ -19,7 +19,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
 | Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `storage.record.*` is the only production reference/record writer; object reads require branch/pin/record/temporary-owner identity |
-| Recovery checkpoint/turn/mutation records | Rust kernel typed `domain_records`/`domain_record_refs`, TS recovery engine for file/apply orchestration | Production checkpoint/turn/mutation calls use the direct `KernelRecoveryStore`; combined operation/operation-file remains a separate migration step |
+| Recovery checkpoint/turn/mutation/operation records | Rust kernel typed recovery tables and references, TS recovery engine for file/apply orchestration | Production checkpoint/turn/mutation and operation/file phase calls use `KernelRecoveryStore`; combined file apply remains a separate migration step |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
 
 Every product-domain call uses an immutable `KernelGrantHandle` obtained for the session/Thread/Run. The
@@ -48,17 +48,17 @@ nodes and objects.
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with
 `node scripts/generate-kernel-protocol.mjs --check`. Request, cancel, and ordered data frames have
-separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage format is v6; startup validates
+separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage format is v7; startup validates
 its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
 
 The old TS `WorkingStateStore` remains only for legacy/unit fixtures. Application Host production
-assembly uses `KernelStorageAdapter` and `KernelWorkingStateStore`; it keeps a short-lived root
-projection for product algorithms but never serializes a catalog/trie or opens the kernel SQLite.
-Recovery file/apply orchestration is still TS (R2). Checkpoint, turn, and mutation calls use the direct kernel
-record API; combined operation/operation-file still has a legacy orchestration path pending removal. A kernel
-failure is surfaced; production does not fall back to the old WorkingState writer.
+assembly uses `KernelStorageAdapter` and the kernel root/revision APIs; no transient recovery SQL catalog or
+close-time flush is part of the production path. Recovery file/apply orchestration is still TS (R2), while
+checkpoint/turn/mutation and operation/file phase calls use direct typed kernel methods with explicit revision
+CAS. A kernel failure is surfaced; production does not fall back to the old WorkingState writer.
 
 The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
 the current run covers the original R0/R1 invariants plus typed record/reference ownership and record-bound object reads.
-The production adapter longitudinal path is assembled in `application-host/index.ts` and uses one scoped grant per
-workspace/purpose (or a supplied actor resolver), never the Host-management grant for domain calls.
+The production adapter longitudinal path is assembled in `application-host/index.ts`; actor-bound recovery calls
+derive session identity from the persisted turn and use an explicit maintenance grant only for startup/list/GC
+operations, never the Host-management grant for domain calls.

@@ -288,6 +288,161 @@ pub(crate) struct KernelRecoveryParams {
 pub(crate) struct KernelRecoveryGetParams {
     pub(crate) record_id: Option<String>,
     pub(crate) operation_id: Option<String>,
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryTurnStartParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) session_id: String,
+    pub(crate) user_entry_id: String,
+    pub(crate) worker_id: String,
+    pub(crate) runtime_generation: i64,
+    pub(crate) active_writer_scopes: Vec<String>,
+    pub(crate) provenance: String,
+    pub(crate) failure: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryTurnGetParams {
+    pub(crate) workspace_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) session_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryTurnSettleParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) status: String,
+    pub(crate) observed_resource_ids: Vec<String>,
+    pub(crate) observation_complete: bool,
+    pub(crate) assistant_entry_id: Option<String>,
+    pub(crate) failure_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryCheckpointCreateParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) label: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryCheckpointListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryEntryResolveParams {
+    pub(crate) workspace_id: String,
+    pub(crate) session_id: String,
+    pub(crate) entry_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryChangeBeforeParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) checkpoint_id: String,
+    pub(crate) path: String,
+    pub(crate) tool_name: String,
+    pub(crate) mutation_id: String,
+    pub(crate) before_json: String,
+    pub(crate) references: Vec<KernelRecoveryReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryChangeGetParams {
+    pub(crate) workspace_id: String,
+    pub(crate) checkpoint_id: String,
+    pub(crate) path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryChangeAfterParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) execution_id: String,
+    pub(crate) checkpoint_id: String,
+    pub(crate) path: String,
+    pub(crate) after_json: String,
+    pub(crate) succeeded: bool,
+    pub(crate) expected_revision: i64,
+    pub(crate) references: Vec<KernelRecoveryReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationCreateParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) kind: String,
+    pub(crate) state: String,
+    pub(crate) data_json: String,
+    pub(crate) files: Vec<KernelRecoveryOperationFile>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationFileCasParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) path: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) expected_phase: String,
+    pub(crate) phase: String,
+    pub(crate) observed_fingerprint: Option<String>,
+    pub(crate) expected_json: Option<String>,
+    pub(crate) target_json: Option<String>,
+    pub(crate) safety_json: Option<String>,
+    pub(crate) references: Option<Vec<KernelRecoveryReference>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationCompleteParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) state: String,
+    pub(crate) result_json: Option<String>,
+    pub(crate) failure_json: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) kind: Option<String>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -332,6 +487,25 @@ pub(crate) struct KernelBranchChange {
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryReference {
+    pub(crate) slot: String,
+    pub(crate) object_hash: String,
+    pub(crate) owner_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecoveryOperationFile {
+    pub(crate) path: String,
+    pub(crate) expected_json: Option<String>,
+    pub(crate) target_json: Option<String>,
+    pub(crate) safety_json: Option<String>,
+    pub(crate) phase: Option<String>,
+    pub(crate) references: Option<Vec<KernelRecoveryReference>>,
 }
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
@@ -467,6 +641,76 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "recovery.operation.get" => {
             serde_json::from_value::<KernelRecoveryGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.turn.start" => {
+            serde_json::from_value::<KernelRecoveryTurnStartParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.turn.get" => {
+            serde_json::from_value::<KernelRecoveryTurnGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.turn.settle" => {
+            serde_json::from_value::<KernelRecoveryTurnSettleParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.checkpoint.create" => {
+            serde_json::from_value::<KernelRecoveryCheckpointCreateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.checkpoint.list" => {
+            serde_json::from_value::<KernelRecoveryCheckpointListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.entry.resolve" => {
+            serde_json::from_value::<KernelRecoveryEntryResolveParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.change.before" => {
+            serde_json::from_value::<KernelRecoveryChangeBeforeParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.change.get" => {
+            serde_json::from_value::<KernelRecoveryChangeGetParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.change.after" => {
+            serde_json::from_value::<KernelRecoveryChangeAfterParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.operation.create" => {
+            serde_json::from_value::<KernelRecoveryOperationCreateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.operation.file.cas" => {
+            serde_json::from_value::<KernelRecoveryOperationFileCasParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.operation.complete" => {
+            serde_json::from_value::<KernelRecoveryOperationCompleteParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.operation.list" => {
+            serde_json::from_value::<KernelRecoveryOperationListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.operation.release" => {
+            serde_json::from_value::<KernelRecoveryOperationReleaseParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

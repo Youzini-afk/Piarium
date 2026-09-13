@@ -4,9 +4,9 @@ import path from "node:path";
 import type { KernelBranchState, KernelRecordResult } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { SqliteDatabase } from "../recovery/journal-catalog.js";
-import type { RecoveryCatalogBackend } from "./kernel-recovery-catalog.js";
 import { createRecoveryFileStore, type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
 import { materializeWorkingState, type MaterializeResult } from "../harness/working-state/materializer.js";
+import { applyIndexModes } from "../harness/working-state/git-index-mode.js";
 import { sameState, stateIdentity } from "../recovery/journal-files.js";
 import type {
   CommandVerificationRecord,
@@ -30,6 +30,7 @@ export interface KernelActorIdentity {
   owningWorkspace: string;
   executionWorkspace?: string;
   pathScopes?: string[];
+  capabilities?: string[];
 }
 
 export interface KernelStorageReference {
@@ -39,12 +40,14 @@ export interface KernelStorageReference {
 
 export interface KernelStorageContext {
   client: KernelScopedClient;
-  /** SQL-shaped transient view for legacy orchestration queries; never durable. */
+  /** Kept only for local test-only recovery adapters. Production kernel paths do not populate it. */
   database?: SqliteDatabase;
+  actor?: KernelActorIdentity;
   identity: RecoveryIdentity;
   root: string;
   fileStore: RecoveryFileStore;
   resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
+  collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
   records: {
     get(recordId: string): Promise<KernelRecordResult | null>;
     list(input: { recordType?: string; threadId?: string; runId?: string; branchId?: string }): Promise<KernelRecordResult[]>;
@@ -348,14 +351,14 @@ export class KernelWorkingStateStore {
       options?.signal?.throwIfAborted();
       const captured = await this.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
       let state = captured.state;
-      if (state.kind === "regular-file") {
+      if (state.kind === "regular-file" && options?.store !== false) {
         const object = await this.putObject(await fs.promises.readFile(path.join(directory, ...file.split("/"))));
         state = { ...state, objectHash: object.hash, byteLength: object.byteLength };
       }
       result[file] = state;
       done += 1; options?.onProgress?.(done, files.length);
     }
-    return result;
+    return applyIndexModes(result, options?.indexModes);
   }
 
   private async scanDirectory(directory: string, base = directory): Promise<string[]> {
@@ -367,7 +370,18 @@ export class KernelWorkingStateStore {
     }
     return output.sort();
   }
-  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> { return Object.keys(await this.captureDirectory(directory, [...scopes])); }
+  async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
+    const output = new Set<string>();
+    for (const rawScope of scopes) {
+      const scope = normalize(rawScope);
+      const absolute = path.join(directory, ...scope.split("/"));
+      let stat: fs.Stats;
+      try { stat = await fs.promises.lstat(absolute); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") continue; throw error; }
+      output.add(scope);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) for (const child of await this.scanDirectory(absolute, directory)) output.add(child);
+    }
+    return [...output].sort();
+  }
   async listWorkspaceBaselinePaths(directory: string): Promise<string[]> { return this.scanDirectory(directory); }
 
   async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = []): Promise<WorkingBranch> {
@@ -417,10 +431,14 @@ export class KernelWorkingStateStore {
     const branch = this.branches.get(branchId); if (!branch) throw new Error(`Working branch not found: ${branchId}`);
     const candidates = knownChangedPaths?.map(normalize) ?? [...new Set([...Object.keys(branch.baseState), ...Object.keys(capturedState)])];
     const changedPaths = candidates.filter((file) => !sameState(branch.baseState[file] ?? { kind: "missing" }, capturedState[file] ?? { kind: "missing" })).sort();
+    const clearedDeltaPaths = candidates.filter((file) => Object.hasOwn(branch.deltas, file) && sameState(branch.baseState[file] ?? { kind: "missing" }, capturedState[file] ?? { kind: "missing" }));
     const baseStates = Object.fromEntries(changedPaths.map((file) => [file, branch.baseState[file] ?? { kind: "missing" as const}]));
     const pathStates = Object.fromEntries(changedPaths.map((file) => [file, capturedState[file] ?? { kind: "missing" as const}]));
-    const written = changedPaths.length > 0 ? await this.commitVirtualWrites(branchId, branch.writeRevision, pathStates) : { status: "committed" as const, writeRevision: branch.writeRevision };
+    const kernelChanges = { ...pathStates, ...Object.fromEntries(clearedDeltaPaths.map((file) => [file, branch.baseState[file] ?? { kind: "missing" as const}])) };
+    const written = Object.keys(kernelChanges).length > 0 ? await this.commitVirtualWrites(branchId, branch.writeRevision, kernelChanges) : { status: "committed" as const, writeRevision: branch.writeRevision };
     if (written.status === "conflict") throw new Error("Working branch changed while publishing result");
+    for (const file of clearedDeltaPaths) delete branch.deltas[file];
+    if (clearedDeltaPaths.length > 0) await this.putMetadata(branch);
     const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: written.writeRevision, expectedRoot: branch.root });
     if (asRecord(published).status === "conflict") throw new Error("Working branch publish CAS conflict");
     const revision = Number(asRecord(published).revision); const result: WorkingResult = { resultRevision: revision, branchId, ...(branch.baseRef ? { parentRef: branch.baseRef } : {}), changedPaths, baseStates, pathStates, diffStats: { files: changedPaths.length, insertions: 0, deletions: 0 }, createdAt: nowIso() };
@@ -473,27 +491,42 @@ export class KernelStorageAdapter {
   private readonly options: KernelStorageAdapterOptions;
   private readonly grants = new Map<string, Promise<KernelGrantHandle>>();
   constructor(options: KernelStorageAdapterOptions) { this.options = options; this.client = options.client; }
-  private grantFor(workspaceId: string, purpose: string): Promise<KernelGrantHandle> {
-    const key = `${workspaceId}:${purpose}`;
+  private grantFor(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelGrantHandle> {
+    const key = JSON.stringify({ workspaceId, purpose, actor: actorOverride ?? null });
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
-      const actor = this.options.resolveActor ? await this.options.resolveActor(workspaceId, purpose) : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] };
-      const capabilities = ["storage.read", "storage.write", "recovery", ...(purpose === "recovery-catalog" ? ["recovery.maintenance", "storage.gc"] : purpose.includes("gc") ? ["storage.gc"] : [])];
-      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${purpose}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
+      const actor = actorOverride
+        ?? (this.options.resolveActor ? await this.options.resolveActor(workspaceId, purpose) : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] });
+      const capabilities = ["storage.read", "storage.write", "recovery", ...(actor.capabilities ?? []), ...(purpose === "recovery-maintenance" ? ["recovery.maintenance", "storage.gc"] : purpose.includes("gc") ? ["storage.gc"] : [])];
+      const actorKey = createHash("sha256").update(JSON.stringify(actor)).digest("hex").slice(0, 24);
+      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${purpose}:${actorKey}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();
     this.grants.set(key, grant); return grant;
   }
-  async context(workspaceId: string, purpose: string): Promise<KernelStorageContext & { client: KernelScopedClient }> {
+  async context(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelStorageContext & { client: KernelScopedClient }> {
     const root = this.options.storageRoot;
     const identity: RecoveryIdentity = { authorityId: this.options.hostId, canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId), filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId };
-    const scoped = this.client.scoped(await this.grantFor(workspaceId, purpose));
+    const scoped = this.client.scoped(await this.grantFor(workspaceId, purpose, actorOverride));
     const records = {
       get: (recordId: string) => scoped.getRecord(workspaceId, recordId),
       list: async (input: { recordType?: string; threadId?: string; runId?: string; branchId?: string }) => { const all: KernelRecordResult[] = []; let cursor: number | undefined; do { const page = await scoped.listRecords({ workspaceId, ...input, ...(cursor === undefined ? {} : { cursor }), pageSize: 128 }); all.push(...page.records); cursor = page.nextCursor === null ? undefined : page.nextCursor; } while (cursor !== undefined); return all; },
       put: (input: Omit<Parameters<KernelScopedClient["putRecord"]>[0], "ownerIds" | "references"> & { ownerIds?: string[]; references?: KernelStorageReference[] }) => scoped.putRecord({ ...input, workspaceId, ownerIds: input.ownerIds ?? [], references: input.references ?? [] }),
       release: (operationId: string, recordId: string) => scoped.releaseRecord(operationId, workspaceId, recordId),
     };
-    return { identity, root, fileStore: this.options.fileStore ?? createRecoveryFileStore(), resourceOperationGate: { run: async (_resources, operation) => operation() }, records, client: scoped };
+    return {
+      identity,
+      root,
+      ...(actorOverride ? { actor: actorOverride } : {}),
+      fileStore: this.options.fileStore ?? createRecoveryFileStore(),
+      resourceOperationGate: { run: async (_resources, operation) => operation() },
+      collectUnreachableObjects: async () => {
+        const maintenance = await this.context(workspaceId, "recovery-maintenance", { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance", "storage.gc"] });
+        const result = await maintenance.client.gc(`kernel-gc:${workspaceId}:${randomUUID()}`);
+        return { byteLengthReclaimed: Number(result.byteLengthReclaimed ?? 0), objectsDeleted: Number(result.deletedBlobs ?? result.objectsDeleted ?? 0) };
+      },
+      records,
+      client: scoped,
+    };
   }
   async dispose(): Promise<void> {
     const grants = await Promise.allSettled([...this.grants.values()].map(async (grant) => this.client.revokeGrant((await grant).grantId)));
@@ -501,9 +534,19 @@ export class KernelStorageAdapter {
     const failures = grants.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (failures.length > 0) throw new Error(`One or more kernel storage grants failed to revoke: ${failures.map((failure) => String(failure.reason)).join("; ")}`);
   }
+
+  async revokeSession(sessionId: string): Promise<void> {
+    const candidates = [...this.grants.entries()];
+    for (const [key, promise] of candidates) {
+      const grant = await promise.catch(() => null);
+      if (!grant || grant.sessionId !== sessionId) continue;
+      await this.client.revokeGrant(grant.grantId).catch(() => undefined);
+      this.grants.delete(key);
+    }
+  }
 }
 
-export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAdapter, catalogBackend?: RecoveryCatalogBackend): WorkspaceWorkingStateAccess => {
+export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAdapter): WorkspaceWorkingStateAccess => {
   // Keep one short-lived root projection per Host/workspace instead of
   // expanding every branch on every consumer callback. Durable truth remains
   // the kernel root/revision; this cache is rebuilt after a Host restart.
@@ -512,7 +555,7 @@ export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAd
     const existing = stores.get(workspaceId);
     if (existing) return existing;
     const opening = (async () => {
-      const context = await adapter.context(workspaceId, "working-state-open");
+      const context = await adapter.context(workspaceId, "working-state-open", { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.read", "storage.write"] });
       return KernelWorkingStateStore.open(adapter, context);
     })();
     stores.set(workspaceId, opening);
@@ -521,16 +564,8 @@ export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAd
   return {
     withStore: async (workspaceId, purpose, operation, _mode: Mode = "exclusive") => {
       const store = await storeFor(workspaceId);
-      const context = await adapter.context(workspaceId, purpose);
-      const database = catalogBackend
-        ? await catalogBackend.open(workspaceId, context.root, { create: true, purpose })
-        : null;
-      try {
-        const scopedContext = database ? { ...context, database } : context;
-        return operation(store as never, scopedContext as never);
-      } finally {
-        if (database) await catalogBackend!.close(database);
-      }
+      const context = await adapter.context(workspaceId, purpose, { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["storage.read", "storage.write"] });
+      return operation(store as never, context as never);
     },
   };
 };

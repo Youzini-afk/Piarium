@@ -1145,3 +1145,8 @@ flat path catalog still walks metadata, but it does not clone or read file bodie
 an O(scope) lookup remains a future Merkle/index property. These
 refinements are recorded as D-224; 3.4 / 3.4a / 3.6 remain Partial pending real paid nested Pi and
 full desktop restart validation.
+
+D-264 adds the Rust v7 direct recovery authority for checkpoint/turn/change and typed
+operation/operation-file phase records. The former Application Host memory-catalog facade and
+close-time flush are deleted. Combined file apply, full root-oriented WorkingState adapter and
+cross-platform crash evidence remain R1 work, not implied by this direct record seam.

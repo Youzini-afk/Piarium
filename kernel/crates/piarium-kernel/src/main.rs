@@ -96,6 +96,39 @@ fn hash_file(path: &Path) -> Result<(String, u64), KernelError> {
     Ok((format!("sha256-{}", hex::encode(digest.finalize())), length))
 }
 
+fn chrono_like_now() -> String {
+    // Keep recovery timestamps RFC3339-shaped without adding a clock crate to
+    // the kernel's small dependency set.  The civil-date conversion is the
+    // standard proleptic Gregorian calculation used for Unix timestamps.
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs() as i64)
+        .unwrap_or(0);
+    let days = seconds.div_euclid(86_400);
+    let day_seconds = seconds.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = mp + if mp < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+    let hour = day_seconds / 3_600;
+    let minute = (day_seconds % 3_600) / 60;
+    let second = day_seconds % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn recovery_fault(phase: &str) -> Result<(), KernelError> {
+    if std::env::var("PIARIUM_KERNEL_FAIL_RECOVERY_PHASE").ok().as_deref() == Some(phase) {
+        return Err(KernelError::Storage(format!("injected recovery failure at {phase}")));
+    }
+    Ok(())
+}
+
 fn blob_owner_id(operation_id: &str) -> String {
     format!(
         "blob-owner-{}",
@@ -733,7 +766,7 @@ impl Storage {
         let row: Option<i64> = if let Some(workspace) = workspace {
             self.conn
                 .query_row(
-                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 AND workspace_id = ?2 UNION SELECT 1 FROM domain_record_refs r WHERE r.object_hash = ?1 AND r.workspace_id = ?2 LIMIT 1",
+                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 AND workspace_id = ?2 UNION SELECT 1 FROM domain_record_refs r WHERE r.object_hash = ?1 AND r.workspace_id = ?2 UNION SELECT 1 FROM recovery_refs r WHERE r.object_hash = ?1 AND r.workspace_id = ?2 LIMIT 1",
                     params![hash, workspace],
                     |row| row.get(0),
                 )
@@ -741,7 +774,7 @@ impl Storage {
         } else {
             self.conn
                 .query_row(
-                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 UNION SELECT 1 FROM domain_record_refs WHERE object_hash = ?1 LIMIT 1",
+                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 UNION SELECT 1 FROM domain_record_refs WHERE object_hash = ?1 UNION SELECT 1 FROM recovery_refs WHERE object_hash = ?1 LIMIT 1",
                     params![hash],
                     |row| row.get(0),
                 )
@@ -877,7 +910,7 @@ impl Storage {
         } else if let Some(record_id) = params.get("recordId").and_then(Value::as_str) {
             self.conn
                 .query_row(
-                    "SELECT workspace_id FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2 UNION SELECT workspace_id FROM recovery_records WHERE record_id = ?1 AND workspace_id = ?2 LIMIT 1",
+                    "SELECT workspace_id FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2 UNION SELECT workspace_id FROM recovery_records WHERE record_id = ?1 AND workspace_id = ?2 UNION SELECT workspace_id FROM recovery_operations WHERE operation_id = ?1 AND workspace_id = ?2 LIMIT 1",
                     params![record_id, grant.owning_workspace],
                     |row| row.get::<_, String>(0),
                 )
@@ -1901,7 +1934,7 @@ impl Storage {
             let owned: Option<(String, String)> = self
                 .conn
                 .query_row(
-                    "SELECT object_hash, workspace_id FROM domain_record_refs WHERE record_id = ?1 AND slot = ?2 AND workspace_id = ?3",
+                    "SELECT object_hash, workspace_id FROM domain_record_refs WHERE record_id = ?1 AND slot = ?2 AND workspace_id = ?3 UNION SELECT object_hash, workspace_id FROM recovery_refs WHERE (owner_id = ?1 OR owner_id LIKE ?1 || ':%') AND slot = ?2 AND workspace_id = ?3 LIMIT 1",
                     params![record_id, slot, record_workspace],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -3458,6 +3491,13 @@ impl Storage {
         {
             blobs.insert(row?);
         }
+        for row in self
+            .conn
+            .prepare("SELECT object_hash FROM recovery_refs")?
+            .query_map([], |row| row.get::<_, String>(0))?
+        {
+            blobs.insert(row?);
+        }
         let stale_root_blobs: Vec<(String, String)> = self
             .conn
             .prepare("SELECT root_hash, blob_hash FROM root_blobs")?
@@ -3568,6 +3608,436 @@ impl Storage {
         Ok(())
     }
 
+    fn recovery_workspace(&self, params_value: &Value, grant_id: &str) -> Result<String, KernelError> {
+        let workspace_id = params_value
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("recovery workspaceId is required".to_string()))?;
+        let grant = self.load_grant(grant_id)?;
+        if grant.owning_workspace.as_deref() != Some(workspace_id)
+            && !grant.capabilities.contains("storage.admin")
+        {
+            return Err(KernelError::Authorization(
+                "recovery workspace does not match actor grant".to_string(),
+            ));
+        }
+        for key in ["sessionId", "threadId", "runId"] {
+            let supplied = params_value.get(key).and_then(Value::as_str);
+            let expected = match key {
+                "sessionId" => grant.session_id.as_deref(),
+                "threadId" => grant.thread_id.as_deref(),
+                _ => grant.run_id.as_deref(),
+            };
+            if supplied.is_some() && expected.is_some() && supplied != expected {
+                return Err(KernelError::Authorization(format!(
+                    "recovery {key} does not match actor grant"
+                )));
+            }
+            if supplied.is_some()
+                && expected.is_none()
+                && !grant.capabilities.contains("recovery.maintenance")
+                && !grant.capabilities.contains("storage.admin")
+            {
+                return Err(KernelError::Authorization(format!(
+                    "recovery {key} requires an actor-bound grant"
+                )));
+            }
+        }
+        Ok(workspace_id.to_string())
+    }
+
+    fn recovery_json_object(params_value: &Value, field: &str) -> Result<Value, KernelError> {
+        let raw = params_value
+            .get(field)
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation(format!("{field} is required")))?;
+        let value = serde_json::from_str::<Value>(raw)
+            .map_err(|error| KernelError::Operation(format!("{field} is malformed: {error}")))?;
+        if !value.is_object() {
+            return Err(KernelError::Operation(format!("{field} must contain an object")));
+        }
+        if let Some(kind) = value.get("kind").and_then(Value::as_str) {
+            match kind {
+                "missing" | "unsupported" | "directory" => {}
+                "symlink" => {
+                    if value.get("symlinkTarget").and_then(Value::as_str).is_none() {
+                        return Err(KernelError::Operation(format!("{field} symlinkTarget is required")));
+                    }
+                }
+                "regular-file" => {
+                    let hash = value.get("objectHash").and_then(Value::as_str).unwrap_or("");
+                    let byte_length = value.get("byteLength").and_then(Value::as_i64);
+                    if !hash.starts_with("sha256-") || byte_length.is_none_or(|length| length < 0) {
+                        return Err(KernelError::Operation(format!("{field} regular-file state is malformed")));
+                    }
+                }
+                _ => return Err(KernelError::Operation(format!("{field} kind is unsupported"))),
+            }
+        }
+        Ok(value)
+    }
+
+    fn recovery_references(
+        &self,
+        params_value: &Value,
+        workspace_id: &str,
+        grant_id: &str,
+    ) -> Result<Vec<(String, String, Option<String>)>, KernelError> {
+        let references = params_value
+            .get("references")
+            .and_then(Value::as_array)
+            .ok_or_else(|| KernelError::Operation("recovery references are required".to_string()))?;
+        let mut slots = BTreeSet::new();
+        let mut result = Vec::with_capacity(references.len());
+        for reference in references {
+            let slot = reference
+                .get("slot")
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| KernelError::Operation("recovery reference slot is malformed".to_string()))?;
+            if !slots.insert(slot.to_string()) {
+                return Err(KernelError::Operation("recovery reference slots must be unique".to_string()));
+            }
+            let hash = reference
+                .get("objectHash")
+                .and_then(Value::as_str)
+                .filter(|value| value.starts_with("sha256-") && value.len() == 71)
+                .ok_or_else(|| KernelError::Operation("recovery reference objectHash is malformed".to_string()))?;
+            let owner_id = reference.get("ownerId").and_then(Value::as_str).filter(|value| !value.is_empty());
+            if let Some(owner_id) = owner_id {
+                let owned_hash: Option<String> = self
+                    .conn
+                    .query_row(
+                        "SELECT blob_hash FROM object_owners WHERE owner_id = ?1 AND blob_hash = ?2 AND workspace_id = ?3 AND grant_id = ?4",
+                        params![owner_id, hash, workspace_id, grant_id],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+                if owned_hash.is_none() {
+                    return Err(KernelError::Authorization(format!("recovery owner is not valid: {owner_id}")));
+                }
+            } else {
+                let durable = self
+                    .conn
+                    .query_row(
+                        "SELECT 1 FROM blobs WHERE hash = ?1 AND (EXISTS (SELECT 1 FROM recovery_refs WHERE object_hash = ?1 AND workspace_id = ?2) OR EXISTS (SELECT 1 FROM domain_record_refs WHERE object_hash = ?1 AND workspace_id = ?2) OR EXISTS (SELECT 1 FROM root_blobs WHERE blob_hash = ?1))",
+                        params![hash, workspace_id],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .optional()?
+                    .is_some();
+                if !durable {
+                    return Err(KernelError::Authorization("recovery reference must consume an owner or existing durable reference".to_string()));
+                }
+            }
+            result.push((slot.to_string(), hash.to_string(), owner_id.map(str::to_string)));
+        }
+        Ok(result)
+    }
+
+    fn insert_recovery_refs(
+        &mut self,
+        workspace_id: &str,
+        owner_kind: &str,
+        owner_id: &str,
+        references: &[(String, String, Option<String>)],
+        grant_id: &str,
+    ) -> Result<(), KernelError> {
+        self.conn.execute(
+            "DELETE FROM recovery_refs WHERE workspace_id = ?1 AND owner_kind = ?2 AND owner_id = ?3",
+            params![workspace_id, owner_kind, owner_id],
+        )?;
+        let mut consumed = BTreeMap::new();
+        for (slot, hash, owner) in references {
+            self.conn.execute(
+                "INSERT INTO recovery_refs(workspace_id, owner_kind, owner_id, slot, object_hash) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![workspace_id, owner_kind, owner_id, slot, hash],
+            )?;
+            if let Some(owner) = owner {
+                consumed.insert(owner.clone(), hash.clone());
+            }
+        }
+        self.consume_object_owners(workspace_id, grant_id, &consumed)
+    }
+
+    fn recovery_checkpoint_value(&self, workspace_id: &str, id: &str) -> Result<Option<Value>, KernelError> {
+        let row: Option<(String, String, i64, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, i64, i64, i64)> = self.conn.query_row(
+            "SELECT id, workspace_id, sequence, source, state, created_at, label, session_id, entry_id, execution_id, changed_path_count, byte_length, revision FROM recovery_checkpoints WHERE workspace_id = ?1 AND id = ?2",
+            params![workspace_id, id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?)),
+        ).optional()?;
+        Ok(row.map(|(id, workspace_id, sequence, source, state, created_at, label, session_id, entry_id, execution_id, changed_path_count, byte_length, revision)| json!({
+            "id": id, "workspaceId": workspace_id, "sequence": sequence, "source": source, "state": state, "createdAt": created_at,
+            "label": label, "sessionId": session_id, "entryId": entry_id, "executionId": execution_id,
+            "changedPathCount": changed_path_count, "byteLength": byte_length, "revision": revision,
+        })))
+    }
+
+    fn recovery_turn_value(&self, workspace_id: &str, execution_id: &str) -> Result<Option<Value>, KernelError> {
+        let row: Option<(String, String, String, i64, String, String, String, Option<String>, String, String, String, String, String, String, Option<String>, String, Option<String>, i64)> = self.conn.query_row(
+            "SELECT execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, user_entry_id, assistant_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, failure_json, started_at, settled_at, revision FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
+            params![workspace_id, execution_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?, row.get(9)?, row.get(10)?, row.get(11)?, row.get(12)?, row.get(13)?, row.get(14)?, row.get(15)?, row.get(16)?, row.get(17)?)),
+        ).optional()?;
+        let Some((execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, user_entry_id, assistant_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, failure_json, started_at, settled_at, revision)) = row else { return Ok(None); };
+        Ok(Some(json!({
+            "executionId": execution_id, "workspaceId": workspace_id, "runtimeKey": runtime_key, "runtimeGeneration": runtime_generation,
+            "workerId": worker_id, "sessionId": session_id, "userEntryId": user_entry_id, "assistantEntryId": assistant_entry_id,
+            "checkpointId": checkpoint_id, "activeWriterScopes": serde_json::from_str::<Value>(&active_writer_scopes_json)?, "provenance": provenance,
+            "status": status, "observedResourceIds": serde_json::from_str::<Value>(&observed_resource_ids_json)?, "unrecordedResourceIds": serde_json::from_str::<Value>(&unrecorded_resource_ids_json)?,
+            "failure": failure_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "startedAt": started_at, "settledAt": settled_at, "revision": revision,
+        })))
+    }
+
+    fn recovery_turn_start(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let execution_id = params_value.get("executionId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
+        let session_id = params_value.get("sessionId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let identity_hash = hash_json(params_value)?;
+        if let Some(existing) = self.operation_existing(operation_id, "recovery.turn.start", &identity_hash)? { return Ok(existing); }
+        if let Some(existing) = self.recovery_turn_value(&workspace_id, execution_id)? { return Ok(existing); }
+        let now = format!("{}", chrono_like_now());
+        let checkpoint_id = format!("recovery.checkpoint:{workspace_id}:{execution_id}");
+        let sequence: i64 = self.conn.query_row("SELECT COALESCE(MAX(sequence), 0) + 1 FROM recovery_checkpoints WHERE workspace_id = ?1", params![workspace_id], |row| row.get(0))?;
+        let active = serde_json::to_string(&params_value.get("activeWriterScopes").cloned().unwrap_or_else(|| json!([])))?;
+        let runtime_generation = params_value.get("runtimeGeneration").and_then(Value::as_i64).unwrap_or(0);
+        let runtime_key = format!("{}@{}", params_value.get("workerId").and_then(Value::as_str).unwrap_or(""), runtime_generation);
+        let status = if params_value.get("failure").and_then(Value::as_bool).unwrap_or(false) { "incomplete" } else { "pending" };
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            self.operation_begin(operation_id, "recovery.turn.start", &identity_hash)?;
+            self.record_operation_workspace(operation_id, Some(&workspace_id))?;
+            recovery_fault("turn-intent")?;
+            self.conn.execute("INSERT INTO recovery_checkpoints(id, workspace_id, sequence, source, state, created_at, session_id, entry_id, execution_id, revision) VALUES (?1, ?2, ?3, 'turn', ?4, ?5, ?6, ?7, ?8, 1)", params![checkpoint_id, workspace_id, sequence, status, now, session_id, params_value.get("userEntryId").and_then(Value::as_str), execution_id])?;
+            self.conn.execute("INSERT INTO recovery_turns(execution_id, workspace_id, runtime_key, runtime_generation, worker_id, session_id, user_entry_id, checkpoint_id, active_writer_scopes_json, provenance, status, observed_resource_ids_json, unrecorded_resource_ids_json, started_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, '[]', '[]', ?12, 1)", params![execution_id, workspace_id, runtime_key, runtime_generation, params_value.get("workerId").and_then(Value::as_str).unwrap_or(""), session_id, params_value.get("userEntryId").and_then(Value::as_str).unwrap_or(""), checkpoint_id, active, params_value.get("provenance").and_then(Value::as_str).unwrap_or("caused-by"), status, now])?;
+            let value = self.recovery_turn_value(&workspace_id, execution_id)?.ok_or_else(|| KernelError::Storage("recovery turn disappeared after commit".to_string()))?;
+            self.operation_finish(operation_id, &value)?;
+            Ok(value)
+        })();
+        match result { Ok(value) => { self.conn.execute_batch("COMMIT")?; Ok(value) }, Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); Err(error) } }
+    }
+
+    fn recovery_turn_get(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let execution_id = params_value.get("executionId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
+        Ok(self.recovery_turn_value(&workspace_id, execution_id)?.unwrap_or(Value::Null))
+    }
+
+    fn recovery_turn_settle(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let execution_id = params_value.get("executionId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let identity_hash = hash_json(params_value)?;
+        if let Some(existing) = self.operation_existing(operation_id, "recovery.turn.settle", &identity_hash)? { return Ok(existing); }
+        let expected = params_value.get("expectedRevision").and_then(Value::as_i64).ok_or_else(|| KernelError::Operation("expectedRevision is required".to_string()))?;
+        let current: Option<(i64, String, String)> = self.conn.query_row("SELECT revision, checkpoint_id, status FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2", params![workspace_id, execution_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+        let Some((revision, checkpoint_id, _)) = current else { return Err(KernelError::Operation("recovery turn not found".to_string())); };
+        if revision != expected { return Err(KernelError::Operation("recovery turn revision conflict".to_string())); }
+        let status = params_value.get("status").and_then(Value::as_str).filter(|value| matches!(*value, "pending" | "ready" | "incomplete" | "failed")).ok_or_else(|| KernelError::Operation("recovery turn status is invalid".to_string()))?;
+        let observed = serde_json::to_string(&params_value.get("observedResourceIds").cloned().unwrap_or_else(|| json!([])))?;
+        let failure = params_value.get("failureJson").and_then(Value::as_str);
+        let now = format!("{}", chrono_like_now());
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            self.operation_begin(operation_id, "recovery.turn.settle", &identity_hash)?;
+            self.record_operation_workspace(operation_id, Some(&workspace_id))?;
+            self.conn.execute("UPDATE recovery_turns SET assistant_entry_id = ?1, status = ?2, observed_resource_ids_json = ?3, failure_json = ?4, settled_at = ?5, revision = revision + 1 WHERE workspace_id = ?6 AND execution_id = ?7 AND revision = ?8", params![params_value.get("assistantEntryId").and_then(Value::as_str), status, observed, failure, now, workspace_id, execution_id, expected])?;
+            self.conn.execute("UPDATE recovery_checkpoints SET state = ?1, revision = revision + 1 WHERE workspace_id = ?2 AND id = ?3", params![status, workspace_id, checkpoint_id])?;
+            let value = self.recovery_turn_value(&workspace_id, execution_id)?.ok_or_else(|| KernelError::Storage("recovery turn disappeared after settle".to_string()))?;
+            self.operation_finish(operation_id, &value)?;
+            Ok(value)
+        })();
+        match result { Ok(value) => { self.conn.execute_batch("COMMIT")?; Ok(value) }, Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); Err(error) } }
+    }
+
+    fn recovery_checkpoint_create(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let label = params_value.get("label").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("checkpoint label is required".to_string()))?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let identity_hash = hash_json(params_value)?;
+        if let Some(existing) = self.operation_existing(operation_id, "recovery.checkpoint.create", &identity_hash)? { return Ok(existing); }
+        let id = format!("recovery.checkpoint:{workspace_id}:named:{}", Uuid::new_v4());
+        let sequence: i64 = self.conn.query_row("SELECT COALESCE(MAX(sequence), 0) + 1 FROM recovery_checkpoints WHERE workspace_id = ?1", params![workspace_id], |row| row.get(0))?;
+        let now = format!("{}", chrono_like_now());
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            self.operation_begin(operation_id, "recovery.checkpoint.create", &identity_hash)?;
+            self.record_operation_workspace(operation_id, Some(&workspace_id))?;
+            self.conn.execute("INSERT INTO recovery_checkpoints(id, workspace_id, sequence, source, state, created_at, label, revision) VALUES (?1, ?2, ?3, 'named', 'ready', ?4, ?5, 1)", params![id, workspace_id, sequence, now, label])?;
+            let value = self.recovery_checkpoint_value(&workspace_id, &id)?.ok_or_else(|| KernelError::Storage("checkpoint disappeared after commit".to_string()))?;
+            self.operation_finish(operation_id, &value)?;
+            Ok(value)
+        })();
+        match result { Ok(value) => { self.conn.execute_batch("COMMIT")?; Ok(value) }, Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); Err(error) } }
+    }
+
+    fn recovery_checkpoint_list(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let cursor = params_value.get("cursor").and_then(Value::as_i64).unwrap_or(0);
+        let page_size = params_value.get("pageSize").and_then(Value::as_i64).unwrap_or(128);
+        if page_size <= 0 { return Err(KernelError::Operation("pageSize must be positive".to_string())); }
+        let rows: Vec<String> = self.conn.prepare("SELECT id FROM recovery_checkpoints WHERE workspace_id = ?1 AND sequence < ?2 ORDER BY sequence DESC LIMIT ?3")?.query_map(params![workspace_id, if cursor > 0 { cursor } else { i64::MAX }, page_size + 1], |row| row.get(0))?.collect::<Result<_, _>>()?;
+        let has_more = rows.len() as i64 > page_size;
+        let ids = rows.into_iter().take(page_size as usize).collect::<Vec<_>>();
+        let mut checkpoints = Vec::new();
+        for id in ids { if let Some(value) = self.recovery_checkpoint_value(&workspace_id, &id)? { checkpoints.push(value); } }
+        let next_cursor = checkpoints.last().and_then(|value| value.get("sequence").and_then(Value::as_i64)).filter(|_| has_more);
+        Ok(json!({"checkpoints": checkpoints, "nextCursor": next_cursor}))
+    }
+
+    fn recovery_entry_resolve(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let session_id = params_value.get("sessionId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("sessionId is required".to_string()))?;
+        let entry_id = params_value.get("entryId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("entryId is required".to_string()))?;
+        let row: Option<(String, String, String)> = self.conn.query_row("SELECT execution_id, checkpoint_id, status FROM recovery_turns WHERE workspace_id = ?1 AND session_id = ?2 AND (user_entry_id = ?3 OR assistant_entry_id = ?3) ORDER BY started_at DESC LIMIT 1", params![workspace_id, session_id, entry_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+        let Some((execution_id, checkpoint_id, status)) = row else { return Ok(json!({"status": "unbound", "reason": "entry-unbound"})); };
+        let checkpoint = self.recovery_checkpoint_value(&workspace_id, &checkpoint_id)?.unwrap_or(Value::Null);
+        if status != "ready" || checkpoint.get("state").and_then(Value::as_str) != Some("ready") { return Ok(json!({"status": "incomplete", "reason": "checkpoint-incomplete", "executionId": execution_id, "checkpoint": checkpoint})); }
+        Ok(json!({"status": "ready", "executionId": execution_id, "checkpoint": checkpoint, "position": "before"}))
+    }
+
+    fn recovery_change_before(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let before = Self::recovery_json_object(params_value, "beforeJson")?;
+        let checkpoint_id = params_value.get("checkpointId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("checkpointId is required".to_string()))?;
+        let execution_id = params_value.get("executionId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("executionId is required".to_string()))?;
+        let path = params_value.get("path").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("recovery change path is required".to_string()))?;
+        if self.conn.query_row("SELECT 1 FROM recovery_checkpoints WHERE workspace_id = ?1 AND id = ?2", params![workspace_id, checkpoint_id], |row| row.get::<_, i64>(0)).optional()?.is_none() { return Err(KernelError::Operation("checkpoint is not found".to_string())); }
+        let references = self.recovery_references(params_value, &workspace_id, grant_id)?;
+        let now = format!("{}", chrono_like_now());
+        let existing: Option<i64> = self.conn.query_row("SELECT revision FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3", params![workspace_id, checkpoint_id, path], |row| row.get(0)).optional()?;
+        if existing.is_none() {
+            self.conn.execute("INSERT INTO recovery_changes(workspace_id, checkpoint_id, path, execution_id, tool_name, mutation_id, before_json, state, created_at, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'before', ?8, ?8, 1)", params![workspace_id, checkpoint_id, path, execution_id, params_value.get("toolName").and_then(Value::as_str).unwrap_or(""), params_value.get("mutationId").and_then(Value::as_str).unwrap_or(""), serde_json::to_string(&before)?, now])?;
+        }
+        self.insert_recovery_refs(&workspace_id, "change", &format!("change:{checkpoint_id}:{path}"), &references, grant_id)?;
+        Ok(json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "revision": existing.unwrap_or(1), "recorded": true}))
+    }
+
+    fn recovery_change_get(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let checkpoint_id = params_value.get("checkpointId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("checkpointId is required".to_string()))?;
+        let path = params_value.get("path").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("recovery change path is required".to_string()))?;
+        let row: Option<(String, String, String, String, Option<String>, String, i64)> = self.conn.query_row("SELECT path, before_json, state, execution_id, after_json, updated_at, revision FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3", params![workspace_id, checkpoint_id, path], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).optional()?;
+        let Some((path, before_json, state, execution_id, after_json, updated_at, revision)) = row else { return Ok(Value::Null); };
+        Ok(json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "executionId": execution_id, "before": serde_json::from_str::<Value>(&before_json)?, "after": after_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "state": state, "updatedAt": updated_at, "revision": revision}))
+    }
+
+    fn recovery_change_after(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let after = Self::recovery_json_object(params_value, "afterJson")?;
+        let checkpoint_id = params_value.get("checkpointId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("checkpointId is required".to_string()))?;
+        let path = params_value.get("path").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("recovery change path is required".to_string()))?;
+        let expected = params_value.get("expectedRevision").and_then(Value::as_i64).ok_or_else(|| KernelError::Operation("expectedRevision is required".to_string()))?;
+        let current: Option<(i64, String)> = self.conn.query_row("SELECT revision, before_json FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3", params![workspace_id, checkpoint_id, path], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+        let Some((revision, before_json)) = current else { return Err(KernelError::Operation("recovery before-image is missing".to_string())); };
+        if revision != expected { return Err(KernelError::Operation("recovery change revision conflict".to_string())); }
+        let references = self.recovery_references(params_value, &workspace_id, grant_id)?;
+        let now = format!("{}", chrono_like_now());
+        let before_value = serde_json::from_str::<Value>(&before_json)?;
+        if before_value == after {
+            self.conn.execute("DELETE FROM recovery_refs WHERE workspace_id = ?1 AND owner_kind = 'change' AND owner_id = ?2", params![workspace_id, format!("change:{checkpoint_id}:{path}")])?;
+            self.conn.execute("DELETE FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3 AND revision = ?4", params![workspace_id, checkpoint_id, path, expected])?;
+            return Ok(json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "released": true, "revision": expected}));
+        }
+        self.conn.execute("UPDATE recovery_changes SET after_json = ?1, state = ?2, updated_at = ?3, revision = revision + 1 WHERE workspace_id = ?4 AND checkpoint_id = ?5 AND path = ?6 AND revision = ?7", params![serde_json::to_string(&after)?, if params_value.get("succeeded").and_then(Value::as_bool).unwrap_or(false) { "after" } else { "failed" }, now, workspace_id, checkpoint_id, path, expected])?;
+        self.insert_recovery_refs(&workspace_id, "change", &format!("change:{checkpoint_id}:{path}"), &references, grant_id)?;
+        Ok(json!({"workspaceId": workspace_id, "checkpointId": checkpoint_id, "path": path, "before": before_value, "after": after, "revision": expected + 1}))
+    }
+
+    fn recovery_operation_create(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let kind = params_value.get("kind").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operation kind is required".to_string()))?;
+        let state = params_value.get("state").and_then(Value::as_str).filter(|value| matches!(*value, "planned" | "applying" | "applying-files" | "complete" | "aborted" | "compensated" | "needs-attention" | "undone" | "awaiting-surface")).ok_or_else(|| KernelError::Operation("operation state is invalid".to_string()))?;
+        let data = Self::recovery_json_object(params_value, "dataJson")?;
+        let files = params_value.get("files").and_then(Value::as_array).ok_or_else(|| KernelError::Operation("operation files are required".to_string()))?;
+        let mut paths = BTreeSet::new();
+        let now = format!("{}", chrono_like_now());
+        let identity_hash = hash_json(params_value)?;
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let result = (|| {
+            if let Some(existing_result) = self.operation_existing(operation_id, "recovery.operation.create", &identity_hash)? { return Ok(existing_result); }
+            let existing: Option<(i64, String, String)> = self.conn.query_row("SELECT revision, state, data_json FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2", params![workspace_id, operation_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+            if let Some(existing) = existing { return Ok(json!({"operationId": operation_id, "workspaceId": workspace_id, "state": existing.1, "revision": existing.0, "data": serde_json::from_str::<Value>(&existing.2)?, "files": []})); }
+            self.operation_begin(operation_id, "recovery.operation.create", &identity_hash)?;
+            self.record_operation_workspace(operation_id, Some(&workspace_id))?;
+            self.conn.execute("INSERT INTO recovery_operations(operation_id, workspace_id, kind, state, data_json, created_at, updated_at, revision) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 1)", params![operation_id, workspace_id, kind, state, serde_json::to_string(&data)?, now])?;
+            recovery_fault("operation-before-files")?;
+            for (ordinal, file) in files.iter().enumerate() {
+                let path = file.get("path").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("operation file path is required".to_string()))?;
+                if !paths.insert(path.to_string()) { return Err(KernelError::Operation("operation file paths must be unique".to_string())); }
+                for field in ["expectedJson", "targetJson", "safetyJson"] { if file.get(field).and_then(Value::as_str).is_some() { let _ = serde_json::from_str::<Value>(file.get(field).and_then(Value::as_str).unwrap_or(""))?; } }
+                self.conn.execute("INSERT INTO recovery_operation_files(workspace_id, operation_id, ordinal, path, expected_json, target_json, safety_json, phase, revision, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 1, ?9)", params![workspace_id, operation_id, ordinal as i64, path, file.get("expectedJson").and_then(Value::as_str), file.get("targetJson").and_then(Value::as_str), file.get("safetyJson").and_then(Value::as_str), file.get("phase").and_then(Value::as_str).unwrap_or("pending"), now])?;
+                let refs = file.get("references").cloned().unwrap_or_else(|| json!([]));
+                let refs_params = json!({"references": refs});
+                let normalized = self.recovery_references(&refs_params, &workspace_id, grant_id)?;
+                self.insert_recovery_refs(&workspace_id, "operation-file", &format!("operation-file:{operation_id}:{path}"), &normalized, grant_id)?;
+            }
+            recovery_fault("operation-before-finish")?;
+            let result = json!({"operationId": operation_id, "workspaceId": workspace_id, "kind": kind, "state": state, "revision": 1, "data": data, "files": files});
+            self.operation_finish(operation_id, &result)?;
+            Ok(result)
+        })();
+        match result { Ok(value) => { self.conn.execute_batch("COMMIT")?; Ok(value) }, Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); Err(error) } }
+    }
+
+    fn recovery_operation_file_cas(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let path = params_value.get("path").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("operation file path is required".to_string()))?;
+        let expected = params_value.get("expectedRevision").and_then(Value::as_i64).ok_or_else(|| KernelError::Operation("expectedRevision is required".to_string()))?;
+        let expected_phase = params_value.get("expectedPhase").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("expectedPhase is required".to_string()))?;
+        let phase = params_value.get("phase").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("phase is required".to_string()))?;
+        let current: Option<(i64, String)> = self.conn.query_row("SELECT revision, phase FROM recovery_operation_files WHERE workspace_id = ?1 AND operation_id = ?2 AND path = ?3", params![workspace_id, operation_id, path], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+        let Some((revision, current_phase)) = current else { return Err(KernelError::Operation("operation file is not found".to_string())); };
+        if revision != expected || current_phase != expected_phase { return Err(KernelError::Operation("operation file phase conflict".to_string())); }
+        recovery_fault("file-phase-cas")?;
+        self.conn.execute("UPDATE recovery_operation_files SET phase = ?1, observed_fingerprint = ?2, expected_json = COALESCE(?3, expected_json), target_json = COALESCE(?4, target_json), safety_json = COALESCE(?5, safety_json), revision = revision + 1, updated_at = ?6 WHERE workspace_id = ?7 AND operation_id = ?8 AND path = ?9 AND revision = ?10 AND phase = ?11", params![phase, params_value.get("observedFingerprint").and_then(Value::as_str), params_value.get("expectedJson").and_then(Value::as_str), params_value.get("targetJson").and_then(Value::as_str), params_value.get("safetyJson").and_then(Value::as_str), chrono_like_now(), workspace_id, operation_id, path, expected, expected_phase])?;
+        if let Some(refs) = params_value.get("references") { let normalized = self.recovery_references(&json!({"references": refs}), &workspace_id, grant_id)?; self.insert_recovery_refs(&workspace_id, "operation-file", &format!("operation-file:{operation_id}:{path}"), &normalized, grant_id)?; }
+        Ok(json!({"operationId": operation_id, "workspaceId": workspace_id, "path": path, "phase": phase, "revision": expected + 1}))
+    }
+
+    fn recovery_operation_complete(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let expected = params_value.get("expectedRevision").and_then(Value::as_i64).ok_or_else(|| KernelError::Operation("expectedRevision is required".to_string()))?;
+        let state = params_value.get("state").and_then(Value::as_str).filter(|value| matches!(*value, "complete" | "aborted" | "compensated" | "undone" | "needs-attention")).ok_or_else(|| KernelError::Operation("terminal operation state is invalid".to_string()))?;
+        recovery_fault("operation-complete")?;
+        let changed = self.conn.execute("UPDATE recovery_operations SET state = ?1, result_json = ?2, failure_json = ?3, revision = revision + 1, updated_at = ?4 WHERE workspace_id = ?5 AND operation_id = ?6 AND revision = ?7 AND state NOT IN ('complete', 'aborted', 'compensated', 'undone', 'needs-attention')", params![state, params_value.get("resultJson").and_then(Value::as_str), params_value.get("failureJson").and_then(Value::as_str), chrono_like_now(), workspace_id, operation_id, expected])?;
+        if changed == 0 { return Err(KernelError::Operation("operation terminal state conflict".to_string())); }
+        Ok(json!({"operationId": operation_id, "workspaceId": workspace_id, "state": state, "revision": expected + 1}))
+    }
+
+    fn recovery_operation_list(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let cursor = params_value.get("cursor").and_then(Value::as_i64).unwrap_or(0);
+        let page_size = params_value.get("pageSize").and_then(Value::as_i64).unwrap_or(128);
+        if page_size <= 0 { return Err(KernelError::Operation("pageSize must be positive".to_string())); }
+        let kind = params_value.get("kind").and_then(Value::as_str);
+        let (sql, values) = if let Some(kind) = kind { ("SELECT operation_id, kind, state, data_json, revision FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4", vec![Value::String(workspace_id.clone()), Value::String(kind.to_string()), Value::from(page_size + 1), Value::from(cursor)]) } else { ("SELECT operation_id, kind, state, data_json, revision FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3", vec![Value::String(workspace_id.clone()), Value::from(page_size + 1), Value::from(cursor)]) };
+        let mut statement = self.conn.prepare(sql)?;
+        let mut rows = if kind.is_some() { statement.query(params![workspace_id, kind.unwrap_or(""), page_size, cursor])? } else { statement.query(params![workspace_id, page_size, cursor])? };
+        let mut operations = Vec::new();
+        while let Some(row) = rows.next()? { let operation_id: String = row.get(0)?; operations.push(json!({"operationId": operation_id, "workspaceId": workspace_id, "kind": row.get::<_, String>(1)?, "state": row.get::<_, String>(2)?, "data": serde_json::from_str::<Value>(&row.get::<_, String>(3)?)?, "revision": row.get::<_, i64>(4)?})); }
+        let _ = values;
+        let has_more = operations.len() as i64 > page_size;
+        operations.truncate(page_size as usize);
+        Ok(json!({"operations": operations, "nextCursor": if has_more { Value::from(cursor + page_size) } else { Value::Null }}))
+    }
+
+    fn recovery_operation_release(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let workspace_id = self.recovery_workspace(params_value, grant_id)?;
+        let operation_id = params_value.get("operationId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("operationId is required".to_string()))?;
+        let state: Option<String> = self.conn.query_row("SELECT state FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2", params![workspace_id, operation_id], |row| row.get(0)).optional()?;
+        let Some(state) = state else { return Ok(json!({"operationId": operation_id, "released": false})); };
+        if !matches!(state.as_str(), "complete" | "aborted" | "compensated" | "undone") { return Err(KernelError::Operation("only terminal recovery operations can be released".to_string())); }
+        self.conn.execute("DELETE FROM recovery_refs WHERE workspace_id = ?1 AND ((owner_kind = 'operation-file' AND owner_id LIKE ?2) OR (owner_kind = 'operation' AND owner_id = ?3))", params![workspace_id, format!("operation-file:{operation_id}:%"), format!("operation:{operation_id}")])?;
+        let deleted = self.conn.execute("DELETE FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2", params![workspace_id, operation_id])?;
+        Ok(json!({"operationId": operation_id, "released": deleted > 0}))
+    }
+
     fn recovery_operation(
         &mut self,
         method: &str,
@@ -3659,7 +4129,7 @@ impl Storage {
         )
     }
 
-    fn recovery_get(&self, params_value: &Value) -> Result<Value, KernelError> {
+    fn recovery_get(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let id = params_value
             .get("recordId")
             .or_else(|| params_value.get("operationId"))
@@ -3667,6 +4137,28 @@ impl Storage {
             .ok_or_else(|| {
                 KernelError::Operation("recordId or operationId is required".to_string())
             })?;
+        if params_value.get("workspaceId").is_some() || params_value.get("sessionId").is_some() || params_value.get("threadId").is_some() || params_value.get("runId").is_some() {
+            let _ = self.recovery_workspace(params_value, grant_id)?;
+        }
+        let grant = self.load_grant(grant_id)?;
+        if let Some(workspace_id) = grant.owning_workspace.as_deref() {
+            let typed: Option<(String, String, String, String, String, Option<String>, Option<String>, i64)> = self.conn.query_row(
+                "SELECT operation_id, workspace_id, kind, state, data_json, result_json, failure_json, revision FROM recovery_operations WHERE workspace_id = ?1 AND operation_id = ?2",
+                params![workspace_id, id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+            ).optional()?;
+            if let Some((operation_id, workspace_id, kind, state, data_json, result_json, failure_json, revision)) = typed {
+                let mut files = Vec::new();
+                let mut files_statement = self.conn.prepare("SELECT path, expected_json, target_json, safety_json, phase, observed_fingerprint, revision FROM recovery_operation_files WHERE workspace_id = ?1 AND operation_id = ?2 ORDER BY ordinal")?;
+                let mut rows = files_statement.query(params![workspace_id, operation_id])?;
+                while let Some(row) = rows.next()? {
+                    files.push(json!({
+                        "path": row.get::<_, String>(0)?, "expectedJson": row.get::<_, Option<String>>(1)?, "targetJson": row.get::<_, Option<String>>(2)?, "safetyJson": row.get::<_, Option<String>>(3)?, "phase": row.get::<_, String>(4)?, "observedFingerprint": row.get::<_, Option<String>>(5)?, "revision": row.get::<_, i64>(6)?,
+                    }));
+                }
+                return Ok(json!({"operationId": operation_id, "workspaceId": workspace_id, "kind": kind, "state": state, "data": serde_json::from_str::<Value>(&data_json)?, "result": result_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "failure": failure_json.and_then(|value| serde_json::from_str::<Value>(&value).ok()), "revision": revision, "files": files}));
+            }
+        }
         let row: Option<(String, String, String, String, String, String)> = self.conn.query_row("SELECT record_id, operation_id, workspace_id, state, data_json, initial_data_json FROM recovery_records WHERE record_id = ?1 OR operation_id = ?1 ORDER BY record_id LIMIT 1", params![id], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?,row.get(3)?,row.get(4)?,row.get(5)?))).optional()?;
         let Some((record_id, operation_id, workspace_id, state, data, initial_data)) = row else {
             return Ok(Value::Null);
@@ -3711,6 +4203,54 @@ impl Storage {
             }
         }
         Ok(workspace_id.to_string())
+    }
+
+    fn validate_domain_record_payload(
+        record_type: &str,
+        record_id: &str,
+        workspace_id: &str,
+        state: &str,
+        payload: &Value,
+    ) -> Result<(), KernelError> {
+        let object = payload
+            .as_object()
+            .ok_or_else(|| KernelError::Operation("typed record payload must be an object".to_string()))?;
+        let same = |field: &str, expected: &str| -> Result<(), KernelError> {
+            if let Some(value) = object.get(field).and_then(Value::as_str) {
+                if value != expected { return Err(KernelError::Operation(format!("typed record {field} does not match its identity"))); }
+            }
+            Ok(())
+        };
+        match record_type {
+            "recovery.checkpoint" => {
+                same("id", record_id)?;
+                same("workspaceId", workspace_id)?;
+                if !matches!(state, "pending" | "ready" | "incomplete" | "failed") { return Err(KernelError::Operation("checkpoint state is invalid".to_string())); }
+                if let Some(sequence) = object.get("sequence") { if sequence.as_i64().is_none_or(|value| value < 0) { return Err(KernelError::Operation("checkpoint sequence is invalid".to_string())); } }
+            }
+            "recovery.turn" => {
+                let execution = object.get("executionId").and_then(Value::as_str).filter(|value| !value.is_empty()).ok_or_else(|| KernelError::Operation("turn executionId is required".to_string()))?;
+                if record_id != format!("recovery.turn:{execution}") { return Err(KernelError::Operation("turn recordId is not derived from executionId".to_string())); }
+                same("workspaceId", workspace_id)?;
+                if object.get("sessionId").and_then(Value::as_str).is_none() || object.get("checkpointId").and_then(Value::as_str).is_none() { return Err(KernelError::Operation("turn identity is incomplete".to_string())); }
+                if !matches!(state, "pending" | "ready" | "incomplete" | "failed") { return Err(KernelError::Operation("turn state is invalid".to_string())); }
+            }
+            "recovery.change" => {
+                if object.get("checkpointId").and_then(Value::as_str).is_none() || object.get("path").and_then(Value::as_str).is_none() { return Err(KernelError::Operation("change identity is incomplete".to_string())); }
+                if object.get("before").is_none() && object.get("beforeJson").is_none() { return Err(KernelError::Operation("change before state is required".to_string())); }
+            }
+            "recovery.operation" => {
+                same("id", record_id)?;
+                same("workspaceId", workspace_id)?;
+                if object.get("kind").and_then(Value::as_str).is_none() { return Err(KernelError::Operation("operation kind is required".to_string())); }
+            }
+            "recovery.operation-file" => {
+                if object.get("operationId").and_then(Value::as_str).is_none() || object.get("path").and_then(Value::as_str).is_none() { return Err(KernelError::Operation("operation-file identity is incomplete".to_string())); }
+                if !matches!(state, "pending" | "apply-intent" | "target-observed" | "compensate-intent" | "safety-observed" | "needs-attention" | "external-intent" | "external-dispatched" | "external-safety-observed") { return Err(KernelError::Operation("operation-file phase is invalid".to_string())); }
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     fn grant_can_access_domain_record(&self, value: &Value, grant_id: &str) -> Result<bool, KernelError> {
@@ -3853,6 +4393,7 @@ impl Storage {
         if !payload.is_object() {
             return Err(KernelError::Operation("payloadJson must contain an object".to_string()));
         }
+        Self::validate_domain_record_payload(record_type, record_id, &workspace_id, state, &payload)?;
         let references = params_value
             .get("references")
             .and_then(Value::as_array)
@@ -3919,6 +4460,8 @@ impl Storage {
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, Option<i64>>(7)?)),
             )
             .optional()?;
+        let expected_revision = params_value.get("expectedRevision").and_then(Value::as_i64);
+        let stored_revision = expected_revision.map(|value| value + 1).or_else(|| params_value.get("revision").and_then(Value::as_i64));
         if let Some((existing_workspace, existing_type, existing_revision, existing_session, existing_thread, existing_run, existing_branch, existing_result_revision)) = existing {
             if existing_workspace != workspace_id || existing_type != record_type {
                 return Err(KernelError::Authorization("record identity cannot be changed".to_string()));
@@ -3934,7 +4477,7 @@ impl Storage {
             if existing_result_revision != params_value.get("resultRevision").and_then(Value::as_i64) {
                 return Err(KernelError::Authorization("record resultRevision identity cannot be changed".to_string()));
             }
-            if let Some(expected) = params_value.get("expectedRevision").and_then(Value::as_i64) {
+            if let Some(expected) = expected_revision {
                 if existing_revision != Some(expected) {
                     return Err(KernelError::Operation("record revision conflict".to_string()));
                 }
@@ -3945,7 +4488,7 @@ impl Storage {
         let now = now_ms();
         self.conn.execute(
             "INSERT INTO domain_records(record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, payload_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, COALESCE((SELECT created_at FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2), ?12), ?12) ON CONFLICT(workspace_id, record_id) DO UPDATE SET state = excluded.state, session_id = excluded.session_id, thread_id = excluded.thread_id, run_id = excluded.run_id, branch_id = excluded.branch_id, revision = excluded.revision, result_revision = excluded.result_revision, payload_json = excluded.payload_json, updated_at = excluded.updated_at",
-            params![record_id, workspace_id, record_type, state, params_value.get("sessionId").and_then(Value::as_str), params_value.get("threadId").and_then(Value::as_str), params_value.get("runId").and_then(Value::as_str), params_value.get("branchId").and_then(Value::as_str), params_value.get("revision").and_then(Value::as_i64), params_value.get("resultRevision").and_then(Value::as_i64), serde_json::to_string(&payload)?, now],
+            params![record_id, workspace_id, record_type, state, params_value.get("sessionId").and_then(Value::as_str), params_value.get("threadId").and_then(Value::as_str), params_value.get("runId").and_then(Value::as_str), params_value.get("branchId").and_then(Value::as_str), stored_revision, params_value.get("resultRevision").and_then(Value::as_i64), serde_json::to_string(&payload)?, now],
         )?;
         self.conn.execute("DELETE FROM domain_record_refs WHERE workspace_id = ?1 AND record_id = ?2", params![workspace_id, record_id])?;
         for (slot, hash) in &normalized_refs {

@@ -5841,3 +5841,25 @@ catalog/WAL 文件大小观测，尚不据此给性能倍数。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-263 | partial implementation (direct checkpoint/turn/mutation path; composite actor/workspace identity) | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |
+
+### D-264 · 2026-09-13 · Typed recovery stages replace the transient catalog seam
+
+类型：返工修正；只追加，不改写 D-259/D-262/D-263 正文
+
+决定：生产 Host 删除 `KernelRecoveryCatalogBackend` 与 `:memory:` flush 路径，Recovery 的 checkpoint/turn/change 与 operation/operation-file 使用 Rust typed recovery methods。Rust 在同一 SQLite 事务内发布 operation 及其 files，文件 phase、turn settle、terminal operation 都携带 revision/state CAS；对象引用进入 Rust `recovery_refs`，GC 以这些引用为根。kernel catalog format 升为 v7，新增明确的 recovery tables/DTO/参数校验和 phase fault injection。
+
+原因：关闭时逐行 flush 不能表达提交前后故障窗口、响应丢失或 operation-file 的单文件 CAS，也会把 durable owner 与 TS SQL 快照分成两份权威。typed method 的输入边界让 workspace/actor/revision 关系在 Rust 内验证，并为后续直接迁移 combined/integration 编排提供真实事务 seam。
+
+影响：删除 `kernel-recovery-catalog.ts`，生产装配使用 `kernel-recovery-store.ts`；旧 local journal 仅供尚未迁移的测试/编排路径，不能作为 kernel recovery fallback。新增真实 release child-process operation transaction/CAS 与 actor turn-read 反例；R1 仍不标 wired/proven/default-on，因为 combined file apply、WorkingState root adapter、完整 actor resolver、location migration 与跨平台/断电证据尚未完成。
+
+证据边界：Windows release kernel typed recovery tests、checkpoint/turn/mutation restart test、protocol generation、cargo check/release build 和 Application Host type-check 通过；完整 public combined/integration stage、跨平台和硬断电窗口仍未实测。
+
+状态：部分实施；D-259 与 D-262 的 transient/record-facade 部分由本决定 superseded in part，其余未迁移消费者保持原边界。
+
+## D-264 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-259 | superseded in part | D-264（Recovery transient seam；WorkingState root cutover 仍保留） | status 阶段 R1 |
+| D-262 | superseded in part | D-264（memory catalog/operation-file facade） | status 阶段 R1；plan 阶段 R1 |
+| D-264 | partial implementation (typed recovery transaction/CAS; old facade deleted) | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |

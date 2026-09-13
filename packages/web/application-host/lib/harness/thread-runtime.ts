@@ -3289,16 +3289,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     // `dirty`/`merge-ready`/`conflict` are projections of a persisted result.
     // Only a still-running integration operation owns the directory.
     if (!options.workingStates) return reasons;
-    const operations = await options.workingStates.withStore(workspaceId, "thread-space-ops", (_store, context) => {
-      const rows = context.database.prepare(`
-        SELECT id, state, data_json FROM operations
-        WHERE workspace_id = ? AND kind = 'integration'
-        AND state NOT IN ('complete', 'conflict', 'compensated', 'aborted', 'undone')
-      `).all(workspaceId) as Array<{ id: string; state: string; data_json: string }>;
+    const operations = await options.workingStates.withStore(workspaceId, "thread-space-ops", async (_store, context) => {
+      if (!context.records) return [];
+      const rows = await context.records.list({ recordType: "recovery.operation" });
       return rows.flatMap((row) => {
         try {
-          const data = JSON.parse(row.data_json) as { threadId?: string };
-          return data.threadId === threadId ? [`Unfinished integration operation ${row.id} (${row.state})`] : [];
+          const data = JSON.parse(row.payloadJson) as { threadId?: string; kind?: string };
+          return data.kind === "integration" && data.threadId === threadId && !["complete", "conflict", "compensated", "aborted", "undone"].includes(row.state)
+            ? [`Unfinished integration operation ${row.recordId} (${row.state})`] : [];
         } catch {
           return [];
         }

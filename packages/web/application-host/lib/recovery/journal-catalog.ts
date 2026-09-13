@@ -414,18 +414,6 @@ const initializeEmptyCatalog = (database: SqliteDatabase): void => {
   })();
 };
 
-/**
- * Creates the SQL-shaped working view used by the recovery engine when its
- * durable rows live in the Rust kernel.  It intentionally uses an in-memory
- * database: callers must flush it through their catalog backend before close.
- */
-export const createRecoveryMemoryCatalog = (): SqliteDatabase => {
-  const database = new BetterSqlite3(':memory:');
-  configureWritableCatalog(database);
-  initializeEmptyCatalog(database);
-  return database;
-};
-
 const referenceSlot = (...parts: unknown[]): string => JSON.stringify(parts);
 
 const stateReference = (slot: string, state: unknown): ObjectReference[] => (

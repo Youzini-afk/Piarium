@@ -41,6 +41,20 @@ export type KernelMethod =
   | "recovery.operation.begin"
   | "recovery.operation.update"
   | "recovery.operation.get"
+  | "recovery.turn.start"
+  | "recovery.turn.get"
+  | "recovery.turn.settle"
+  | "recovery.checkpoint.create"
+  | "recovery.checkpoint.list"
+  | "recovery.entry.resolve"
+  | "recovery.change.before"
+  | "recovery.change.get"
+  | "recovery.change.after"
+  | "recovery.operation.create"
+  | "recovery.operation.file.cas"
+  | "recovery.operation.complete"
+  | "recovery.operation.list"
+  | "recovery.operation.release"
   | "operation.get"
   | "operation.release"
   | "storage.gc";
@@ -281,6 +295,148 @@ export interface KernelRecoveryParams {
 export interface KernelRecoveryGetParams {
   recordId?: string;
   operationId?: string;
+  workspaceId?: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+}
+
+export interface KernelRecoveryReference {
+  slot: string;
+  objectHash: string;
+  ownerId?: string;
+}
+
+export interface KernelRecoveryTurnStartParams {
+  operationId: string;
+  workspaceId: string;
+  executionId: string;
+  sessionId: string;
+  userEntryId: string;
+  workerId: string;
+  runtimeGeneration: number;
+  activeWriterScopes: string[];
+  provenance: string;
+  failure?: boolean;
+}
+
+export interface KernelRecoveryTurnGetParams {
+  workspaceId: string;
+  executionId: string;
+  sessionId?: string;
+}
+
+export interface KernelRecoveryTurnSettleParams {
+  operationId: string;
+  workspaceId: string;
+  executionId: string;
+  expectedRevision: number;
+  status: string;
+  observedResourceIds: string[];
+  observationComplete: boolean;
+  assistantEntryId?: string;
+  failureJson?: string;
+}
+
+export interface KernelRecoveryCheckpointCreateParams {
+  operationId: string;
+  workspaceId: string;
+  label: string;
+}
+
+export interface KernelRecoveryCheckpointListParams {
+  workspaceId: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelRecoveryEntryResolveParams {
+  workspaceId: string;
+  sessionId: string;
+  entryId: string;
+}
+
+export interface KernelRecoveryChangeBeforeParams {
+  operationId: string;
+  workspaceId: string;
+  executionId: string;
+  checkpointId: string;
+  path: string;
+  toolName: string;
+  mutationId: string;
+  beforeJson: string;
+  references: KernelRecoveryReference[];
+}
+
+export interface KernelRecoveryChangeGetParams {
+  workspaceId: string;
+  checkpointId: string;
+  path: string;
+}
+
+export interface KernelRecoveryChangeAfterParams {
+  operationId: string;
+  workspaceId: string;
+  executionId: string;
+  checkpointId: string;
+  path: string;
+  afterJson: string;
+  succeeded: boolean;
+  expectedRevision: number;
+  references: KernelRecoveryReference[];
+}
+
+export interface KernelRecoveryOperationFile {
+  path: string;
+  expectedJson?: string;
+  targetJson?: string;
+  safetyJson?: string;
+  phase?: string;
+  references?: KernelRecoveryReference[];
+}
+
+export interface KernelRecoveryOperationCreateParams {
+  operationId: string;
+  workspaceId: string;
+  kind: string;
+  state: string;
+  dataJson: string;
+  files: KernelRecoveryOperationFile[];
+}
+
+export interface KernelRecoveryOperationFileCasParams {
+  operationId: string;
+  workspaceId: string;
+  path: string;
+  expectedRevision: number;
+  expectedPhase: string;
+  phase: string;
+  observedFingerprint?: string;
+  expectedJson?: string;
+  targetJson?: string;
+  safetyJson?: string;
+  references?: KernelRecoveryReference[];
+}
+
+export interface KernelRecoveryOperationCompleteParams {
+  operationId: string;
+  workspaceId: string;
+  expectedRevision: number;
+  state: string;
+  resultJson?: string;
+  failureJson?: string;
+}
+
+export interface KernelRecoveryOperationListParams {
+  workspaceId: string;
+  kind?: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelRecoveryOperationReleaseParams {
+  operationId: string;
+  workspaceId: string;
 }
 
 export interface KernelOperationGetParams {
@@ -450,6 +606,20 @@ export type KernelMethodParams = {
   "recovery.operation.begin": KernelRecoveryParams;
   "recovery.operation.update": KernelRecoveryParams;
   "recovery.operation.get": KernelRecoveryGetParams;
+  "recovery.turn.start": KernelRecoveryTurnStartParams;
+  "recovery.turn.get": KernelRecoveryTurnGetParams;
+  "recovery.turn.settle": KernelRecoveryTurnSettleParams;
+  "recovery.checkpoint.create": KernelRecoveryCheckpointCreateParams;
+  "recovery.checkpoint.list": KernelRecoveryCheckpointListParams;
+  "recovery.entry.resolve": KernelRecoveryEntryResolveParams;
+  "recovery.change.before": KernelRecoveryChangeBeforeParams;
+  "recovery.change.get": KernelRecoveryChangeGetParams;
+  "recovery.change.after": KernelRecoveryChangeAfterParams;
+  "recovery.operation.create": KernelRecoveryOperationCreateParams;
+  "recovery.operation.file.cas": KernelRecoveryOperationFileCasParams;
+  "recovery.operation.complete": KernelRecoveryOperationCompleteParams;
+  "recovery.operation.list": KernelRecoveryOperationListParams;
+  "recovery.operation.release": KernelRecoveryOperationReleaseParams;
   "operation.get": KernelOperationGetParams;
   "operation.release": KernelOperationReleaseParams;
   "storage.gc": KernelGcParams;
@@ -759,6 +929,132 @@ export type KernelRequest =
       id: string;
       method: "recovery.operation.get";
       params: KernelRecoveryGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.turn.start";
+      params: KernelRecoveryTurnStartParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.turn.get";
+      params: KernelRecoveryTurnGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.turn.settle";
+      params: KernelRecoveryTurnSettleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.checkpoint.create";
+      params: KernelRecoveryCheckpointCreateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.checkpoint.list";
+      params: KernelRecoveryCheckpointListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.entry.resolve";
+      params: KernelRecoveryEntryResolveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.change.before";
+      params: KernelRecoveryChangeBeforeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.change.get";
+      params: KernelRecoveryChangeGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.change.after";
+      params: KernelRecoveryChangeAfterParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.operation.create";
+      params: KernelRecoveryOperationCreateParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.operation.file.cas";
+      params: KernelRecoveryOperationFileCasParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.operation.complete";
+      params: KernelRecoveryOperationCompleteParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.operation.list";
+      params: KernelRecoveryOperationListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.operation.release";
+      params: KernelRecoveryOperationReleaseParams;
       epoch?: string;
       grantId?: string;
     }

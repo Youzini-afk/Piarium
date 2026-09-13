@@ -24,7 +24,23 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.delete"
         | "operation.release" | "storage.record.put" | "storage.record.release" => "storage.write",
         "storage.gc" => "storage.gc",
-        "recovery.operation.begin" | "recovery.operation.update" | "recovery.operation.get" => {
+        "recovery.operation.begin"
+        | "recovery.operation.update"
+        | "recovery.operation.get"
+        | "recovery.turn.start"
+        | "recovery.turn.get"
+        | "recovery.turn.settle"
+        | "recovery.checkpoint.create"
+        | "recovery.checkpoint.list"
+        | "recovery.entry.resolve"
+        | "recovery.change.before"
+        | "recovery.change.get"
+        | "recovery.change.after"
+        | "recovery.operation.create"
+        | "recovery.operation.file.cas"
+        | "recovery.operation.complete"
+        | "recovery.operation.list"
+        | "recovery.operation.release" => {
             "recovery"
         }
         _ => "storage.read",
