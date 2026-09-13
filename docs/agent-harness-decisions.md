@@ -5906,3 +5906,26 @@ agent-mutation consumer 的 typed API 切换、同步 ThreadRuntime/IntegrationC
 | D-262 | superseded in part | D-265（combined journal 未迁移，撤回 production kernel persistence 表述） | status 阶段 R1；plan R1 |
 | D-264 | superseded in part | D-265（typed recovery API 与真实 consumer 状态分开） | status 阶段 R1；plan R1 |
 | D-265 | partial implementation / acceptance correction | — | status 阶段 R1；plan R1；kernel documentation |
+
+### D-266 · 2026-09-13 · Rust kernel 按领域拆分存储实现
+
+类型：内部架构重构；不改变协议、catalog 格式或产品行为
+
+问题：`piarium-kernel/src/main.rs` 已增长到 6483 行、约 275 KiB，一个 `impl Storage` 同时包含进程入口、catalog、授权、
+对象、状态树、分支、Recovery、领域记录、GC、完整性检查和协议分发。事务使用同一个 SQLite 连接是正确的，但把全部实现放在
+一个入口文件里会掩盖领域和事务边界，也会让 R2 的文件协调继续扩大一个任何修改都能触及的实现面。
+
+决定：二进制 `main.rs` 只调用 library 入口；`lib.rs` 装配 kernel crate；`runtime.rs` 只处理 framed transport、握手、
+admission/cancel 和少量生命周期入口。`Storage` 继续唯一持有 SQLite 连接、对象根、进程锁、取消状态和在建流，不复制 store、
+不引入 trait facade 或第二套事务框架。其实现拆入 `storage/{core,operations,authority_store,objects,state_tree,branches,recovery,
+records,gc,maintenance,dispatch}.rs`。领域方法默认只在 `storage` 父模块内可见；runtime 经一个授权后的 dispatch 进入，只有打开、
+grant、data chunk 和取消所需入口保持 crate 可见。
+
+状态：已实施。Rust workspace 单测、Windows release build 与既有真实 Host→release-kernel 子进程反例保持通过。此条只收口源码
+责任边界，不提高 R0/R1 的交付等级，也不提前完成 combined journal cutover 或 R2。
+
+## D-266 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-266 | implementation / internal architecture | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel documentation |

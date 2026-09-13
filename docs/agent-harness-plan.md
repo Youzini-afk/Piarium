@@ -734,6 +734,10 @@ Rust 接管同一 storage location 的所有元数据 writer，TS storage adapte
 
 本轮 D-264/D-265 已把恢复阶段的直接 seam 落到 Rust v8：checkpoint+turn、change before/after、operation+operation-file 初始事务、file phase CAS、terminal CAS、typed list/get/release 和 recovery reference GC root。`KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 不再是生产入口；但 combined Recovery/Integration/agent-mutation consumer 仍写 TS recovery SQLite。D-265 已接上 root/path adapter、准确 session resolver 与 current-root pin；同步消费者改造、typed consumer 切换、location 收口、跨平台/断电证据仍未完成。
 
+D-266 已把 Rust crate 的进程入口、transport 与存储领域实现分开，并用一个授权 dispatch 限制 runtime 可见面；它不改变
+R1 数据格式或消费者状态。后续 R1/R2 直接进入对应 `storage/recovery.rs`、`storage/branches.rs` 和新的文件资源模块，不能再把
+领域实现堆回 `main.rs` 或在各模块自行打开 SQLite。
+
 ### R2. 文件权威、Documents 与恢复事务
 
 迁移 canonical 文件资源、路径 gate、磁盘 before/after、三方计划/应用/条件补偿及启动对账。

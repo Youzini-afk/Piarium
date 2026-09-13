@@ -210,6 +210,11 @@ agent-mutation 的真实持久 writer 仍是 TS recovery SQLite，Rust operation
 
 **D-264/D-265 当前返工证据（2026-09-13）**：生产 `KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 已删除；Rust format v8 提供 typed recovery transaction/CAS。`kernel-client.test.ts` 的真实 Windows release 子进程覆盖 fixed/current pin、grant revoke 清理 query pin、recordRevision CAS、actor/session/thread/run 隔离、record-backed source 权限、typed operation 故障回滚及重启。`storage-adapter.test.ts` 另走真实 kernel，覆盖 root/path 读取、未发布 query pin、virtual write/revert 和 kernel branch + TS durable Integration 的生产组合。combined consumer 尚未切到 Rust，不能据 typed API 的测试写成已接管。
 
+**D-266 源码责任边界（2026-09-13）**：原 6483 行 `piarium-kernel/src/main.rs` 已缩为启动入口；crate 装配进入
+`lib.rs`，transport/admission 留在 `runtime.rs`，唯一 `Storage` 的 core/operation/authority/object/tree/branch/recovery/record/
+GC/health/dispatch 实现拆入 `storage/`。Windows release build、Rust workspace tests 与既有真实 child-process 反例用于证明此次
+移动没有改变协议或持久行为。本条是可维护性收口，不改变 R0/R1 Partial 和 R2–R6 未完成状态。
+
 **R0/R1 历史验收边界（D-258，2026-09-13；当前由 D-265 取代）**：D-257 的 64-envelope queue、hash-only blob read、可选 publish CAS、
 format v5 与 object attachment 表述已由本条取代。
 

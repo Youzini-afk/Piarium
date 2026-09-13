@@ -60,6 +60,16 @@ their current durable writer. The adapter composes that journal's Documents gate
 consumer cutover replaces it. It does not use a transient close-time flush. A kernel failure is surfaced; production does not fall back to
 the old WorkingState writer.
 
+## Rust source ownership
+
+The executable `main.rs` only invokes the library runtime. `lib.rs` owns crate assembly and `runtime.rs`
+owns framed transport, handshake, request admission, cancellation, and authorized dispatch. A single
+`storage::Storage` owns the SQLite connection, object root, process lock, cancellation state, and active
+builders. Its implementation is divided into `core`, `operations`, `authority_store`, `objects`,
+`state_tree`, `branches`, `recovery`, `records`, `gc`, `maintenance`, and `dispatch` modules. These are
+one transaction owner with bounded source visibility, not independent stores. Storage domains do not
+open their own catalog connections or bypass dispatch identity checks.
+
 The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
 the current run covers the original R0/R1 invariants plus typed record/reference ownership and record-bound object reads.
 The production adapter longitudinal path is assembled in `application-host/index.ts`; actor-bound recovery calls

@@ -101,6 +101,13 @@ explicitly without preserving its old internal schema. There is no dual writer o
 the old backend on native-runtime failure. Exact protocol, data, lifecycle, performance, and packaging
 requirements are in [rust-kernel-design.md](rust-kernel-design.md).
 
+Inside the Rust crate, the executable `main.rs` is only the process entry. `lib.rs` assembles the
+runtime and storage modules; `runtime.rs` owns framed transport, handshake, admission, and cancellation.
+One `storage::Storage` still owns the catalog connection, object root, process lock, cancellation state,
+and active builders. Its authority, objects, immutable tree, branches, Recovery, records, GC, health, and
+transaction implementations live in bounded `storage/` modules and are entered through one authorized
+dispatch. This is a source ownership boundary, not multiple stores or services (D-266).
+
 ### 4.1 Renderer
 
 The renderer contains presentation, local view state, and the shared client-side kernel. It never

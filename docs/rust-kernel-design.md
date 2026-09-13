@@ -75,6 +75,11 @@ TS 增加私有 kernel client；具体 crate/package 拆分服从这些依赖边
 共享 wire schema 在内核协议模块定义，生成 TS DTO/schema 并验证运行时输入；不手工维护两份漂移的契约。
 前端的 `application-client` 和 Pi 的 `protocol` 保持各自的公共契约，由 Host 适配，不泄露数据库结构。
 
+D-266 已把当前单 crate 的实现按这些边界落地：`main.rs` 只启动 library；`runtime.rs` 持有 framed transport、握手、
+admission 与取消；`storage/mod.rs` 是唯一 SQLite/对象根/锁/取消/在建流 owner；授权、对象、不可变状态树、分支、typed
+Recovery、领域记录、GC/完整性和幂等事务分别位于 `storage/` 子模块。它们仍共享同一 `Storage` 和事务域，不能各自打开连接。
+协议 runtime 通过统一的授权 dispatch 进入领域实现，避免重新暴露一组可绕过身份检查的底层方法。
+
 ## 3. IPC、权限与执行身份
 
 控制消息使用有长度帧的结构化编码，经 Host 创建的私有管道传输；正文/PTY 等大数据按可背压的数据流传送。
