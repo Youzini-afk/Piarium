@@ -732,7 +732,7 @@ Rust 接管同一 storage location 的所有元数据 writer，TS storage adapte
 验证真实 Host client→Rust→重开后的分支读写、跨分支 sharing、mode/字节身份、固定查询、CAS 冲突、pin 与 GC 并发、
 新格式发布关键窗口故障，以及旧实现/数据移除后从新库启动。复用本轮反例；节点数/读写字节从生产调用计量，不能仅测一个 trie helper。
 
-本轮 D-264/D-265 已把恢复阶段的直接 seam 落到 Rust v8：checkpoint+turn、change before/after、operation+operation-file 初始事务、file phase CAS、terminal CAS、typed list/get/release 和 recovery reference GC root。D-267 增加 result/draft/verification/review 的领域 DTO；D-268/D-269 把 root preview、directory Integration 与 agent surface/disk mutation 接到 Rust durable operation port。`KernelRecoveryCatalogBackend`、内存 catalog 与 close-time flush 不再是这些已切换路径的生产入口；但 ThreadRuntime/IntegrationCoordinator 的兼容投影、branch undo/reconcile 和 combined Recovery public methods 仍未全切换。跨平台/断电证据仍未完成。
+本轮 D-264/D-265 已把恢复阶段的直接 seam 落到 Rust v8：checkpoint+turn、change before/after、operation+operation-file 初始事务、file phase CAS、terminal CAS、typed list/get/release 和 recovery reference GC root。D-273 纠正了 D-267–D-272 把局部 DTO/port 写成完整 consumer 接管的表述：现在确有 generated nested working DTO、result root/revision/diff 校验、固定 publish pin、scoped subtree read、dirty surface Rust operation phases 与 agent mutation 的逐步 await；但 ThreadRuntime/IntegrationCoordinator 的兼容投影、branch undo/reconcile、combined Recovery public methods 和 TS recovery writer 仍未全切换。跨平台/断电证据仍未完成。
 
 D-266 已把 Rust crate 的进程入口、transport 与存储领域实现分开，并用一个授权 dispatch 限制 runtime 可见面；它不改变
 R1 数据格式或消费者状态。后续 R1/R2 直接进入对应 `storage/recovery.rs`、`storage/branches.rs` 和新的文件资源模块，不能再把
