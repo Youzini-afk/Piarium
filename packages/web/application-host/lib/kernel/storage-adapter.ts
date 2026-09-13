@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult } from "./protocol.generated.js";
+import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument, KernelWorkingReviewDocument, KernelWorkingResultDocument, KernelWorkingVerificationDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { SqliteDatabase } from "../recovery/journal-catalog.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
@@ -1126,7 +1126,14 @@ class KernelWorkingStateCompatibilityAdapter {
     const id = `draft-${randomUUID()}`; const pathStates: Record<string, RecoveryState> = {}; const provenance: Record<string, DraftBaselinePathProvenance> = {}; const ownerIds: string[] = []; const references: KernelStorageReference[] = [];
     for (const input of paths) { const file = normalize(input.path); const bytes = typeof input.content === "string" ? Buffer.from(input.content, "utf8") : input.content; const object = await this.putObject(bytes); pathStates[file] = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(input.mode === undefined ? {} : { mode: input.mode }) }; provenance[file] = clone(input.provenance); const owner = this.ownerByHash.get(object.hash); if (owner) ownerIds.push(owner); references.push({ slot: `draft:${file}`, objectHash: object.hash }); }
     const baseline: DraftBaseline = { id, workspaceId, createdAt: nowIso(), pathStates, provenance };
-    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document: baseline, createdAt: baseline.createdAt, ownerIds, references }); this.drafts.set(id, baseline); for (const state of Object.values(pathStates)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` }); } return clone(baseline);
+    const draftDocument: KernelWorkingDraftDocument = {
+      id,
+      workspaceId,
+      createdAt: baseline.createdAt,
+      root: transientStateIdentity(pathStates),
+      provenance: Object.entries(provenance).map(([file, value]) => ({ path: file, ...value })),
+    };
+    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document: draftDocument, createdAt: baseline.createdAt, ownerIds, references }); this.drafts.set(id, baseline); for (const state of Object.values(pathStates)) if (state.kind === "regular-file") { this.ownerByHash.delete(state.objectHash); this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` }); } return clone(baseline);
   }
 
   async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
@@ -1198,7 +1205,7 @@ class KernelWorkingStateCompatibilityAdapter {
       ...Object.entries(pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
     ];
     const persistedResult = { resultRevision: result.resultRevision, branchId: result.branchId, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, root: result.root };
-    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root: publishedRoot, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, document: persistedResult, ownerIds: [], references: refs });
+    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root: publishedRoot, ...(result.parentRef ? { parentRef: result.parentRef } : {}), changedPaths: result.changedPaths, diffStats: result.diffStats, createdAt: result.createdAt, document: { ...persistedResult, root: publishedRoot } as KernelWorkingResultDocument, ownerIds: [], references: refs });
     for (const reference of refs) this.sourceByHash.set(reference.objectHash, { recordId: `working-result:${branchId}@${revision}`, slot: reference.slot });
     return clone(result);
   }
@@ -1241,12 +1248,19 @@ class KernelWorkingStateCompatibilityAdapter {
   private async putVerification(recordType: string, threadId: string, revision: number, payload: unknown): Promise<void> {
     const recordId = `${recordType}:${threadId}:${revision}`;
     const document = asRecord(payload);
-    const branchId = typeof document.branchId === "string" ? document.branchId : typeof document.mergedResultRevision === "number" ? `merge:${document.mergedResultRevision}` : "unknown";
-    const root = typeof document.resultTreeHash === "string" ? document.resultTreeHash : typeof document.parentTreeHash === "string" ? document.parentTreeHash : "root:unbound";
+    const resultRecords = await this.context.working.resultList();
+    const matchingResult = resultRecords.find((entry) => Number(asRecord(entry.record).resultRevision) === revision);
+    if (!matchingResult) throw new Error(`Working result ${revision} is not available for ${recordType}`);
+    const result = asRecord(matchingResult.record);
+    const branchId = typeof result.branchId === "string" && result.branchId ? result.branchId : (() => { throw new Error(`Working result ${revision} has no branch identity`); })();
+    const root = typeof result.root === "string" && result.root ? result.root : (() => { throw new Error(`Working result ${revision} has no root identity`); })();
+    if (typeof document.branchId === "string" && document.branchId !== branchId) throw new Error(`Verification ${recordId} branch identity does not match result`);
+    if (typeof document.resultTreeHash === "string" && document.resultTreeHash !== root) throw new Error(`Verification ${recordId} root identity does not match result`);
+    if (typeof document.parentTreeHash === "string" && document.parentTreeHash !== root) throw new Error(`Verification ${recordId} parent root does not match result`);
     if (recordType === "working.review") {
-      await this.context.working.reviewPut({ operationId: `${recordId}:${randomUUID()}`, recordId, threadId, branchId, resultRevision: revision, root, document, ownerIds: [], references: [] });
+      await this.context.working.reviewPut({ operationId: `${recordId}:${randomUUID()}`, recordId, threadId, branchId, resultRevision: revision, root, document: document as unknown as KernelWorkingReviewDocument, ownerIds: [], references: [] });
     } else {
-      await this.context.working.verificationPut({ operationId: `${recordId}:${randomUUID()}`, recordId, kind: recordType.endsWith("child") ? "child" : "parent", threadId, branchId, resultRevision: revision, root, document, ownerIds: [], references: [] });
+      await this.context.working.verificationPut({ operationId: `${recordId}:${randomUUID()}`, recordId, kind: recordType.endsWith("child") ? "child" : "parent", threadId, branchId, resultRevision: revision, root, document: document as unknown as KernelWorkingVerificationDocument, ownerIds: [], references: [] });
     }
   }
 }

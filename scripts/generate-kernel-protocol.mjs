@@ -59,6 +59,7 @@ const rustType = (type) => {
   if (type === 'unknown') return 'Value';
   if (type === 'string | null') return 'RequiredNullable<String>';
   if (type === 'number | null') return 'RequiredNullable<i64>';
+  if (type === 'boolean | null') return 'RequiredNullable<bool>';
   if (type === 'KernelBranchState') return 'PathState';
   return type;
 };
@@ -86,7 +87,13 @@ const renderRustDto = (name) => {
   });
   return `#[derive(Clone, Debug, Deserialize)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(crate) struct ${name} {\n${fields.join('\n')}\n}`;
 };
-const unformattedRust = `// Generated from kernel/protocol/schema.json. Do not hand-edit.\n#![allow(dead_code)]\n\nuse crate::model::PathState;\nuse serde::Deserialize;\nuse serde_json::Value;\n\n#[derive(Clone, Debug, Deserialize)]\n#[serde(transparent)]\npub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);\n\n${[...rustDtoNames].map(renderRustDto).join('\n\n')}\n\npub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {\n    match method {\n${Object.entries(methodParams).map(([method, paramsType]) => `        ${JSON.stringify(method)} => serde_json::from_value::<${paramsType}>(params.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n`;
+const workingDocumentDto = {
+  'working.result': 'KernelWorkingResultDocument',
+  'working.draft': 'KernelWorkingDraftDocument',
+  'working.verification': 'KernelWorkingVerificationDocument',
+  'working.review': 'KernelWorkingReviewDocument',
+};
+const unformattedRust = `// Generated from kernel/protocol/schema.json. Do not hand-edit.\n#![allow(dead_code)]\n\nuse crate::model::PathState;\nuse serde::Deserialize;\nuse serde_json::Value;\n\n#[derive(Clone, Debug, Deserialize)]\n#[serde(transparent)]\npub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);\n\n${[...rustDtoNames].map(renderRustDto).join('\n\n')}\n\npub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {\n    match method {\n${Object.entries(methodParams).map(([method, paramsType]) => `        ${JSON.stringify(method)} => serde_json::from_value::<${paramsType}>(params.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n\npub(crate) fn validate_generated_working_document(record_type: &str, document: &Value) -> Result<(), String> {\n    match record_type {\n${Object.entries(workingDocumentDto).map(([recordType, dto]) => `        ${JSON.stringify(recordType)} => serde_json::from_value::<${dto}>(document.clone()).map(|_| ()).map_err(|error| error.to_string()),`).join('\n')}\n        _ => Ok(()),\n    }\n}\n`;
 const rustfmt = spawnSync(process.platform === 'win32' ? 'rustfmt.exe' : 'rustfmt', ['--emit', 'stdout', '--edition', '2021'], {
   input: unformattedRust,
   encoding: 'utf8',

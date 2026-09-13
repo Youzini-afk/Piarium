@@ -134,11 +134,43 @@
       "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},
     "KernelRecordReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
+    "KernelWorkingDiffStats": {"fields": {"files": {"type": "number"}, "insertions": {"type": "number"}, "deletions": {"type": "number"}}},
+    "KernelWorkingResultDocument": {"fields": {
+      "resultRevision": {"type": "number"}, "branchId": {"type": "string"}, "parentRef": {"type": "string", "optional": true},
+      "changedPaths": {"type": "string[]"}, "diffStats": {"type": "KernelWorkingDiffStats"}, "createdAt": {"type": "string"}, "root": {"type": "string"}
+    }},
+    "KernelDraftProvenance": {"fields": {
+      "path": {"type": "string"}, "baseRevision": {"type": "string | null"}, "encoding": {"type": "string"}, "bom": {"type": "boolean"}, "localEditRevision": {"type": "number"}, "revision": {"type": "string"}
+    }},
+    "KernelWorkingDraftDocument": {"fields": {
+      "id": {"type": "string"}, "workspaceId": {"type": "string"}, "createdAt": {"type": "string"}, "root": {"type": "string"},
+      "pinId": {"type": "string", "optional": true}, "provenance": {"type": "KernelDraftProvenance[]"}
+    }},
+    "KernelVerificationEnvSummary": {"fields": {"PATH": {"type": "boolean", "optional": true}, "VIRTUAL_ENV": {"type": "string", "optional": true}}},
+    "KernelVerificationActor": {"fields": {"authorityInstanceId": {"type": "string"}, "sessionId": {"type": "string"}, "workerId": {"type": "string"}, "workerGeneration": {"type": "number"}, "runId": {"type": "string", "optional": true}}},
+    "KernelVerificationInputIdentity": {"fields": {"kind": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "root": {"type": "string", "optional": true}, "startTreeHash": {"type": "string", "optional": true}, "endTreeHash": {"type": "string", "optional": true}, "reason": {"type": "string", "optional": true}}},
+    "KernelCommandVerificationRecord": {"fields": {
+      "id": {"type": "string"}, "runId": {"type": "string"}, "command": {"type": "string"}, "cwd": {"type": "string"},
+      "envSummary": {"type": "KernelVerificationEnvSummary", "optional": true}, "commandRunId": {"type": "string", "optional": true}, "startedAt": {"type": "number"}, "endedAt": {"type": "number"},
+      "exitCode": {"type": "number | null"}, "cancelled": {"type": "boolean"}, "outputHandle": {"type": "string", "optional": true}, "outputPreview": {"type": "string", "optional": true},
+      "actor": {"type": "KernelVerificationActor"}, "bindingGeneration": {"type": "number"}, "inputIdentity": {"type": "KernelVerificationInputIdentity"}, "inputChangedDuringRun": {"type": "boolean | null"}, "relationToPublished": {"type": "string"}
+    }},
+    "KernelWorkingVerificationDocument": {"fields": {
+      "resultRevision": {"type": "number", "optional": true}, "mergedResultRevision": {"type": "number", "optional": true}, "mergeOperationId": {"type": "string", "optional": true}, "branchId": {"type": "string", "optional": true},
+      "resultTreeHash": {"type": "string", "optional": true}, "parentTreeHash": {"type": "string", "optional": true}, "recordedAt": {"type": "number"}, "windowOpenedAt": {"type": "number", "optional": true},
+      "draftUnsaved": {"type": "boolean", "optional": true}, "note": {"type": "string", "optional": true}, "binding": {"type": "string"}, "bindingReason": {"type": "string", "optional": true},
+      "checks": {"type": "KernelCommandVerificationRecord[]"}
+    }},
+    "KernelReviewFinding": {"fields": {"severity": {"type": "string"}, "file": {"type": "string", "optional": true}, "line": {"type": "number", "optional": true}, "message": {"type": "string"}}},
+    "KernelWorkingReviewDocument": {"fields": {
+      "resultRevision": {"type": "number"}, "status": {"type": "string"}, "recordedAt": {"type": "number"}, "reviewThreadId": {"type": "string", "optional": true}, "reviewRunId": {"type": "string", "optional": true},
+      "gate": {"type": "boolean", "optional": true}, "conclusion": {"type": "string", "optional": true}, "findings": {"type": "KernelReviewFinding[]", "optional": true}, "error": {"type": "string", "optional": true}
+    }},
     "KernelWorkingResultPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"},
       "branchId": {"type": "string"}, "resultRevision": {"type": "number"}, "root": {"type": "string"},
       "parentRef": {"type": "string", "optional": true}, "changedPaths": {"type": "string[]"},
-      "diffStats": {"type": "unknown"}, "createdAt": {"type": "string"}, "document": {"type": "unknown"},
+      "diffStats": {"type": "KernelWorkingDiffStats"}, "createdAt": {"type": "string"}, "document": {"type": "KernelWorkingResultDocument"},
       "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true},
       "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
@@ -146,7 +178,7 @@
     "KernelWorkingResultListParams": {"fields": {"workspaceId": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}}},
     "KernelWorkingResultReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelWorkingDraftPutParams": {"fields": {
-      "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "document": {"type": "unknown"},
+      "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "document": {"type": "KernelWorkingDraftDocument"},
       "root": {"type": "string", "optional": true}, "pinId": {"type": "string", "optional": true}, "createdAt": {"type": "string"},
       "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
@@ -156,14 +188,14 @@
     "KernelWorkingVerificationPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "kind": {"type": "string"},
       "threadId": {"type": "string"}, "runId": {"type": "string", "optional": true}, "branchId": {"type": "string"}, "resultRevision": {"type": "number"}, "root": {"type": "string"},
-      "document": {"type": "unknown"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
+      "document": {"type": "KernelWorkingVerificationDocument"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
     "KernelWorkingVerificationListParams": {"fields": {"workspaceId": {"type": "string"}, "threadId": {"type": "string"}, "kind": {"type": "string"}}},
     "KernelWorkingVerificationReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelWorkingReviewPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "threadId": {"type": "string"},
       "runId": {"type": "string", "optional": true}, "branchId": {"type": "string"}, "resultRevision": {"type": "number"}, "root": {"type": "string"},
-      "document": {"type": "unknown"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
+      "document": {"type": "KernelWorkingReviewDocument"}, "expectedRecordRevision": {"type": "number", "optional": true}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
     "KernelWorkingReviewListParams": {"fields": {"workspaceId": {"type": "string"}, "threadId": {"type": "string"}}},
     "KernelWorkingReviewReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},

@@ -614,17 +614,20 @@ test("typed working result boundary stores root identity without state maps", { 
   clients.push(host);
   await host.start();
   const client = host.scoped(await issueActor(host, "working-record-actor", "working-record-workspace"));
+  const created = await client.createBranch({ operationId: "working-result-branch-create", branchId: "branch-1", workspaceId: "working-record-workspace", entries: [] });
+  const publishedBranch = await client.publishBranch({ operationId: "working-result-branch-publish", branchId: "branch-1", expectedWriteRevision: Number(created.writeRevision ?? 0), expectedRoot: String(created.root) });
+  const publishedRoot = String(publishedBranch.root);
   const value = await client.workingResultPut({
     operationId: "working-result-put",
     recordId: "working-result:branch-1@1",
     workspaceId: "working-record-workspace",
     branchId: "branch-1",
     resultRevision: 1,
-    root: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    changedPaths: ["a.txt"],
-    diffStats: { files: 1, insertions: 1, deletions: 0 },
+    root: publishedRoot,
+    changedPaths: [],
+    diffStats: { files: 0, insertions: 0, deletions: 0 },
     createdAt: new Date().toISOString(),
-    document: { branchId: "branch-1", resultRevision: 1, root: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", changedPaths: ["a.txt"], diffStats: { files: 1, insertions: 1, deletions: 0 }, createdAt: new Date().toISOString() },
+    document: { branchId: "branch-1", resultRevision: 1, root: publishedRoot, changedPaths: [], diffStats: { files: 0, insertions: 0, deletions: 0 }, createdAt: new Date().toISOString() },
     ownerIds: [],
     references: [],
   });
@@ -632,6 +635,37 @@ test("typed working result boundary stores root identity without state maps", { 
   assert.equal(JSON.stringify(value.record).includes("pathStates"), false);
   const listed = await client.workingResultList({ workspaceId: "working-record-workspace", branchId: "branch-1" });
   assert.equal((listed.records as unknown[]).length, 1);
+});
+
+test("Rust rejects malformed and mismatched typed working result DTOs", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-dto-reject-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "working-dto-reject-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "working-dto-reject-actor", "working-dto-reject-workspace"));
+  const common = {
+    operationId: "working-dto-reject-malformed",
+    recordId: "working-result:missing@1",
+    workspaceId: "working-dto-reject-workspace",
+    branchId: "missing",
+    resultRevision: 1,
+    root: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    changedPaths: [],
+    diffStats: { files: 0, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    ownerIds: [],
+    references: [],
+  };
+  await assert.rejects(
+    client.workingResultPut({ ...common, document: { branchId: "missing", resultRevision: 1, root: common.root, changedPaths: [], diffStats: common.diffStats, createdAt: common.createdAt, pathStates: {} } as never }),
+    /unknown field|malformed|revision is not published/i,
+  );
+  await assert.rejects(
+    client.workingResultPut({ ...common, operationId: "working-dto-reject-mismatch", recordId: "working-result:missing@1", document: { branchId: "missing", resultRevision: 1, root: common.root, changedPaths: [], diffStats: common.diffStats, createdAt: common.createdAt } as never }),
+    /revision is not published|branch|root/i,
+  );
 });
 
 test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 }, async (t) => {

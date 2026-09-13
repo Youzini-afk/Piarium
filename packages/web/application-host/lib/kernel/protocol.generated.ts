@@ -196,6 +196,117 @@ export interface KernelRecordReleaseParams {
   recordId: string;
 }
 
+export interface KernelWorkingDiffStats {
+  files: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface KernelWorkingResultDocument {
+  resultRevision: number;
+  branchId: string;
+  parentRef?: string;
+  changedPaths: string[];
+  diffStats: KernelWorkingDiffStats;
+  createdAt: string;
+  root: string;
+}
+
+export interface KernelDraftProvenance {
+  path: string;
+  baseRevision: string | null;
+  encoding: string;
+  bom: boolean;
+  localEditRevision: number;
+  revision: string;
+}
+
+export interface KernelWorkingDraftDocument {
+  id: string;
+  workspaceId: string;
+  createdAt: string;
+  root: string;
+  pinId?: string;
+  provenance: KernelDraftProvenance[];
+}
+
+export interface KernelVerificationEnvSummary {
+  PATH?: boolean;
+  VIRTUAL_ENV?: string;
+}
+
+export interface KernelVerificationActor {
+  authorityInstanceId: string;
+  sessionId: string;
+  workerId: string;
+  workerGeneration: number;
+  runId?: string;
+}
+
+export interface KernelVerificationInputIdentity {
+  kind: string;
+  branchId?: string;
+  root?: string;
+  startTreeHash?: string;
+  endTreeHash?: string;
+  reason?: string;
+}
+
+export interface KernelCommandVerificationRecord {
+  id: string;
+  runId: string;
+  command: string;
+  cwd: string;
+  envSummary?: KernelVerificationEnvSummary;
+  commandRunId?: string;
+  startedAt: number;
+  endedAt: number;
+  exitCode: number | null;
+  cancelled: boolean;
+  outputHandle?: string;
+  outputPreview?: string;
+  actor: KernelVerificationActor;
+  bindingGeneration: number;
+  inputIdentity: KernelVerificationInputIdentity;
+  inputChangedDuringRun: boolean | null;
+  relationToPublished: string;
+}
+
+export interface KernelWorkingVerificationDocument {
+  resultRevision?: number;
+  mergedResultRevision?: number;
+  mergeOperationId?: string;
+  branchId?: string;
+  resultTreeHash?: string;
+  parentTreeHash?: string;
+  recordedAt: number;
+  windowOpenedAt?: number;
+  draftUnsaved?: boolean;
+  note?: string;
+  binding: string;
+  bindingReason?: string;
+  checks: KernelCommandVerificationRecord[];
+}
+
+export interface KernelReviewFinding {
+  severity: string;
+  file?: string;
+  line?: number;
+  message: string;
+}
+
+export interface KernelWorkingReviewDocument {
+  resultRevision: number;
+  status: string;
+  recordedAt: number;
+  reviewThreadId?: string;
+  reviewRunId?: string;
+  gate?: boolean;
+  conclusion?: string;
+  findings?: KernelReviewFinding[];
+  error?: string;
+}
+
 export interface KernelWorkingResultPutParams {
   operationId: string;
   recordId: string;
@@ -205,9 +316,9 @@ export interface KernelWorkingResultPutParams {
   root: string;
   parentRef?: string;
   changedPaths: string[];
-  diffStats: unknown;
+  diffStats: KernelWorkingDiffStats;
   createdAt: string;
-  document: unknown;
+  document: KernelWorkingResultDocument;
   sessionId?: string;
   threadId?: string;
   runId?: string;
@@ -238,7 +349,7 @@ export interface KernelWorkingDraftPutParams {
   operationId: string;
   recordId: string;
   workspaceId: string;
-  document: unknown;
+  document: KernelWorkingDraftDocument;
   root?: string;
   pinId?: string;
   createdAt: string;
@@ -274,7 +385,7 @@ export interface KernelWorkingVerificationPutParams {
   branchId: string;
   resultRevision: number;
   root: string;
-  document: unknown;
+  document: KernelWorkingVerificationDocument;
   expectedRecordRevision?: number;
   ownerIds: string[];
   references: KernelRecordReference[];
@@ -301,7 +412,7 @@ export interface KernelWorkingReviewPutParams {
   branchId: string;
   resultRevision: number;
   root: string;
-  document: unknown;
+  document: KernelWorkingReviewDocument;
   expectedRecordRevision?: number;
   ownerIds: string[];
   references: KernelRecordReference[];

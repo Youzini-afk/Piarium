@@ -168,9 +168,9 @@ pub(crate) struct KernelWorkingResultPutParams {
     pub(crate) root: String,
     pub(crate) parent_ref: Option<String>,
     pub(crate) changed_paths: Vec<String>,
-    pub(crate) diff_stats: Value,
+    pub(crate) diff_stats: KernelWorkingDiffStats,
     pub(crate) created_at: String,
-    pub(crate) document: Value,
+    pub(crate) document: KernelWorkingResultDocument,
     pub(crate) session_id: Option<String>,
     pub(crate) thread_id: Option<String>,
     pub(crate) run_id: Option<String>,
@@ -209,7 +209,7 @@ pub(crate) struct KernelWorkingDraftPutParams {
     pub(crate) operation_id: String,
     pub(crate) record_id: String,
     pub(crate) workspace_id: String,
-    pub(crate) document: Value,
+    pub(crate) document: KernelWorkingDraftDocument,
     pub(crate) root: Option<String>,
     pub(crate) pin_id: Option<String>,
     pub(crate) created_at: String,
@@ -253,7 +253,7 @@ pub(crate) struct KernelWorkingVerificationPutParams {
     pub(crate) branch_id: String,
     pub(crate) result_revision: i64,
     pub(crate) root: String,
-    pub(crate) document: Value,
+    pub(crate) document: KernelWorkingVerificationDocument,
     pub(crate) expected_record_revision: Option<i64>,
     pub(crate) owner_ids: Vec<String>,
     pub(crate) references: Vec<KernelRecordReference>,
@@ -286,7 +286,7 @@ pub(crate) struct KernelWorkingReviewPutParams {
     pub(crate) branch_id: String,
     pub(crate) result_revision: i64,
     pub(crate) root: String,
-    pub(crate) document: Value,
+    pub(crate) document: KernelWorkingReviewDocument,
     pub(crate) expected_record_revision: Option<i64>,
     pub(crate) owner_ids: Vec<String>,
     pub(crate) references: Vec<KernelRecordReference>,
@@ -625,6 +625,69 @@ pub(crate) struct KernelRecordReference {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDiffStats {
+    pub(crate) files: i64,
+    pub(crate) insertions: i64,
+    pub(crate) deletions: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingResultDocument {
+    pub(crate) result_revision: i64,
+    pub(crate) branch_id: String,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) changed_paths: Vec<String>,
+    pub(crate) diff_stats: KernelWorkingDiffStats,
+    pub(crate) created_at: String,
+    pub(crate) root: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingDraftDocument {
+    pub(crate) id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) created_at: String,
+    pub(crate) root: String,
+    pub(crate) pin_id: Option<String>,
+    pub(crate) provenance: Vec<KernelDraftProvenance>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingVerificationDocument {
+    pub(crate) result_revision: Option<i64>,
+    pub(crate) merged_result_revision: Option<i64>,
+    pub(crate) merge_operation_id: Option<String>,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) result_tree_hash: Option<String>,
+    pub(crate) parent_tree_hash: Option<String>,
+    pub(crate) recorded_at: i64,
+    pub(crate) window_opened_at: Option<i64>,
+    pub(crate) draft_unsaved: Option<bool>,
+    pub(crate) note: Option<String>,
+    pub(crate) binding: String,
+    pub(crate) binding_reason: Option<String>,
+    pub(crate) checks: Vec<KernelCommandVerificationRecord>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkingReviewDocument {
+    pub(crate) result_revision: i64,
+    pub(crate) status: String,
+    pub(crate) recorded_at: i64,
+    pub(crate) review_thread_id: Option<String>,
+    pub(crate) review_run_id: Option<String>,
+    pub(crate) gate: Option<bool>,
+    pub(crate) conclusion: Option<String>,
+    pub(crate) findings: Option<Vec<KernelReviewFinding>>,
+    pub(crate) error: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelCreateEntry {
     pub(crate) path: String,
     pub(crate) state: PathState,
@@ -662,6 +725,76 @@ pub(crate) struct KernelRecoveryOperationFile {
     pub(crate) safety_json: Option<String>,
     pub(crate) phase: Option<String>,
     pub(crate) references: Option<Vec<KernelRecoveryReference>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelDraftProvenance {
+    pub(crate) path: String,
+    pub(crate) base_revision: RequiredNullable<String>,
+    pub(crate) encoding: String,
+    pub(crate) bom: bool,
+    pub(crate) local_edit_revision: i64,
+    pub(crate) revision: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelCommandVerificationRecord {
+    pub(crate) id: String,
+    pub(crate) run_id: String,
+    pub(crate) command: String,
+    pub(crate) cwd: String,
+    pub(crate) env_summary: Option<KernelVerificationEnvSummary>,
+    pub(crate) command_run_id: Option<String>,
+    pub(crate) started_at: i64,
+    pub(crate) ended_at: i64,
+    pub(crate) exit_code: RequiredNullable<i64>,
+    pub(crate) cancelled: bool,
+    pub(crate) output_handle: Option<String>,
+    pub(crate) output_preview: Option<String>,
+    pub(crate) actor: KernelVerificationActor,
+    pub(crate) binding_generation: i64,
+    pub(crate) input_identity: KernelVerificationInputIdentity,
+    pub(crate) input_changed_during_run: RequiredNullable<bool>,
+    pub(crate) relation_to_published: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelReviewFinding {
+    pub(crate) severity: String,
+    pub(crate) file: Option<String>,
+    pub(crate) line: Option<i64>,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelVerificationEnvSummary {
+    pub(crate) path: Option<bool>,
+    pub(crate) virtual_env: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelVerificationActor {
+    pub(crate) authority_instance_id: String,
+    pub(crate) session_id: String,
+    pub(crate) worker_id: String,
+    pub(crate) worker_generation: i64,
+    pub(crate) run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelVerificationInputIdentity {
+    pub(crate) kind: String,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) root: Option<String>,
+    pub(crate) start_tree_hash: Option<String>,
+    pub(crate) end_tree_hash: Option<String>,
+    pub(crate) reason: Option<String>,
 }
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
@@ -939,6 +1072,29 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "storage.gc" => serde_json::from_value::<KernelGcParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        _ => Ok(()),
+    }
+}
+
+pub(crate) fn validate_generated_working_document(
+    record_type: &str,
+    document: &Value,
+) -> Result<(), String> {
+    match record_type {
+        "working.result" => serde_json::from_value::<KernelWorkingResultDocument>(document.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "working.draft" => serde_json::from_value::<KernelWorkingDraftDocument>(document.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "working.verification" => {
+            serde_json::from_value::<KernelWorkingVerificationDocument>(document.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "working.review" => serde_json::from_value::<KernelWorkingReviewDocument>(document.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         _ => Ok(()),
