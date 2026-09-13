@@ -73,8 +73,7 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
-import { createKernelRecoveryRecordFacade } from './lib/kernel/recovery-record-adapter.js';
-import { createRecoveryFileStore } from './lib/recovery/journal-files.js';
+import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from './lib/kernel/kernel-recovery-catalog.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
@@ -1004,9 +1003,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId: extensionRuntime.services.hostId,
     hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
     storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
-    fileStore: createRecoveryFileStore(),
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
   });
+  const kernelRecoveryContentStore = new KernelRecoveryContentStore(
+    kernelStorageAdapter,
+    path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId, 'recovery-cache'),
+  );
+  const kernelRecoveryCatalog = new KernelRecoveryCatalogBackend(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -1130,8 +1133,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         sessionNavigation: recoverySessionNavigation,
         resolveDirectoryApplyContext,
         storageOwnerId,
+        fileStore: kernelRecoveryContentStore,
+        catalogBackend: kernelRecoveryCatalog,
       });
-      engine = createKernelRecoveryRecordFacade(engine, kernelStorageAdapter);
       workspaceRecoveryEngines.set(storageOwnerId, engine);
     }
     return engine;
@@ -1359,7 +1363,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return DEFAULT_SUGGESTIONS_SETTINGS;
     }
   };
-  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
+  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, kernelRecoveryCatalog);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;

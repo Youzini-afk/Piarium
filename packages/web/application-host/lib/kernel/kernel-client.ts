@@ -146,11 +146,11 @@ export class KernelScopedClient {
     return this.owner.getOperation(operationId, this.grant, signal);
   }
 
-  beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: unknown }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.beginRecovery(params, this.grant, signal);
   }
 
-  updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: unknown }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.updateRecovery(params, this.grant, signal);
   }
 
@@ -699,11 +699,11 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown> | null>("operation.get", { operationId }, { signal, grant });
   }
 
-  async beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: unknown }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async beginRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.begin", params, { signal, grant });
   }
 
-  async updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: unknown }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async updateRecovery(params: { operationId: string; recordId?: string; workspaceId?: string; state?: string; data?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.update", params, { signal, grant });
   }
 

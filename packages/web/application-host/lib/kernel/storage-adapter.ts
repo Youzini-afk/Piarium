@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import type { KernelBranchState, KernelRecordResult } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
+import type { SqliteDatabase } from "../recovery/journal-catalog.js";
+import type { RecoveryCatalogBackend } from "./kernel-recovery-catalog.js";
 import { createRecoveryFileStore, type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
 import { materializeWorkingState, type MaterializeResult } from "../harness/working-state/materializer.js";
 import { sameState, stateIdentity } from "../recovery/journal-files.js";
@@ -37,6 +39,8 @@ export interface KernelStorageReference {
 
 export interface KernelStorageContext {
   client: KernelScopedClient;
+  /** SQL-shaped transient view for legacy orchestration queries; never durable. */
+  database?: SqliteDatabase;
   identity: RecoveryIdentity;
   root: string;
   fileStore: RecoveryFileStore;
@@ -473,8 +477,9 @@ export class KernelStorageAdapter {
     const key = `${workspaceId}:${purpose}`;
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
-      const actor = this.options.resolveActor ? await this.options.resolveActor(workspaceId, purpose) : { sessionId: `application-host:${this.options.hostId}`, threadId: `workspace:${workspaceId}`, runId: `storage:${purpose}`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] };
-      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${workspaceId}:${purpose}`, ...actor, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: actor.pathScopes ?? [""] });
+      const actor = this.options.resolveActor ? await this.options.resolveActor(workspaceId, purpose) : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] };
+      const capabilities = ["storage.read", "storage.write", "recovery", ...(purpose.includes("gc") || purpose === "recovery-catalog" ? ["storage.gc"] : [])];
+      return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${purpose}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();
     this.grants.set(key, grant); return grant;
   }
@@ -493,14 +498,39 @@ export class KernelStorageAdapter {
   async dispose(): Promise<void> {
     const grants = await Promise.allSettled([...this.grants.values()].map(async (grant) => this.client.revokeGrant((await grant).grantId)));
     this.grants.clear();
-    if (grants.some((result) => result.status === "rejected")) throw new Error("One or more kernel storage grants failed to revoke");
+    const failures = grants.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length > 0) throw new Error(`One or more kernel storage grants failed to revoke: ${failures.map((failure) => String(failure.reason)).join("; ")}`);
   }
 }
 
-export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAdapter): WorkspaceWorkingStateAccess => ({
-  withStore: async (workspaceId, purpose, operation, _mode: Mode = "exclusive") => {
-    const context = await adapter.context(workspaceId, purpose);
-    const store = await KernelWorkingStateStore.open(adapter, context);
-    return operation(store as never, context as never);
-  },
-});
+export const createKernelWorkspaceWorkingStateAccess = (adapter: KernelStorageAdapter, catalogBackend?: RecoveryCatalogBackend): WorkspaceWorkingStateAccess => {
+  // Keep one short-lived root projection per Host/workspace instead of
+  // expanding every branch on every consumer callback. Durable truth remains
+  // the kernel root/revision; this cache is rebuilt after a Host restart.
+  const stores = new Map<string, Promise<KernelWorkingStateStore>>();
+  const storeFor = (workspaceId: string): Promise<KernelWorkingStateStore> => {
+    const existing = stores.get(workspaceId);
+    if (existing) return existing;
+    const opening = (async () => {
+      const context = await adapter.context(workspaceId, "working-state-open");
+      return KernelWorkingStateStore.open(adapter, context);
+    })();
+    stores.set(workspaceId, opening);
+    return opening;
+  };
+  return {
+    withStore: async (workspaceId, purpose, operation, _mode: Mode = "exclusive") => {
+      const store = await storeFor(workspaceId);
+      const context = await adapter.context(workspaceId, purpose);
+      const database = catalogBackend
+        ? await catalogBackend.open(workspaceId, context.root, { create: true, purpose })
+        : null;
+      try {
+        const scopedContext = database ? { ...context, database } : context;
+        return operation(store as never, scopedContext as never);
+      } finally {
+        if (database) await catalogBackend!.close(database);
+      }
+    },
+  };
+};

@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, and production WorkingState/retrieval now route through typed kernel records; Recovery durable record cutover remains partial
+Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, and production WorkingState/retrieval/Recovery durable records now route through typed kernel records; file apply and materialization remain later stages
 
 Last updated: 2026-09-13
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-13
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-本轮 D-258 之后已把 WorkingState branch/result/draft/publish/CAS、materializer 输入和 retrieval artifact/receipt 的记录与引用交给 Rust typed domain API；Recovery checkpoint/turn/operation 与 Integration durable journal 仍待切换，R2–R6 不因本轮实现而完成。
+本轮已把 WorkingState branch/result/draft/publish/CAS、verification/review、materializer 输入、retrieval artifact/receipt，以及 Recovery checkpoint/turn/operation/operation-file 与 Integration durable journal 的记录和引用交给 Rust typed domain API；TS 只保留内存 SQL-shaped 编排视图，实际文件 apply/materialize 与 R2–R6 不因本轮实现而完成。
 
 ## 1. 产品与阶段目标
 

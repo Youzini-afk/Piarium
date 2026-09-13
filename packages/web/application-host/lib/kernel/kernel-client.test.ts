@@ -5,6 +5,9 @@ import os from "node:os";
 import path from "node:path";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
+import { KernelStorageAdapter } from "./storage-adapter.js";
+import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from "./kernel-recovery-catalog.js";
+import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
 const kernelPath = path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
@@ -239,7 +242,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     recordId: "recovery-record",
     workspaceId: "recovery-workspace",
     state: "started",
-    data: { before: "before-state" },
+    data: JSON.stringify({ before: "before-state" }),
   });
   assert.equal(recoveryBegin.state, "started");
   const recoveryUpdate = await retried.updateRecovery({
@@ -247,7 +250,7 @@ test("operation finish failure rolls back the durable mutation and permits retry
     recordId: "recovery-record",
     workspaceId: "recovery-workspace",
     state: "complete",
-    data: { target: "after-state" },
+    data: JSON.stringify({ target: "after-state" }),
   });
   assert.equal(recoveryUpdate.state, "complete");
   const recovery = await retried.getRecovery({ recordId: "recovery-record" });
@@ -617,4 +620,66 @@ test("the source package finds its kernel independently of process cwd", async (
   } finally {
     process.chdir(previous);
   }
+});
+
+test("real kernel recovery catalog persists checkpoints, operation files, and objects across restart", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-recovery-test-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-recovery-workspace-"));
+  roots.push(root, workspace);
+  await fs.writeFile(path.join(workspace, "a.txt"), "before");
+  const makeEngine = async () => {
+    const client = createKernelClient({ hostId: "kernel-recovery-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+    clients.push(client);
+    await client.start();
+    const adapter = new KernelStorageAdapter({ hostId: "kernel-recovery-host", storageRoot: root, client, resolveWorkspaceRoot: async () => workspace });
+    const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
+    const catalog = new KernelRecoveryCatalogBackend(adapter, content);
+    const documents = {
+      inspectWorkspace: async () => ({ workspaceId: "workspace-test", root: workspace }),
+      listWorkspaceRegistrations: async () => [{ workspaceId: "workspace-test", canonicalPath: workspace }],
+      inspectDirtyBuffers: async () => [],
+      beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
+      runResourceOperation: async (_workspaceId: string, _resources: readonly unknown[], operation: () => Promise<unknown>) => operation(),
+    };
+    const navigation = {
+      prepare: async () => ({ expectedLeafId: null, targetLeafId: null, removedEntryIds: [] }),
+      prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
+      commit: async () => ({}),
+      commitLeaf: async () => ({}),
+    };
+    const engine = createWorkspaceRecoveryEngine({
+      authorityId: "kernel-recovery-host",
+      dataDir: path.join(root, "host-data"),
+      documents: documents as never,
+      sessionNavigation: navigation as never,
+      fileStore: content,
+      catalogBackend: catalog,
+    });
+    return { adapter, client, engine };
+  };
+
+  const first = await makeEngine();
+  await first.engine.recordTurnStart({ executionId: "execution-1", workspaceId: "workspace-test", sessionId: "session-1", userEntryId: "user-1", workerId: "worker-1", runtimeGeneration: 1, activeWriterScopes: [], provenance: "caused-by" });
+  await first.engine.recordMutationBefore({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1" });
+  await fs.writeFile(path.join(workspace, "a.txt"), "after");
+  await first.engine.recordMutationAfter({ executionId: "execution-1", workspaceId: "workspace-test", path: "a.txt", toolName: "edit", mutationId: "mutation-1", toolCallId: "tool-call-1", succeeded: true });
+  await first.engine.recordTurnSettled({ executionId: "execution-1", workspaceId: "workspace-test", activeWriterScopes: [], provenance: "caused-by", observedResourceIds: ["a.txt"], observationComplete: true, mutationObserved: true, assistantEntryId: "assistant-1" });
+  await first.engine.dispose();
+  await first.adapter.dispose();
+  await first.client.close();
+
+  const second = await makeEngine();
+  const checkpoints = await second.engine.listCheckpoints({ workspaceId: "workspace-test" });
+  assert.equal(checkpoints.status, "ready");
+  assert.equal(checkpoints.page.checkpoints.length, 1);
+  const resolved = await second.engine.resolveEntry({ workspaceId: "workspace-test", sessionId: "session-1", entryId: "user-1" });
+  assert.equal(resolved.status, "ready");
+  assert.equal(resolved.binding?.checkpointId, checkpoints.page.checkpoints[0]?.id);
+  await second.engine.dispose();
+  await second.adapter.dispose();
+  await second.client.close();
 });

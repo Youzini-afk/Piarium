@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R0/R1 foundations are implemented and locally exercised, with production WorkingState/retrieval consumers routed through the Rust storage authority while Recovery durable records remain partial
+Status: Pi-native workbench and harness in production; Rust kernel R0/R1 foundations are implemented and locally exercised, with production WorkingState/retrieval/Recovery durable records routed through the Rust storage authority while file apply/materialization remain later stages
 
 Last updated: 2026-09-13
 
@@ -723,7 +723,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval and checkpoint/turn records; Git/copy directories are materializations | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; combined Recovery operation-file/Integration cutover remains separate |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval and Recovery/Integration durable records; Git/copy directories are materializations | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; file apply/materialization remain R2/R3 |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |

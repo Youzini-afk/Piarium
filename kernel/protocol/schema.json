@@ -136,7 +136,7 @@
     "KernelBranchDeleteParams": {"fields": {"operationId": {"type": "string"}, "branchId": {"type": "string"}}},
     "KernelPinReadParams": {"fields": {"pinId": {"type": "string"}, "includeEntries": {"type": "boolean", "optional": true}}},
     "KernelRecoveryParams": {"fields": {
-      "operationId": {"type": "string"}, "recordId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}, "state": {"type": "string", "optional": true}, "data": {"type": "unknown", "optional": true}
+      "operationId": {"type": "string"}, "recordId": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}, "state": {"type": "string", "optional": true}, "data": {"type": "string", "optional": true}
     }},
     "KernelRecoveryGetParams": {"fields": {"recordId": {"type": "string", "optional": true}, "operationId": {"type": "string", "optional": true}}},
     "KernelOperationGetParams": {"fields": {"operationId": {"type": "string"}}},

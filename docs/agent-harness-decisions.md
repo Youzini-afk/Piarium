@@ -5797,3 +5797,25 @@ catalog/WAL 文件大小观测，尚不据此给性能倍数。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-261 | implementation (checkpoint/turn/mutation record seam) | — | status 阶段 R1；kernel module documentation |
+
+### D-262 · 2026-09-13 · Kernel recovery catalog and operation-file cutover
+
+类型：问题与解法；不改写 D-259–D-261
+
+决定：生产 recovery engine 使用内存 SQL-shaped 工作视图，打开/关闭时把 checkpoint、change、turn、operation、operation-file、metadata 行按稳定 record identity flush 到 Rust `domain_records`/`domain_record_refs`；内容对象由同一 recovery grant 上传到 kernel blob store，Rust 负责引用消费和 GC。旧 BetterSqlite3 recovery catalog 只保留给现有离线夹具，不再由 Application Host 生产装配打开。
+
+原因：现有 combined recovery、Integration coordinator 和 thread-runtime 仍通过 `context.database` 查询，直接删除接口会在没有迁移消费者的情况下断生产链；把 SQL 视图限制为进程内工作副本可以保持既有文件计划/实际 apply 编排，同时让唯一耐久 writer、引用生命周期和重启对账落到 kernel。每个 Host/workspace 复用短生命周期 WorkingState projection，避免每个 consumer callback 再次展开整棵树。
+
+考虑过的替代：继续把 recovery rows 写入 workspace `catalog.sqlite`（保留双 authority）；为所有旧 SQL 调用临时发明通用 SQL RPC（绕过领域约束）；复制 rows 到 TS JSON 并在失败时回退（违反无双写/无 fallback）。均未采用。
+
+影响：新增 `kernel/kernel-recovery-catalog.ts`，`journal-engine.ts` 支持 catalog backend 与 kernel content store，生产 `application-host/index.ts` 注入该 backend，删除无调用方的旧 recovery record facade；Recovery 文件计划、Documents barrier 和实际磁盘 apply 仍属于 R2，Thread/Run/Pi/Registry/TriviumDB 权威不变。
+
+证据边界：真实 Windows release kernel 子进程通过 turn/checkpoint → before/after blob → settle、关闭重开列出/resolve、combined prepare/apply、kernel GC smoke；`kernel-client.test.ts` 12/12、协议生成、Host 类型检查和 Host 启停 smoke 通过。macOS/Linux、断电、完整桌面点击链和受控性能测量仍未实测。
+
+状态：已实施；R1 durable recovery records wired，文件 apply/materializer 与跨平台发行仍未完成
+
+## D-262 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-262 | implementation (kernel recovery catalog/operation-file cutover) | — | status 阶段 R1；plan 阶段 R1；rust-kernel-design；architecture；kernel module documentation |

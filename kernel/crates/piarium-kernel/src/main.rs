@@ -3586,7 +3586,9 @@ impl Storage {
         );
         let data = params_value
             .get("data")
-            .cloned()
+            .and_then(Value::as_str)
+            .map(|value| serde_json::from_str::<Value>(value).map_err(|error| KernelError::Operation(format!("recovery data is malformed: {error}"))))
+            .transpose()?
             .unwrap_or_else(|| json!({}));
         let data_json = serde_json::to_string(&data)?;
         let existing: Option<(String, String, String)> = self
@@ -3785,6 +3787,28 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("recordType is required".to_string()))?;
+        const KNOWN_RECORD_TYPES: &[&str] = &[
+            "working.branch",
+            "working.draft",
+            "working.result",
+            "working.verification.child",
+            "working.verification.parent",
+            "working.review",
+            "retrieval.artifact",
+            "retrieval.receipt",
+            "retrieval.evidence",
+            "recovery.metadata",
+            "recovery.checkpoint",
+            "recovery.change",
+            "recovery.turn",
+            "recovery.operation",
+            "recovery.operation-file",
+        ];
+        if !KNOWN_RECORD_TYPES.contains(&record_type)
+            && !(record_type.starts_with("retrieval.evidence.") && record_type.len() > "retrieval.evidence.".len())
+        {
+            return Err(KernelError::Operation(format!("recordType is not supported: {record_type}")));
+        }
         let state = params_value
             .get("state")
             .and_then(Value::as_str)
@@ -3796,6 +3820,9 @@ impl Storage {
             .ok_or_else(|| KernelError::Operation("payloadJson is required".to_string()))?;
         let payload: Value = serde_json::from_str(payload_json)
             .map_err(|error| KernelError::Operation(format!("payloadJson is malformed: {error}")))?;
+        if !payload.is_object() {
+            return Err(KernelError::Operation("payloadJson must contain an object".to_string()));
+        }
         let references = params_value
             .get("references")
             .and_then(Value::as_array)

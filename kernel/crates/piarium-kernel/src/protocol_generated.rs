@@ -279,7 +279,7 @@ pub(crate) struct KernelRecoveryParams {
     pub(crate) record_id: Option<String>,
     pub(crate) workspace_id: Option<String>,
     pub(crate) state: Option<String>,
-    pub(crate) data: Option<Value>,
+    pub(crate) data: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

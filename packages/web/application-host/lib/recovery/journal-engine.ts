@@ -89,6 +89,7 @@ import {
   type RecoveryIdentity,
   type RecoveryState,
 } from './journal-files.js';
+import type { RecoveryCatalogBackend } from '../kernel/kernel-recovery-catalog.js';
 import {
   createRecoveryLocationRegistry,
   readRecoveryJsonAtomic,
@@ -198,6 +199,8 @@ export interface CreateWorkspaceRecoveryEngineOptions {
   sessionNavigation: RecoverySessionNavigation;
   storageOwnerId?: string | undefined;
   resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
+  /** Optional durable backend. Production uses the Rust kernel; tests retain the local catalog. */
+  catalogBackend?: RecoveryCatalogBackend | undefined;
 }
 
 interface RecoveryTargetStates {
@@ -554,6 +557,7 @@ export const createWorkspaceRecoveryEngine = (
     storageOwnerId = 'piarium.builtin.recovery',
     fileStore: fileStoreOverride,
     resolveDirectoryApplyContext,
+    catalogBackend,
   } = options;
   const locations = createRecoveryLocationRegistry({
     authorityId,
@@ -749,8 +753,19 @@ export const createWorkspaceRecoveryEngine = (
     });
   };
 
-  const openWritableCatalog = async (root: string): Promise<SqliteDatabase> => {
-    const database = await openRecoveryJournalCatalog(root, { create: true, fsPromises });
+  const openCatalog = async (workspaceId: string, root: string, create: boolean, purpose: string): Promise<SqliteDatabase | null> => (
+    catalogBackend
+      ? catalogBackend.open(workspaceId, root, { create, purpose })
+      : openRecoveryJournalCatalog(root, { create, fsPromises })
+  );
+
+  const closeCatalog = async (database: SqliteDatabase): Promise<void> => {
+    if (catalogBackend) await catalogBackend.close(database);
+    else database.close();
+  };
+
+  const openWritableCatalog = async (workspaceId: string, root: string, purpose: string): Promise<SqliteDatabase> => {
+    const database = await openCatalog(workspaceId, root, true, purpose);
     if (!database) {
       throw new RecoveryPrimitiveError('checkpoint-unavailable', 'Recovery catalog could not be created', {
         origin: 'storage',
@@ -760,8 +775,8 @@ export const createWorkspaceRecoveryEngine = (
     return database;
   };
 
-  const openExistingCatalog = async (root: string, operationId?: string): Promise<SqliteDatabase> => {
-    const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
+  const openExistingCatalog = async (workspaceId: string, root: string, operationId?: string, purpose = 'recovery-read'): Promise<SqliteDatabase> => {
+    const database = await openCatalog(workspaceId, root, false, purpose);
     if (!database) {
       throw new RecoveryPrimitiveError(
         operationId ? 'operation-not-found' : 'checkpoint-missing',
@@ -777,7 +792,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<WorkspaceRecoveryTurnBinding> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-turn-start');
     try {
       const checkpointId = randomUUID();
       const createdAt = new Date().toISOString();
@@ -833,7 +848,7 @@ export const createWorkspaceRecoveryEngine = (
       }
       return result;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -842,7 +857,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<boolean> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-journal-before-image');
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding || binding.workspaceId !== input.workspaceId || binding.status === 'incomplete') return false;
@@ -886,7 +901,7 @@ export const createWorkspaceRecoveryEngine = (
       ));
       throw error;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -895,7 +910,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<boolean> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-journal-after-image');
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding || binding.workspaceId !== input.workspaceId || binding.status === 'incomplete') return false;
@@ -940,7 +955,7 @@ export const createWorkspaceRecoveryEngine = (
       });
       return changed;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -949,7 +964,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<WorkspaceRecoveryTurnBinding> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-turn-settle');
     try {
       const binding = bindingFor(database, input.executionId);
       if (!binding) throw new RecoveryPrimitiveError('checkpoint-missing', 'Turn checkpoint was not created');
@@ -1008,7 +1023,7 @@ export const createWorkspaceRecoveryEngine = (
       if (!settled) throw new RecoveryPrimitiveError('checkpoint-missing', 'Settled turn checkpoint is missing', { origin: 'storage' });
       return settled;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1017,7 +1032,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<Exclude<WorkspaceRecoveryEntryBindingResult, WorkspaceRecoveryFailedResult>> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(input.workspaceId, storage.root, false, 'recovery-entry-read');
     if (!database) return { reason: 'session-unbound', status: 'unbound' };
     try {
       const row = database.prepare(`
@@ -1040,7 +1055,7 @@ export const createWorkspaceRecoveryEngine = (
         status: 'ready',
       };
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1379,7 +1394,7 @@ export const createWorkspaceRecoveryEngine = (
       let database: SqliteDatabase | null;
       try {
         storage = await storageFor(identity, false);
-        database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+        database = await openCatalog(identity.workspaceId, storage.root, false, 'recovery-operation-locate');
       } catch (error) {
         inspectionFailure ??= error;
         continue;
@@ -1390,7 +1405,7 @@ export const createWorkspaceRecoveryEngine = (
           .get(operationId, identity.workspaceId) as OperationRow | undefined;
         if (row) return { identity, record: parseCombinedOperationRecord(row), root: storage.root };
       } finally {
-        database.close();
+        await closeCatalog(database);
       }
     }
     if (inspectionFailure) {
@@ -1409,7 +1424,7 @@ export const createWorkspaceRecoveryEngine = (
     const storage = await storageFor(identity);
     const navigation = await sessionNavigation.prepare(input);
     const removedEntryIds = [...new Set(navigation.removedEntryIds ?? [])];
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'combined-recovery-prepare');
     try {
       const _targetBinding = await resolveEntryInternal(input);
       const loaded = changesForEntries(database, input.sessionId, removedEntryIds);
@@ -1492,7 +1507,7 @@ export const createWorkspaceRecoveryEngine = (
       })();
       return plan;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1553,7 +1568,7 @@ export const createWorkspaceRecoveryEngine = (
     input: WorkspaceCombinedRecoveryApplyInput,
   ): Promise<WorkspaceCombinedRecoveryOperation> => {
     const { identity, root } = located;
-    const database = await openRecoveryJournalCatalog(root, { create: false, fsPromises });
+    const database = await openCatalog(identity.workspaceId, root, false, 'combined-recovery-apply');
     if (!database) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${input.operationId}`);
     let dirtyBarrier: DirtyBarrierHandle | undefined;
     try {
@@ -1701,7 +1716,7 @@ export const createWorkspaceRecoveryEngine = (
       return publicOperation(record);
     } finally {
       await dirtyBarrier?.release();
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1712,7 +1727,7 @@ export const createWorkspaceRecoveryEngine = (
 
   const cancelOperationInternal = async (operationId: string): Promise<WorkspaceCombinedRecoveryOperation> => {
     const located = await locateOperation(operationId);
-    const database = await openExistingCatalog(located.root, operationId);
+    const database = await openExistingCatalog(located.identity.workspaceId, located.root, operationId, 'combined-recovery-cancel');
     try {
       const row = database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
       if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${operationId}`);
@@ -1723,13 +1738,13 @@ export const createWorkspaceRecoveryEngine = (
       }
       return publicOperation(record);
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
   const prepareUndoInternal = async (operationId: string): Promise<WorkspaceCombinedRecoveryPlan> => {
     const located = await locateOperation(operationId);
-    const database = await openExistingCatalog(located.root, operationId);
+    const database = await openExistingCatalog(located.identity.workspaceId, located.root, operationId, 'combined-recovery-undo-prepare');
     try {
       const row = database.prepare('SELECT * FROM operations WHERE id = ?').get(operationId) as OperationRow | undefined;
       if (!row) throw new RecoveryPrimitiveError('operation-not-found', `Unknown recovery operation: ${operationId}`);
@@ -1799,7 +1814,7 @@ export const createWorkspaceRecoveryEngine = (
       })();
       return plan;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1808,7 +1823,7 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<WorkspaceRecoveryCheckpointSummary> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-checkpoint');
     try {
       const id = randomUUID();
       runImmediateTransaction(database, 'Named checkpoint creation', () => {
@@ -1821,7 +1836,7 @@ export const createWorkspaceRecoveryEngine = (
       if (!checkpoint) throw new RecoveryPrimitiveError('checkpoint-missing', 'Named checkpoint was not persisted', { origin: 'storage' });
       return checkpoint;
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1831,7 +1846,7 @@ export const createWorkspaceRecoveryEngine = (
   }> => {
     const identity = await inspectIdentity(input.workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(input.workspaceId, storage.root, false, 'recovery-checkpoint-list');
     if (!database) return { checkpoints: [], nextCursor: null };
     try {
       const limit = input.limit;
@@ -1849,14 +1864,14 @@ export const createWorkspaceRecoveryEngine = (
       const checkpoints = (limit === undefined ? rows : rows.slice(0, limit)).map(parseCheckpointRow);
       return { checkpoints, nextCursor: hasMore ? checkpoints.at(-1)!.sequence : null };
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
   const listOperationsInternal = async (workspaceId: string): Promise<WorkspaceCombinedRecoveryOperation[]> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(workspaceId, storage.root, false, 'recovery-operation-list');
     if (!database) return [];
     try {
       const rows = database.prepare(`
@@ -1865,7 +1880,7 @@ export const createWorkspaceRecoveryEngine = (
       `).all(workspaceId) as OperationRow[];
       return rows.map(parseCombinedOperationRecord).map(publicOperation);
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1876,7 +1891,7 @@ export const createWorkspaceRecoveryEngine = (
   const agentMutationFailuresInternal = async (workspaceId: string): Promise<WorkspaceRecoveryFailure[]> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(workspaceId, storage.root, false, 'recovery-agent-failures');
     if (!database) return [];
     try {
       const rows = database.prepare(`
@@ -1909,7 +1924,7 @@ export const createWorkspaceRecoveryEngine = (
         );
       });
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -1940,20 +1955,38 @@ export const createWorkspaceRecoveryEngine = (
     let readyCheckpointCount = 0;
     let state: RecoveryStorageStatus['state'] = 'missing';
     let catalog: RecoveryStorageStatus['catalog'] = { currentSchemaVersion: 0, retiredCatalogCount: 0, state: 'missing' };
-    // Use the read-only inspect path for status queries — this never
-    // migrates, retires, or creates a catalog. It only classifies and,
-    // for current v5 catalogs, opens a readonly handle to count rows.
-    const inspected = await inspectRecoveryJournalCatalog(root, { fsPromises }).catch((error) => {
-      if (errorCode(error) === 'storage-schema-newer') {
-        state = 'corrupt';
-      } else if (errorCode(error) === 'storage-malformed') {
-        state = 'malformed';
-      } else {
-        state = 'corrupt';
+    if (catalogBackend) {
+      const database = await openCatalog(workspaceId, root, false, 'recovery-status');
+      if (database) {
+        try {
+          const counts = database.prepare(`
+            SELECT COUNT(*) AS count,
+              SUM(CASE WHEN state = 'ready' THEN 1 ELSE 0 END) AS ready
+            FROM checkpoints WHERE workspace_id = ?
+          `).get(workspaceId) as { count: number; ready: number | null };
+          checkpointCount = counts.count;
+          readyCheckpointCount = counts.ready ?? 0;
+          state = 'ready';
+          catalog = { currentSchemaVersion: 6, retiredCatalogCount: 0, state: 'ready' };
+        } finally {
+          await closeCatalog(database);
+        }
       }
-      return null;
-    });
-    if (inspected) {
+    } else {
+      // Use the read-only inspect path for status queries — this never
+      // migrates, retires, or creates a catalog. It only classifies and,
+      // for current v5 catalogs, opens a readonly handle to count rows.
+      const inspected = await inspectRecoveryJournalCatalog(root, { fsPromises }).catch((error) => {
+        if (errorCode(error) === 'storage-schema-newer') {
+          state = 'corrupt';
+        } else if (errorCode(error) === 'storage-malformed') {
+          state = 'malformed';
+        } else {
+          state = 'corrupt';
+        }
+        return null;
+      });
+      if (inspected) {
       catalog = {
         currentSchemaVersion: inspected.status.currentSchemaVersion,
         retiredCatalogCount: inspected.status.retiredCatalogCount,
@@ -1962,7 +1995,7 @@ export const createWorkspaceRecoveryEngine = (
           ? { migratedFrom: inspected.status.migratedFrom }
           : {}),
       };
-      if (inspected.database) {
+        if (inspected.database) {
         try {
           const counts = inspected.database.prepare(`
             SELECT COUNT(*) AS count,
@@ -1972,16 +2005,17 @@ export const createWorkspaceRecoveryEngine = (
           checkpointCount = counts.count;
           readyCheckpointCount = counts.ready ?? 0;
           state = 'ready';
-        } finally {
-          inspected.database.close();
+          } finally {
+            inspected.database.close();
+          }
+        } else if (inspected.classification.kind === 'migrate'
+          || inspected.classification.kind === 'retire'
+          || inspected.classification.kind === 'empty') {
+          // Catalog exists but needs activation before it can be read.
+          // Report it as 'ready' with zero counts — the caller can activate
+          // by performing a write operation (createCheckpoint, etc).
+          state = 'ready';
         }
-      } else if (inspected.classification.kind === 'migrate'
-        || inspected.classification.kind === 'retire'
-        || inspected.classification.kind === 'empty') {
-        // Catalog exists but needs activation before it can be read.
-        // Report it as 'ready' with zero counts — the caller can activate
-        // by performing a write operation (createCheckpoint, etc).
-        state = 'ready';
       }
     }
     return {
@@ -2098,11 +2132,12 @@ export const createWorkspaceRecoveryEngine = (
         const status = await storageStatusInternal(entry.workspaceId);
         const storage = await storageFor(identity, false);
         let lastActivityAt: string | null = null;
-        // Use the read-only inspect path for last-activity queries.
-        const inspected = await inspectRecoveryJournalCatalog(storage.root, { fsPromises }).catch(() => null);
-        if (inspected?.database) {
+        const database = catalogBackend
+          ? await openCatalog(entry.workspaceId, storage.root, false, 'recovery-workspace-list')
+          : (await inspectRecoveryJournalCatalog(storage.root, { fsPromises }).catch(() => null))?.database;
+        if (database) {
           try {
-            const lastActivity = inspected.database.prepare(`
+            const lastActivity = database.prepare(`
               SELECT MAX(value) AS value FROM (
                 SELECT MAX(created_at) AS value FROM checkpoints WHERE workspace_id = ?
                 UNION ALL SELECT MAX(updated_at) AS value FROM operations WHERE workspace_id = ?
@@ -2110,7 +2145,8 @@ export const createWorkspaceRecoveryEngine = (
             `).get(entry.workspaceId, entry.workspaceId) as { value: string | null };
             lastActivityAt = lastActivity.value ?? null;
           } finally {
-            inspected.database.close();
+            if (catalogBackend) await closeCatalog(database);
+            else database.close();
           }
         }
         results.push({
@@ -2306,6 +2342,7 @@ export const createWorkspaceRecoveryEngine = (
     root: string,
     database: SqliteDatabase,
   ): Promise<{ byteLengthReclaimed: number; objectsDeleted: number }> => {
+    if (catalogBackend) return { byteLengthReclaimed: 0, objectsDeleted: 0 };
     const refs = referencedObjects(database);
     const objectsRoot = pathModule.join(root, 'objects');
     let byteLengthReclaimed = 0;
@@ -2337,8 +2374,10 @@ export const createWorkspaceRecoveryEngine = (
   const retentionStatusInternal = async (workspaceId: string): Promise<RecoveryRetentionStatus> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
-    const inspected = await inspectRecoveryJournalCatalog(storage.root, { fsPromises });
-    if (!inspected?.database) {
+    const database = catalogBackend
+      ? await openCatalog(workspaceId, storage.root, false, 'recovery-retention-status')
+      : (await inspectRecoveryJournalCatalog(storage.root, { fsPromises }))?.database;
+    if (!database) {
       return {
         eligibleCheckpointCount: 0,
         lastRunAt: null,
@@ -2351,11 +2390,10 @@ export const createWorkspaceRecoveryEngine = (
         workspaceId,
       };
     }
-    const database = inspected.database;
     try {
       return retentionStatusFor(database, workspaceId);
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
   };
 
@@ -2364,7 +2402,8 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<RecoveryRetentionStatus> => {
     const { identity } = await inspectStorageIdentity(input.workspaceId);
     const storage = await storageFor(identity, true);
-    const database = await openWritableCatalog(storage.root);
+    const database = await openWritableCatalog(input.workspaceId, storage.root, 'recovery-retention-policy');
+    let retention: RecoveryRetentionStatus;
     try {
       runImmediateTransaction(database, 'Recovery retention policy update', () => {
         database.prepare(`
@@ -2374,10 +2413,12 @@ export const createWorkspaceRecoveryEngine = (
       });
       pruneRetentionRecords(database, input.workspaceId);
       await collectUnreachableObjects(storage.root, database);
-      return retentionStatusFor(database, input.workspaceId);
+      retention = retentionStatusFor(database, input.workspaceId);
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
+    if (catalogBackend?.gc) await catalogBackend.gc(input.workspaceId, `recovery-gc:${input.workspaceId}:${randomUUID()}`);
+    return retention;
   };
 
   const cleanupStorageInternal = async (
@@ -2386,28 +2427,35 @@ export const createWorkspaceRecoveryEngine = (
   ): Promise<RecoveryStorageCleanupResult> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(workspaceId, storage.root, false, 'recovery-retention-cleanup');
     const operationId = randomUUID();
     if (!database) return { byteLengthReclaimed: 0, failures: [], objectsDeleted: 0, operationId, recordsDeleted: 0, status: 'complete', workspaceId };
+    let result: RecoveryStorageCleanupResult;
     try {
       const { recordsDeleted } = pruneRetentionRecords(database, workspaceId);
       const { byteLengthReclaimed, objectsDeleted } = recordsDeleted > 0 || options.scanUnchangedObjects !== false
         ? await collectUnreachableObjects(storage.root, database)
         : { byteLengthReclaimed: 0, objectsDeleted: 0 };
-      return { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
+      result = { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
+    if (catalogBackend?.gc) {
+      const gc = await catalogBackend.gc(workspaceId, `recovery-gc:${workspaceId}:${operationId}`);
+      result = { ...result, objectsDeleted: Number(gc.deletedBlobs ?? result.objectsDeleted) };
+    }
+    return result;
   };
 
   const deleteWorkspaceHistoryInternal = async (workspaceId: string): Promise<RecoveryStorageCleanupResult> => {
     const { identity } = await inspectStorageIdentity(workspaceId);
     const storage = await storageFor(identity, false);
-    const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises });
+    const database = await openCatalog(workspaceId, storage.root, false, 'recovery-history-delete');
     const operationId = randomUUID();
     if (!database) {
       return { byteLengthReclaimed: 0, failures: [], objectsDeleted: 0, operationId, recordsDeleted: 0, status: 'complete', workspaceId };
     }
+    let result: RecoveryStorageCleanupResult;
     try {
       let recordsDeleted = 0;
       runImmediateTransaction(database, 'Workspace history deletion', () => {
@@ -2457,12 +2505,18 @@ export const createWorkspaceRecoveryEngine = (
         // inside the outer immediate transaction.
         rebuildObjectReferences(database);
       });
-      // GC unreachable objects after row deletion.
+      // The kernel owns physical object cleanup in production. The local
+      // catalog backend retains the historical filesystem sweep for tests.
       const { byteLengthReclaimed, objectsDeleted } = await collectUnreachableObjects(storage.root, database);
-      return { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
+      result = { byteLengthReclaimed, failures: [], objectsDeleted, operationId, recordsDeleted, status: 'complete', workspaceId };
     } finally {
-      database.close();
+      await closeCatalog(database);
     }
+    if (catalogBackend?.gc) {
+      const gc = await catalogBackend.gc(workspaceId, `recovery-gc:${workspaceId}:${operationId}`);
+      result = { ...result, objectsDeleted: Number(gc.deletedBlobs ?? result.objectsDeleted) };
+    }
+    return result;
   };
 
   // Reconcile a single operation file's phase against its on-disk state
@@ -2548,7 +2602,7 @@ export const createWorkspaceRecoveryEngine = (
         startupFailures.set(workspaceId, failures);
         continue;
       }
-      const database = await openRecoveryJournalCatalog(storage.root, { create: false, fsPromises }).catch((error) => {
+      const database = await openCatalog(workspaceId, storage.root, false, 'recovery-crash-reconciliation').catch((error) => {
         const failures = startupFailures.get(workspaceId) ?? [];
         failures.push(recoveryFailure(error, 'storage-malformed'));
         startupFailures.set(workspaceId, failures);
@@ -2650,18 +2704,20 @@ export const createWorkspaceRecoveryEngine = (
             'needs-attention',
           );
         }
-        try {
-          const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
-          const workingState = await WorkingStateStore.open(integrationContext);
-          await workingState.reconcileObjectReferences();
-          await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
-        } catch (error) {
-          // Preserve unknown ownership and expose this workspace's failure;
-          // other workspaces still need their startup reconciliation.
-          rememberFailure(workspaceId, error, 'needs-attention');
+        if (!catalogBackend) {
+          try {
+            const { WorkingStateStore } = await import('../harness/working-state/working-state-store.js');
+            const workingState = await WorkingStateStore.open(integrationContext);
+            await workingState.reconcileObjectReferences();
+            await reconcileInterruptedBranchIntegrations(integrationContext, workingState);
+          } catch (error) {
+            // Preserve unknown ownership and expose this workspace's failure;
+            // other workspaces still need their startup reconciliation.
+            rememberFailure(workspaceId, error, 'needs-attention');
+          }
         }
       } finally {
-        database.close();
+        await closeCatalog(database);
         await workspaceLease.release().catch((error) => rememberLeaseReleaseFailure(workspaceId, error));
       }
     }
@@ -2842,8 +2898,8 @@ export const createWorkspaceRecoveryEngine = (
       const identity = await inspectIdentity(workspaceId);
       const storage = await storageFor(identity, accessOptions.create !== false);
       const database = accessOptions.create === false
-        ? await openExistingCatalog(storage.root)
-        : await openWritableCatalog(storage.root);
+        ? await openExistingCatalog(workspaceId, storage.root, undefined, accessOptions.purpose)
+        : await openWritableCatalog(workspaceId, storage.root, accessOptions.purpose);
       try {
         return await operation({
           database,
@@ -2857,7 +2913,7 @@ export const createWorkspaceRecoveryEngine = (
           } : {}),
         });
       } finally {
-        database.close();
+        await closeCatalog(database);
       }
     }, { mode: accessOptions.mode, purpose: accessOptions.purpose }),
     dispose: async () => {

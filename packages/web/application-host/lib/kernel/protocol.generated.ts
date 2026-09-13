@@ -274,7 +274,7 @@ export interface KernelRecoveryParams {
   recordId?: string;
   workspaceId?: string;
   state?: string;
-  data?: unknown;
+  data?: string;
 }
 
 export interface KernelRecoveryGetParams {
