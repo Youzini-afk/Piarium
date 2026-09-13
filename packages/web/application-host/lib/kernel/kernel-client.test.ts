@@ -7,6 +7,7 @@ import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
 import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from "./kernel-recovery-catalog.js";
+import { KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
@@ -514,8 +515,6 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
     workspaceId: "record-workspace",
     recordType: "retrieval.artifact",
     state: "temporary",
-    threadId: "thread-1",
-    runId: "run-1",
     payloadJson: JSON.stringify({ receipt: "record-1" }),
     ownerIds: [body.ownerId],
     references: [{ slot: "body", objectHash: body.hash }],
@@ -526,6 +525,29 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   assert.equal((await client.listRecords({ workspaceId: "record-workspace", recordType: "retrieval.artifact", pageSize: 1 })).records.length, 1);
   await client.releaseRecord("record-release-op", "record-workspace", "record-1");
   await assert.rejects(client.getBlob(body.hash, { recordId: "record-1", slot: "body" }), /content|record|reference|owner/i);
+});
+
+test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-record-scope-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "record-scope-host", hostGeneration: "record-scope-generation", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const storageIdentity = host.handshake?.storageRoot;
+  const actor = async (grantId: string, workspaceId: string, sessionId: string) => host.scoped(await host.issueGrant({ grantId, hostGeneration: "record-scope-generation", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, owningWorkspace: workspaceId, executionWorkspace: workspaceId, storageIdentity, capabilities: ["storage.read", "storage.write", "recovery"], pathScopes: [""] }));
+  const first = await actor("record-scope-a", "workspace-a", "session-a");
+  const second = await actor("record-scope-b", "workspace-b", "session-b");
+  const put = (client: ReturnType<typeof host.scoped>, operationId: string, workspaceId: string, sessionId: string) => client.putRecord({ operationId, recordId: "same-record", workspaceId, recordType: "recovery.checkpoint", state: "ready", sessionId, threadId: `${sessionId}-thread`, runId: `${sessionId}-run`, payloadJson: JSON.stringify({ id: "same-record", workspaceId, sessionId }), ownerIds: [], references: [] });
+  await put(first, "scope-put-a", "workspace-a", "session-a");
+  await put(second, "scope-put-b", "workspace-b", "session-b");
+  assert.equal((await first.getRecord("workspace-a", "same-record"))?.workspaceId, "workspace-a");
+  assert.equal((await second.getRecord("workspace-b", "same-record"))?.workspaceId, "workspace-b");
+  const wrongActor = await actor("record-scope-wrong", "workspace-a", "session-other");
+  await assert.rejects(wrongActor.getRecord("workspace-a", "same-record"), /actor|authorization|record/i);
 });
 
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
@@ -659,7 +681,7 @@ test("real kernel recovery catalog persists checkpoints, operation files, and ob
       fileStore: content,
       catalogBackend: catalog,
     });
-    return { adapter, client, engine };
+    return { adapter, client, engine: createKernelRecoveryDirectFacade(engine, new KernelRecoveryStore(adapter, content)) };
   };
 
   const first = await makeEngine();

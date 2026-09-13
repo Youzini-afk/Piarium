@@ -5819,3 +5819,25 @@ catalog/WAL 文件大小观测，尚不据此给性能倍数。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-262 | implementation (kernel recovery catalog/operation-file cutover) | — | status 阶段 R1；plan 阶段 R1；rust-kernel-design；architecture；kernel module documentation |
+
+### D-263 · 2026-09-13 · Direct recovery record path and composite actor identity
+
+类型：返工修正；不改写 D-259/D-262 正文
+
+决定：checkpoint、turn binding、mutation before/after、checkpoint list/resolve 在生产 recovery facade 中直接调用 kernel `storage.record.*`，不再经过内存 SQLite；kernel `domain_records` 改为 `(workspace_id, record_id)` 复合主键，references 同样携带 workspace，get/list/blob read/release 按 session/thread/run actor 校验，并为 workspace maintenance grant 保留明确的 `recovery.maintenance` 能力。
+
+原因：全局 record id 允许不同 workspace 互相覆盖，workspace-only read 也允许不同 Thread/Run 读取彼此记录；transient catalog 关闭时 flush 不能表达阶段提交或响应丢失。直接路径先关闭公开 turn/checkpoint durable 入口，并用 release 子进程反例验证跨 workspace/actor 隔离。
+
+考虑过的替代：继续扩大内存 catalog facade；按字符串前缀制造全局 record id；让所有读者拥有 storage.admin。均未采用。
+
+影响：kernel catalog schema/authorization、generated record-put expectedRevision 字段、Host `kernel-recovery-store.ts` 与生产 recovery facade、真实 kernel-client scope test；combined operation/operation-file direct API、WorkingState root projection、旧 transient catalog 清理、真实 session resolver 和 recovery location 迁移仍待后续提交。
+
+证据边界：Windows release 子进程 kernel-client 测试 14/14 通过，新增相同 record id 的双 workspace、错误 actor 拒绝和 Recovery checkpoint/turn/mutation 重启测试；Host 类型检查及 release build 通过。崩溃窗口、跨平台、完整 operation stage 和性能仍未实测。
+
+状态：已实施；R1 仍 Partial，未宣称 wired/proven/default-on
+
+## D-263 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-263 | partial implementation (direct checkpoint/turn/mutation path; composite actor/workspace identity) | — | status 阶段 R1；plan 阶段 R1；kernel module documentation |

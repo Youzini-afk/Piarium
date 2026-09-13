@@ -74,6 +74,7 @@ import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
 import { KernelRecoveryCatalogBackend, KernelRecoveryContentStore } from './lib/kernel/kernel-recovery-catalog.js';
+import { KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
@@ -1010,6 +1011,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId, 'recovery-cache'),
   );
   const kernelRecoveryCatalog = new KernelRecoveryCatalogBackend(kernelStorageAdapter, kernelRecoveryContentStore);
+  const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -1136,6 +1138,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         fileStore: kernelRecoveryContentStore,
         catalogBackend: kernelRecoveryCatalog,
       });
+      engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore);
       workspaceRecoveryEngines.set(storageOwnerId, engine);
     }
     return engine;

@@ -95,7 +95,7 @@
     "KernelRecordPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordType": {"type": "string"}, "state": {"type": "string"},
       "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true},
-      "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true}, "resultRevision": {"type": "number", "optional": true},
+      "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true}, "resultRevision": {"type": "number", "optional": true}, "expectedRevision": {"type": "number", "optional": true},
       "payloadJson": {"type": "string"}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
     }},
     "KernelRecordGetParams": {"fields": {"workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},

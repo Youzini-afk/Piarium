@@ -139,6 +139,7 @@ export interface KernelRecordPutParams {
   branchId?: string;
   revision?: number;
   resultRevision?: number;
+  expectedRevision?: number;
   payloadJson: string;
   ownerIds: string[];
   references: KernelRecordReference[];

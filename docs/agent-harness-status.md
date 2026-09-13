@@ -163,13 +163,13 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
 
-R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；R1 durable WorkingState/retrieval/Recovery records 已切换，但文件 apply/materialization 不等同于阶段 R 整体完成。
+R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；R1 WorkingState/retrieval 与 checkpoint/turn/mutation durable paths 已切换，但 combined operation/integration 和文件 apply/materialization 不等同于阶段 R 整体完成。
 R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
 | R0 协议与进程 | Partial（implemented / wired） | `kernel/rust-toolchain.toml` 钉住 1.97.1；同一 schema 生成 TS/Rust method DTO；真实 framed 子进程、单 envelope 交接背压、blob 与 branch create/write 流式输入、build/epoch/grant/generation 握手、取消、真实退出等待和 Host 启停已有 Windows release 证据；macOS/Linux、签名安装包、stdout 半帧断线和完整任意 cwd 包内 smoke 仍需验收 |
-| R1 状态与存储 | Partial（WorkingState、retrieval 与 Recovery durable catalog 已走真实 kernel；R1 仍保留短生命周期 Host projection，文件 apply/物化属于 R2/R3） | format v6、typed path state、AVL 持久索引、固定 revision、强制 publish CAS/事务 operation、精确 object owner、pin/delete/GC、durable pending cleanup、typed domain record/reference、分页 root read 已实现；生产 branch/draft/result/publish/CAS/materializer 输入、verification/review、retrieval artifact/receipt、checkpoint/turn/mutation、combined operation/operation-file 阶段和引用均由 kernel domain records 持久化，TS 只运行内存 SQL-shaped view 供现有编排查询 |
+| R1 状态与存储 | Partial（WorkingState、retrieval 与 checkpoint/turn/mutation direct kernel path 已走真实 kernel；combined operation/integration 仍待 direct API） | format v6、typed path state、AVL 持久索引、固定 revision、强制 publish CAS/事务 operation、精确 object owner、pin/delete/GC、durable pending cleanup、workspace/actor-scoped domain record/reference、分页 root read 已实现；生产 branch/draft/result/publish/CAS/materializer 输入、verification/review、retrieval artifact/receipt、checkpoint/turn/mutation 已走 kernel，combined operation/operation-file 仍由旧编排视图承载，不能标 wired/proven/default-on |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -185,11 +185,11 @@ typed path/tree 不变量、grant workspace/path scope 与 revoke、8,000-entry 
 关闭重开与字节/hash 保持；GC 的逻辑释放、实际文件删除和注入的清理失败分别可观察，失败在重启时重试。`cargo check --manifest-path kernel/Cargo.toml` 与 Windows release build 通过（本机通过
 Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 SDK 会报告环境缺失）。
 
-**D-259/D-260/D-262 生产 consumer 证据（2026-09-13）**：同一 release child-process 测试现为 **12/12 通过**，新增
+**D-259/D-260/D-262/D-263 生产 consumer 证据（2026-09-13）**：同一 release child-process 测试现为 **14/14 通过**，新增
 typed `storage.record.*`、record-bound blob read、空根分页边界和 owner/reference release；独立 Host adapter 纵切经
 `KernelStorageAdapter` 完成 capture → branch create → virtual CAS write → publish result → kernel object read，重建/释放
 使用同一 v6 catalog。生产装配切换位置是 `application-host/index.ts` 的 `createKernelWorkspaceWorkingStateAccess`；Recovery
-checkpoint/turn/mutation、combined operation/operation-file 和引用清理通过 kernel catalog backend 持久化，R1 仍因文件 apply、跨平台与完整故障证据保持 Partial。
+checkpoint/turn/mutation 通过 direct kernel record path 持久化；workspace composite record identity 和错误 actor 拒绝已由 release child-process test 覆盖。combined operation/operation-file 仍需 direct typed API，R1 仍因文件 apply、跨平台与完整故障证据保持 Partial。
 Kernel protocol 使用 `kernel/protocol/schema.json` → generated TS DTO，Host 在 `application-host/index.ts` 启动/停止同一 client；
 Electron package 将可执行文件和 SHA-256 manifest 放在 `resources/kernel`（asar 外），after-pack 会核对 manifest；Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
 macOS/Linux 真机运行或完整跨平台签名证据。
@@ -204,8 +204,7 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 **R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation/domain record/reference 表；
 TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
 `working-state/working-state-store.ts` 仍保留为测试/历史实现，生产 dispatch/branchWrite/result/draft/materializer 和 retrieval evidence/receipt
-已由 `KernelStorageAdapter` 切换到 kernel；turn/checkpoint/mutation、combined Recovery/Integration operation-file rows 也通过 transient
-SQL-shaped view flush 到 kernel，`recovery/journal-catalog.ts` 不再由生产装配打开。文件 apply、materializer、旧测试夹具清理、跨平台和断电证据仍未完成，故 R1 仍保持 Partial。
+已由 `KernelStorageAdapter` 切换到 kernel；turn/checkpoint/mutation 已直接调用 kernel record API，`kernel-recovery-store.ts` 不再依赖 transient catalog。combined Recovery/Integration operation-file 仍有旧 SQL-shaped 编排视图，文件 apply、materializer、旧测试夹具清理、跨平台和断电证据仍未完成，故 R1 仍保持 Partial。
 
 **R0/R1 当前重新验收边界（D-258，2026-09-13）**：D-257 的 64-envelope queue、hash-only blob read、可选 publish CAS、
 format v5 与 object attachment 表述已由本条取代。

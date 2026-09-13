@@ -19,8 +19,8 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS object_owners_blob ON object_owners(blob_hash);
      CREATE INDEX IF NOT EXISTS object_owners_workspace ON object_owners(workspace_id);
      CREATE TABLE IF NOT EXISTS recovery_records (record_id TEXT PRIMARY KEY, operation_id TEXT NOT NULL, workspace_id TEXT NOT NULL, state TEXT NOT NULL, data_json TEXT NOT NULL, initial_data_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-     CREATE TABLE IF NOT EXISTS domain_records (record_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, record_type TEXT NOT NULL, state TEXT NOT NULL, session_id TEXT, thread_id TEXT, run_id TEXT, branch_id TEXT, revision INTEGER, result_revision INTEGER, payload_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-     CREATE TABLE IF NOT EXISTS domain_record_refs (record_id TEXT NOT NULL REFERENCES domain_records(record_id) ON DELETE CASCADE, slot TEXT NOT NULL, object_hash TEXT NOT NULL, PRIMARY KEY(record_id, slot));
+     CREATE TABLE IF NOT EXISTS domain_records (record_id TEXT NOT NULL, workspace_id TEXT NOT NULL, record_type TEXT NOT NULL, state TEXT NOT NULL, session_id TEXT, thread_id TEXT, run_id TEXT, branch_id TEXT, revision INTEGER, result_revision INTEGER, payload_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, PRIMARY KEY(workspace_id, record_id));
+     CREATE TABLE IF NOT EXISTS domain_record_refs (workspace_id TEXT NOT NULL, record_id TEXT NOT NULL, slot TEXT NOT NULL, object_hash TEXT NOT NULL, PRIMARY KEY(workspace_id, record_id, slot), FOREIGN KEY(workspace_id, record_id) REFERENCES domain_records(workspace_id, record_id) ON DELETE CASCADE);
      CREATE TABLE IF NOT EXISTS pending_gc_files (hash TEXT PRIMARY KEY, path TEXT NOT NULL, state TEXT NOT NULL, last_error TEXT, queued_at INTEGER NOT NULL, cleaned_at INTEGER);
      CREATE INDEX IF NOT EXISTS revisions_root ON revisions(root_hash);
      CREATE INDEX IF NOT EXISTS pins_root ON pins(root_hash);
@@ -173,7 +173,7 @@ pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
             "updated_at",
         ],
     ),
-    ("domain_record_refs", &["record_id", "slot", "object_hash"]),
+    ("domain_record_refs", &["workspace_id", "record_id", "slot", "object_hash"]),
     ("recovery_roots", &["record_id", "root_hash"]),
     (
         "revisions",

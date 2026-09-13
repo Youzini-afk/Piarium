@@ -478,7 +478,7 @@ export class KernelStorageAdapter {
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
       const actor = this.options.resolveActor ? await this.options.resolveActor(workspaceId, purpose) : { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] };
-      const capabilities = ["storage.read", "storage.write", "recovery", ...(purpose.includes("gc") || purpose === "recovery-catalog" ? ["storage.gc"] : [])];
+      const capabilities = ["storage.read", "storage.write", "recovery", ...(purpose === "recovery-catalog" ? ["recovery.maintenance", "storage.gc"] : purpose.includes("gc") ? ["storage.gc"] : [])];
       return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${purpose}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();
     this.grants.set(key, grant); return grant;

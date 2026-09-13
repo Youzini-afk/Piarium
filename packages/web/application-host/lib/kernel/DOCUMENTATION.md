@@ -19,7 +19,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
 | Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
 | Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `storage.record.*` is the only production reference/record writer; object reads require branch/pin/record/temporary-owner identity |
-| Recovery operation/checkpoint records | Rust kernel typed `domain_records`/`domain_record_refs`, TS recovery engine for file/apply orchestration | Checkpoints, turns, mutations, combined operations, operation-file phases and retention refs are flushed through the kernel; the SQL-shaped view is transient only |
+| Recovery checkpoint/turn/mutation records | Rust kernel typed `domain_records`/`domain_record_refs`, TS recovery engine for file/apply orchestration | Production checkpoint/turn/mutation calls use the direct `KernelRecoveryStore`; combined operation/operation-file remains a separate migration step |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
 
 Every product-domain call uses an immutable `KernelGrantHandle` obtained for the session/Thread/Run. The
@@ -54,9 +54,9 @@ its schema fingerprint plus the complete table/index/column shape and never upgr
 The old TS `WorkingStateStore` remains only for legacy/unit fixtures. Application Host production
 assembly uses `KernelStorageAdapter` and `KernelWorkingStateStore`; it keeps a short-lived root
 projection for product algorithms but never serializes a catalog/trie or opens the kernel SQLite.
-Recovery file/apply orchestration is still TS (R2), while checkpoint, turn, mutation, combined operation and
-operation-file rows use the typed kernel record API. A kernel failure is surfaced; production does not fall back
-to a physical recovery SQLite catalog or the old WorkingState writer.
+Recovery file/apply orchestration is still TS (R2). Checkpoint, turn, and mutation calls use the direct kernel
+record API; combined operation/operation-file still has a legacy orchestration path pending removal. A kernel
+failure is surfaced; production does not fall back to the old WorkingState writer.
 
 The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
 the current run covers the original R0/R1 invariants plus typed record/reference ownership and record-bound object reads.

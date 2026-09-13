@@ -120,6 +120,7 @@ pub(crate) struct KernelRecordPutParams {
     pub(crate) branch_id: Option<String>,
     pub(crate) revision: Option<i64>,
     pub(crate) result_revision: Option<i64>,
+    pub(crate) expected_revision: Option<i64>,
     pub(crate) payload_json: String,
     pub(crate) owner_ids: Vec<String>,
     pub(crate) references: Vec<KernelRecordReference>,

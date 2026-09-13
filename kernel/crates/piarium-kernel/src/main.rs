@@ -733,7 +733,7 @@ impl Storage {
         let row: Option<i64> = if let Some(workspace) = workspace {
             self.conn
                 .query_row(
-                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 AND workspace_id = ?2 UNION SELECT 1 FROM domain_record_refs r JOIN domain_records d ON d.record_id = r.record_id WHERE r.object_hash = ?1 AND d.workspace_id = ?2 LIMIT 1",
+                    "SELECT 1 FROM object_owners WHERE blob_hash = ?1 AND workspace_id = ?2 UNION SELECT 1 FROM domain_record_refs r WHERE r.object_hash = ?1 AND r.workspace_id = ?2 LIMIT 1",
                     params![hash, workspace],
                     |row| row.get(0),
                 )
@@ -877,8 +877,8 @@ impl Storage {
         } else if let Some(record_id) = params.get("recordId").and_then(Value::as_str) {
             self.conn
                 .query_row(
-                    "SELECT workspace_id FROM domain_records WHERE record_id = ?1 UNION SELECT workspace_id FROM recovery_records WHERE record_id = ?1 LIMIT 1",
-                    params![record_id],
+                    "SELECT workspace_id FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2 UNION SELECT workspace_id FROM recovery_records WHERE record_id = ?1 AND workspace_id = ?2 LIMIT 1",
+                    params![record_id, grant.owning_workspace],
                     |row| row.get::<_, String>(0),
                 )
                 .optional()?
@@ -1890,11 +1890,19 @@ impl Storage {
             let slot = params.get("slot").and_then(Value::as_str).ok_or_else(|| {
                 KernelError::Authorization("record content reads require a reference slot".to_string())
             })?;
+            let record_workspace = self.grant_workspace(grant_id).ok_or_else(|| {
+                KernelError::Authorization("record content reads require an owning workspace grant".to_string())
+            })?;
+            if let Some(record) = self.domain_record_value(&record_workspace, record_id)? {
+                if !self.grant_can_access_domain_record(&record, grant_id)? {
+                    return Err(KernelError::Authorization("record belongs to another actor".to_string()));
+                }
+            }
             let owned: Option<(String, String)> = self
                 .conn
                 .query_row(
-                    "SELECT r.object_hash, d.workspace_id FROM domain_record_refs r JOIN domain_records d ON d.record_id = r.record_id WHERE r.record_id = ?1 AND r.slot = ?2",
-                    params![record_id, slot],
+                    "SELECT object_hash, workspace_id FROM domain_record_refs WHERE record_id = ?1 AND slot = ?2 AND workspace_id = ?3",
+                    params![record_id, slot, record_workspace],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .optional()?;
@@ -3705,7 +3713,29 @@ impl Storage {
         Ok(workspace_id.to_string())
     }
 
-    fn domain_record_value(&self, record_id: &str) -> Result<Option<Value>, KernelError> {
+    fn grant_can_access_domain_record(&self, value: &Value, grant_id: &str) -> Result<bool, KernelError> {
+        let grant = self.load_grant(grant_id)?;
+        if grant.capabilities.contains("recovery.maintenance") {
+            return Ok(true);
+        }
+        for key in ["sessionId", "threadId", "runId"] {
+            let record_value = value.get(key).and_then(Value::as_str);
+            let grant_value = match key {
+                "sessionId" => grant.session_id.as_deref(),
+                "threadId" => grant.thread_id.as_deref(),
+                _ => grant.run_id.as_deref(),
+            };
+            if record_value.is_some() && grant_value.is_some() && record_value != grant_value {
+                return Ok(false);
+            }
+            if record_value.is_some() && grant_value.is_none() && !grant.capabilities.contains("storage.admin") {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn domain_record_value(&self, workspace_id: &str, record_id: &str) -> Result<Option<Value>, KernelError> {
         let row: Option<(
             String,
             String,
@@ -3723,8 +3753,8 @@ impl Storage {
         )> = self
             .conn
             .query_row(
-                "SELECT record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, payload_json, created_at, updated_at FROM domain_records WHERE record_id = ?1",
-                params![record_id],
+                "SELECT record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, payload_json, created_at, updated_at FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
+                params![record_id, workspace_id],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -3749,8 +3779,8 @@ impl Storage {
         };
         let references = self
             .conn
-            .prepare("SELECT slot, object_hash FROM domain_record_refs WHERE record_id = ?1 ORDER BY slot")?
-            .query_map(params![record_id], |row| {
+            .prepare("SELECT slot, object_hash FROM domain_record_refs WHERE record_id = ?1 AND workspace_id = ?2 ORDER BY slot")?
+            .query_map(params![record_id, workspace_id], |row| {
                 Ok(json!({"slot": row.get::<_, String>(0)?, "objectHash": row.get::<_, String>(1)?}))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -3868,8 +3898,8 @@ impl Storage {
             let durable = self
                 .conn
                 .query_row(
-                    "SELECT 1 FROM blobs WHERE hash = ?1 AND (EXISTS (SELECT 1 FROM domain_record_refs WHERE object_hash = ?1) OR EXISTS (SELECT 1 FROM root_blobs WHERE blob_hash = ?1))",
-                    params![hash],
+                    "SELECT 1 FROM blobs WHERE hash = ?1 AND (EXISTS (SELECT 1 FROM domain_record_refs WHERE object_hash = ?1 AND workspace_id = ?2) OR EXISTS (SELECT 1 FROM root_blobs WHERE blob_hash = ?1))",
+                    params![hash, workspace_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .optional()?
@@ -3884,24 +3914,42 @@ impl Storage {
         let existing = self
             .conn
             .query_row(
-                "SELECT workspace_id, record_type FROM domain_records WHERE record_id = ?1",
-                params![record_id],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                "SELECT workspace_id, record_type, revision, session_id, thread_id, run_id, branch_id, result_revision FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
+                params![record_id, workspace_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?, row.get::<_, Option<String>>(5)?, row.get::<_, Option<String>>(6)?, row.get::<_, Option<i64>>(7)?)),
             )
             .optional()?;
-        if let Some((existing_workspace, existing_type)) = existing {
+        if let Some((existing_workspace, existing_type, existing_revision, existing_session, existing_thread, existing_run, existing_branch, existing_result_revision)) = existing {
             if existing_workspace != workspace_id || existing_type != record_type {
                 return Err(KernelError::Authorization("record identity cannot be changed".to_string()));
             }
+            for (label, old, new) in [
+                ("sessionId", existing_session.as_deref(), params_value.get("sessionId").and_then(Value::as_str)),
+                ("threadId", existing_thread.as_deref(), params_value.get("threadId").and_then(Value::as_str)),
+                ("runId", existing_run.as_deref(), params_value.get("runId").and_then(Value::as_str)),
+                ("branchId", existing_branch.as_deref(), params_value.get("branchId").and_then(Value::as_str)),
+            ] {
+                if old != new { return Err(KernelError::Authorization(format!("record {label} identity cannot be changed"))); }
+            }
+            if existing_result_revision != params_value.get("resultRevision").and_then(Value::as_i64) {
+                return Err(KernelError::Authorization("record resultRevision identity cannot be changed".to_string()));
+            }
+            if let Some(expected) = params_value.get("expectedRevision").and_then(Value::as_i64) {
+                if existing_revision != Some(expected) {
+                    return Err(KernelError::Operation("record revision conflict".to_string()));
+                }
+            }
+        } else if params_value.get("expectedRevision").is_some() {
+            return Err(KernelError::Operation("record revision conflict: record does not exist".to_string()));
         }
         let now = now_ms();
         self.conn.execute(
-            "INSERT INTO domain_records(record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, payload_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, COALESCE((SELECT created_at FROM domain_records WHERE record_id = ?1), ?12), ?12) ON CONFLICT(record_id) DO UPDATE SET state = excluded.state, session_id = excluded.session_id, thread_id = excluded.thread_id, run_id = excluded.run_id, branch_id = excluded.branch_id, revision = excluded.revision, result_revision = excluded.result_revision, payload_json = excluded.payload_json, updated_at = excluded.updated_at",
+            "INSERT INTO domain_records(record_id, workspace_id, record_type, state, session_id, thread_id, run_id, branch_id, revision, result_revision, payload_json, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, COALESCE((SELECT created_at FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2), ?12), ?12) ON CONFLICT(workspace_id, record_id) DO UPDATE SET state = excluded.state, session_id = excluded.session_id, thread_id = excluded.thread_id, run_id = excluded.run_id, branch_id = excluded.branch_id, revision = excluded.revision, result_revision = excluded.result_revision, payload_json = excluded.payload_json, updated_at = excluded.updated_at",
             params![record_id, workspace_id, record_type, state, params_value.get("sessionId").and_then(Value::as_str), params_value.get("threadId").and_then(Value::as_str), params_value.get("runId").and_then(Value::as_str), params_value.get("branchId").and_then(Value::as_str), params_value.get("revision").and_then(Value::as_i64), params_value.get("resultRevision").and_then(Value::as_i64), serde_json::to_string(&payload)?, now],
         )?;
-        self.conn.execute("DELETE FROM domain_record_refs WHERE record_id = ?1", params![record_id])?;
+        self.conn.execute("DELETE FROM domain_record_refs WHERE workspace_id = ?1 AND record_id = ?2", params![workspace_id, record_id])?;
         for (slot, hash) in &normalized_refs {
-            self.conn.execute("INSERT INTO domain_record_refs(record_id, slot, object_hash) VALUES (?1, ?2, ?3)", params![record_id, slot, hash])?;
+            self.conn.execute("INSERT INTO domain_record_refs(workspace_id, record_id, slot, object_hash) VALUES (?1, ?2, ?3, ?4)", params![workspace_id, record_id, slot, hash])?;
         }
         let mut consumed = BTreeMap::new();
         for (owner_id, hash) in owner_hashes {
@@ -3911,7 +3959,7 @@ impl Storage {
             consumed.insert(owner_id, hash);
         }
         self.consume_object_owners(&workspace_id, grant_id, &consumed)?;
-        self.domain_record_value(record_id)?.ok_or_else(|| KernelError::Storage("record disappeared after commit".to_string()))
+        self.domain_record_value(&workspace_id, record_id)?.ok_or_else(|| KernelError::Storage("record disappeared after commit".to_string()))
     }
 
     fn domain_record_get(&self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
@@ -3927,8 +3975,10 @@ impl Storage {
         if grant.owning_workspace.as_deref() != Some(workspace_id) && !grant.capabilities.contains("storage.admin") {
             return Err(KernelError::Authorization("record workspace does not match actor grant".to_string()));
         }
-        match self.domain_record_value(record_id)? {
-            Some(value) if value.get("workspaceId").and_then(Value::as_str) == Some(workspace_id) => Ok(value),
+        match self.domain_record_value(workspace_id, record_id)? {
+            Some(value) if value.get("workspaceId").and_then(Value::as_str) == Some(workspace_id)
+                && self.grant_can_access_domain_record(&value, grant_id)? => Ok(value),
+            Some(value) if value.get("workspaceId").and_then(Value::as_str) == Some(workspace_id) => Err(KernelError::Authorization("record belongs to another actor".to_string())),
             Some(_) => Err(KernelError::Authorization("record belongs to another workspace".to_string())),
             None => Ok(Value::Null),
         }
@@ -3962,7 +4012,8 @@ impl Storage {
         let branch_filter = params_value.get("branchId").and_then(Value::as_str);
         let mut filtered = Vec::new();
         for id in ids {
-            let Some(value) = self.domain_record_value(&id)? else { continue; };
+            let Some(value) = self.domain_record_value(workspace_id, &id)? else { continue; };
+            if !self.grant_can_access_domain_record(&value, grant_id)? { continue; }
             if session_filter.is_some_and(|filter| value.get("sessionId").and_then(Value::as_str) != Some(filter))
                 || thread_filter.is_some_and(|filter| value.get("threadId").and_then(Value::as_str) != Some(filter))
                 || run_filter.is_some_and(|filter| value.get("runId").and_then(Value::as_str) != Some(filter))
@@ -3977,6 +4028,11 @@ impl Storage {
     fn domain_record_release(&mut self, params_value: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let workspace_id = self.validate_domain_record_identity(params_value, grant_id)?;
         let record_id = params_value.get("recordId").and_then(Value::as_str).ok_or_else(|| KernelError::Operation("recordId is required".to_string()))?;
+        if let Some(value) = self.domain_record_value(&workspace_id, record_id)? {
+            if !self.grant_can_access_domain_record(&value, grant_id)? {
+                return Err(KernelError::Authorization("record belongs to another actor".to_string()));
+            }
+        }
         let deleted = self.conn.execute("DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2", params![record_id, workspace_id])?;
         Ok(json!({"recordId": record_id, "released": deleted > 0}))
     }
