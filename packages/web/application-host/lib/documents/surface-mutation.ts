@@ -20,6 +20,7 @@ import {
 } from "./line-ending.js";
 import {
   beginAgentMutationOperation,
+  beginAgentMutationOperationAsync,
   compensateAgentMutationDiskPath,
   finalizeAgentMutationOperation,
   markAgentMutationPathApplied,
@@ -563,7 +564,18 @@ export async function applyAgentSurfaceMutation(
     // A stale disk identity is a real conflict, so it must not be included in
     // the durable operation that will be dispatched for the remaining paths.
     if (Object.keys(targets).length === 0) return null;
-    return beginAgentMutationOperation(deps.durable, {
+    return deps.durable.durableRecoveryStore
+      ? beginAgentMutationOperationAsync(deps.durable, {
+        operationId,
+        sessionId: input.sessionId,
+        workspaceId,
+        targetKinds,
+        surfaceBindings,
+        diskIdentities,
+        targets,
+        safety,
+      })
+      : beginAgentMutationOperation(deps.durable, {
       operationId,
       sessionId: input.sessionId,
       workspaceId,

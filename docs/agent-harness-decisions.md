@@ -5955,3 +5955,15 @@ WorkingState root access now exposes immutable result lookup and selected state 
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-268 | partial implementation / wired for preview and directory apply | — | status 阶段 R1；plan 阶段 R1；kernel/application-host module documentation |
+
+### D-269 · 2026-09-13 · Agent mutation durable port
+
+类型：R1 recovery consumer cutover；只追加，不改写 D-265–D-268 正文
+
+Kernel-backed `WorkspaceRecoveryStorageContext` now carries a Rust-owned `RecoveryDurableOperationPort`. Agent surface/disk mutation intent creation, file phase transitions, compensation markers and terminal completion use the port; production `surface-mutation` awaits the atomic operation/file intent before applying the first surface or disk side effect. Startup reconciliation reads unfinished agent-mutation operations and performs conditional disk observation through the same operation revision. Local test contexts without the port retain their isolated SQLite fixture helpers. Combined recovery’s older public engine methods and branch undo/reconcile remain outstanding and keep R1 Partial.
+
+## D-269 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-269 | partial implementation / wired for production agent mutation | — | status 阶段 R1；plan 阶段 R1；recovery/application-host module documentation |

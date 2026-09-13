@@ -54,6 +54,12 @@ steps remains needs-attention rather than being guessed or silently rolled back 
 
 ## Coverage boundary
 
+Kernel-backed Application Host production contexts expose a Rust `RecoveryDurableOperationPort`. Agent
+surface/disk mutation intent and file phases use that port before the first side effect; local SQLite
+operation rows remain only in isolated fixtures and in combined consumers not yet cut over. The port
+uses one operation revision for file CAS and terminal completion, so a lost response is reconciled by
+operation identity rather than replaying a mutation.
+
 `write` and `edit` have exact before/after coverage because Piarium pauses them at the mutation
 boundary. A generic native process can modify unknown paths without a portable pre-write hook. Watcher
 events identify those paths only after the change, so such a turn is explicitly incomplete for combined

@@ -98,6 +98,86 @@ const stateFromJson = (value: string | null, label: string): RecoveryState => {
   return parseRecoveryState(JSON.parse(value) as unknown);
 };
 
+interface KernelMutationState { revision: number; phases: Map<string, string>; queue: Promise<void> }
+const kernelMutationState = new WeakMap<PersistedAgentMutationData, KernelMutationState>();
+
+const kernelPhase = (
+  context: DurableFileOperationContext,
+  data: PersistedAgentMutationData,
+  path: string,
+  phase: string,
+  fields: { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {},
+): void => {
+  const durable = context.durableRecoveryStore;
+  if (!durable) return;
+  const state = kernelMutationState.get(data);
+  if (!state) throw new Error(`Agent mutation ${data.operationId} has no kernel revision`);
+  state.queue = state.queue.then(async () => {
+    const result = await durable.updateOperationFile({
+      operationId: data.operationId,
+      workspaceId: data.workspaceId,
+      path,
+      expectedRevision: state.revision,
+      expectedPhase: state.phases.get(path) ?? "pending",
+      phase,
+      ...fields,
+      sessionId: data.sessionId,
+    });
+    state.revision = Number(result.revision ?? state.revision + 1);
+    state.phases.set(path, phase);
+  });
+};
+
+const kernelComplete = (context: DurableFileOperationContext, data: PersistedAgentMutationData, state: string, resultData: Record<string, unknown>): void => {
+  const durable = context.durableRecoveryStore;
+  const revision = kernelMutationState.get(data);
+  if (!durable || !revision) return;
+  revision.queue = revision.queue.then(async () => {
+    const result = await durable.completeOperation({ operationId: data.operationId, workspaceId: data.workspaceId, expectedRevision: revision.revision, state, result: resultData, sessionId: data.sessionId });
+    revision.revision = Number(result.revision ?? revision.revision + 1);
+  });
+};
+
+export const beginAgentMutationOperationAsync = async (
+  context: DurableFileOperationContext,
+  spec: AgentMutationBeginSpec,
+): Promise<PersistedAgentMutationData> => {
+  const data: PersistedAgentMutationData = {
+    operationId: spec.operationId,
+    sessionId: spec.sessionId,
+    workspaceId: spec.workspaceId,
+    intent: "agent-surface-write",
+    targetKinds: { ...spec.targetKinds },
+    surfaceBindings: structuredClone(spec.surfaceBindings ?? {}),
+    diskIdentities: structuredClone(spec.diskIdentities ?? {}),
+    targets: structuredClone(spec.targets),
+    safety: structuredClone(spec.safety),
+    appliedPaths: [],
+    compensatedPaths: [],
+    needsAttentionPaths: [],
+    results: [],
+  };
+  if (!context.durableRecoveryStore) return beginAgentMutationOperation(context, spec);
+  const created = await context.durableRecoveryStore.createOperation({
+    operationId: spec.operationId,
+    workspaceId: spec.workspaceId,
+    kind: AGENT_MUTATION_KIND,
+    state: "applying",
+    data,
+    targets: spec.targets,
+    sessionId: spec.sessionId,
+  });
+  const phases = new Map(Object.keys(spec.targets).map((path) => [path, "pending"]));
+  const state: KernelMutationState = { revision: Number(created.revision ?? 1), phases, queue: Promise.resolve() };
+  kernelMutationState.set(data, state);
+  for (const [path, safety] of Object.entries(spec.safety)) {
+    const phase = spec.targetKinds[path] === "surface" ? "external-intent" : "apply-intent";
+    kernelPhase(context, data, path, phase, { safety });
+  }
+  await state.queue;
+  return data;
+};
+
 export const beginAgentMutationOperation = (
   context: DurableFileOperationContext,
   spec: AgentMutationBeginSpec,
@@ -153,13 +233,6 @@ export const markAgentMutationPathApplied = (
       afterHash: extras.afterHash,
     };
   }
-  updateOperationFilePhase(
-    context.database,
-    data.operationId,
-    path,
-    data.targetKinds[path] === "surface" ? "external-target-observed" : "target-observed",
-    extras?.target ? { targetJson: JSON.stringify(extras.target) } : {},
-  );
   if (extras?.target) {
     const current = data.targets[path];
     data.targets[path] = {
@@ -167,6 +240,17 @@ export const markAgentMutationPathApplied = (
       target: extras.target,
     };
   }
+  if (context.durableRecoveryStore) {
+    kernelPhase(context, data, path, data.targetKinds[path] === "surface" ? "external-target-observed" : "target-observed", extras?.target ? { target: extras.target } : {});
+    return;
+  }
+  updateOperationFilePhase(
+    context.database,
+    data.operationId,
+    path,
+    data.targetKinds[path] === "surface" ? "external-target-observed" : "target-observed",
+    extras?.target ? { targetJson: JSON.stringify(extras.target) } : {},
+  );
   writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
 };
 
@@ -175,6 +259,7 @@ export const markAgentMutationSurfaceDispatched = (
   data: PersistedAgentMutationData,
   path: string,
 ): void => {
+  if (context.durableRecoveryStore) { kernelPhase(context, data, path, "external-dispatched"); return; }
   updateOperationFilePhase(context.database, data.operationId, path, "external-dispatched");
   writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
 };
@@ -184,6 +269,7 @@ export const markAgentMutationSurfaceCompensateIntent = (
   data: PersistedAgentMutationData,
   path: string,
 ): void => {
+  if (context.durableRecoveryStore) { kernelPhase(context, data, path, "external-compensate-intent"); return; }
   updateOperationFilePhase(context.database, data.operationId, path, "external-compensate-intent");
   writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
 };
@@ -198,6 +284,7 @@ export const markAgentMutationSurfaceNotApplied = (
   data: PersistedAgentMutationData,
   path: string,
 ): void => {
+  if (context.durableRecoveryStore) { kernelPhase(context, data, path, "external-safety-observed"); return; }
   updateOperationFilePhase(context.database, data.operationId, path, "external-safety-observed");
   writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
 };
@@ -210,6 +297,7 @@ export const markAgentMutationPathNeedsAttention = (
 ): void => {
   if (!data.needsAttentionPaths.includes(path)) data.needsAttentionPaths.push(path);
   if (failure) data.failure = failure;
+  if (context.durableRecoveryStore) { kernelPhase(context, data, path, "needs-attention"); return; }
   try {
     updateOperationFilePhase(context.database, data.operationId, path, "needs-attention");
   } catch {
@@ -231,11 +319,13 @@ export const compensateAgentMutationDiskPath = async (
     return "needs-attention";
   }
   const run = async (): Promise<"compensated" | "needs-attention"> => {
-    updateOperationFilePhase(context.database, data.operationId, path, "compensate-intent");
+    if (context.durableRecoveryStore) kernelPhase(context, data, path, "compensate-intent");
+    else updateOperationFilePhase(context.database, data.operationId, path, "compensate-intent");
     try {
       const current = (await context.fileStore.captureState(context.identity, context.root, path, { store: false })).state;
       if (sameState(current, safety)) {
-        updateOperationFilePhase(context.database, data.operationId, path, "safety-observed");
+        if (context.durableRecoveryStore) kernelPhase(context, data, path, "safety-observed");
+        else updateOperationFilePhase(context.database, data.operationId, path, "safety-observed");
         if (!data.compensatedPaths.includes(path)) data.compensatedPaths.push(path);
         writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
         return "compensated";
@@ -247,7 +337,8 @@ export const compensateAgentMutationDiskPath = async (
       await context.fileStore.applyState(context.identity, context.root, path, safety);
       const restored = (await context.fileStore.captureState(context.identity, context.root, path, { store: false })).state;
       if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${path}`);
-      updateOperationFilePhase(context.database, data.operationId, path, "safety-observed");
+      if (context.durableRecoveryStore) kernelPhase(context, data, path, "safety-observed");
+      else updateOperationFilePhase(context.database, data.operationId, path, "safety-observed");
       if (!data.compensatedPaths.includes(path)) data.compensatedPaths.push(path);
       writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
       return "compensated";
@@ -272,6 +363,7 @@ export const markAgentMutationSurfaceCompensated = (
   path: string,
 ): void => {
   if (!data.compensatedPaths.includes(path)) data.compensatedPaths.push(path);
+  if (context.durableRecoveryStore) { kernelPhase(context, data, path, "external-safety-observed"); return; }
   updateOperationFilePhase(context.database, data.operationId, path, "external-safety-observed");
   writeRecord(context.database, data.workspaceId, durableState(data, "applying"), data, new Date().toISOString());
 };
@@ -289,6 +381,7 @@ export const finalizeAgentMutationOperation = (
       : data.appliedPaths.length > 0
         ? "complete"
         : "aborted";
+  if (context.durableRecoveryStore) { kernelComplete(context, data, state, data); return; }
   writeRecord(context.database, data.workspaceId, state, data, new Date().toISOString());
 };
 
@@ -316,6 +409,48 @@ export const reconcileInterruptedAgentMutations = async (
   } = {},
 ): Promise<{ compensated: string[]; needsAttention: string[]; aborted: string[] }> => {
   void options.surfaceOwnerAvailable;
+  if (context.durableRecoveryStore) {
+    const outcome = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[] };
+    for (const summary of await context.durableRecoveryStore.listOperations(context.identity.workspaceId, AGENT_MUTATION_KIND)) {
+      const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+      if (!operationId || ["complete", "aborted", "compensated", "conflict"].includes(String(summary.state))) continue;
+      const durableOperation: Record<string, unknown> | null = await context.durableRecoveryStore.getOperation(context.identity.workspaceId, operationId, typeof summary.sessionId === "string" ? summary.sessionId : undefined);
+      if (!durableOperation) continue;
+      const data = (durableOperation.data && typeof durableOperation.data === "object" ? durableOperation.data : {}) as PersistedAgentMutationData;
+      const files: Array<Record<string, unknown>> = Array.isArray(durableOperation.files) ? durableOperation.files.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object") : [];
+      let revision = Number(durableOperation.revision ?? 1);
+      let unknown = false;
+      const update = async (file: Record<string, unknown>, phase: string, fields: { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState } = {}) => {
+        const result = await context.durableRecoveryStore!.updateOperationFile({
+          operationId, workspaceId: context.identity.workspaceId, path: String(file.path), expectedRevision: revision,
+          expectedPhase: String(file.phase ?? "pending"), phase, ...fields,
+          ...(typeof summary.sessionId === "string" ? { sessionId: summary.sessionId } : {}),
+        });
+        revision = Number(result.revision ?? revision + 1);
+        file.phase = phase;
+      };
+      for (const file of files) {
+        const path = String(file.path ?? "");
+        const phase = String(file.phase ?? "pending");
+        const parse = (key: string): RecoveryState | undefined => typeof file[key] === "string" ? parseRecoveryState(JSON.parse(String(file[key]))) : undefined;
+        const target = parse("targetJson");
+        const safety = parse("safetyJson");
+        if (String(data.targetKinds?.[path]) === "surface") {
+          if (phase !== "external-safety-observed") { await update(file, "needs-attention"); unknown = true; }
+          continue;
+        }
+        if (!target || !safety) { await update(file, "needs-attention"); unknown = true; continue; }
+        const current = await observeDisk(context, path);
+        if (phase === "apply-intent" && sameState(current, target)) await update(file, "target-observed", { target });
+        else if ((phase === "apply-intent" || phase === "target-observed" || phase === "compensate-intent") && sameState(current, safety)) await update(file, "safety-observed", { safety });
+        else if (!sameState(current, safety) && !sameState(current, target)) { await update(file, "needs-attention"); unknown = true; }
+      }
+      const state = unknown ? "needs-attention" : files.some((file: Record<string, unknown>) => String(file.phase).includes("target-observed")) ? "compensated" : "aborted";
+      await context.durableRecoveryStore.completeOperation({ operationId, workspaceId: context.identity.workspaceId, expectedRevision: revision, state, result: data });
+      (state === "needs-attention" ? outcome.needsAttention : state === "compensated" ? outcome.compensated : outcome.aborted).push(operationId);
+    }
+    return outcome;
+  }
   const rows = context.database.prepare(`
     SELECT * FROM operations WHERE kind = ?
     AND workspace_id = ?

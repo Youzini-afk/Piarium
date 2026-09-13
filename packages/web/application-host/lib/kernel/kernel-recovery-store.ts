@@ -647,6 +647,12 @@ export const createKernelRecoveryDirectFacade = (
   store: KernelRecoveryStore,
 ): WorkspaceRecoveryEngine => {
   const facade = { ...base } as WorkspaceRecoveryEngine;
+  const withWorkspaceStorage = base.withWorkspaceStorage.bind(base);
+  facade.withWorkspaceStorage = (workspaceId, options, operation) => withWorkspaceStorage(
+    workspaceId,
+    options,
+    (context) => operation({ ...context, durableRecoveryStore: store }),
+  );
   facade.recordTurnStart = async (input) => ({ binding: await store.recordTurnStart(input), status: "ready" });
   facade.recordMutationBefore = async (input) => ({ recorded: await store.recordMutationBefore(input), status: "ready" });
   facade.recordMutationAfter = async (input) => ({ recorded: await store.recordMutationAfter(input), status: "ready" });
