@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-12
+Last updated: 2026-09-13
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
