@@ -396,3 +396,70 @@ it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a c
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal response is lost and the Host restarts", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-branch-reconcile-"));
+  const workspace = path.join(root, "workspace");
+  const storageRoot = path.join(root, "storage");
+  const dataDir = path.join(root, "data");
+  const workspaceId = "kernel-branch-reconcile-workspace";
+  await fs.mkdir(workspace, { recursive: true });
+  await fs.writeFile(path.join(workspace, "base.txt"), "base\n");
+  const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
+    inspectWorkspace: async () => ({ root: workspace, workspaceId }),
+    listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
+    beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
+    inspectDirtyBuffers: async () => [],
+    runResourceOperation: async (_workspace, _resources, operation) => operation(),
+  };
+  const baseEngine = createWorkspaceRecoveryEngine({
+    authorityId: "kernel-branch-reconcile-test",
+    dataDir,
+    documents,
+    sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
+  });
+  const client = createKernelClient({ hostId: "kernel-branch-reconcile-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "kernel-branch-reconcile-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
+  const content = new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache"));
+  adapter.bindFileStore(content);
+  const kernelRecoveryStore = new KernelRecoveryStore(adapter, content);
+  const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
+  try {
+    await client.start();
+    const access = createKernelWorkspaceWorkingStateAccess(adapter, engine, kernelRecoveryStore);
+    const result = await access.withStore(workspaceId, "branch-reconcile-setup", async (store) => {
+      const base = await store.captureDirectory(workspace);
+      await store.createBranch(workspaceId, "reconcile-parent", base, "base");
+      await store.createBranch(workspaceId, "reconcile-child", base, "reconcile-parent@0");
+      const object = await store.putObject(Buffer.from("child\n"));
+      await store.commitVirtualWrites("reconcile-child", 0, { "child.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      return store.publishHeadResult("reconcile-child");
+    });
+    const coordinator = new IntegrationCoordinator({ workingStates: access });
+    const originalComplete = kernelRecoveryStore.completeOperation.bind(kernelRecoveryStore);
+    let lost = true;
+    kernelRecoveryStore.completeOperation = async (input) => {
+      if (lost && input.state === "complete") {
+        lost = false;
+        throw new Error("simulated lost terminal response");
+      }
+      return originalComplete(input);
+    };
+    await assert.rejects(
+      coordinator.mergeResult({ workspaceId, threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } }),
+      /lost terminal response/i,
+    );
+    const pending = (await kernelRecoveryStore.listOperations(workspaceId, "integration")).find((entry) => String(entry.state) === "applying");
+    assert.ok(pending);
+    kernelRecoveryStore.completeOperation = originalComplete;
+    const restartedCoordinator = new IntegrationCoordinator({ workingStates: access });
+    await restartedCoordinator.mergeResult({ workspaceId, threadId: "reconcile-thread", branchId: "reconcile-child", resultRevision: result.resultRevision, parentAuthority: { kind: "branch", branchId: "reconcile-parent" } });
+    const reconciled = await kernelRecoveryStore.getOperation(workspaceId, String(pending?.operationId));
+    assert.equal(reconciled?.state, "complete");
+  } finally {
+    await adapter.dispose().catch(() => undefined);
+    await client.close().catch(() => undefined);
+    await engine.dispose().catch(() => undefined);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

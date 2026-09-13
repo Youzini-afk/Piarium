@@ -32,6 +32,7 @@ import {
   markDurableIntegrationUndoing,
   markDurableExternalDispatched,
   reconcileInterruptedBranchIntegrations,
+  reconcileInterruptedKernelBranchIntegrations,
   reconcileInterruptedIntegrationOperations,
   undoDurableIntegrationOperation,
   undoBranchIntegrationOnDirectory,
@@ -520,6 +521,8 @@ export class IntegrationCoordinator {
       if (!context.durableRecoveryStore && !isWorkingStateRootStore(store)) {
         await reconcileInterruptedIntegrationOperations(context);
         await reconcileInterruptedBranchIntegrations(context, store);
+      } else if (context.durableRecoveryStore && isWorkingStateRootStore(store)) {
+        await reconcileInterruptedKernelBranchIntegrations(context as DurableFileOperationContext, store);
       }
       const blocking = context.durableRecoveryStore
         ? (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
@@ -959,6 +962,8 @@ export class IntegrationCoordinator {
       if (!context.durableRecoveryStore && !isWorkingStateRootStore(store)) {
         await reconcileInterruptedIntegrationOperations(context);
         await reconcileInterruptedBranchIntegrations(context, store);
+      } else if (context.durableRecoveryStore && isWorkingStateRootStore(store)) {
+        await reconcileInterruptedKernelBranchIntegrations(context as DurableFileOperationContext, store);
       }
       const operation = await inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);

@@ -4,6 +4,7 @@ import { parseRecoveryState, sameState } from "./journal-files.js";
 import type { OperationFileRow, OperationRow, SqliteDatabase } from "./journal-catalog.js";
 import { initOperationFiles, operationFileRows, updateOperationFilePhase, writeOperationRow } from "./journal-catalog.js";
 import { assertIntegrationTurnBinding, bindIntegrationOperationToTurn } from "./integration-turn-binding.js";
+import type { WorkingStateRootStore } from "../harness/working-state/types.js";
 
 export interface DurableFileTarget {
   expected: RecoveryState;
@@ -1555,6 +1556,46 @@ export interface BranchIntegrationView {
     files: Record<string, RecoveryState>,
   ) => Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
 }
+
+/** Reconcile a kernel-owned branch CAS whose terminal response was lost. */
+export const reconcileInterruptedKernelBranchIntegrations = async (
+  context: DurableFileOperationContext,
+  store: WorkingStateRootStore,
+): Promise<{ aborted: string[]; completed: string[]; needsAttention: string[] }> => {
+  const result = { aborted: [] as string[], completed: [] as string[], needsAttention: [] as string[] };
+  const durable = context.durableRecoveryStore;
+  if (!durable) return result;
+  for (const summary of await durable.listOperations(context.identity.workspaceId, "integration")) {
+    const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+    if (!operationId || ["complete", "conflict", "compensated", "aborted", "undone", "needs-attention"].includes(String(summary.state))) continue;
+    const operation = await durable.getOperation(context.identity.workspaceId, operationId);
+    if (!operation || !operation.data || typeof operation.data !== "object") continue;
+    const data = operation.data as Record<string, unknown>;
+    const parentBranchId = typeof data.parentBranchId === "string" ? data.parentBranchId : "";
+    if (!parentBranchId) continue;
+    const branch = await store.getBranchRoot(parentBranchId);
+    const before = data.beforeStates && typeof data.beforeStates === "object" ? data.beforeStates as Record<string, RecoveryState> : {};
+    const after = data.afterStates && typeof data.afterStates === "object" ? data.afterStates as Record<string, RecoveryState> : {};
+    const paths = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+    if (!branch || paths.length === 0) {
+      await durable.completeOperation({ operationId, workspaceId: context.identity.workspaceId, expectedRevision: Number(operation.revision ?? 1), state: "needs-attention", result: data, failure: { message: "Parent branch is unavailable during kernel restart reconciliation" } });
+      result.needsAttention.push(operationId);
+      continue;
+    }
+    const current = await store.readStateSlice(parentBranchId, paths) ?? {};
+    const matches = (expected: Record<string, RecoveryState>): boolean => paths.every((file) => sameState(current[file] ?? { kind: "missing" }, expected[file] ?? { kind: "missing" }));
+    const beforeRevision = Number(data.beforeWriteRevision ?? 0);
+    const afterRevision = Number(data.afterWriteRevision ?? beforeRevision);
+    const state = branch.writeRevision === afterRevision && matches(after)
+      ? "complete"
+      : branch.writeRevision === beforeRevision && matches(before)
+        ? "aborted"
+        : "needs-attention";
+    await durable.completeOperation({ operationId, workspaceId: context.identity.workspaceId, expectedRevision: Number(operation.revision ?? 1), state, result: data, ...(state === "needs-attention" ? { failure: { message: "Parent branch matches neither before nor after integration state" } } : {}) });
+    (state === "complete" ? result.completed : state === "aborted" ? result.aborted : result.needsAttention).push(operationId);
+  }
+  return result;
+};
 
 const parentSliceMatches = (
   current: Record<string, RecoveryState>,
