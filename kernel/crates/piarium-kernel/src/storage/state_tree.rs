@@ -65,27 +65,54 @@ impl Storage {
         Ok(output)
     }
 
-    fn find_path_node(&self, hash: &str, segments: &[String]) -> Result<Option<String>, KernelError> {
+    fn find_path_node(
+        &self,
+        hash: &str,
+        segments: &[String],
+    ) -> Result<Option<String>, KernelError> {
         let TrieNode::Path { children, .. } = self.load_node(hash)? else {
-            return Err(KernelError::Storage("path root points to an index node".to_string()));
+            return Err(KernelError::Storage(
+                "path root points to an index node".to_string(),
+            ));
         };
         if segments.is_empty() {
             return Ok(Some(hash.to_string()));
         }
-        let Some(children) = children else { return Ok(None); };
-        let Some(child) = self.find_index_child(&children, &segments[0])? else { return Ok(None); };
+        let Some(children) = children else {
+            return Ok(None);
+        };
+        let Some(child) = self.find_index_child(&children, &segments[0])? else {
+            return Ok(None);
+        };
         self.find_path_node(&child, &segments[1..])
     }
 
     fn find_index_child(&self, hash: &str, key: &str) -> Result<Option<String>, KernelError> {
-        let TrieNode::Index { key: node_key, child, left, right, .. } = self.load_node(hash)? else {
-            return Err(KernelError::Storage("path children point to a path node".to_string()));
+        let TrieNode::Index {
+            key: node_key,
+            child,
+            left,
+            right,
+            ..
+        } = self.load_node(hash)?
+        else {
+            return Err(KernelError::Storage(
+                "path children point to a path node".to_string(),
+            ));
         };
-        if key == node_key { return Ok(Some(child)); }
-        if key < node_key.as_str() {
-            return left.map(|value| self.find_index_child(&value, key)).transpose().map(|value| value.flatten());
+        if key == node_key {
+            return Ok(Some(child));
         }
-        right.map(|value| self.find_index_child(&value, key)).transpose().map(|value| value.flatten())
+        if key < node_key.as_str() {
+            return left
+                .map(|value| self.find_index_child(&value, key))
+                .transpose()
+                .map(|value| value.flatten());
+        }
+        right
+            .map(|value| self.find_index_child(&value, key))
+            .transpose()
+            .map(|value| value.flatten())
     }
 
     pub(super) fn walk_path_entries(

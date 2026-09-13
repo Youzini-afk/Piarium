@@ -1128,7 +1128,14 @@ impl Storage {
             .filter(|value| {
                 matches!(
                     *value,
-                    "complete" | "conflict" | "aborted" | "compensated" | "undone" | "needs-attention" | "undoing" | "awaiting-surface"
+                    "complete"
+                        | "conflict"
+                        | "aborted"
+                        | "compensated"
+                        | "undone"
+                        | "needs-attention"
+                        | "undoing"
+                        | "awaiting-surface"
                 )
             })
             .ok_or_else(|| {

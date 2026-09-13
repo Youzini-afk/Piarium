@@ -701,8 +701,12 @@ impl Storage {
         let object = document
             .as_object()
             .ok_or_else(|| KernelError::Operation(format!("{document_field} must be an object")))?;
-        if let Err(error) = crate::protocol_generated::validate_generated_working_document(record_type, document) {
-            return Err(KernelError::Operation(format!("{method} document is malformed: {error}")));
+        if let Err(error) =
+            crate::protocol_generated::validate_generated_working_document(record_type, document)
+        {
+            return Err(KernelError::Operation(format!(
+                "{method} document is malformed: {error}"
+            )));
         }
         let workspace_id = params_value
             .get("workspaceId")
@@ -763,15 +767,21 @@ impl Storage {
                 .get("branchId")
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
-                .ok_or_else(|| KernelError::Operation("working.result branchId is required".to_string()))?;
+                .ok_or_else(|| {
+                    KernelError::Operation("working.result branchId is required".to_string())
+                })?;
             let result_revision = params_value
                 .get("resultRevision")
                 .and_then(Value::as_i64)
                 .filter(|value| *value > 0)
-                .ok_or_else(|| KernelError::Operation("working.result resultRevision is required".to_string()))?;
+                .ok_or_else(|| {
+                    KernelError::Operation("working.result resultRevision is required".to_string())
+                })?;
             let expected_record_id = format!("working-result:{branch_id}@{result_revision}");
             if record_id != expected_record_id {
-                return Err(KernelError::Operation("working.result recordId does not match branchId/resultRevision".to_string()));
+                return Err(KernelError::Operation(
+                    "working.result recordId does not match branchId/resultRevision".to_string(),
+                ));
             }
             let expected_root: Option<String> = self
                 .conn
@@ -781,11 +791,15 @@ impl Storage {
                     |row| row.get(0),
                 )
                 .optional()?;
-            let expected_root = expected_root.ok_or_else(|| KernelError::Operation("working.result revision is not published".to_string()))?;
+            let expected_root = expected_root.ok_or_else(|| {
+                KernelError::Operation("working.result revision is not published".to_string())
+            })?;
             if params_value.get("root").and_then(Value::as_str) != Some(expected_root.as_str())
                 || object.get("root").and_then(Value::as_str) != Some(expected_root.as_str())
             {
-                return Err(KernelError::Operation("working.result root does not match published revision".to_string()));
+                return Err(KernelError::Operation(
+                    "working.result root does not match published revision".to_string(),
+                ));
             }
             let base_root: String = self
                 .conn
@@ -795,11 +809,20 @@ impl Storage {
                     |row| row.get(0),
                 )
                 .optional()?
-                .ok_or_else(|| KernelError::Operation("working.result branch is not available".to_string()))?;
+                .ok_or_else(|| {
+                    KernelError::Operation("working.result branch is not available".to_string())
+                })?;
             let mut added = Vec::new();
             let mut removed = Vec::new();
             let mut changed = Vec::new();
-            self.diff_nodes(&base_root, &expected_root, "", &mut added, &mut removed, &mut changed)?;
+            self.diff_nodes(
+                &base_root,
+                &expected_root,
+                "",
+                &mut added,
+                &mut removed,
+                &mut changed,
+            )?;
             let mut expected_paths = added;
             expected_paths.extend(removed);
             expected_paths.extend(changed);
@@ -807,13 +830,23 @@ impl Storage {
             let mut supplied_paths = object
                 .get("changedPaths")
                 .and_then(Value::as_array)
-                .ok_or_else(|| KernelError::Operation("working.result changedPaths is required".to_string()))?
+                .ok_or_else(|| {
+                    KernelError::Operation("working.result changedPaths is required".to_string())
+                })?
                 .iter()
-                .map(|value| value.as_str().map(str::to_string).ok_or_else(|| KernelError::Operation("working.result changedPaths contains a non-string".to_string())))
+                .map(|value| {
+                    value.as_str().map(str::to_string).ok_or_else(|| {
+                        KernelError::Operation(
+                            "working.result changedPaths contains a non-string".to_string(),
+                        )
+                    })
+                })
                 .collect::<Result<Vec<_>, _>>()?;
             supplied_paths.sort();
             if supplied_paths != expected_paths {
-                return Err(KernelError::Operation("working.result changedPaths do not match the published root diff".to_string()));
+                return Err(KernelError::Operation(
+                    "working.result changedPaths do not match the published root diff".to_string(),
+                ));
             }
             let files = object
                 .get("diffStats")
@@ -821,7 +854,9 @@ impl Storage {
                 .and_then(|stats| stats.get("files"))
                 .and_then(Value::as_i64);
             if files != Some(expected_paths.len() as i64) {
-                return Err(KernelError::Operation("working.result diffStats.files does not match changedPaths".to_string()));
+                return Err(KernelError::Operation(
+                    "working.result diffStats.files does not match changedPaths".to_string(),
+                ));
             }
         }
         let mut translated = params_value.clone();
