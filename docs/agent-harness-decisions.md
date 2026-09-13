@@ -5979,3 +5979,15 @@ Kernel-backed `WorkspaceRecoveryStorageContext` now carries a Rust-owned `Recove
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-270 | partial acceptance record | — | status 阶段 R1；plan 阶段 R1；architecture；kernel/application-host module documentation |
+
+### D-271 · 2026-09-13 · Result publication uses root store CAS
+
+类型：R1 root consumer continuation；只追加，不改写 D-270 正文
+
+ThreadRuntime partial/settle result publication now invokes the async root store. Directory capture only sends the requested changed paths; the kernel performs branch writeRevision/root CAS and publishes the immutable result record through `working.result.put`. Virtual publication uses the current branch root and fixed revision identity. The callback compatibility adapter remains for draft/verification/history and other not-yet-converted consumers.
+
+## D-271 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-271 | wired / locally proven by kernel and Host type checks | — | status 阶段 R1；plan 阶段 R1；kernel/application-host module documentation |

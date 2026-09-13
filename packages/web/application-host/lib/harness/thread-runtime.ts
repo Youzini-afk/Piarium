@@ -1250,11 +1250,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (thread?.role === "retrieval") return;
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
     const result = isVirtualWorktree(thread.worktree)
-      ? await options.workingStates.withStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
+      ? await withWorkingStateRootStore(options.workingStates, workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
       : await (async () => {
         const inspected = await options.worktrees.inspect(thread.worktree!, "live");
         const indexModes = await options.worktrees.inspectIndexModes?.(thread.worktree!.path);
-        return options.workingStates!.withStore(workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
+        return withWorkingStateRootStore(options.workingStates!, workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
       })();
     let worktree = thread.worktree;
     try {
@@ -2350,7 +2350,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const publishedIndexModes = !isVirtualWorktree(currentWorktree)
             ? await options.worktrees.inspectIndexModes?.(currentWorktree!.path)
             : undefined;
-          const published = await options.workingStates.withStore(
+          const published = await withWorkingStateRootStore(
+            options.workingStates,
             binding.workspaceId,
             "thread-result-publish",
             (store) => isVirtualWorktree(currentWorktree)
@@ -2360,10 +2361,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
                 currentWorktree!.resultPath ?? currentWorktree!.path,
                 inspected!.changedFiles,
                 {
-                  indexModes: publishedIndexModes,
-                  ...(options.worktrees.verifyFixedResult
-                    ? { validateFixedSource: () => options.worktrees.verifyFixedResult!(currentWorktree!) }
-                    : {}),
+                  ...(publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes }),
+                  ...(options.worktrees.verifyFixedResult ? { validateFixedSource: () => options.worktrees.verifyFixedResult!(currentWorktree!) } : {}),
                 },
               ),
           );

@@ -206,6 +206,8 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
 
   materializeResult(...args: Parameters<WorkingStateStore["materializeResult"]>): ReturnType<WorkingStateStore["materializeResult"]> { return this.store.materializeResult(...args); }
   captureBranchCandidateIdentity(...args: Parameters<WorkingStateStore["captureBranchCandidateIdentity"]>): ReturnType<WorkingStateStore["captureBranchCandidateIdentity"]> { return this.store.captureBranchCandidateIdentity(...args); }
+  publishHeadResult(...args: Parameters<WorkingStateStore["publishHeadResult"]>): ReturnType<WorkingStateStore["publishHeadResult"]> { return this.store.publishHeadResult(...args); }
+  publishDirectoryResult(...args: Parameters<WorkingStateStore["publishDirectoryResult"]>): ReturnType<WorkingStateStore["publishDirectoryResult"]> { return this.store.publishDirectoryResult(...args); }
 }
 
 export const isWorkingStateRootStore = (store: CompatibleWorkingStateStore): store is WorkingStateRootStore => (

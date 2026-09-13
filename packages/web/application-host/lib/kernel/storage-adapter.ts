@@ -642,6 +642,79 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     });
   }
 
+  private async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
+    const files = relativePaths?.map(normalize) ?? await this.scanDirectory(directory);
+    const result: Record<string, RecoveryState> = {};
+    let done = 0;
+    for (const file of files) {
+      options?.signal?.throwIfAborted();
+      const captured = await this.context.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
+      let state = captured.state;
+      if (state.kind === "regular-file" && options?.store !== false) {
+        const object = await this.putObject(await fs.promises.readFile(path.join(directory, ...file.split("/"))));
+        state = { ...state, objectHash: object.hash, byteLength: object.byteLength };
+      }
+      result[file] = state;
+      done += 1;
+      options?.onProgress?.(done, files.length);
+    }
+    return applyIndexModes(result, options?.indexModes);
+  }
+
+  private async scanDirectory(directory: string, base = directory): Promise<string[]> {
+    const output: string[] = [];
+    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === ".piarium") continue;
+      const absolute = path.join(directory, entry.name);
+      const relative = normalize(path.relative(base, absolute));
+      output.push(relative);
+      if (entry.isDirectory()) output.push(...await this.scanDirectory(absolute, base));
+    }
+    return output.sort();
+  }
+
+  private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[]): Promise<WorkingResult> {
+    const branch = await this.getBranchRoot(branchId);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const candidates = (changedPaths?.map(normalize) ?? Object.keys(captured).map(normalize)).sort();
+    const [base, current] = await Promise.all([
+      this.context.client.readBranch({ branchId, revision: 0, paths: candidates, includeEntries: true }),
+      this.context.client.readBranch({ branchId, paths: candidates, includeEntries: true }),
+    ]);
+    const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    const baseStates = states(base);
+    const currentStates = states(current);
+    const changed = candidates.filter((file) => !sameState(baseStates[file] ?? { kind: "missing" }, captured[file] ?? currentStates[file] ?? { kind: "missing" }));
+    const writes = Object.fromEntries(candidates.filter((file) => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" })).map((file) => [file, captured[file] ?? { kind: "missing" as const}]));
+    if (Object.keys(writes).length > 0) {
+      const committed = await this.commitVirtualWrites(branchId, branch.writeRevision, writes);
+      if (committed.status === "conflict") throw new Error(`Working branch changed while publishing result: ${branchId}`);
+    }
+    const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: (await this.getBranchRoot(branchId))!.writeRevision, expectedRoot: (await this.getBranchRoot(branchId))!.root });
+    const revision = Number(published.revision);
+    const root = String(published.root ?? "");
+    if (!Number.isSafeInteger(revision) || revision <= 0 || !root) throw new Error("Kernel returned an invalid published result identity");
+    const pathStates = Object.fromEntries(changed.map((file) => [file, captured[file] ?? { kind: "missing" as const }]));
+    const result: WorkingResult = { resultRevision: revision, branchId, changedPaths: changed, baseStates: Object.fromEntries(changed.map((file) => [file, baseStates[file] ?? { kind: "missing" as const }])), pathStates, diffStats: { files: changed.length, insertions: 0, deletions: 0 }, createdAt: nowIso(), root };
+    const references = [
+      ...Object.entries(result.baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
+      ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
+    ];
+    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
+    return result;
+  }
+
+  async publishHeadResult(branchId: string): Promise<WorkingResult> {
+    const read = await this.context.client.readBranch({ branchId, includeEntries: true });
+    return this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])));
+  }
+
+  async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {
+    const captured = await this.captureDirectory(directory, changedPaths, options);
+    if (options?.validateFixedSource && !await options.validateFixedSource()) throw new Error("Working-state source changed while it was being captured");
+    return this.publishCaptured(branchId, captured, changedPaths);
+  }
+
   async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> {
     const branch = await this.getBranchRoot(branchId);
     if (!branch) return null;

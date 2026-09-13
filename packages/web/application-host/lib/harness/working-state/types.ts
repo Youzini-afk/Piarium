@@ -132,6 +132,8 @@ export interface WorkingStateRootStore {
   ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
   materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
+  publishHeadResult(branchId: string): Promise<WorkingResult>;
+  publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult>;
 }
 
 export interface WorkspaceWorkingStateRootAccess {
