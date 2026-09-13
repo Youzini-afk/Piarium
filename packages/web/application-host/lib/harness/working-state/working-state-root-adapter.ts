@@ -181,6 +181,12 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
 
   ownerIdForObject(hash: string): string | undefined { return (this.store as WorkingStateStore & { ownerIdForObject?: (value: string) => string | undefined }).ownerIdForObject?.(hash); }
 
+  createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: import("./types.js").DraftBaselinePathProvenance }[]): Promise<import("./types.js").DraftBaseline> {
+    return this.store.createDraftBaseline(workspaceId, paths);
+  }
+
+  deleteDraftBaseline(id: string): Promise<void> { return this.store.deleteDraftBaseline(id); }
+
   async pinBranch(branchId: string, options?: { revision?: number }): Promise<WorkingStatePin> {
     const branch = this.store.getBranch(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);

@@ -621,6 +621,42 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return { hash: value.hash, byteLength: value.byteLength };
   }
 
+  async createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline> {
+    if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
+    const id = `draft-${randomUUID()}`;
+    const pathStates: Record<string, RecoveryState> = {};
+    const provenance: Record<string, DraftBaselinePathProvenance> = {};
+    const ownerIds: string[] = [];
+    const references: KernelStorageReference[] = [];
+    for (const input of paths) {
+      const file = normalize(input.path);
+      const object = await this.putObject(typeof input.content === "string" ? Buffer.from(input.content, "utf8") : input.content);
+      pathStates[file] = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(input.mode === undefined ? {} : { mode: input.mode }) };
+      provenance[file] = structuredClone(input.provenance);
+      const owner = this.ownerByHash.get(object.hash);
+      if (owner) ownerIds.push(owner);
+      references.push({ slot: `draft:${file}`, objectHash: object.hash });
+    }
+    const baseline: DraftBaseline = { id, workspaceId, createdAt: nowIso(), pathStates, provenance };
+    const document: KernelWorkingDraftDocument = {
+      id,
+      workspaceId,
+      createdAt: baseline.createdAt,
+      root: transientStateIdentity(pathStates),
+      provenance: Object.entries(provenance).map(([file, value]) => ({ path: file, ...value })),
+    };
+    await this.context.working.draftPut({ operationId: `draft:${id}`, recordId: id, document, createdAt: baseline.createdAt, ownerIds, references });
+    for (const state of Object.values(pathStates)) if (state.kind === "regular-file") {
+      this.ownerByHash.delete(state.objectHash);
+      this.sourceByHash.set(state.objectHash, { recordId: id, slot: `draft:${Object.entries(pathStates).find(([, value]) => value === state)?.[0] ?? ""}` });
+    }
+    return structuredClone(baseline);
+  }
+
+  async deleteDraftBaseline(id: string): Promise<void> {
+    await this.context.working.draftRelease(`draft-release:${id}`, id);
+  }
+
   async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
     const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalize(file), state]));
     const ancestorPaths = new Set<string>();

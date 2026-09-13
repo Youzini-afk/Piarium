@@ -128,6 +128,8 @@ export interface WorkingStateRootStore {
   ownerIdForObject?(hash: string): string | undefined;
   pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
   putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
+  createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline>;
+  deleteDraftBaseline(id: string): Promise<void>;
   commitVirtualWrites(
     branchId: string,
     expectedWriteRevision: number,

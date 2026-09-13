@@ -1323,7 +1323,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.workingStates) {
       throw new ThreadRuntimeError("unavailable", "Persistent working state is unavailable for editor drafts");
     }
-    const baseline = await options.workingStates.withStore(workspaceId, "thread-draft-baseline-capture", (store) => (
+    const baseline = await withWorkingStateRootStore(options.workingStates, workspaceId, "thread-draft-baseline-capture", (store) => (
       store.createDraftBaseline(workspaceId, cloned.resources.map((resource) => ({
         path: resource.resource.resourceId,
         content: encodeDocumentText({
@@ -1342,11 +1342,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     ));
     return {
       draftBaselineId: baseline.id,
-      cleanup: () => options.workingStates!.withStore(
-        workspaceId,
-        "thread-draft-baseline-create-failed",
-        (store) => store.deleteDraftBaseline(baseline.id),
-      ),
+      cleanup: () => withWorkingStateRootStore(options.workingStates!, workspaceId, "thread-draft-baseline-create-failed", (store) => store.deleteDraftBaseline(baseline.id)),
     };
   };
 
