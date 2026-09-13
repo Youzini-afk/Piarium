@@ -129,7 +129,7 @@ export interface WorkingStateRootStore {
     branchId: string,
     expectedWriteRevision: number,
     files: Record<string, RecoveryState>,
-  ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }>;
+  ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }>;
   materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
   publishHeadResult(branchId: string): Promise<WorkingResult>;

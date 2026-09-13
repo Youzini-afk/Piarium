@@ -555,7 +555,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return { hash: value.hash, byteLength: value.byteLength };
   }
 
-  async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
+  async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
     const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalize(file), state]));
     const ancestorPaths = new Set<string>();
     for (const file of Object.keys(normalized)) {
@@ -571,7 +571,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       this.selected(branchId, selectedPaths, 0),
     ]);
     if (!currentRead || !baseRead) throw new Error(`Working branch not found: ${branchId}`);
-    if (currentRead.writeRevision !== expectedWriteRevision) return { status: "conflict", writeRevision: currentRead.writeRevision };
+    if (currentRead.writeRevision !== expectedWriteRevision) return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
     const current = Object.fromEntries(currentRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     const base = Object.fromEntries(baseRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     assertVirtualWriteTree(current, normalized);
@@ -607,7 +607,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     if (result.status === "committed") {
       for (const state of Object.values(committedWrites)) if (state.kind === "regular-file") this.ownerByHash.delete(state.objectHash);
     }
-    return { status: result.status, writeRevision: result.writeRevision };
+    return { status: result.status, writeRevision: result.writeRevision, root: result.root };
   }
 
   async materializeResult(branchId: string, revision: number, directory: string): Promise<MaterializeResult> {
@@ -673,48 +673,73 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return output.sort();
   }
 
-  private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[]): Promise<WorkingResult> {
+  private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[], fixedPin?: WorkingStatePin): Promise<WorkingResult> {
     const branch = await this.getBranchRoot(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
     const candidates = (changedPaths?.map(normalize) ?? Object.keys(captured).map(normalize)).sort();
-    const [base, current] = await Promise.all([
-      this.context.client.readBranch({ branchId, revision: 0, paths: candidates, includeEntries: true }),
-      this.context.client.readBranch({ branchId, paths: candidates, includeEntries: true }),
-    ]);
+    const base = await this.context.client.readBranch({ branchId, revision: 0, paths: candidates, includeEntries: true });
+    const current = fixedPin ? undefined : await this.context.client.readBranch({ branchId, paths: candidates, includeEntries: true });
     const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => Object.fromEntries(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
     const baseStates = states(base);
-    const currentStates = states(current);
-    const changed = candidates.filter((file) => !sameState(baseStates[file] ?? { kind: "missing" }, captured[file] ?? currentStates[file] ?? { kind: "missing" }));
-    const writes = Object.fromEntries(candidates.filter((file) => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" })).map((file) => [file, captured[file] ?? { kind: "missing" as const}]));
+    const currentStates = current ? states(current) : {};
+    const writes = fixedPin ? {} : Object.fromEntries(candidates.filter((file) => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" })).map((file) => [file, captured[file] ?? { kind: "missing" as const}]));
+    let fixedRoot = fixedPin?.root ?? current!.root;
+    let fixedWriteRevision = fixedPin?.writeRevision ?? current!.writeRevision;
     if (Object.keys(writes).length > 0) {
       const committed = await this.commitVirtualWrites(branchId, branch.writeRevision, writes);
       if (committed.status === "conflict") throw new Error(`Working branch changed while publishing result: ${branchId}`);
+      if (!committed.root) throw new Error(`Kernel did not return the published working root for ${branchId}`);
+      fixedRoot = committed.root;
+      fixedWriteRevision = committed.writeRevision;
     }
-    const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: (await this.getBranchRoot(branchId))!.writeRevision, expectedRoot: (await this.getBranchRoot(branchId))!.root });
-    const revision = Number(published.revision);
-    const root = String(published.root ?? "");
-    if (!Number.isSafeInteger(revision) || revision <= 0 || !root) throw new Error("Kernel returned an invalid published result identity");
-    const pathStates = Object.fromEntries(changed.map((file) => [file, captured[file] ?? { kind: "missing" as const }]));
-    const result: WorkingResult = { resultRevision: revision, branchId, changedPaths: changed, baseStates: Object.fromEntries(changed.map((file) => [file, baseStates[file] ?? { kind: "missing" as const }])), pathStates, diffStats: { files: changed.length, insertions: 0, deletions: 0 }, createdAt: nowIso(), root };
-    const references = [
-      ...Object.entries(result.baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
-      ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
-    ];
-    await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
-    return result;
+    const pin = fixedPin ?? await this.pinBranch(branchId);
+    try {
+      if (pin.root !== fixedRoot || pin.writeRevision !== fixedWriteRevision) {
+        throw new Error(`Working branch changed while pinning result ${branchId}`);
+      }
+      const rootDiff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: pin.root }));
+      const changed = [
+        ...(Array.isArray(rootDiff.added) ? rootDiff.added : []),
+        ...(Array.isArray(rootDiff.removed) ? rootDiff.removed : []),
+        ...(Array.isArray(rootDiff.changed) ? rootDiff.changed : []),
+      ].filter((value): value is string => typeof value === "string").map(normalize).sort();
+      const fixed = await this.selectedPin(pin.pinId, changed);
+      const pathStates = Object.fromEntries(fixed.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+      const resultBase = Object.fromEntries(changed.map((file) => [file, baseStates[file] ?? { kind: "missing" as const }]));
+      const published = await this.context.client.publishBranch({ operationId: `branch-publish:${branchId}:${branch.headRevision + 1}`, branchId, expectedWriteRevision: pin.writeRevision, expectedRoot: pin.root });
+      if (published.status === "conflict") throw new Error(`Working branch changed while publishing result: ${branchId}`);
+      const revision = Number(published.revision);
+      const root = String(published.root ?? "");
+      if (!Number.isSafeInteger(revision) || revision <= 0 || !root || root !== pin.root) throw new Error("Kernel returned an invalid published result identity");
+      const result: WorkingResult = { resultRevision: revision, branchId, changedPaths: changed, baseStates: resultBase, pathStates, diffStats: { files: changed.length, insertions: 0, deletions: 0 }, createdAt: nowIso(), root };
+      const references = [
+        ...Object.entries(result.baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
+        ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
+      ];
+      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
+      return result;
+    } finally {
+      if (!fixedPin) await pin.release();
+    }
   }
 
   async publishHeadResult(branchId: string): Promise<WorkingResult> {
     const branch = await this.getBranchRoot(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);
-    const diff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: branch.root }));
-    const changedPaths = [
-      ...(Array.isArray(diff.added) ? diff.added : []),
-      ...(Array.isArray(diff.removed) ? diff.removed : []),
-      ...(Array.isArray(diff.changed) ? diff.changed : []),
-    ].filter((value): value is string => typeof value === "string").map(normalize);
-    const read = await this.context.client.readBranch({ branchId, paths: changedPaths, includeEntries: true });
-    return this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])), changedPaths);
+    const pin = await this.pinBranch(branchId);
+    try {
+      if (pin.root !== branch.root || pin.writeRevision !== branch.writeRevision) throw new Error(`Working branch changed while pinning result ${branchId}`);
+      const diff = asRecord(await this.context.client.diffRoots({ leftRoot: branch.baseRoot, rightRoot: pin.root }));
+      const changedPaths = [
+        ...(Array.isArray(diff.added) ? diff.added : []),
+        ...(Array.isArray(diff.removed) ? diff.removed : []),
+        ...(Array.isArray(diff.changed) ? diff.changed : []),
+      ].filter((value): value is string => typeof value === "string").map(normalize);
+      const read = await this.selectedPin(pin.pinId, changedPaths);
+      return await this.publishCaptured(branchId, Object.fromEntries(read.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)])), changedPaths, pin);
+    } finally {
+      await pin.release();
+    }
   }
 
   async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {

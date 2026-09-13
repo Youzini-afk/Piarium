@@ -12,7 +12,7 @@ import { VirtualWriteGate } from "../harness/working-state/virtual-write-gate.js
 import { IntegrationCoordinator } from "../harness/working-state/integration-coordinator.js";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/journal-engine.js";
 import { createKernelClient } from "./kernel-client.js";
-import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from "./storage-adapter.js";
+import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter, KernelWorkingStateRootStore } from "./storage-adapter.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -340,6 +340,59 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
     await adapter.dispose().catch(() => undefined);
     await client.close().catch(() => undefined);
     await engine.dispose().catch(() => undefined);
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(!hasReleaseKernel)("publishes a pinned virtual root without mixing a concurrent write", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-publish-race-"));
+  const workspace = path.join(root, "workspace");
+  const storageRoot = path.join(root, "storage");
+  const workspaceId = "kernel-publish-race-workspace";
+  await fs.mkdir(workspace, { recursive: true });
+  await fs.writeFile(path.join(workspace, "a.txt"), "base\n");
+  const client = createKernelClient({ hostId: "kernel-publish-race-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "kernel-publish-race-host", storageRoot, resolveWorkspaceRoot: async () => workspace });
+  adapter.bindFileStore(new KernelRecoveryContentStore(adapter, path.join(root, "recovery-cache")));
+  try {
+    await client.start();
+    const access = createKernelWorkspaceWorkingStateAccess(adapter);
+    await access.withStore(workspaceId, "publish-race-setup", async (store) => {
+      const base = await store.captureDirectory(workspace);
+      await store.createBranch(workspaceId, "publish-race", base, "base");
+      const object = await store.putObject(Buffer.from("one\n"));
+      const baseMode = base["a.txt"]?.kind === "regular-file" ? base["a.txt"].mode : undefined;
+      const committed = await store.commitVirtualWrites("publish-race", 0, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(baseMode === undefined ? {} : { mode: baseMode }) } });
+      assert.equal(committed.status, "committed");
+    });
+    const context = await adapter.context(workspaceId, "publish-race-context");
+    const store = new KernelWorkingStateRootStore(context);
+    const writer = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const object = await store.putObject(Buffer.from("two\n"));
+      const result = await store.commitVirtualWrites("publish-race", 1, { "a.txt": { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength } });
+      return result;
+    })();
+    const published = await store.publishHeadResult("publish-race").catch((error: unknown) => error);
+    const write = await writer;
+    assert.equal(write.status, "committed");
+    if (published instanceof Error) {
+      assert.match(published.message, /changed|conflict|publishing/i);
+      return;
+    }
+    const result = published as { root: string; changedPaths: string[]; pathStates: Record<string, { kind: string; objectHash?: string }> };
+    assert.equal(result.changedPaths.includes("a.txt"), true);
+    const state = result.pathStates["a.txt"];
+    assert.equal(state?.kind, "regular-file");
+    const body = state?.objectHash ? await store.getObject(state.objectHash) : null;
+    assert.ok(body);
+    assert.equal(body?.toString("utf8"), "one\n");
+    const current = await store.getBranchRoot("publish-race");
+    assert.ok(current);
+    assert.notEqual(current?.root, result.root);
+  } finally {
+    await adapter.dispose().catch(() => undefined);
+    await client.close().catch(() => undefined);
     await fs.rm(root, { recursive: true, force: true });
   }
 });
