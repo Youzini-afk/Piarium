@@ -18,6 +18,8 @@ import {
   type KernelMethodParams,
   type KernelObjectSlice,
   type KernelPutBlobResult,
+  type KernelRecordListResult,
+  type KernelRecordResult,
   type KernelRequest,
   type KernelResponse,
   type KernelWriteResult,
@@ -44,6 +46,7 @@ export interface KernelClientOptions {
 export type KernelBlobReadSource =
   | { branchId: string; path: string; revision?: number }
   | { pinId: string; path: string }
+  | { recordId: string; slot: string }
   | { ownerId: string };
 
 export interface KernelGrantHandle {
@@ -103,7 +106,7 @@ export class KernelScopedClient {
     return this.owner.createBranch(params, this.grant, signal);
   }
 
-  readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean }, signal?: AbortSignal): Promise<KernelBranchReadResult> {
+  readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<KernelBranchReadResult> {
     return this.owner.readBranch(params, this.grant, signal);
   }
 
@@ -161,6 +164,22 @@ export class KernelScopedClient {
 
   releaseOperation(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.releaseOperation(operationId, this.grant, signal);
+  }
+
+  putRecord(params: KernelMethodParams["storage.record.put"], signal?: AbortSignal): Promise<KernelRecordResult> {
+    return this.owner.putRecord(params, this.grant, signal);
+  }
+
+  getRecord(workspaceId: string, recordId: string, signal?: AbortSignal): Promise<KernelRecordResult | null> {
+    return this.owner.getRecord({ workspaceId, recordId }, this.grant, signal);
+  }
+
+  listRecords(params: KernelMethodParams["storage.record.list"], signal?: AbortSignal): Promise<KernelRecordListResult> {
+    return this.owner.listRecords(params, this.grant, signal);
+  }
+
+  releaseRecord(operationId: string, workspaceId: string, recordId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.releaseRecord({ operationId, workspaceId, recordId }, this.grant, signal);
   }
 
   close(): Promise<void> { return this.owner.close(); }
@@ -622,7 +641,7 @@ export class KernelClient {
     }
   }
 
-  async readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
+  async readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
     return this.requestRaw<KernelBranchReadResult>("branch.read", params, { signal, grant });
   }
 
@@ -719,6 +738,22 @@ export class KernelClient {
       operationId,
       ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
     }, { signal, grant: scoped });
+  }
+
+  async putRecord(params: KernelMethodParams["storage.record.put"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult> {
+    return this.requestRaw<KernelRecordResult>("storage.record.put", params, { signal, grant });
+  }
+
+  async getRecord(params: KernelMethodParams["storage.record.get"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordResult | null> {
+    return this.requestRaw<KernelRecordResult | null>("storage.record.get", params, { signal, grant });
+  }
+
+  async listRecords(params: KernelMethodParams["storage.record.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelRecordListResult> {
+    return this.requestRaw<KernelRecordListResult>("storage.record.list", params, { signal, grant });
+  }
+
+  async releaseRecord(params: KernelMethodParams["storage.record.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("storage.record.release", params, { signal, grant });
   }
 
   async close(): Promise<void> {

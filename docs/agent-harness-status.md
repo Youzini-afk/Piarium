@@ -163,13 +163,13 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 
 ## 阶段 R：Rust 系统内核（D-252，计划中）
 
-R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；这不等同于阶段 R 整体完成。
+R0 与 R1 的 kernel vertical 已进入真实 Host→Rust 子进程调用链；当前 R1 只有 WorkingState/retrieval 资源已切换，不等同于阶段 R 整体完成。
 R2–R6 仍未交付。已有 TS 能力继续按上表和具体证据记录，不因计划换语言撤下，也不继承为 Rust 证据。
 
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
 | R0 协议与进程 | Partial（implemented / wired） | `kernel/rust-toolchain.toml` 钉住 1.97.1；同一 schema 生成 TS/Rust method DTO；真实 framed 子进程、单 envelope 交接背压、blob 与 branch create/write 流式输入、build/epoch/grant/generation 握手、取消、真实退出等待和 Host 启停已有 Windows release 证据；macOS/Linux、签名安装包、stdout 半帧断线和完整任意 cwd 包内 smoke 仍需验收 |
-| R1 状态与存储 | implemented（kernel foundations；尚未 wired/proven/default-on） | format v6、typed path state、AVL 持久索引、固定 revision、强制 publish CAS/事务 operation、精确 object owner、pin/delete/GC、durable pending cleanup、来源绑定的 path-scope blob 读取、baseRef fork、recovery root identity、deep relationship checks 已实现；Host 尚无 WorkingState/Recovery/结果/草稿/evidence 的生产 cutover，旧 JSON/SQLite writer 仍由原所有者维护 |
+| R1 状态与存储 | Partial（WorkingState/retrieval and turn/checkpoint record seam wired；combined Recovery/Integration not cut over） | format v6、typed path state、AVL 持久索引、固定 revision、强制 publish CAS/事务 operation、精确 object owner、pin/delete/GC、durable pending cleanup、typed domain record/reference、分页 root read 已实现；生产 branch/draft/result/publish/CAS/materializer 输入、retrieval artifact/receipt、checkpoint/turn/mutation record seam 已走 kernel，combined Recovery/operation-file/Integration durable journal 仍有 TS writer |
 | R2 文件与恢复 | 未实现 | 同一磁盘 gate、Documents/Integration/恢复、Registry 混合操作与故障对账 |
 | R3 基线与物化 | 未实现 | Git/非 Git/CoW/执行写回/回收/删除，全部资源消费者和引用保留 |
 | R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
@@ -184,6 +184,12 @@ release `piarium-kernel` 子进程覆盖固定 revision 不漂移、pin 保留�
 typed path/tree 不变量、grant workspace/path scope 与 revoke、8,000-entry 构建取消、200,000-byte 分块上传、deep health、
 关闭重开与字节/hash 保持；GC 的逻辑释放、实际文件删除和注入的清理失败分别可观察，失败在重启时重试。`cargo check --manifest-path kernel/Cargo.toml` 与 Windows release build 通过（本机通过
 Visual Studio Build Tools 环境注入 Windows SDK；普通 shell 若未加载 SDK 会报告环境缺失）。
+
+**D-259/D-260 生产 consumer 证据（2026-09-13）**：同一 release child-process 测试现为 **12/12 通过**，新增
+typed `storage.record.*`、record-bound blob read、空根分页边界和 owner/reference release；独立 Host adapter 纵切经
+`KernelStorageAdapter` 完成 capture → branch create → virtual CAS write → publish result → kernel object read，重建/释放
+使用同一 v6 catalog。生产装配切换位置是 `application-host/index.ts` 的 `createKernelWorkspaceWorkingStateAccess`；Recovery
+checkpoint/turn/operation 仍未切换，故 R1 仍是 Partial 而非 default-on。
 Kernel protocol 使用 `kernel/protocol/schema.json` → generated TS DTO，Host 在 `application-host/index.ts` 启动/停止同一 client；
 Electron package 将可执行文件和 SHA-256 manifest 放在 `resources/kernel`（asar 外），after-pack 会核对 manifest；Web package 将其放在 `kernel/`。这些是本机/构建链证据，不是
 macOS/Linux 真机运行或完整跨平台签名证据。
@@ -195,11 +201,11 @@ macOS/Linux 真机运行或完整跨平台签名证据。
 单路径更新没有复制完整兄弟集合。D-258 已确认其中 `length(TEXT)` 不是持久写入字节，原 payload 数字撤回；启动/缓存未控制的
 墙钟与 RSS 也不作为性能结论。受控端到端对照仍按 R6 执行。
 
-**R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation 表；
+**R1 责任盘点与尚未迁移项**：Rust 已拥有自己的 kernel storage root、对象、trie nodes、branch/revision/pin/operation/domain record/reference 表；
 TS Thread/Run catalog、Pi JSONL、Document Registry、TriviumDB 仍各自持有其明确对象。现有
-`working-state/working-state-store.ts`、`recovery/journal-catalog.ts` 仍是生产消费者的旧直接 writer，本轮已把它们的
-责任和 cutover seam 记录到 `packages/web/application-host/lib/kernel/DOCUMENTATION.md`，但还没有把全部 dispatch/branchWrite/
-recovery/evidence/materializer 调用替换为 kernel adapter；因此 R1 不标 `proven/default-on`，也没有声称删除了旧 writer。
+`working-state/working-state-store.ts` 仍保留为测试/历史实现，生产 dispatch/branchWrite/result/draft/materializer 和 retrieval evidence/receipt
+已由 `KernelStorageAdapter` 切换到 kernel；turn/checkpoint/mutation record 已经走 kernel facade，但 `recovery/journal-catalog.ts` 仍是 combined Recovery/Integration 的生产 writer，故 R1 仍不标
+`proven/default-on`，也没有声称旧 Recovery writer 已删除。
 
 **R0/R1 当前重新验收边界（D-258，2026-09-13）**：D-257 的 64-envelope queue、hash-only blob read、可选 publish CAS、
 format v5 与 object attachment 表述已由本条取代。
@@ -221,7 +227,7 @@ format v5 与 object attachment 表述已由本条取代。
 - 对象使用流式 SHA-256，范围读取不把整文件载入内存；对象安装先 flush 内容，Windows 用 write-through rename，Unix 另同步 staging、
   shard 与新 shard 的父目录项，再由 SQLite FULL 事务发布引用。硬断电仍未注入，不能据此写成跨平台 proven。
 
-当前生产接线仍是 Application Host 启动并管理 kernel；`Thread/Run` catalog 仍由 TS、未保存缓冲仍由 Document Registry、Pi session/model/credential 仍由 Pi、知识/向量仍由 TriviumDB/adapter。WorkingState/Recovery/结果/草稿/retrieval evidence/materializer 的产品消费者尚未切换到 kernel adapter，因此不把 R1 记为 wired/proven/default-on，也不删除其现有 writer。R2–R6 保持未完成。
+当前生产接线仍是 Application Host 启动并管理 kernel；`Thread/Run` catalog 仍由 TS、未保存缓冲仍由 Document Registry、Pi session/model/credential 仍由 Pi、知识/向量仍由 TriviumDB/adapter。WorkingState/结果/草稿/retrieval evidence/materializer 与 checkpoint/turn/mutation record 已使用 kernel adapter；combined Recovery/operation-file、Integration durable journal 和旧 recovery SQLite 尚未完全切换，因此不把 R1 记为 wired/proven/default-on。R2–R6 保持未完成。
 
 D-257 的 `nodePayloadBytes` 使用 SQLite `length(TEXT)`，不是实际持久写放大，该字节结论撤回。当前 health 分列 node JSON 的 UTF-8
 bytes、catalog 文件和 WAL 文件大小，并暴露 operation/temporary owner 数；尚未据此重做受控性能对照。128/1024/4096 条目下的

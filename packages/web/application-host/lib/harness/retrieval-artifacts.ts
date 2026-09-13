@@ -1,12 +1,5 @@
 import { createHash } from "node:crypto";
-import type {
-  RetrievalArtifactRef,
-  RetrievalEvidence,
-  RetrievalReceiptAuthority,
-  RetrievalUrlReceipt,
-  Thread,
-} from "@piarium/protocol";
-import { deleteObjectReferences, listObjectReferences, replaceObjectReferences } from "../recovery/journal-catalog.js";
+import type { RetrievalArtifactRef, RetrievalEvidence, RetrievalReceiptAuthority, RetrievalUrlReceipt, Thread } from "@piarium/protocol";
 import type { WorkspaceWorkingStateAccess } from "./working-state/working-state-store.js";
 import type { WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
@@ -15,471 +8,55 @@ export const RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND = "retrieval-evidence-sealed";
 export const RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND = "retrieval-artifact-temporary";
 export const WEB_FETCH_RECEIPT_OWNER_KIND = "web-fetch-receipt-temporary";
 
-export const hashRetrievalText = (text: string): string => (
-  `sha256-${createHash("sha256").update(text, "utf8").digest("hex")}`
-);
-
+export const hashRetrievalText = (text: string): string => `sha256-${createHash("sha256").update(text, "utf8").digest("hex")}`;
 const keyPart = (value: string): string => Buffer.from(value, "utf8").toString("base64url");
-const evidenceOwnerPrefix = (threadId: string): string => `${keyPart(threadId)}:`;
-const pendingEvidenceOwnerId = (threadId: string, runId: string): string => (
-  `${evidenceOwnerPrefix(threadId)}pending:${keyPart(runId)}`
-);
-const sealedEvidenceOwnerId = (threadId: string, runId: string): string => (
-  `${evidenceOwnerPrefix(threadId)}sealed:${keyPart(runId)}`
-);
-const temporaryArtifactOwnerPrefix = (threadId: string, runId: string): string => (
-  `${evidenceOwnerPrefix(threadId)}temporary:${keyPart(runId)}:`
-);
-const temporaryArtifactOwnerId = (threadId: string, runId: string, hash: string): string => (
-  `${temporaryArtifactOwnerPrefix(threadId, runId)}${keyPart(hash)}`
-);
-const receiptAuthorityKey = (authority: RetrievalReceiptAuthority): string => [
-  authority.owningWorkspaceId,
-  authority.sessionId,
-  authority.threadId ?? "",
-  authority.runId ?? "",
-].map(keyPart).join(".");
-const receiptOwnerId = (authority: RetrievalReceiptAuthority, receiptId: string): string => (
-  `${receiptAuthorityKey(authority)}:${keyPart(receiptId)}`
-);
-const receiptOwnerBelongsToThread = (ownerId: string, threadId: string): boolean => {
-  const authorityKey = ownerId.split(":", 1)[0];
-  if (!authorityKey) return false;
-  const parts = authorityKey.split(".");
-  return parts.length === 4 && parts[2] === keyPart(threadId);
+const authorityKey = (authority: RetrievalReceiptAuthority): string => [authority.owningWorkspaceId, authority.sessionId, authority.threadId ?? "", authority.runId ?? ""].map(keyPart).join(".");
+const artifactRecordId = (authority: RetrievalReceiptAuthority | undefined, hash: string): string => `retrieval-artifact:${authority?.threadId ?? "unbound"}:${authority?.runId ?? "unbound"}:${hash}`;
+const receiptRecordId = (authority: RetrievalReceiptAuthority, receiptId: string): string => `retrieval-receipt:${authorityKey(authority)}:${keyPart(receiptId)}`;
+const evidenceRecordId = (kind: "pending" | "sealed", threadId: string, runId: string): string => `retrieval-evidence:${kind}:${threadId}:${runId}`;
+const sameAuthority = (left: RetrievalReceiptAuthority, right: RetrievalReceiptAuthority): boolean => left.owningWorkspaceId === right.owningWorkspaceId && left.sessionId === right.sessionId && (left.threadId ?? "") === (right.threadId ?? "") && (left.runId ?? "") === (right.runId ?? "");
+const hashesForEvidence = (evidence: RetrievalEvidence): string[] => [...new Set(evidence.facts.flatMap((fact) => fact.sources.flatMap((source) => source.artifact?.hash ? [source.artifact.hash] : [])))].sort();
+
+type StoreLike = {
+  putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
+  getObject(hash: string): Promise<Buffer | null>;
+  getObjectSlice(hash: string, byteLength: number, offset: number, length: number): Promise<Buffer | null>;
+  ownerIdForObject?(hash: string): string | undefined;
 };
+type ContextLike = { records: { get(id: string): Promise<any>; list(input: { recordType?: string }): Promise<any[]>; put(input: any): Promise<any>; release(operationId: string, recordId: string): Promise<any> } };
+const withKernel = async <T>(workingStates: WorkspaceWorkingStateAccess, workspaceId: string, purpose: string, operation: (store: StoreLike, context: ContextLike) => Promise<T> | T): Promise<T> => workingStates.withStore(workspaceId, purpose, (store, context) => operation(store as unknown as StoreLike, context as unknown as ContextLike));
 
-export const collectRetrievalArtifactHashes = (evidence: RetrievalEvidence): string[] => {
-  const hashes = new Set<string>();
-  for (const fact of evidence.facts) {
-    for (const source of fact.sources) {
-      if (source.artifact?.hash) hashes.add(source.artifact.hash);
-    }
-  }
-  return [...hashes].sort();
-};
-
-const evidenceReferences = (evidence: RetrievalEvidence) => (
-  collectRetrievalArtifactHashes(evidence).map((objectHash, index) => ({ slot: String(index), objectHash }))
-);
-
-const sameAuthority = (left: RetrievalReceiptAuthority, right: RetrievalReceiptAuthority): boolean => (
-  left.owningWorkspaceId === right.owningWorkspaceId
-  && left.sessionId === right.sessionId
-  && (left.threadId ?? "") === (right.threadId ?? "")
-  && (left.runId ?? "") === (right.runId ?? "")
-);
+export const collectRetrievalArtifactHashes = hashesForEvidence;
 
 export const createRetrievalArtifactAccess = (workingStates: WorkspaceWorkingStateAccess) => {
-  const storeArtifact = async (
-    workspaceId: string,
-    bytes: Buffer,
-    authority?: RetrievalReceiptAuthority,
-  ): Promise<RetrievalArtifactRef> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-put", async (store, context) => {
-      const object = await store.putObject(bytes);
-      if (authority) {
-        if (authority.owningWorkspaceId !== workspaceId || !authority.threadId || !authority.runId) {
-          throw new Error("Retrieval artifact authority does not match an owning Thread Run");
-        }
-        replaceObjectReferences(
-          context.database,
-          workspaceId,
-          RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND,
-          temporaryArtifactOwnerId(authority.threadId, authority.runId, object.hash),
-          [{ slot: "body", objectHash: object.hash }],
-        );
-      }
-      return { durability: "durable" as const, hash: object.hash, byteLength: object.byteLength };
-    })
-  );
-
-  const readArtifact = async (workspaceId: string, hash: string): Promise<Buffer | null> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-get", (store) => store.getObject(hash), "shared")
-  );
-
-  const readArtifactSlice = async (
-    workspaceId: string,
-    artifact: RetrievalArtifactRef,
-    offset: number,
-    length: number,
-  ): Promise<Buffer | null> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-slice", (store) => (
-      store.getObjectSlice(artifact.hash, artifact.byteLength, offset, length)
-    ), "shared")
-  );
-
-  const persistReceipt = async (
-    workspaceId: string,
-    draft: WebFetchReceiptDraft,
-    markdown: string,
-  ): Promise<RetrievalUrlReceipt> => (
-    workingStates.withStore(workspaceId, "web-fetch-receipt-put", async (store, context) => {
-      if (draft.authority.owningWorkspaceId !== workspaceId) {
-        throw new Error("Web receipt authority does not match its owning workspace");
-      }
-      const body = await store.putObject(Buffer.from(markdown, "utf8"));
-      if (body.hash !== draft.contentHash || draft.revision !== draft.contentHash) {
-        throw new Error("Web receipt content identity does not match its durable body");
-      }
-      const receipt: RetrievalUrlReceipt = {
-        ...draft,
-        artifact: { durability: "durable", hash: body.hash, byteLength: body.byteLength },
-      };
-      const meta = await store.putObject(Buffer.from(JSON.stringify(receipt), "utf8"));
-      context.database.transaction(() => {
-        replaceObjectReferences(
-          context.database,
-          workspaceId,
-          WEB_FETCH_RECEIPT_OWNER_KIND,
-          receiptOwnerId(receipt.authority, receipt.receiptId),
-          [
-            { slot: "meta", objectHash: meta.hash },
-            { slot: "body", objectHash: body.hash },
-          ],
-        );
-      }).immediate();
-      return receipt;
-    })
-  );
-
-  const lookupReceipt = async (
-    workspaceId: string,
-    authority: RetrievalReceiptAuthority,
-    receiptId: string,
-  ): Promise<RetrievalUrlReceipt | null> => (
-    workingStates.withStore(workspaceId, "web-fetch-receipt-get", async (store, context) => {
-      if (authority.owningWorkspaceId !== workspaceId) return null;
-      const refs = listObjectReferences(
-        context.database,
-        workspaceId,
-        WEB_FETCH_RECEIPT_OWNER_KIND,
-        receiptOwnerId(authority, receiptId),
-      );
-      const metaRef = refs.find((ref) => ref.slot === "meta");
-      const bodyRef = refs.find((ref) => ref.slot === "body");
-      if (!metaRef || !bodyRef) return null;
-      const bytes = await store.getObject(metaRef.objectHash);
-      if (!bytes) return null;
-      try {
-        const parsed = JSON.parse(bytes.toString("utf8")) as RetrievalUrlReceipt;
-        if (
-          typeof parsed.receiptId !== "string"
-          || typeof parsed.finalUrl !== "string"
-          || typeof parsed.contentHash !== "string"
-          || typeof parsed.revision !== "string"
-          || !parsed.artifact
-          || parsed.artifact.durability !== "durable"
-          || typeof parsed.artifact.hash !== "string"
-          || typeof parsed.artifact.byteLength !== "number"
-          || !parsed.authority
-          || !sameAuthority(parsed.authority, authority)
-          || parsed.receiptId !== receiptId
-          || parsed.artifact.hash !== bodyRef.objectHash
-          || parsed.artifact.hash !== parsed.contentHash
-          || parsed.revision !== parsed.contentHash
-        ) return null;
-        if (await store.getObject(parsed.artifact.hash) === null) return null;
-        return parsed;
-      } catch {
-        return null;
-      }
-    }, "shared")
-  );
-
-  const promotePendingEvidence = async (input: {
-    workspaceId: string;
-    threadId: string;
-    runId: string;
-    evidence: RetrievalEvidence;
-    receiptAuthority: RetrievalReceiptAuthority;
-  }): Promise<void> => (
-    workingStates.withStore(input.workspaceId, "retrieval-evidence-promote", (_store, context) => {
-      context.database.transaction(() => {
-        replaceObjectReferences(
-          context.database,
-          input.workspaceId,
-          RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-          pendingEvidenceOwnerId(input.threadId, input.runId),
-          evidenceReferences(input.evidence),
-        );
-        for (const fact of input.evidence.facts) {
-          for (const source of fact.sources) {
-            if (source.kind === "url" && source.receiptId) {
-              deleteObjectReferences(
-                context.database,
-                input.workspaceId,
-                WEB_FETCH_RECEIPT_OWNER_KIND,
-                receiptOwnerId(input.receiptAuthority, source.receiptId),
-              );
-            }
-          }
-        }
-        const temporaryRows = context.database.prepare(`
-          SELECT owner_id FROM object_references
-          WHERE workspace_id = ? AND owner_kind = ?
-        `).all(input.workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND) as Array<{ owner_id: string }>;
-        const prefix = temporaryArtifactOwnerPrefix(input.threadId, input.runId);
-        for (const row of temporaryRows) {
-          if (row.owner_id.startsWith(prefix)) {
-            deleteObjectReferences(
-              context.database,
-              input.workspaceId,
-              RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND,
-              row.owner_id,
-            );
-          }
-        }
-      }).immediate();
-    })
-  );
-
-  const syncThreadEvidence = async (workspaceId: string, thread: Thread): Promise<void> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-reconcile-thread", async (store, context) => {
-      if (thread.workspaceId !== workspaceId) throw new Error("Thread evidence workspace mismatch");
-      const desired = new Map<string, { kind: string; evidence: RetrievalEvidence }>();
-      if (thread.pendingEvidence && thread.activeRunId) {
-        desired.set(pendingEvidenceOwnerId(thread.id, thread.activeRunId), {
-          kind: RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-          evidence: thread.pendingEvidence,
-        });
-      }
-      const sealedRunId = thread.report?.evidenceRunId ?? thread.activeRunId;
-      if (thread.report?.evidence && sealedRunId) {
-        desired.set(sealedEvidenceOwnerId(thread.id, sealedRunId), {
-          kind: RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND,
-          evidence: thread.report.evidence,
-        });
-      }
-      const receiptRows = context.database.prepare(`
-        SELECT owner_id, object_hash FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ? AND slot = 'meta'
-      `).all(workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND) as Array<{ owner_id: string; object_hash: string }>;
-      const staleReceiptOwners: string[] = [];
-      for (const row of receiptRows) {
-        const meta = await store.getObject(row.object_hash);
-        if (!meta) {
-          staleReceiptOwners.push(row.owner_id);
-          continue;
-        }
-        try {
-          const parsed = JSON.parse(meta.toString("utf8")) as Partial<RetrievalUrlReceipt>;
-          if (parsed.authority?.threadId === thread.id && (
-            thread.lifecycle !== "active"
-            || !thread.activeRunId
-            || parsed.authority.runId !== thread.activeRunId
-          )) staleReceiptOwners.push(row.owner_id);
-        } catch {
-          staleReceiptOwners.push(row.owner_id);
-        }
-      }
-      const temporaryRows = context.database.prepare(`
-        SELECT owner_id FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ?
-      `).all(workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND) as Array<{ owner_id: string }>;
-      const activeTemporaryPrefix = thread.activeRunId
-        ? temporaryArtifactOwnerPrefix(thread.id, thread.activeRunId)
-        : null;
-      const staleTemporaryOwners = temporaryRows
-        .map((row) => row.owner_id)
-        .filter((ownerId) => ownerId.startsWith(evidenceOwnerPrefix(thread.id))
-          && (!activeTemporaryPrefix || !ownerId.startsWith(activeTemporaryPrefix)));
-      context.database.transaction(() => {
-        for (const kind of [RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND, RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND]) {
-          const rows = context.database.prepare(`
-            SELECT owner_id FROM object_references
-            WHERE workspace_id = ? AND owner_kind = ?
-          `).all(workspaceId, kind) as Array<{ owner_id: string }>;
-          for (const row of rows) {
-            if (row.owner_id.startsWith(evidenceOwnerPrefix(thread.id)) && !desired.has(row.owner_id)) {
-              deleteObjectReferences(context.database, workspaceId, kind, row.owner_id);
-            }
-          }
-        }
-        for (const [ownerId, entry] of desired) {
-          replaceObjectReferences(context.database, workspaceId, entry.kind, ownerId, evidenceReferences(entry.evidence));
-        }
-        for (const ownerId of staleReceiptOwners) {
-          deleteObjectReferences(context.database, workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND, ownerId);
-        }
-        for (const ownerId of staleTemporaryOwners) {
-          deleteObjectReferences(context.database, workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND, ownerId);
-        }
-      }).immediate();
-    })
-  );
-
-  const releaseThreadEvidence = async (workspaceId: string, threadId: string): Promise<void> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-release", (_store, context) => {
-      context.database.transaction(() => {
-        for (const kind of [
-          RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-          RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND,
-          RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND,
-        ]) {
-          const rows = context.database.prepare(`
-            SELECT owner_id FROM object_references
-            WHERE workspace_id = ? AND owner_kind = ?
-          `).all(workspaceId, kind) as Array<{ owner_id: string }>;
-          for (const row of rows) {
-            if (row.owner_id.startsWith(evidenceOwnerPrefix(threadId))) {
-              deleteObjectReferences(context.database, workspaceId, kind, row.owner_id);
-            }
-          }
-        }
-        const receiptRows = context.database.prepare(`
-          SELECT owner_id FROM object_references
-          WHERE workspace_id = ? AND owner_kind = ?
-        `).all(workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND) as Array<{ owner_id: string }>;
-        for (const row of receiptRows) {
-          if (receiptOwnerBelongsToThread(row.owner_id, threadId)) {
-            deleteObjectReferences(context.database, workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND, row.owner_id);
-          }
-        }
-      }).immediate();
-    })
-  );
-
-  const releaseReceiptAuthority = async (
-    workspaceId: string,
-    authority: RetrievalReceiptAuthority,
-  ): Promise<void> => (
-    workingStates.withStore(workspaceId, "web-fetch-receipt-release", (_store, context) => {
-      const prefix = `${receiptAuthorityKey(authority)}:`;
-      const rows = context.database.prepare(`
-        SELECT owner_id FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ?
-      `).all(workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND) as Array<{ owner_id: string }>;
-      context.database.transaction(() => {
-        for (const row of rows) {
-          if (row.owner_id.startsWith(prefix)) {
-            deleteObjectReferences(context.database, workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND, row.owner_id);
-          }
-        }
-      }).immediate();
-    })
-  );
-
-  const releaseTemporaryArtifacts = async (
-    workspaceId: string,
-    authority: RetrievalReceiptAuthority,
-  ): Promise<void> => {
-    if (authority.owningWorkspaceId !== workspaceId || !authority.threadId || !authority.runId) return;
-    await workingStates.withStore(workspaceId, "retrieval-artifact-temporary-release", (_store, context) => {
-      const prefix = temporaryArtifactOwnerPrefix(authority.threadId!, authority.runId!);
-      const rows = context.database.prepare(`
-        SELECT owner_id FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ?
-      `).all(workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND) as Array<{ owner_id: string }>;
-      context.database.transaction(() => {
-        for (const row of rows) {
-          if (row.owner_id.startsWith(prefix)) {
-            deleteObjectReferences(context.database, workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND, row.owner_id);
-          }
-        }
-      }).immediate();
-    });
-  };
-
-  const reconcileWorkspaceEvidence = async (workspaceId: string, threads: readonly Thread[]): Promise<void> => (
-    workingStates.withStore(workspaceId, "retrieval-evidence-reconcile-workspace", async (store, context) => {
-      const activeRetrievalRuns = new Map(
-        threads
-          .filter((thread) => thread.role === "retrieval" && thread.lifecycle === "active" && thread.activeRunId)
-          .map((thread) => [thread.id, thread.activeRunId!] as const),
-      );
-      const receiptRows = context.database.prepare(`
-        SELECT DISTINCT owner_id FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ?
-      `).all(workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND) as Array<{ owner_id: string }>;
-      const staleReceiptOwners: string[] = [];
-      for (const row of receiptRows) {
-        const refs = listObjectReferences(
-          context.database,
-          workspaceId,
-          WEB_FETCH_RECEIPT_OWNER_KIND,
-          row.owner_id,
-        );
-        const metaRef = refs.find((ref) => ref.slot === "meta");
-        const meta = metaRef ? await store.getObject(metaRef.objectHash) : null;
-        if (!meta) {
-          staleReceiptOwners.push(row.owner_id);
-          continue;
-        }
-        try {
-          const parsed = JSON.parse(meta.toString("utf8")) as Partial<RetrievalUrlReceipt>;
-          const authority = parsed.authority;
-          if (
-            !authority
-            || authority.owningWorkspaceId !== workspaceId
-            || !authority.threadId
-            || !authority.runId
-            || activeRetrievalRuns.get(authority.threadId) !== authority.runId
-          ) staleReceiptOwners.push(row.owner_id);
-        } catch {
-          staleReceiptOwners.push(row.owner_id);
-        }
-      }
-      const temporaryRows = context.database.prepare(`
-        SELECT DISTINCT owner_id FROM object_references
-        WHERE workspace_id = ? AND owner_kind = ?
-      `).all(workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND) as Array<{ owner_id: string }>;
-      const activeTemporaryPrefixes = [...activeRetrievalRuns]
-        .map(([threadId, runId]) => temporaryArtifactOwnerPrefix(threadId, runId));
-      const staleTemporaryOwners = temporaryRows
-        .map((row) => row.owner_id)
-        .filter((ownerId) => !activeTemporaryPrefixes.some((prefix) => ownerId.startsWith(prefix)));
-      context.database.transaction(() => {
-        context.database.prepare(`
-          DELETE FROM object_references
-          WHERE workspace_id = ? AND owner_kind IN (?, ?)
-        `).run(
-          workspaceId,
-          RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-          RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND,
-        );
-        for (const thread of threads) {
-          if (thread.pendingEvidence && thread.activeRunId) {
-            replaceObjectReferences(
-              context.database,
-              workspaceId,
-              RETRIEVAL_PENDING_EVIDENCE_OWNER_KIND,
-              pendingEvidenceOwnerId(thread.id, thread.activeRunId),
-              evidenceReferences(thread.pendingEvidence),
-            );
-          }
-          const sealedRunId = thread.report?.evidenceRunId ?? thread.activeRunId;
-          if (thread.report?.evidence && sealedRunId) {
-            replaceObjectReferences(
-              context.database,
-              workspaceId,
-              RETRIEVAL_SEALED_EVIDENCE_OWNER_KIND,
-              sealedEvidenceOwnerId(thread.id, sealedRunId),
-              evidenceReferences(thread.report.evidence),
-            );
-          }
-        }
-        for (const ownerId of staleReceiptOwners) {
-          deleteObjectReferences(context.database, workspaceId, WEB_FETCH_RECEIPT_OWNER_KIND, ownerId);
-        }
-        for (const ownerId of staleTemporaryOwners) {
-          deleteObjectReferences(context.database, workspaceId, RETRIEVAL_TEMPORARY_ARTIFACT_OWNER_KIND, ownerId);
-        }
-      }).immediate();
-    })
-  );
-
-  return {
-    storeArtifact,
-    readArtifact,
-    readArtifactSlice,
-    persistReceipt,
-    lookupReceipt,
-    promotePendingEvidence,
-    syncThreadEvidence,
-    releaseThreadEvidence,
-    releaseReceiptAuthority,
-    releaseTemporaryArtifacts,
-    reconcileWorkspaceEvidence,
-  };
+  const storeArtifact = async (workspaceId: string, bytes: Buffer, authority?: RetrievalReceiptAuthority): Promise<RetrievalArtifactRef> => withKernel(workingStates, workspaceId, "retrieval-evidence-put", async (store, context) => {
+    const object = await store.putObject(bytes);
+    const ownerId = store.ownerIdForObject?.(object.hash);
+    await context.records.put({ operationId: `retrieval-artifact:${object.hash}`, recordId: artifactRecordId(authority, object.hash), recordType: "retrieval.artifact", state: authority ? "temporary" : "durable", ...(authority?.sessionId ? { sessionId: authority.sessionId } : {}), ...(authority?.threadId ? { threadId: authority.threadId } : {}), ...(authority?.runId ? { runId: authority.runId } : {}), payloadJson: JSON.stringify({ artifact: { durability: "durable", hash: object.hash, byteLength: object.byteLength }, authority: authority ?? null }), ownerIds: ownerId ? [ownerId] : [], references: [{ slot: "body", objectHash: object.hash }] });
+    return { durability: "durable", hash: object.hash, byteLength: object.byteLength };
+  });
+  const readArtifact = async (workspaceId: string, hash: string): Promise<Buffer | null> => withKernel(workingStates, workspaceId, "retrieval-evidence-get", async (store, context) => { const records = await context.records.list({ recordType: "retrieval.artifact" }); return records.some((record) => record.references.some((reference: any) => reference.slot === "body" && reference.objectHash === hash)) ? store.getObject(hash) : null; });
+  const readArtifactSlice = async (workspaceId: string, artifact: RetrievalArtifactRef, offset: number, length: number): Promise<Buffer | null> => withKernel(workingStates, workspaceId, "retrieval-evidence-slice", async (store, context) => { const records = await context.records.list({ recordType: "retrieval.artifact" }); return records.some((record) => record.references.some((reference: any) => reference.slot === "body" && reference.objectHash === artifact.hash)) ? store.getObjectSlice(artifact.hash, artifact.byteLength, offset, length) : null; });
+  const persistReceipt = async (workspaceId: string, draft: WebFetchReceiptDraft, markdown: string): Promise<RetrievalUrlReceipt> => withKernel(workingStates, workspaceId, "web-fetch-receipt-put", async (store, context) => {
+    if (draft.authority.owningWorkspaceId !== workspaceId) throw new Error("Web receipt authority does not match its owning workspace");
+    const body = await store.putObject(Buffer.from(markdown, "utf8"));
+    if (body.hash !== draft.contentHash || draft.revision !== draft.contentHash) throw new Error("Web receipt content identity does not match its durable body");
+    const receipt: RetrievalUrlReceipt = { ...draft, artifact: { durability: "durable", hash: body.hash, byteLength: body.byteLength } };
+    const meta = await store.putObject(Buffer.from(JSON.stringify(receipt), "utf8"));
+    const owners = [store.ownerIdForObject?.(body.hash), store.ownerIdForObject?.(meta.hash)].filter((value): value is string => Boolean(value));
+    await context.records.put({ operationId: `receipt:${receipt.receiptId}`, recordId: receiptRecordId(receipt.authority, receipt.receiptId), recordType: "retrieval.receipt", state: "temporary", sessionId: receipt.authority.sessionId, ...(receipt.authority.threadId ? { threadId: receipt.authority.threadId } : {}), ...(receipt.authority.runId ? { runId: receipt.authority.runId } : {}), payloadJson: JSON.stringify(receipt), ownerIds: owners, references: [{ slot: "body", objectHash: body.hash }, { slot: "meta", objectHash: meta.hash }] });
+    return receipt;
+  });
+  const lookupReceipt = async (workspaceId: string, authority: RetrievalReceiptAuthority, receiptId: string): Promise<RetrievalUrlReceipt | null> => withKernel(workingStates, workspaceId, "web-fetch-receipt-get", async (store, context) => {
+    const record = await context.records.get(receiptRecordId(authority, receiptId)); if (!record) return null;
+    try { const parsed = JSON.parse(record.payloadJson) as RetrievalUrlReceipt; if (parsed.receiptId !== receiptId || !sameAuthority(parsed.authority, authority) || parsed.artifact?.hash !== record.references.find((item: any) => item.slot === "body")?.objectHash) return null; return await store.getObject(parsed.artifact.hash) === null ? null : parsed; } catch { return null; }
+  });
+  const putEvidence = async (kind: "pending" | "sealed", threadId: string, runId: string, evidence: RetrievalEvidence, context: ContextLike): Promise<void> => { const references = hashesForEvidence(evidence).map((objectHash) => ({ slot: objectHash, objectHash })); await context.records.put({ operationId: `evidence:${kind}:${threadId}:${runId}`, recordId: evidenceRecordId(kind, threadId, runId), recordType: `retrieval.evidence.${kind}`, state: kind, threadId, runId, payloadJson: JSON.stringify(evidence), references }); };
+  const promotePendingEvidence = async (input: { workspaceId: string; threadId: string; runId: string; evidence: RetrievalEvidence; receiptAuthority: RetrievalReceiptAuthority }): Promise<void> => withKernel(workingStates, input.workspaceId, "retrieval-evidence-promote", async (_store, context) => { await putEvidence("pending", input.threadId, input.runId, input.evidence, context); for (const fact of input.evidence.facts) for (const source of fact.sources) if (source.kind === "url" && source.receiptId) await context.records.release(`receipt-release:${source.receiptId}`, receiptRecordId(input.receiptAuthority, source.receiptId)); });
+  const syncThreadEvidence = async (workspaceId: string, thread: Thread): Promise<void> => withKernel(workingStates, workspaceId, "retrieval-evidence-reconcile-thread", async (_store, context) => { const pending = thread.pendingEvidence && thread.activeRunId ? evidenceRecordId("pending", thread.id, thread.activeRunId) : null; const sealedRunId = thread.report?.evidenceRunId ?? thread.activeRunId; const sealed = thread.report?.evidence && sealedRunId ? evidenceRecordId("sealed", thread.id, sealedRunId) : null; for (const record of await context.records.list({})) if ((record.recordType === "retrieval.evidence.pending" || record.recordType === "retrieval.evidence.sealed") && record.threadId === thread.id && record.recordId !== pending && record.recordId !== sealed) await context.records.release(`evidence-release:${record.recordId}`, record.recordId); if (thread.pendingEvidence && thread.activeRunId) await putEvidence("pending", thread.id, thread.activeRunId, thread.pendingEvidence, context); if (thread.report?.evidence && sealedRunId) await putEvidence("sealed", thread.id, sealedRunId, thread.report.evidence, context); });
+  const releaseThreadEvidence = async (workspaceId: string, threadId: string): Promise<void> => withKernel(workingStates, workspaceId, "retrieval-evidence-release", async (_store, context) => { for (const record of await context.records.list({})) if ((record.recordType.startsWith("retrieval.evidence.") || record.recordType === "retrieval.artifact" || record.recordType === "retrieval.receipt") && (record.threadId === threadId || record.payloadJson.includes(threadId))) await context.records.release(`thread-release:${threadId}:${record.recordId}`, record.recordId); });
+  const releaseReceiptAuthority = async (workspaceId: string, authority: RetrievalReceiptAuthority): Promise<void> => withKernel(workingStates, workspaceId, "web-fetch-receipt-release", async (_store, context) => { for (const record of await context.records.list({ recordType: "retrieval.receipt" })) if (record.sessionId === authority.sessionId && record.threadId === authority.threadId && record.runId === authority.runId) await context.records.release(`receipt-authority-release:${record.recordId}`, record.recordId); });
+  const releaseTemporaryArtifacts = async (workspaceId: string, authority: RetrievalReceiptAuthority): Promise<void> => withKernel(workingStates, workspaceId, "retrieval-artifact-temporary-release", async (_store, context) => { for (const record of await context.records.list({ recordType: "retrieval.artifact" })) if (record.threadId === authority.threadId && record.runId === authority.runId) await context.records.release(`artifact-release:${record.recordId}`, record.recordId); });
+  const reconcileWorkspaceEvidence = async (workspaceId: string, threads: readonly Thread[]): Promise<void> => { for (const thread of threads) await syncThreadEvidence(workspaceId, thread); };
+  return { storeArtifact, readArtifact, readArtifactSlice, persistReceipt, lookupReceipt, promotePendingEvidence, syncThreadEvidence, releaseThreadEvidence, releaseReceiptAuthority, releaseTemporaryArtifacts, reconcileWorkspaceEvidence };
 };

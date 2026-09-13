@@ -17,8 +17,9 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
 | Unsaved editor buffers and grouped undo | Document Registry | remains Registry; surface receipts are not kernel text authority |
 | Knowledge graph/vector stores | TriviumDB + TS adapters | remains the existing single writer |
-| Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | R1 domain API (`branch.*`, `storage.*`) |
-| Recovery operation/checkpoint records | Rust kernel operation API | R1 idempotent operation records and durable phases |
+| Working roots, immutable nodes, blobs, revisions, pins, GC | Rust kernel SQLite/object store | Production `KernelStorageAdapter` uses actor-scoped `branch.*`, paged roots and CAS; no TS WorkingState catalog write |
+| Product records and object references (results, drafts, verification/review, retrieval artifact/receipt) | Rust kernel typed `domain_records`/`domain_record_refs` | `storage.record.*` is the only production reference/record writer; object reads require branch/pin/record/temporary-owner identity |
+| Recovery operation/checkpoint records | TS recovery engine (R2 file/apply orchestration) with kernel migration seam | Recovery checkpoint/turn/operation consumer cutover remains in progress; do not use the old catalog as a second WorkingState writer |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
 
 Every product-domain call uses an immutable `KernelGrantHandle` obtained for the session/Thread/Run. The
@@ -50,6 +51,14 @@ The shared wire source is `kernel/protocol/schema.json`; it generates both the T
 separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage format is v6; startup validates
 its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
 
-The existing TS WorkingState/Recovery modules remain the historical product adapters until their
-consumer-by-consumer cutover is complete. They must not be described as a second Rust writer; new
-kernel-domain calls are the production migration seam and are covered by the real child-process test.
+The old TS `WorkingStateStore` remains only for legacy/unit fixtures. Application Host production
+assembly uses `KernelStorageAdapter` and `KernelWorkingStateStore`; it keeps a short-lived root
+projection for product algorithms but never serializes a catalog/trie or opens the kernel SQLite.
+Recovery file/apply orchestration and combined operation-file journal are still TS while checkpoint,
+turn and mutation records use the typed kernel record API. A kernel failure is surfaced; production does not
+fall back to the old WorkingState writer.
+
+The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
+the current run covers the original R0/R1 invariants plus typed record/reference ownership and record-bound object reads.
+The production adapter longitudinal path is assembled in `application-host/index.ts` and uses one scoped grant per
+workspace/purpose (or a supplied actor resolver), never the Host-management grant for domain calls.

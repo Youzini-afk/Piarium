@@ -21,6 +21,10 @@
     "storage.putBlob.abort": "KernelPutBlobAbortParams",
     "storage.blob.release": "KernelBlobReleaseParams",
     "storage.getBlob": "KernelGetBlobParams",
+    "storage.record.put": "KernelRecordPutParams",
+    "storage.record.get": "KernelRecordGetParams",
+    "storage.record.list": "KernelRecordListParams",
+    "storage.record.release": "KernelRecordReleaseParams",
     "branch.create.begin": "KernelCreateBranchBeginParams",
     "branch.create.append": "KernelCreateBranchAppendParams",
     "branch.create.finish": "KernelCreateBranchFinishParams",
@@ -84,9 +88,23 @@
     }},
     "KernelGetBlobParams": {"fields": {
       "hash": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true},
-      "pinId": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "path": {"type": "string", "optional": true},
+      "pinId": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "recordId": {"type": "string", "optional": true}, "slot": {"type": "string", "optional": true}, "path": {"type": "string", "optional": true},
       "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
     }},
+    "KernelRecordReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}}},
+    "KernelRecordPutParams": {"fields": {
+      "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordType": {"type": "string"}, "state": {"type": "string"},
+      "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true},
+      "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true}, "resultRevision": {"type": "number", "optional": true},
+      "payloadJson": {"type": "string"}, "ownerIds": {"type": "string[]"}, "references": {"type": "KernelRecordReference[]"}
+    }},
+    "KernelRecordGetParams": {"fields": {"workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
+    "KernelRecordListParams": {"fields": {
+      "workspaceId": {"type": "string"}, "recordType": {"type": "string", "optional": true}, "sessionId": {"type": "string", "optional": true},
+      "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true}, "branchId": {"type": "string", "optional": true},
+      "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
+    }},
+    "KernelRecordReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
     "KernelCreateBranchBeginParams": {"fields": {
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "workspaceId": {"type": "string"},
       "baseRef": {"type": "string", "optional": true}
@@ -98,7 +116,7 @@
     "KernelCreateBranchAbortParams": {"fields": {"builderId": {"type": "string"}}},
     "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}}},
     "KernelBranchReadParams": {"fields": {
-      "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}
+      "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},
     "KernelBranchWriteBeginParams": {"fields": {
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}
@@ -175,7 +193,8 @@
         "currentRoot": {"type": "string"},
         "headRevision": {"type": "number"},
         "writeRevision": {"type": "number"},
-        "entries": {"type": "KernelEntry[]"}
+        "entries": {"type": "KernelEntry[]"},
+        "nextCursor": {"type": "number | null", "optional": true}
       }
     },
     "KernelWriteResult": {
@@ -192,6 +211,13 @@
       }
     },
     "KernelPutBlobResult": {"extends": ["KernelBlobResult"], "fields": {"ownerId": {"type": "string"}}},
+    "KernelRecordResult": {"fields": {
+      "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordType": {"type": "string"}, "state": {"type": "string"},
+      "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true},
+      "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true}, "resultRevision": {"type": "number", "optional": true},
+      "payloadJson": {"type": "string"}, "references": {"type": "KernelRecordReference[]"}, "createdAt": {"type": "number"}, "updatedAt": {"type": "number"}
+    }},
+    "KernelRecordListResult": {"fields": {"records": {"type": "KernelRecordResult[]"}, "nextCursor": {"type": "number | null"}}},
     "KernelObjectSlice": {
       "extends": ["KernelBlobResult"],
       "fields": {
@@ -236,6 +262,10 @@
     "storage.putBlob.abort": "discard a content upload stream",
     "storage.blob.release": "release a temporary content owner",
     "storage.getBlob": "read a content object or byte range",
+    "storage.record.put": "publish a typed durable product record and its object references",
+    "storage.record.get": "read a durable product record by identity",
+    "storage.record.list": "page durable product records by workspace and owner identity",
+    "storage.record.release": "release a durable product record and its object references",
     "branch.create.begin": "open a backpressured branch builder",
     "branch.create.append": "append a bounded entry batch to a branch builder",
     "branch.create.finish": "atomically publish a completed branch builder",

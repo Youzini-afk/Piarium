@@ -493,6 +493,38 @@ test("temporary blob owners are independent and have explicit release", async (t
   await assert.rejects(client.getBlob(second.hash, { ownerId: second.ownerId }), /owner|owned|grant/i);
 });
 
+test("typed durable records own references and page fixed roots", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-records-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "record-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "record-actor", "record-workspace"));
+  const body = await client.putBlob(Buffer.from("record-body"), "record-body-op");
+  const record = await client.putRecord({
+    operationId: "record-put-op",
+    recordId: "record-1",
+    workspaceId: "record-workspace",
+    recordType: "retrieval.artifact",
+    state: "temporary",
+    threadId: "thread-1",
+    runId: "run-1",
+    payloadJson: JSON.stringify({ receipt: "record-1" }),
+    ownerIds: [body.ownerId],
+    references: [{ slot: "body", objectHash: body.hash }],
+  });
+  assert.equal(record.recordId, "record-1");
+  const read = await client.getBlob(body.hash, { recordId: "record-1", slot: "body" });
+  assert.equal(Buffer.from(read.bytesBase64, "base64").toString("utf8"), "record-body");
+  assert.equal((await client.listRecords({ workspaceId: "record-workspace", recordType: "retrieval.artifact", pageSize: 1 })).records.length, 1);
+  await client.releaseRecord("record-release-op", "record-workspace", "record-1");
+  await assert.rejects(client.getBlob(body.hash, { recordId: "record-1", slot: "body" }), /content|record|reference|owner/i);
+});
+
 test("branch creation streams a normal input larger than one control frame", { timeout: 60_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
     t.skip("release kernel has not been built in this checkout");

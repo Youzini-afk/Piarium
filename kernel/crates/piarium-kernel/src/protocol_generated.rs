@@ -99,9 +99,58 @@ pub(crate) struct KernelGetBlobParams {
     pub(crate) revision: Option<i64>,
     pub(crate) pin_id: Option<String>,
     pub(crate) owner_id: Option<String>,
+    pub(crate) record_id: Option<String>,
+    pub(crate) slot: Option<String>,
     pub(crate) path: Option<String>,
     pub(crate) offset: Option<i64>,
     pub(crate) length: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordPutParams {
+    pub(crate) operation_id: String,
+    pub(crate) record_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_type: String,
+    pub(crate) state: String,
+    pub(crate) session_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) run_id: Option<String>,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) revision: Option<i64>,
+    pub(crate) result_revision: Option<i64>,
+    pub(crate) payload_json: String,
+    pub(crate) owner_ids: Vec<String>,
+    pub(crate) references: Vec<KernelRecordReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordGetParams {
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) record_type: Option<String>,
+    pub(crate) session_id: Option<String>,
+    pub(crate) thread_id: Option<String>,
+    pub(crate) run_id: Option<String>,
+    pub(crate) branch_id: Option<String>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordReleaseParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) record_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -142,6 +191,8 @@ pub(crate) struct KernelBranchReadParams {
     pub(crate) revision: Option<i64>,
     pub(crate) paths: Option<Vec<String>>,
     pub(crate) include_entries: Option<bool>,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -259,6 +310,13 @@ pub(crate) struct KernelGcParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordReference {
+    pub(crate) slot: String,
+    pub(crate) object_hash: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelCreateEntry {
     pub(crate) path: String,
     pub(crate) state: PathState,
@@ -321,6 +379,20 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "storage.getBlob" => serde_json::from_value::<KernelGetBlobParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "storage.record.put" => serde_json::from_value::<KernelRecordPutParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "storage.record.get" => serde_json::from_value::<KernelRecordGetParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "storage.record.list" => serde_json::from_value::<KernelRecordListParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "storage.record.release" => {
+            serde_json::from_value::<KernelRecordReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "branch.create.begin" => {
             serde_json::from_value::<KernelCreateBranchBeginParams>(params.clone())
                 .map(|_| ())

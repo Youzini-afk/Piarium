@@ -4,7 +4,7 @@ use crate::model::Grant;
 pub(crate) fn required_capability(method: &str) -> &'static str {
     match method {
         "storage.health" | "storage.snapshot" | "storage.getBlob" | "branch.read"
-        | "branch.diff" | "pin.read" | "operation.get" => "storage.read",
+        | "branch.diff" | "pin.read" | "operation.get" | "storage.record.get" | "storage.record.list" => "storage.read",
         "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
@@ -22,7 +22,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.pin"
         | "branch.unpin"
         | "branch.delete"
-        | "operation.release" => "storage.write",
+        | "operation.release" | "storage.record.put" | "storage.record.release" => "storage.write",
         "storage.gc" => "storage.gc",
         "recovery.operation.begin" | "recovery.operation.update" | "recovery.operation.get" => {
             "recovery"

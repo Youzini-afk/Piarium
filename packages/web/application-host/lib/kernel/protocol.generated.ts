@@ -19,6 +19,10 @@ export type KernelMethod =
   | "storage.putBlob.abort"
   | "storage.blob.release"
   | "storage.getBlob"
+  | "storage.record.put"
+  | "storage.record.get"
+  | "storage.record.list"
+  | "storage.record.release"
   | "branch.create.begin"
   | "branch.create.append"
   | "branch.create.finish"
@@ -111,9 +115,55 @@ export interface KernelGetBlobParams {
   revision?: number;
   pinId?: string;
   ownerId?: string;
+  recordId?: string;
+  slot?: string;
   path?: string;
   offset?: number;
   length?: number;
+}
+
+export interface KernelRecordReference {
+  slot: string;
+  objectHash: string;
+}
+
+export interface KernelRecordPutParams {
+  operationId: string;
+  recordId: string;
+  workspaceId: string;
+  recordType: string;
+  state: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  branchId?: string;
+  revision?: number;
+  resultRevision?: number;
+  payloadJson: string;
+  ownerIds: string[];
+  references: KernelRecordReference[];
+}
+
+export interface KernelRecordGetParams {
+  workspaceId: string;
+  recordId: string;
+}
+
+export interface KernelRecordListParams {
+  workspaceId: string;
+  recordType?: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  branchId?: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelRecordReleaseParams {
+  operationId: string;
+  workspaceId: string;
+  recordId: string;
 }
 
 export interface KernelCreateBranchBeginParams {
@@ -151,6 +201,8 @@ export interface KernelBranchReadParams {
   revision?: number;
   paths?: string[];
   includeEntries?: boolean;
+  cursor?: number;
+  pageSize?: number;
 }
 
 export interface KernelBranchWriteBeginParams {
@@ -295,6 +347,7 @@ export interface KernelBranchReadResult {
   headRevision: number;
   writeRevision: number;
   entries: KernelEntry[];
+  nextCursor?: number | null;
 }
 
 export interface KernelWriteResult {
@@ -310,6 +363,28 @@ export interface KernelBlobResult {
 
 export interface KernelPutBlobResult extends KernelBlobResult {
   ownerId: string;
+}
+
+export interface KernelRecordResult {
+  recordId: string;
+  workspaceId: string;
+  recordType: string;
+  state: string;
+  sessionId?: string;
+  threadId?: string;
+  runId?: string;
+  branchId?: string;
+  revision?: number;
+  resultRevision?: number;
+  payloadJson: string;
+  references: KernelRecordReference[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface KernelRecordListResult {
+  records: KernelRecordResult[];
+  nextCursor: number | null;
 }
 
 export interface KernelObjectSlice extends KernelBlobResult {
@@ -352,6 +427,10 @@ export type KernelMethodParams = {
   "storage.putBlob.abort": KernelPutBlobAbortParams;
   "storage.blob.release": KernelBlobReleaseParams;
   "storage.getBlob": KernelGetBlobParams;
+  "storage.record.put": KernelRecordPutParams;
+  "storage.record.get": KernelRecordGetParams;
+  "storage.record.list": KernelRecordListParams;
+  "storage.record.release": KernelRecordReleaseParams;
   "branch.create.begin": KernelCreateBranchBeginParams;
   "branch.create.append": KernelCreateBranchAppendParams;
   "branch.create.finish": KernelCreateBranchFinishParams;
@@ -481,6 +560,42 @@ export type KernelRequest =
       id: string;
       method: "storage.getBlob";
       params: KernelGetBlobParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.record.put";
+      params: KernelRecordPutParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.record.get";
+      params: KernelRecordGetParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.record.list";
+      params: KernelRecordListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.record.release";
+      params: KernelRecordReleaseParams;
       epoch?: string;
       grantId?: string;
     }

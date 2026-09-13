@@ -72,7 +72,9 @@ import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
-import { createWorkspaceWorkingStateAccess } from './lib/harness/working-state/working-state-store.js';
+import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
+import { createKernelRecoveryRecordFacade } from './lib/kernel/recovery-record-adapter.js';
+import { createRecoveryFileStore } from './lib/recovery/journal-files.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
 import { createWorkingBranchLookups } from './lib/harness/working-state/working-branch-lookups.js';
@@ -997,6 +999,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onExit: (error) => console.error('[PiariumKernel] Kernel process exited:', error.message),
   });
   await kernelClient.start();
+  const kernelStorageAdapter = new KernelStorageAdapter({
+    client: kernelClient,
+    hostId: extensionRuntime.services.hostId,
+    hostGeneration: `${extensionRuntime.services.hostId}:${process.pid}`,
+    storageRoot: path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId),
+    fileStore: createRecoveryFileStore(),
+    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+  });
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
     cwd: process.cwd(),
@@ -1121,6 +1131,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         resolveDirectoryApplyContext,
         storageOwnerId,
       });
+      engine = createKernelRecoveryRecordFacade(engine, kernelStorageAdapter);
       workspaceRecoveryEngines.set(storageOwnerId, engine);
     }
     return engine;
@@ -1348,7 +1359,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       return DEFAULT_SUGGESTIONS_SETTINGS;
     }
   };
-  const harnessWorkingStates = createWorkspaceWorkingStateAccess(foundationalRecoveryEngine);
+  const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter);
   const retrievalArtifacts = createRetrievalArtifactAccess(harnessWorkingStates);
   retrievalEvidenceAccess.persistReceipt = retrievalArtifacts.persistReceipt;
   retrievalEvidenceAccess.syncThread = retrievalArtifacts.syncThreadEvidence;
@@ -2690,6 +2701,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await runRuntime.dispose();
       await threadRuntime.dispose();
       await piRuntimeGateway.stop();
+      await kernelStorageAdapter.dispose().catch((error) => console.error('[PiariumKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
       await semanticRuntime.dispose();

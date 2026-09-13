@@ -58,6 +58,7 @@ const rustType = (type) => {
   if (type === 'boolean') return 'bool';
   if (type === 'unknown') return 'Value';
   if (type === 'string | null') return 'RequiredNullable<String>';
+  if (type === 'number | null') return 'RequiredNullable<i64>';
   if (type === 'KernelBranchState') return 'PathState';
   return type;
 };

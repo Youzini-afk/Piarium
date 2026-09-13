@@ -5739,3 +5739,61 @@ catalog/WAL 文件大小观测，尚不据此给性能倍数。
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-258 | implementation correction / R0-R1 foundation acceptance | — | rust-kernel-design；architecture；plan/status 阶段 R；kernel module documentation |
+
+### D-259 · 2026-09-13 · R1 production WorkingState/retrieval consumer cutover
+
+类型：实施选择与阶段边界
+
+决定：在不保留 TS/Rust 双写的前提下，Application Host 的生产 WorkingState branch/draft/result/publish/CAS、分页固定根读取、materializer 输入和 retrieval artifact/receipt/evidence 引用改由 actor-scoped `KernelStorageAdapter` 写入 Rust format v6 的 `domain_records`/`domain_record_refs`；新增的 record/reference wire DTO、record-bound blob read 和 branch page cursor 继续从 `kernel/protocol/schema.json` 生成。TS `WorkingStateStore` 只保留给旧夹具/单测，生产装配不再调用其 JSON/node-pool writer。
+
+原因：仅增加 adapter 而让 `createWorkspaceWorkingStateAccess` 继续打开 recovery SQLite 会留下同一资源两个写者，也无法证明公开 branchWrite/retrieval 走真实 kernel。typed record/reference 让结果、verification/review 和 retrieval 生命周期不再依赖 `context.database`/`object_references` SQL；分页根读取避免大树响应跨 16 MiB 控制帧。
+
+考虑过的替代：继续把 Rust 结果复制回 TS WorkingState 平表（违反 R1 root authority）；在 adapter 中提供通用 SQL/kv（绕过领域身份）；把 recovery SQLite 一并伪装为 kernel facade（会把 R2 文件阶段和新的记录契约混成双写）。均未采用。
+
+影响：`kernel/protocol/schema.json`、generated TS/Rust DTO、Rust `domain_records`/`domain_record_refs` 与 record-bound blob read、Host `KernelStorageAdapter`/`KernelWorkingStateStore`、生产 `application-host/index.ts`、retrieval artifact/receipt access 及 release test 夹具；TS recovery checkpoint/turn/operation 和 Integration durable journal 仍为下一段 R1 工作，R1 暂不标 proven/default-on。
+
+证据边界：`cargo check --manifest-path kernel/Cargo.toml`、protocol `--check`、Application Host source/test type-check 已通过；新增真实 release child-process record/reference/paged-root 测试入口，但本机本轮未完成带新 build identity 的 release binary smoke，Recovery durable records、旧 SQLite 删除、断电级故障及跨平台发行仍未证明。
+
+状态：WorkingState/retrieval wired；Recovery cutover 待实施
+
+## D-259 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-259 | implementation (WorkingState/retrieval consumer cutover; Recovery remains partial) | — | rust-kernel-design；architecture；plan/status 阶段 R1；kernel module documentation |
+
+### D-260 · 2026-09-13 · D-259 release-path evidence correction
+
+类型：实验结果；更正 D-259 的证据边界，不改写 D-259 正文
+
+决定：补记带当前 schema/build identity 的 Windows x64 release `piarium-kernel` 真实子进程证据：现有 kernel-client 反例 12/12 通过，新增 typed durable record/reference、record-bound blob read 与分页/空根边界通过；Host adapter 的 dispatch → virtual write → publish 纵切也经同一 release child process 验证。D-259 对“本轮未完成 release smoke”的暂时表述由本条取代。
+
+原因：首次验证时 release binary 仍是旧 build identity，随后用 Visual Studio Build Tools 环境重新构建并复跑，确认新增 `domain_records`/`domain_record_refs` catalog fingerprint 和 record-bound authorization 实际被 kernel 执行。
+
+影响：status R0/R1 证据、kernel module documentation；Recovery durable record、旧 recovery SQLite 删除、断电级故障和跨平台发行仍未证明。
+
+状态：已验收（WorkingState/retrieval vertical）；Recovery 仍待实施
+
+## D-260 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-260 | evidence correction for D-259 | — | status 阶段 R；kernel module documentation |
+
+### D-261 · 2026-09-13 · Recovery record seam extension
+
+类型：实施补充；不改写 D-259/D-260
+
+决定：Application Host recovery capability 的 checkpoint、turn binding 和 mutation before/after 记录先经 kernel typed record facade 持久化，保留 TS engine 负责文件计划、Documents 协调以及尚未迁移的 combined operation/operation-file 阶段。相同 operation/record identity 继续由 kernel `storage.record.*` 做幂等与 actor/workspace 校验。
+
+原因：turn coordinator 是真实公开工具链的耐久入口，若继续直接打开 recovery SQLite，会让 R1 consumer map 同时存在两份 writer；但把 combined file apply/Integration 阶段一起搬动会越过 R2 边界。分离 record seam 可以先关闭重启后 turn/checkpoint 丢失，再继续清理 operation-file writer。
+
+影响：新增 `kernel/recovery-record-adapter.ts`，`application-host/index.ts` 的 recovery capability/启动 facade 使用它；`recovery/journal-catalog.ts` 仍只服务尚未迁移的 combined Recovery/Integration 路径，R1 继续 Partial。
+
+状态：已实施；combined Recovery/Integration 待继续
+
+## D-261 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-261 | implementation (checkpoint/turn/mutation record seam) | — | status 阶段 R1；kernel module documentation |

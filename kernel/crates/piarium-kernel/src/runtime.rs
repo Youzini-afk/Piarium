@@ -374,6 +374,14 @@ impl Kernel {
                 grant_id.unwrap_or(""),
                 authorized_grant.capabilities.contains("storage.admin"),
             ),
+            "storage.record.put" => idempotent(storage, method, &authorized_params, |storage| {
+                storage.domain_record_put(&authorized_params, grant_id.unwrap_or(""))
+            }),
+            "storage.record.get" => storage.domain_record_get(&authorized_params, grant_id.unwrap_or("")),
+            "storage.record.list" => storage.domain_record_list(&authorized_params, grant_id.unwrap_or("")),
+            "storage.record.release" => idempotent(storage, method, &authorized_params, |storage| {
+                storage.domain_record_release(&authorized_params, grant_id.unwrap_or(""))
+            }),
             "branch.create.begin" => {
                 storage.begin_branch_builder(&authorized_params, grant_id.unwrap_or(""))
             }

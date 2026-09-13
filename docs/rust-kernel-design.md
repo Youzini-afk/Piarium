@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, but re-acceptance is still partial: Host starts the kernel while product storage consumers remain on their existing owners
+Status: accepted architecture; R0/R1 foundations are implemented with a local release-path verification set, and production WorkingState/retrieval now route through typed kernel records; Recovery durable record cutover remains partial
 
 Last updated: 2026-09-13
 
@@ -9,9 +9,7 @@ Last updated: 2026-09-13
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-本轮 D-258 只重新验收 R0/R1 基础：Host 已能管理真实 kernel 进程，Rust storage foundation 已具备
-scope/owner/CAS/pin/recovery/GC 不变量；WorkingState、Recovery、结果、草稿与 evidence 的产品消费者
-仍未切换，R2–R6 不因本轮实现而完成。
+本轮 D-258 之后已把 WorkingState branch/result/draft/publish/CAS、materializer 输入和 retrieval artifact/receipt 的记录与引用交给 Rust typed domain API；Recovery checkpoint/turn/operation 与 Integration durable journal 仍待切换，R2–R6 不因本轮实现而完成。
 
 ## 1. 产品与阶段目标
 
@@ -63,7 +61,7 @@ Rust 不监听新的公共端口，renderer/Pi 扩展不直接连接它。它是
 | 模型、凭据、Pi 会话与包 | Pi worker / 原生 Pi 存储 | Rust 不加载 Pi 扩展、不读 provider secret、不重建会话树 |
 | Thread/Run、角色、队列、review/retrieval、用户策略 | TS Host / Thread catalog | Rust 使用经授权的 Thread/Run 身份；不再建一个调度器或 Thread catalog |
 | workspace/root 注册与 actor 授权 | TS Host 注册意图，Rust 验证并持有文件资源身份 | owning、execution、storage root 分开；实际文件访问在内核核验 |
-| 分支、快照、结果、内容对象、引用、文件恢复操作 | Rust 内核 | TS 只持 ID、修订和投影，不直接打开同一可写存储 |
+| 分支、快照、结果、草稿、verification/review、retrieval artifact/receipt、内容对象、引用 | Rust 内核 | TS 只持 ID、修订和短生命周期投影，不直接打开同一可写存储 |
 | 未保存缓冲、文档实例、grouped undo | 现有 Document Registry | Documents 保留公开入口；Rust 不另存一份可变编辑器权威 |
 | 受控磁盘写入、路径 gate、条件补偿 | Rust 内核 | Documents、Files、Git/任务写者等现有消费者全部纳入同一资源边界 |
 | shell/终端的 PTY、进程状态、原始输出及 writer 生命周期 | Rust 内核 | TS 保留命令展示/上下文投影；UI 与工具使用同一 handle |
@@ -106,7 +104,7 @@ owning/execution/storage 身份以及读/写/发布能力，私有构造器限�
 ## 4. 存储、根与持久发布
 
 工作状态复用现有 recovery storage 的 SQLite + 内容对象模式；这是已有恢复库的内核接管，不是把 TriviumDB 换成 SQLite。
-在同一选定存储位置内，分支根/修订、结果、草稿引用、树节点、对象所有者和恢复 operation/checkpoint 元数据归一个事务域。
+在同一选定存储位置内，分支根/修订、结果、草稿引用、verification/review、retrieval evidence/receipt、树节点、对象所有者和恢复 operation/checkpoint 元数据归一个事务域。
 不继续用整份 WorkingState JSON 加另一份 SQLite 引用表作为两个写入权威。
 
 ### 4.1 内容与树的身份
