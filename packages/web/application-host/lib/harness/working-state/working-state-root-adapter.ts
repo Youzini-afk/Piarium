@@ -175,6 +175,12 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
 
   getObject(hash: string): Promise<Buffer | null> { return this.store.getObject(hash); }
 
+  getObjectSlice(hash: string, byteLength: number, offset: number, length: number): Promise<Buffer | null> {
+    return this.store.getObjectSlice(hash, byteLength, offset, length);
+  }
+
+  ownerIdForObject(hash: string): string | undefined { return (this.store as WorkingStateStore & { ownerIdForObject?: (value: string) => string | undefined }).ownerIdForObject?.(hash); }
+
   async pinBranch(branchId: string, options?: { revision?: number }): Promise<WorkingStatePin> {
     const branch = this.store.getBranch(branchId);
     if (!branch) throw new Error(`Working branch not found: ${branchId}`);

@@ -229,7 +229,7 @@ const parsePinTreeRead = (value: Record<string, unknown>): KernelPinTreeRead => 
 /** Rust-kernel root/path authority. It retains no expanded branch or result tree. */
 export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly ownerByHash = new Map<string, string>();
-  private readonly sourceByHash = new Map<string, { branchId?: string; path?: string; revision?: number; ownerId?: string }>();
+  private readonly sourceByHash = new Map<string, { branchId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
 
@@ -498,6 +498,20 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const slice = await this.context.client.getBlob(hash, ownerId ? { ownerId } : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) });
     return Buffer.from(slice.bytesBase64, "base64");
   }
+
+  async getObjectSlice(hash: string, _byteLength: number, offset: number, length: number): Promise<Buffer | null> {
+    const ownerId = this.ownerByHash.get(hash);
+    const source = this.sourceByHash.get(hash);
+    if (!ownerId && !source?.branchId && !source?.recordId) return null;
+    const slice = await this.context.client.getBlob(hash, ownerId
+      ? { ownerId }
+      : source?.recordId
+        ? { recordId: source.recordId, slot: source.slot ?? "" }
+        : { branchId: source!.branchId!, path: source!.path!, ...(source!.revision === undefined ? {} : { revision: source!.revision }) }, { offset, length });
+    return Buffer.from(slice.bytesBase64, "base64");
+  }
+
+  ownerIdForObject(hash: string): string | undefined { return this.ownerByHash.get(hash); }
 
   async pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
     const branch = await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);

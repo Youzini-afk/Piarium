@@ -7,7 +7,6 @@ import type {
   MissingState,
   UnsupportedState,
 } from "../../recovery/journal-files.js";
-import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import type { RecoveryIdentity, RecoveryFileStore } from "../../recovery/journal-files.js";
 
 export interface WorkingStateRootContext {
@@ -15,6 +14,8 @@ export interface WorkingStateRootContext {
   root: string;
   fileStore: RecoveryFileStore;
   resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
+  records?: unknown;
+  client?: unknown;
 }
 
 export type {
@@ -123,6 +124,8 @@ export interface WorkingStateRootStore {
   listPaths(branchId: string, roots: readonly string[], options?: WorkingStateReadOptions): Promise<WorkingStateTreeRead | null>;
   readContent(entry: WorkingStateTreeEntry, options?: { offset?: number; length?: number; signal?: AbortSignal }): Promise<Buffer | null>;
   getObject(hash: string): Promise<Buffer | null>;
+  getObjectSlice(hash: string, byteLength: number, offset: number, length: number): Promise<Buffer | null>;
+  ownerIdForObject?(hash: string): string | undefined;
   pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
   putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
   commitVirtualWrites(
