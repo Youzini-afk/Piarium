@@ -1420,6 +1420,8 @@ export class IntegrationCoordinator {
       const mergeBaseStates = { ...result.baseStates };
       const mergeChildStates = { ...result.pathStates };
       for (const file of result.changedPaths) {
+        mergeBaseStates[file] ??= { kind: "missing" };
+        mergeChildStates[file] ??= { kind: "missing" };
         if (targets[file] === "surface") {
           mergeBaseStates[file] = await editorStateFrom(store, result.baseStates[file]!);
           mergeChildStates[file] = await editorStateFrom(store, result.pathStates[file]!);

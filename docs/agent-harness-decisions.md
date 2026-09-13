@@ -5991,3 +5991,15 @@ ThreadRuntime partial/settle result publication now invokes the async root store
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-271 | wired / locally proven by kernel and Host type checks | — | status 阶段 R1；plan 阶段 R1；kernel/application-host module documentation |
+
+### D-272 · 2026-09-13 · Selected result publication regression guard
+
+类型：R1 反例修正；只追加，不改写 D-271 正文
+
+The root publication path now tolerates a selected-path read that reports an absent entry as a `missing` state before building the three-way preview. This preserves delete/new-file semantics when a result was published from a narrow changed-path set and prevents the compatibility projection from reintroducing an undefined flat-map entry. The production storage-adapter integration test passes through the real kernel branch authority and durable journal composition.
+
+## D-272 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-272 | implemented / targeted regression proven | — | status 阶段 R1；kernel/application-host module documentation |
