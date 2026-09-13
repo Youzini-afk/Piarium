@@ -514,6 +514,20 @@ impl Storage {
                 }
             }
             selected
+        } else if let Some(roots) = params.get("roots").and_then(Value::as_array) {
+            let requested = roots
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let scoped = self.root_entries_scoped(&root, &requested)?;
+            let cursor = params.get("cursor").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let page_size = params.get("pageSize").and_then(Value::as_u64).map(|value| value as usize).unwrap_or(scoped.len());
+            if params.get("pageSize").is_some() && page_size == 0 { return Err(KernelError::Operation("pageSize must be positive when supplied".to_string())); }
+            let start = cursor.min(scoped.len());
+            let end = start.saturating_add(page_size).min(scoped.len());
+            if end < scoped.len() { next_cursor = Some(end as u64); }
+            scoped[start..end].iter().cloned().map(|(path, state)| json!({"path": path, "state": state})).collect()
         } else if params
             .get("includeEntries")
             .and_then(Value::as_bool)

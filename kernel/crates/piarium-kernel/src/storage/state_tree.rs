@@ -42,6 +42,52 @@ impl Storage {
         Ok(output)
     }
 
+    pub(super) fn root_entries_scoped(
+        &self,
+        root: &str,
+        roots: &[String],
+    ) -> Result<Vec<(String, PathState)>, KernelError> {
+        if roots.is_empty() || roots.iter().any(|value| value.is_empty()) {
+            return self.root_entries(root);
+        }
+        let mut output = Vec::new();
+        for requested in roots {
+            let segments = Self::validate_path(requested)?;
+            if segments.is_empty() {
+                return self.root_entries(root);
+            }
+            if let Some(subtree) = self.find_path_node(root, &segments)? {
+                self.walk_path_entries(&subtree, &segments.join("/"), &mut output)?;
+            }
+        }
+        output.sort_by(|left, right| left.0.cmp(&right.0));
+        output.dedup_by(|left, right| left.0 == right.0);
+        Ok(output)
+    }
+
+    fn find_path_node(&self, hash: &str, segments: &[String]) -> Result<Option<String>, KernelError> {
+        let TrieNode::Path { children, .. } = self.load_node(hash)? else {
+            return Err(KernelError::Storage("path root points to an index node".to_string()));
+        };
+        if segments.is_empty() {
+            return Ok(Some(hash.to_string()));
+        }
+        let Some(children) = children else { return Ok(None); };
+        let Some(child) = self.find_index_child(&children, &segments[0])? else { return Ok(None); };
+        self.find_path_node(&child, &segments[1..])
+    }
+
+    fn find_index_child(&self, hash: &str, key: &str) -> Result<Option<String>, KernelError> {
+        let TrieNode::Index { key: node_key, child, left, right, .. } = self.load_node(hash)? else {
+            return Err(KernelError::Storage("path children point to a path node".to_string()));
+        };
+        if key == node_key { return Ok(Some(child)); }
+        if key < node_key.as_str() {
+            return left.map(|value| self.find_index_child(&value, key)).transpose().map(|value| value.flatten());
+        }
+        right.map(|value| self.find_index_child(&value, key)).transpose().map(|value| value.flatten())
+    }
+
     pub(super) fn walk_path_entries(
         &self,
         hash: &str,

@@ -344,6 +344,7 @@ pub(crate) struct KernelBranchReadParams {
     pub(crate) branch_id: String,
     pub(crate) revision: Option<i64>,
     pub(crate) paths: Option<Vec<String>>,
+    pub(crate) roots: Option<Vec<String>>,
     pub(crate) include_entries: Option<bool>,
     pub(crate) cursor: Option<i64>,
     pub(crate) page_size: Option<i64>,

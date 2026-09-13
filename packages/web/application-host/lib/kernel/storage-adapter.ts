@@ -390,6 +390,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         page = await this.context.client.readBranch({
           branchId,
           ...(revision === undefined ? {} : { revision }),
+          roots: [...roots],
           includeEntries: true,
           ...(cursor === undefined ? {} : { cursor }),
           pageSize: 256,

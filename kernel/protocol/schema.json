@@ -210,7 +210,7 @@
     "KernelCreateBranchAbortParams": {"fields": {"builderId": {"type": "string"}}},
     "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
     "KernelBranchReadParams": {"fields": {
-      "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
+      "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "roots": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},
     "KernelBranchWriteBeginParams": {"fields": {
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}

@@ -109,7 +109,7 @@ export class KernelScopedClient {
     return this.owner.createBranch(params, this.grant, signal);
   }
 
-  readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<KernelBranchReadResult> {
+  readBranch(params: { branchId: string; revision?: number; paths?: string[]; roots?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<KernelBranchReadResult> {
     return this.owner.readBranch(params, this.grant, signal);
   }
 
@@ -710,7 +710,7 @@ export class KernelClient {
     }
   }
 
-  async readBranch(params: { branchId: string; revision?: number; paths?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
+  async readBranch(params: { branchId: string; revision?: number; paths?: string[]; roots?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
     return this.requestRaw<KernelBranchReadResult>("branch.read", params, { signal, grant });
   }
 

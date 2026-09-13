@@ -465,6 +465,7 @@ export interface KernelBranchReadParams {
   branchId: string;
   revision?: number;
   paths?: string[];
+  roots?: string[];
   includeEntries?: boolean;
   cursor?: number;
   pageSize?: number;
