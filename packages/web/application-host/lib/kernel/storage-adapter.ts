@@ -49,12 +49,25 @@ export interface KernelStorageReference {
   objectHash: string;
 }
 
+export interface KernelPendingFileOperation {
+  operationId: string;
+  kind: string;
+  rootId: string;
+  paths: string[];
+  disposition: "reconcile" | "needs-attention";
+  reason: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface KernelFileAuthorityContext {
   client: KernelScopedClient;
   rootId: string;
   owningWorkspaceId: string;
   executionWorkspaceId: string;
   canonicalRoot: string;
+  pendingFileOperations: KernelPendingFileOperation[];
+  reconcilePendingFileOperation(operationId: string): Promise<Record<string, unknown>>;
 }
 
 export interface KernelStorageContext {
@@ -148,6 +161,21 @@ const fromKernelState = (state: KernelBranchState): RecoveryState => {
 const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
 );
+
+const parsePendingFileOperation = (value: unknown): KernelPendingFileOperation => {
+  const record = asRecord(value);
+  const disposition = record.disposition;
+  if (typeof record.operationId !== "string" || typeof record.kind !== "string" || typeof record.rootId !== "string"
+    || !Array.isArray(record.paths) || !record.paths.every((path) => typeof path === "string")
+    || (disposition !== "reconcile" && disposition !== "needs-attention")
+    || typeof record.reason !== "string" || !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt)) {
+    throw new Error("Kernel returned an invalid pending file operation descriptor");
+  }
+  return {
+    operationId: record.operationId, kind: record.kind, rootId: record.rootId, paths: [...record.paths] as string[],
+    disposition, reason: record.reason, createdAt: Number(record.createdAt), updatedAt: Number(record.updatedAt),
+  };
+};
 
 const checkRead = (options?: { signal?: AbortSignal; deadlineAt?: number }): void => {
   options?.signal?.throwIfAborted();
@@ -768,6 +796,74 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         await releasePromise;
       },
     };
+  }
+
+  private pinResult(raw: Record<string, unknown>, branch: WorkingBranchRoot, expectedPinId?: string): WorkingStatePin {
+    const pinId = String(raw.pinId ?? "");
+    const branchId = String(raw.branchId ?? "");
+    const workspaceId = String(raw.workspaceId ?? "");
+    const revision = Number(raw.revision);
+    const view = raw.view;
+    const rawWriteRevision = Number(raw.writeRevision);
+    const writeRevision = view === "current" ? rawWriteRevision : revision;
+    const root = String(raw.root ?? "");
+    if (!pinId || (expectedPinId !== undefined && pinId !== expectedPinId) || branchId !== branch.branchId
+      || workspaceId !== this.context.identity.workspaceId || !Number.isSafeInteger(revision) || revision < 0
+      || !Number.isSafeInteger(writeRevision) || writeRevision < 0 || (view !== "current" && view !== "revision") || !root) {
+      throw new Error(`Kernel returned an invalid pin for ${branch.branchId}`);
+    }
+    let releasePromise: Promise<void> | undefined;
+    return {
+      pinId, branchId, workspaceId, view, revision, writeRevision, root, branch,
+      release: async () => {
+        releasePromise ??= this.context.client
+          .unpinBranch({ operationId: `branch-handoff-unpin:${branchId}:${pinId}`, branchId, pinId })
+          .catch((error) => { if (!pinAlreadyReleasedWithGrant(error)) throw error; })
+          .then(() => undefined);
+        await releasePromise;
+      },
+    };
+  }
+
+  async pinBranchHandoff(branchId: string, pinId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
+    const branch = await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const raw = await this.context.client.pinBranch({
+      operationId: `branch-handoff-pin:${branchId}:${pinId}`,
+      branchId,
+      pinId,
+      ...(options?.revision === undefined
+        ? { expectedWriteRevision: branch.writeRevision, expectedRoot: branch.root, persistent: true }
+        : { revision: options.revision }),
+    }, options?.signal);
+    if (raw.status === "conflict") throw new Error(`Working branch changed while fixing materialization handoff ${branchId}`);
+    return this.pinResult(raw, branch, pinId);
+  }
+
+  async openBranchHandoffPin(
+    branchId: string,
+    pinId: string,
+    expected: { root: string; revision: number; writeRevision: number },
+    signal?: AbortSignal,
+  ): Promise<WorkingStatePin> {
+    const branch = await this.getBranchRoot(branchId, signal ? { signal } : undefined);
+    if (!branch) throw new Error(`Working branch not found while reopening materialization handoff: ${branchId}`);
+    const raw = await this.context.client.readPin({ pinId, includeEntries: false }, signal);
+    const pin = this.pinResult(raw, branch, pinId);
+    if (pin.root !== expected.root || pin.revision !== expected.revision || pin.writeRevision !== expected.writeRevision) {
+      throw new Error(`Materialization handoff pin identity changed: ${branchId}/${pinId}`);
+    }
+    return pin;
+  }
+
+  async releaseBranchHandoffPin(branchId: string, pinId: string): Promise<void> {
+    await this.context.client.unpinBranch({
+      operationId: `branch-handoff-unpin:${branchId}:${pinId}`,
+      branchId,
+      pinId,
+    }).catch((error) => {
+      if (!/pin not found/i.test(error instanceof Error ? error.message : String(error)) && !pinAlreadyReleasedWithGrant(error)) throw error;
+    });
   }
 
   async putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }> {
@@ -1493,12 +1589,28 @@ export class KernelStorageAdapter {
     if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string") {
       throw new Error("Kernel returned an invalid file root registration");
     }
+    const rootId = registered.rootId;
+    const pendingFileOperations: KernelPendingFileOperation[] = [];
+    if (Number(registered.pendingOperations ?? 0) > 0) {
+      let cursor: number | undefined;
+      do {
+        const page = await client.fileOperationList({
+          workspaceId: input.owningWorkspaceId, rootId, ...(cursor === undefined ? {} : { cursor }), pageSize: 128,
+        });
+        if (!Array.isArray(page.operations)) throw new Error("Kernel returned an invalid pending file operation page");
+        pendingFileOperations.push(...page.operations.map(parsePendingFileOperation));
+        cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
+      } while (cursor !== undefined);
+    }
     return {
-      client,
-      rootId: registered.rootId,
+      client, rootId,
       owningWorkspaceId: input.owningWorkspaceId,
       executionWorkspaceId: input.executionWorkspaceId,
       canonicalRoot: registered.canonicalRoot,
+      pendingFileOperations,
+      reconcilePendingFileOperation: (operationId: string) => client.fileOperationReconcile({
+        workspaceId: input.owningWorkspaceId, rootId, operationId,
+      }),
     };
   }
 

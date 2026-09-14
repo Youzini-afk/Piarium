@@ -67,6 +67,12 @@ impl Storage {
                 authorized_grant.capabilities.contains("storage.admin"),
             ),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
+            "file.operation.list" => {
+                storage.file_operation_list(authorized_params, authorized_grant)
+            }
+            "file.operation.reconcile" => {
+                storage.file_operation_reconcile(authorized_params, authorized_grant)
+            }
             "file.lease.acquire" => storage.file_lease_acquire(authorized_params, authorized_grant),
             "file.lease.check" => storage.file_lease_check(authorized_params, authorized_grant),
             "file.lease.release" => storage.file_lease_release(authorized_params, authorized_grant),

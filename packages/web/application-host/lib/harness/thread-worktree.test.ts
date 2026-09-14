@@ -1,5 +1,7 @@
 import fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -480,6 +482,45 @@ describe("thread worktree runtime", () => {
     }
   });
 
+  it("does not report setup timeout until the spawned process has actually closed", async () => {
+    const root = mkdtempSync(join(tmpdir(), "setup-close-receipt-"));
+    const worktreePath = join(root, "thread");
+    mkdirSync(worktreePath);
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number;
+      stdout: PassThrough;
+      stderr: PassThrough;
+      kill(): boolean;
+    };
+    child.pid = 42;
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    let killed = false;
+    child.kill = () => { killed = true; return true; };
+    const runtime = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => candidate === root,
+      createWorktree: async () => ({ path: worktreePath, managedRoot: root }),
+      getWorktreeBootstrapStatus: async () => ({ status: "ready", phase: "setup-ready", error: null, updatedAt: Date.now() }),
+      spawnProcess: (() => child) as unknown as typeof import("node:child_process").spawn,
+    });
+    try {
+      let settled = false;
+      const setup = runtime.runSetup(root, { path: worktreePath, managedRoot: root, base: "zero-commit" }, {
+        setup: "long-running",
+        setupTimeoutMs: 5,
+      });
+      void setup.finally(() => { settled = true; }).catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      expect(killed).toBe(true);
+      expect(settled).toBe(false);
+      child.emit("close", null);
+      await expect(setup).rejects.toMatchObject({ exitReason: "setup-failed", message: expect.stringContaining("timed out") });
+      expect(settled).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("fails setup cleanly when command fails with exitReason setup-failed", async () => {
     const fixture = createRepo();
     const runtime = runtimeFor(fixture.worktrees);
@@ -734,6 +775,10 @@ describe("thread worktree runtime", () => {
       expect(attached.kind).toBe("init");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       expect(attached.executionBaseline).not.toBe(parentHead);
+      const retried = await runtime.attachIsolatedGitContext(fixture.repo, {
+        path: live, managedRoot: join(fixture.repo, ".piarium", "worktrees"), base: parentHead,
+      });
+      expect(retried).toEqual(attached);
       const inspected = await runtime.inspect({
         path: live,
         managedRoot: join(fixture.repo, ".piarium", "worktrees"),

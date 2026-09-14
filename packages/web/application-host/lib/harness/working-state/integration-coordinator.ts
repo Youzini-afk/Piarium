@@ -360,6 +360,68 @@ export class IntegrationCoordinator {
     return Object.keys(expected).every((file) => sameState(current[file] ?? { kind: "missing" }, expected[file]!));
   }
 
+  private async reusableTerminalIntegration(
+    store: WorkingStateRootStore,
+    context: WorkingStateRootContext & { durableRecoveryStore: NonNullable<WorkingStateRootContext["durableRecoveryStore"]> },
+    input: IntegrationPlanInput,
+  ): Promise<(IntegrationApplyResult & { changedFiles: string[] }) | null> {
+    if (input.requireTurnBinding) return null;
+    const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
+    const summaries = await context.durableRecoveryStore.listOperations(input.workspaceId, "integration");
+    for (const summary of [...summaries].reverse()) {
+      const state = String(summary.state ?? "");
+      if (state !== "complete" && state !== "conflict") continue;
+      const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+      if (!operationId) continue;
+      const operation = await inspectDurableIntegrationOperation(context as DurableFileOperationContext, operationId);
+      const binding = operation.retryBinding;
+      if (!binding
+        || operation.threadId !== input.threadId
+        || Number(operation.resultRevision) !== input.resultRevision
+        || binding.branchId !== input.branchId
+        || Object.values(operation.targetKinds).some((kind) => kind === "surface")) continue;
+      const expected = binding.resultingParentStates;
+      const paths = Object.keys(expected).sort();
+      let current: Record<string, RecoveryState>;
+      if (parentAuthority.kind === "branch") {
+        if (operation.parentBranchId !== parentAuthority.branchId) continue;
+        current = await store.readStateSlice(parentAuthority.branchId, paths) ?? {};
+      } else {
+        if (operation.parentBranchId) continue;
+        let applyContext: DurableFileOperationContext = context as DurableFileOperationContext;
+        if (parentAuthority.kind === "directory") {
+          if (operation.applyCanonicalRoot !== parentAuthority.directory) continue;
+          try {
+            applyContext = (await this.directoryApplyContext(context as DurableFileOperationContext, parentAuthority)).context;
+          } catch {
+            continue;
+          }
+        } else if (operation.applyCanonicalRoot) {
+          continue;
+        }
+        current = {};
+        for (const file of paths) {
+          current[file] = (await applyContext.fileStore.captureState(
+            applyContext.identity, applyContext.root, file, { store: false },
+          )).state;
+        }
+      }
+      if (!this.sameParentSlice(current, expected)) continue;
+      return {
+        operationId,
+        status: state === "complete" ? "applied" : "conflict",
+        appliedPaths: [],
+        conflictPaths: [...operation.conflictPaths],
+        compensatedPaths: [...operation.compensatedPaths],
+        needsAttentionPaths: [...operation.needsAttentionPaths],
+        diffStats: operation.diffStats,
+        changedFiles: Object.keys(binding.childStates).sort(),
+        text: `Reused durable ${state} integration ${operationId}; parent state already matches its recorded result.`,
+      };
+    }
+    return null;
+  }
+
   private previewKey(workspaceId: string, threadId: string): string {
     return `${workspaceId}\0${threadId}`;
   }
@@ -427,6 +489,8 @@ export class IntegrationCoordinator {
       const blocking = (await context.durableRecoveryStore.listOperations(input.workspaceId, "integration"))
         .find((entry) => !["complete", "conflict", "compensated", "aborted", "undone"].includes(String(entry.state)));
       if (blocking) throw new Error(`Integration ${String(blocking.operationId)} requires recovery before planning (${String(blocking.state)})`);
+      const reusable = await this.reusableTerminalIntegration(store, context, input);
+      if (reusable) return reusable;
       const planned = await this.planFrom(store, context, input);
       if (input.expectedBindingFingerprint
         && input.expectedBindingFingerprint !== planned.preview.bindingFingerprint) {

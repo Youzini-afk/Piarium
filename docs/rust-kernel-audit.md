@@ -1,6 +1,6 @@
 # Rust kernel R0–R3 审查与返工记录
 
-Status: audit implemented; R1 core cutover retained; R2/R3 completion claims reopened by D-278
+Status: D-278 audit implemented; D-279 closes the reopened R2/R3 acceptance gaps; R1–R3 are Complete
 
 Last updated: 2026-09-14
 
@@ -14,8 +14,8 @@ Last updated: 2026-09-14
 | --- | --- | --- |
 | R0 | Partial，保持 | framed process、epoch/grant 和实际子进程证据存在；本轮补 CI 的真实 kernel 验收入口，不声称打包/任意 cwd/饱和队列取消均已验证 |
 | R1 | 核心状态/存储接管 Complete，已完成本轮正确性返工 | Rust 仍是根、对象、引用、revision 和 recovery metadata 的生产权威；GC 和 epoch pin 的实质缺陷已修，未恢复 TS writer |
-| R2 | Partial：生产文件权威已接管，恢复闭环重新验收 | 跨 root 物理互斥、lease coverage、owner、重试与真实 Documents 装配已修；仍缺低层 pending file operation 到 Host 可见处置状态的完整闭环 |
-| R3 | Partial：原语和主要消费者已接，跨域物化生命周期尚未闭环 | kernel 自己的 staging/backup/promote 能恢复，不等于 Git execution baseline、Thread Registry 与执行 view 的持久交接也能恢复 |
+| R2 | **Complete（D-279）** | D-278 的物理互斥/coverage/owner/重试修复保留；`file.operation.list/reconcile` 现在把 pending operationId、路径、reason/disposition 暴露给 Host，并以真实 restart 反例证明证据不足的目录 rename 不会隐身或被猜成成功 |
+| R3 | **Complete（D-279）** | 固定 root/revision/writeRevision、同一 kernel operationId、persistent handoff pin、Git executionBaseline receipt、Thread Registry 与 execution view 已形成可重入持久交接；setup timeout/abort 等待真实 child close |
 
 不增加新的产品范围：本地 macOS/Linux 机器、购买签名证书、物理断电实验、真实付费 Pi 会话都不作为这次返工的硬门槛。native 平台验证交给已有 CI；普通 copy 是正式后端，未测文件系统不宣称已证明 CoW。R4 进程后端、R5 检索和 R6 性能/发行整体收口不在本轮迁移。
 
@@ -89,7 +89,7 @@ readonly file 安装先取得 flush handle，再恢复权限并 flush，不在�
 
 ThreadRuntime 曾用 `.catch(() => null)` 吞掉 branch metadata 读取错误以兼容不完整测试对象。本轮移除此生产错误吞咽，修正 fixture 为合法 branch shape，让发布失败保持失败。
 
-## 3. 完成度尚未闭环的具体事项
+## 3. D-278 时点未闭环、D-279 已关闭的具体事项
 
 ### R2：未决文件操作的产品处置
 
@@ -104,6 +104,14 @@ ThreadRuntime 曾用 `.catch(() => null)` 吞掉 branch metadata 读取错误以
 kernel 能恢复目录，不代表 Host 能证明“这是哪个固定输入、Git 上下文是否完成、该 Run 是否可以开始执行”。Git attach 失败、Host 在 promote 后退出、Registry 持久化失败等窗口不能靠再生成随机 operationId 或重读当前 branch 消除。本轮先阻止未知内容被替换；完整解决需要 Host 持久 switch intent 与 kernel receipt 的明确协议、同 operationId 重入和跨层故障纵切。
 
 此外 `thread-worktree.ts::runSetup` 的 timeout/abort 在发出 kill 后立即 reject，未以真实 child close 决定准备已停止。它属于生命周期检查项：应在进入可回收阶段前确认实际退出，不能等同于“R4 尚未迁移，所以现在可以提前释放目录”。本轮未把通用 process/PTY backend 搬进 R3。
+
+### D-279 关闭证据
+
+R2：kernel 新增 typed `file.operation.list/reconcile`，Host `KernelFileAuthorityContext` 保留每个未决 operation 的 operationId、kind、paths、disposition 与 reason，并暴露显式 reconcile。真实 release-kernel audit 注入目录 rename 在 side effect 后丢失 terminal finish，重启后 operation 仍可列举；由于目录元数据不足以证明整树来源，显式 reconcile 继续保留 needs-attention，而不是重放 rename 或制造成功。
+
+R3：Thread Registry 持久化 `materializationHandoff`，固定 source root/revision/writeRevision、operationId、pinId、stage 和 Git receipt；current-root handoff 使用 maintenance-scoped persistent pin 跨 kernel/Host restart 保活。native materialize 与 Git attach 均以同一 handoff 重入，Piarium-owned Git baseline attach 幂等；进入 `git-attached` 后必须先成功释放 durable pin 才清 Registry intent，失败则保留 receipt 供下次恢复。setup timeout/abort 发送 kill 后等待 child `close` 再结束。
+
+复核证据：统一 `bun run test:kernel` 57 passed：真实 release kernel child-process 25/25、file-resource audit 26/26、storage adapter 5/5、kernel-backed combined Recovery 1/1；IntegrationCoordinator 37/37（已移除对退役 SQLite 内部表的依赖，改用 current durable port），ThreadRuntime/ThreadWorktree 91 passed / 1 platform skip；Application Host type-check、protocol drift、release build 与 diff check 通过。由此 D-278 的 R2/R3 reopen gate 均关闭。
 
 ### R0 与工程质量后续
 

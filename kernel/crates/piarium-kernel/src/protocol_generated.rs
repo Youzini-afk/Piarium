@@ -126,6 +126,23 @@ pub(crate) struct KernelFileRootRegisterParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileOperationListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileOperationReconcileParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelFileLeaseAcquireParams {
     pub(crate) workspace_id: String,
     pub(crate) root_id: String,
@@ -526,6 +543,7 @@ pub(crate) struct KernelBranchPinParams {
     pub(crate) expected_write_revision: Option<i64>,
     pub(crate) expected_root: Option<String>,
     pub(crate) pin_id: Option<String>,
+    pub(crate) persistent: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1009,6 +1027,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "file.root.register" => {
             serde_json::from_value::<KernelFileRootRegisterParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.operation.list" => {
+            serde_json::from_value::<KernelFileOperationListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.operation.reconcile" => {
+            serde_json::from_value::<KernelFileOperationReconcileParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

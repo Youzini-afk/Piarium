@@ -256,6 +256,26 @@ const MATERIALIZATION_SWITCH_STAGES = new Set<NonNullable<ThreadWorktree["materi
   "live-backed-up",
   "staging-promoted",
 ]);
+const MATERIALIZATION_HANDOFF_STAGES = new Set<NonNullable<ThreadWorktree["materializationHandoff"]>["stage"]>([
+  "intent-persisted",
+  "kernel-materialized",
+  "git-attached",
+]);
+
+const isMaterializationHandoff = (value: unknown): value is NonNullable<ThreadWorktree["materializationHandoff"]> => (
+  isRecord(value)
+  && isString(value.operationId) && value.operationId.length > 0
+  && isString(value.pinId) && value.pinId.length > 0
+  && Number.isSafeInteger(value.revision) && Number(value.revision) >= 0
+  && Number.isSafeInteger(value.writeRevision) && Number(value.writeRevision) >= 0
+  && isString(value.root) && value.root.length > 0
+  && (value.view === "current" || value.view === "revision")
+  && (value.nextPreparationStage === "setup" || value.nextPreparationStage === "ready")
+  && MATERIALIZATION_HANDOFF_STAGES.has(value.stage as NonNullable<ThreadWorktree["materializationHandoff"]>["stage"])
+  && (value.gitKind === undefined || value.gitKind === "worktree" || value.gitKind === "init" || value.gitKind === "none")
+  && (value.executionBaseline === undefined || isString(value.executionBaseline))
+  && (value.stage !== "git-attached" || value.gitKind === "worktree" || value.gitKind === "init" || value.gitKind === "none")
+);
 
 const isMaterializationSwitch = (value: unknown): value is NonNullable<ThreadWorktree["materializationSwitch"]> => (
   isRecord(value)
@@ -591,6 +611,7 @@ const isThread = (value: unknown): value is Thread => {
       && (value.worktree.materialized === undefined || typeof value.worktree.materialized === "boolean")
       && (value.worktree.viewMode === undefined || value.worktree.viewMode === "virtual" || value.worktree.viewMode === "materialized")
       && (value.worktree.materializationSwitch === undefined || isMaterializationSwitch(value.worktree.materializationSwitch))
+      && (value.worktree.materializationHandoff === undefined || isMaterializationHandoff(value.worktree.materializationHandoff))
       && (value.worktree.preparationStage === undefined
         || WORKTREE_PREPARATION_STAGES.has(value.worktree.preparationStage as NonNullable<ThreadWorktree["preparationStage"]>))
       && (value.worktree.materializationFingerprint === undefined || isString(value.worktree.materializationFingerprint))

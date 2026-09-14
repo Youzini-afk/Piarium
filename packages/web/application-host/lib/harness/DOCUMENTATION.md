@@ -641,15 +641,23 @@ The harness is wired in `packages/web/application-host/index.ts`:
 
 ## D-278 native lifecycle acceptance correction
 
-See [the authority audit](../../../../../docs/rust-kernel-audit.md). Native materialization, capture, and root
-publication primitives are wired; this is not a completed cross-domain execution-generation transition.
-`materializeExecutionView` still needs a durable Host switch intent connecting the selected root/writeRevision,
-kernel operationId/receipt, Git executionBaseline, and Registry/view binding. Failed Git attachment or Host exit
-after promotion cannot be resolved by a new random operationId or a current-branch read. Uncollected live content
-is now protected by a kernel conflict rather than overwritten to force a retry through.
+See [the authority audit](../../../../../docs/rust-kernel-audit.md). At the D-278 audit point, native materialization,
+capture, and root publication primitives were wired but the cross-domain execution-generation transition was not yet
+accepted. The audit required a durable Host switch intent connecting selected root/writeRevision, kernel
+operationId/receipt, Git executionBaseline, and Registry/view binding; a failed Git attachment or Host exit after
+promotion could not be resolved by a new random operationId or a current-branch read. Uncollected live content was
+already protected by a kernel conflict rather than overwritten to force a retry through.
 
 Maintenance hints containing only executionWorkspace remain Host operations, not fake session actors. Production
 capture/settle/reclaim carries the real execution workspace. Managed materialization admission uses the owning
 workspace's retained Thread/worktree and existing ownership assertion; root selection does not create authority.
 Branch metadata read failures propagate; incomplete unit fixtures must be corrected instead of swallowing errors.
-R2/R3 are Partial pending the concrete recovery/handoff items, not local platform machines or code signing.
+
+## D-279 R2/R3 acceptance closure
+
+D-279 closes the D-278 gaps without adding another writer. Pending kernel file operations are surfaced to the Host
+with operation identity, affected paths, disposition, reason, and a proof-based reconcile action. Native
+materialization persists a fixed root/revision/writeRevision plus operationId and durable pin in the Thread Registry,
+then records kernel-materialized and Git-attached receipts. The pin is released before the Registry handoff is cleared;
+a release failure leaves the receipt available for restart retry. Setup timeout/abort waits for the actual child
+`close` event. R2/R3 are Complete; local platform machines and code signing remain outside those stage gates.

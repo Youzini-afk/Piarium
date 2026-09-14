@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1 core state/storage cutover complete; R2/R3 wired but acceptance reopened by D-278; R0 and R4–R6 remain separate.
+Status: accepted architecture; R1–R3 complete after D-279 closes the D-278 acceptance gaps; R0 and R4–R6 remain separate.
 
 Last updated: 2026-09-14
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-14
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。R2/R3 主要 file-resource 与物化原语已经 wired，但 D-278 通过真实反例修复了物理租约、owner、GC、重试和实际 root admission，并撤回整体完成声明。剩余的 low-level pending operation 产品处置和 kernel/Git/Registry 持久 switch 交接见 [审查记录](rust-kernel-audit.md)；下文规定目标契约，不以目标替代交付事实。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。当前 R1–R3 均按各自可执行契约完成；[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
 
 ## 1. 产品与阶段目标
 

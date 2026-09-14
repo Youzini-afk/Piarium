@@ -121,6 +121,14 @@ export class KernelScopedClient {
     return this.owner.fileRootRegister(params, this.grant, signal);
   }
 
+  fileOperationList(params: KernelMethodParams["file.operation.list"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileOperationList(params, this.grant, signal);
+  }
+
+  fileOperationReconcile(params: KernelMethodParams["file.operation.reconcile"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileOperationReconcile(params, this.grant, signal);
+  }
+
   fileLeaseAcquire(params: KernelMethodParams["file.lease.acquire"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileLeaseAcquire(params, this.grant, signal);
   }
@@ -181,7 +189,7 @@ export class KernelScopedClient {
     return this.owner.publishBranch(params, this.grant, signal);
   }
 
-  pinBranch(params: { operationId: string; branchId: string; revision?: number; expectedWriteRevision?: number; expectedRoot?: string; pinId?: string }, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  pinBranch(params: KernelMethodParams["branch.pin"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.pinBranch(params, this.grant, signal);
   }
 
@@ -763,6 +771,14 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("file.root.register", params, { signal, grant });
   }
 
+  async fileOperationList(params: KernelMethodParams["file.operation.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.operation.list", params, { signal, grant });
+  }
+
+  async fileOperationReconcile(params: KernelMethodParams["file.operation.reconcile"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.operation.reconcile", params, { signal, grant });
+  }
+
   async fileLeaseAcquire(params: KernelMethodParams["file.lease.acquire"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.lease.acquire", params, { signal, grant });
   }
@@ -863,7 +879,7 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("branch.publish", params, { signal, grant });
   }
 
-  async pinBranch(params: { operationId: string; branchId: string; revision?: number; expectedWriteRevision?: number; expectedRoot?: string; pinId?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  async pinBranch(params: KernelMethodParams["branch.pin"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("branch.pin", params, { signal, grant });
   }
 

@@ -441,6 +441,69 @@ export class KernelRecoveryStore {
     return true;
   }
 
+  async recordIntegrationChanges(input: {
+    workspaceId: string;
+    executionId: string;
+    operationId: string;
+    changes: Record<string, { before: RecoveryState; after: RecoveryState }>;
+  }): Promise<boolean> {
+    const lookup = await this.context(input.workspaceId, undefined, true);
+    const turn = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
+    if (!turn || (turn.status !== "pending" && turn.status !== "ready") || typeof turn.sessionId !== "string" || typeof turn.checkpointId !== "string") return false;
+    const context = await this.context(input.workspaceId, turn.sessionId);
+    const checkpointId = turn.checkpointId;
+    if (turn.status === "ready") {
+      for (const [rawPath, states] of Object.entries(input.changes)) {
+        const path = normalizeResourceId(rawPath);
+        const prior = await context.client.recoveryChangeGet({ workspaceId: input.workspaceId, checkpointId, path });
+        if (!prior || !prior.after || !sameState(parseRecoveryState(prior.after), states.after)) return false;
+      }
+      return true;
+    }
+    const refs = (before: RecoveryState, after?: RecoveryState) => [
+      ...(before.kind === "regular-file" ? [{ slot: "before", objectHash: before.objectHash }] : []),
+      ...(after?.kind === "regular-file" ? [{ slot: "after", objectHash: after.objectHash }] : []),
+    ];
+    for (const [rawPath, states] of Object.entries(input.changes).sort(([left], [right]) => left.localeCompare(right))) {
+      const path = normalizeResourceId(rawPath);
+      if (!path) throw new Error("Integration recovery change path is empty");
+      const beforeResult = await context.client.recoveryChangeBefore({
+        operationId: `integration-before:${input.operationId}:${path}`,
+        workspaceId: input.workspaceId,
+        sessionId: turn.sessionId,
+        executionId: input.executionId,
+        checkpointId,
+        path,
+        toolName: "thread.merge",
+        mutationId: `thread.merge:${input.operationId}:${path}`,
+        beforeJson: JSON.stringify(states.before),
+        references: refs(states.before),
+      });
+      const prior = await context.client.recoveryChangeGet({ workspaceId: input.workspaceId, checkpointId, path });
+      if (!prior) throw new Error(`Integration recovery before-image disappeared: ${path}`);
+      const priorAfter = prior.after && typeof prior.after === "object"
+        ? parseRecoveryState(prior.after)
+        : undefined;
+      if (priorAfter && sameState(priorAfter, states.after)) continue;
+      await context.client.recoveryChangeAfter({
+        operationId: `integration-after:${input.operationId}:${path}`,
+        workspaceId: input.workspaceId,
+        sessionId: turn.sessionId,
+        executionId: input.executionId,
+        checkpointId,
+        path,
+        afterJson: JSON.stringify(states.after),
+        succeeded: true,
+        expectedRevision: Number(prior.revision ?? beforeResult.revision ?? 1),
+        references: refs(parseRecoveryState(prior.before), states.after),
+      });
+      for (const reference of refs(parseRecoveryState(prior.before), states.after)) {
+        this.content.registerRecord(input.workspaceId, `change:${checkpointId}:${path}`, reference);
+      }
+    }
+    return true;
+  }
+
   async recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBinding> {
     const lookup = await this.context(input.workspaceId, undefined, true);
     const row = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });

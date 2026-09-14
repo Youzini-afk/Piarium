@@ -19,6 +19,9 @@ export interface InMemoryRecoveryDurablePort extends RecoveryDurableMetadataPort
 export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort => {
   const operations = new Map<string, MemoryOperation>();
   const checkpoints = new Map<string, Array<Record<string, unknown>>>();
+  const turns = new Map<string, DurableRecoveryChangeSelection["turns"][number] & { workspaceId: string }>();
+  const changes = new Map<string, DurableRecoveryChangeSelection["changes"][number] & { workspaceId: string }>();
+  let turnSequence = 0;
   const key = (workspaceId: string, operationId: string) => `${workspaceId}\0${operationId}`;
   const clone = (operation: MemoryOperation): MemoryOperation => structuredClone(operation);
   const get = (workspaceId: string, operationId: string): MemoryOperation | null => {
@@ -82,9 +85,51 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
       return [...operations.values()].filter((operation) => operation.workspaceId === workspaceId && (!kind || operation.kind === kind)).map(clone);
     },
     async releaseOperation(workspaceId, operationId) {
-      return { operationId, released: operations.delete(key(workspaceId, operationId)) };
+      const id = key(workspaceId, operationId);
+      const operation = operations.get(id);
+      if (!operation) return { operationId, released: false };
+      if (!["complete", "aborted", "compensated", "undone"].includes(operation.state)) {
+        return { operationId, released: false };
+      }
+      operations.delete(id);
+      return { operationId, released: true };
     },
-    async listChanges(): Promise<DurableRecoveryChangeSelection> { return { changes: [], turns: [] }; },
+    async listChanges(input): Promise<DurableRecoveryChangeSelection> {
+      return {
+        changes: [...changes.values()]
+          .filter((change) => change.workspaceId === input.workspaceId && (!input.executionId || change.executionId === input.executionId))
+          .map(({ workspaceId: _workspaceId, ...change }) => structuredClone(change)),
+        turns: [...turns.values()]
+          .filter((turn) => turn.workspaceId === input.workspaceId && (!input.executionId || turn.executionId === input.executionId))
+          .map(({ workspaceId: _workspaceId, ...turn }) => structuredClone(turn)),
+      };
+    },
+    async recordIntegrationChanges(input) {
+      const turn = turns.get(`${input.workspaceId}\0${input.executionId}`);
+      if (!turn || (turn.status !== "pending" && turn.status !== "ready")) return false;
+      if (turn.status === "ready") {
+        return Object.entries(input.changes).every(([path, states]) => {
+          const prior = changes.get(`${input.workspaceId}\0${turn.checkpointId}\0${path}`);
+          return prior !== undefined && JSON.stringify(prior.after) === JSON.stringify(states.after);
+        });
+      }
+      for (const [path, states] of Object.entries(input.changes).sort(([left], [right]) => left.localeCompare(right))) {
+        const id = `${input.workspaceId}\0${turn.checkpointId}\0${path}`;
+        const prior = changes.get(id);
+        changes.set(id, {
+          workspaceId: input.workspaceId,
+          checkpointId: turn.checkpointId,
+          executionId: input.executionId,
+          mutationId: prior?.mutationId ?? `thread.merge:${input.operationId}:${path}`,
+          path,
+          sequence: turn.sequence,
+          toolName: prior?.toolName ?? "thread.merge",
+          before: prior?.before ?? structuredClone(states.before),
+          after: structuredClone(states.after),
+        });
+      }
+      return true;
+    },
     async createNamedCheckpoint(workspaceId, name) {
       const createdAt = new Date().toISOString();
       const values = checkpoints.get(workspaceId) ?? [];
@@ -109,21 +154,35 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
     async recordMutationAfter() { return true; },
     async recordMutationBefore() { return true; },
     async recordTurnSettled(input) {
-      return {
-        executionId: input.executionId,
+      const turnKey = `${input.workspaceId}\0${input.executionId}`;
+      const previous = turns.get(turnKey);
+      const next = {
         workspaceId: input.workspaceId,
-        checkpointId: `turn-${input.executionId}`,
+        executionId: input.executionId,
+        checkpointId: previous?.checkpointId ?? `turn-${input.executionId}`,
+        sequence: previous?.sequence ?? ++turnSequence,
+        activeWriterScopes: [...input.activeWriterScopes],
         status: input.observationComplete ? "ready" : "incomplete",
         unrecordedResourceIds: [],
+        ...(input.failure ? { failure: structuredClone(input.failure) as unknown as Record<string, unknown> } : {}),
+      };
+      turns.set(turnKey, next);
+      return {
+        executionId: input.executionId, workspaceId: input.workspaceId, checkpointId: next.checkpointId,
+        status: next.status, activeWriterScopes: next.activeWriterScopes, unrecordedResourceIds: [],
       } as never;
     },
     async recordTurnStart(input) {
+      const turnKey = `${input.workspaceId}\0${input.executionId}`;
+      const next = {
+        workspaceId: input.workspaceId, executionId: input.executionId, checkpointId: `turn-${input.executionId}`,
+        sequence: ++turnSequence, activeWriterScopes: [...input.activeWriterScopes], status: "pending", unrecordedResourceIds: [],
+        ...(input.failure ? { failure: structuredClone(input.failure) as unknown as Record<string, unknown> } : {}),
+      };
+      turns.set(turnKey, next);
       return {
-        executionId: input.executionId,
-        workspaceId: input.workspaceId,
-        checkpointId: `turn-${input.executionId}`,
-        status: "pending",
-        unrecordedResourceIds: [],
+        executionId: input.executionId, workspaceId: input.workspaceId, checkpointId: next.checkpointId,
+        status: "pending", activeWriterScopes: next.activeWriterScopes, unrecordedResourceIds: [],
       } as never;
     },
     async resolveEntry() {

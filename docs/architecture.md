@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; R1 core storage cutover complete; D-278 reopens R2/R3 recovery and lifecycle acceptance. R0 and R4–R6 retain their own scope.
+Status: Pi-native workbench and harness in production; R1–R3 complete after D-279 closes the D-278 recovery/lifecycle gaps. R0 and R4–R6 retain their own scope.
 
 Last updated: 2026-09-14
 
@@ -1175,7 +1175,7 @@ that authority. Registry remains the sole unsaved-buffer/grouped-undo authority;
 the durable mixed operation without copying editor text into Rust. Piarium `write`/`edit`/`apply_patch` no
 longer fall back to direct pi-host disk mutation when the Host backend is unavailable.
 
-D-277 wired major R3 primitives; D-278 reopens full lifecycle acceptance. Production baseline inventory and file-body capture now use the same Host-admitted,
+D-277 wired major R3 primitives; D-278 reopened full lifecycle acceptance, and D-279 closes those specific gaps. Production baseline inventory and file-body capture now use the same Host-admitted,
 same-grant Rust file authority that owns WorkingState objects; Git remains the semantic adapter for staged/
 unstaged/untracked paths, index modes and configured clean/filter behavior rather than a second body writer.
 Immutable roots materialize through kernel-owned staging/backup/promotion with object verification, truthful
@@ -1196,3 +1196,7 @@ reversed coverage, destructive operation replay, stale GC cleanup, epoch pin lea
 failures. These are repaired without introducing another persistent authority. Native lifecycle acceptance still
 requires Host-visible pending file-operation disposition and durable kernel/Git/Registry execution-generation handoff.
 CI now has an explicit native authority command; editing that workflow is not evidence that remote CI has passed.
+
+## D-279 R2/R3 acceptance closure
+
+D-279 closes the two concrete acceptance gaps left by D-278 without adding another authority. Low-level file operations are now exposed through typed `file.operation.list/reconcile` state carrying operation identity, paths, disposition and reason; operations such as an unprovable directory rename remain retained/needs-attention rather than being forced to success. Native materialization persists a fixed source root/revision/writeRevision, kernel operationId and durable pin in the Thread Registry handoff, then advances explicit kernel-materialized and Git-attached receipts. Git attachment is idempotent for Piarium-owned baselines, the durable pin is released before the handoff intent is cleared, and a failed release leaves the receipt available for restart retry. Setup timeout/abort completes only after the spawned child actually closes. R2 and R3 are therefore Complete; R0 and R4–R6 remain independent.

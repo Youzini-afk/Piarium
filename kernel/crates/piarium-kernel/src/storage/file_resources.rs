@@ -7,7 +7,8 @@
 use super::*;
 use crate::protocol_generated::{
     KernelFileApplyParams, KernelFileCaptureParams, KernelFileMaterializeParams,
-    KernelFileMeasureParams, KernelFileMkdirParams, KernelFileRemoveParams, KernelFileRenameParams,
+    KernelFileMeasureParams, KernelFileMkdirParams, KernelFileOperationListParams,
+    KernelFileOperationReconcileParams, KernelFileRemoveParams, KernelFileRenameParams,
     KernelFileRootRegisterParams, KernelFileScanParams,
 };
 use serde::de::DeserializeOwned;
@@ -1421,6 +1422,301 @@ impl Storage {
             }
         }
         Ok((reconciled, unresolved))
+    }
+
+    fn pending_file_operation_descriptor(
+        &mut self,
+        root_id: &str,
+        operation_id: &str,
+        kind: &str,
+        envelope: &Value,
+        created_at: i64,
+        updated_at: i64,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let intent = envelope.get("intent").ok_or_else(|| {
+            KernelError::Storage(format!(
+                "pending file operation has no intent: {operation_id}"
+            ))
+        })?;
+        let paths = if kind == "file.rename" {
+            let params: KernelFileRenameParams = parse_file_params(intent)?;
+            vec![params.from_path.clone(), params.to_path.clone()]
+        } else {
+            vec![intent
+                .get("path")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Storage(format!(
+                        "pending file operation has no path: {operation_id}"
+                    ))
+                })?
+                .to_string()]
+        };
+        let (disposition, reason) = match kind {
+            "file.apply" => {
+                let params: KernelFileApplyParams = parse_file_params(intent)?;
+                let resource = self.resolve_file_resource(root_id, &params.path, grant, false)?;
+                let target: FileState = serde_json::from_str(&params.target_json)?;
+                let observed = self.observe_state(&resource)?;
+                if Self::file_state_matches(&observed, &target) {
+                    ("reconcile", "target-observed")
+                } else {
+                    ("needs-attention", "target-not-observed")
+                }
+            }
+            "file.mkdir" => {
+                let params: KernelFileMkdirParams = parse_file_params(intent)?;
+                let resource = self.resolve_file_resource(root_id, &params.path, grant, false)?;
+                if fs::symlink_metadata(&resource.absolute)
+                    .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+                {
+                    ("reconcile", "directory-observed")
+                } else {
+                    ("needs-attention", "directory-not-observed")
+                }
+            }
+            "file.remove" => {
+                let params: KernelFileRemoveParams = parse_file_params(intent)?;
+                let resource = self.resolve_file_resource(root_id, &params.path, grant, false)?;
+                if fs::symlink_metadata(&resource.absolute)
+                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+                {
+                    ("reconcile", "path-absent")
+                } else {
+                    ("needs-attention", "path-present-after-interrupted-remove")
+                }
+            }
+            "file.rename" => {
+                let params: KernelFileRenameParams = parse_file_params(intent)?;
+                let source =
+                    self.resolve_file_resource(root_id, &params.from_path, grant, false)?;
+                let target = self.resolve_file_resource(root_id, &params.to_path, grant, false)?;
+                let before = envelope
+                    .get("renameSourceState")
+                    .cloned()
+                    .map(serde_json::from_value::<FileState>)
+                    .transpose()?;
+                let target_state = self.observe_state(&target)?;
+                if fs::symlink_metadata(&source.absolute)
+                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+                    && before.as_ref().is_some_and(|state| {
+                        matches!(
+                            state,
+                            FileState::RegularFile { .. } | FileState::Symlink { .. }
+                        ) && Self::file_state_matches(&target_state, state)
+                    })
+                {
+                    ("reconcile", "saved-source-state-observed-at-target")
+                } else if before
+                    .as_ref()
+                    .is_some_and(|state| matches!(state, FileState::Directory { .. }))
+                {
+                    (
+                        "needs-attention",
+                        "directory-rename-cannot-be-proven-from-directory-metadata",
+                    )
+                } else {
+                    ("needs-attention", "rename-result-not-provable")
+                }
+            }
+            "file.materialize" => {
+                let params: KernelFileMaterializeParams = parse_file_params(intent)?;
+                let target = self.resolve_file_resource(root_id, &params.path, grant, false)?;
+                let stage_path = materialize_side_path(&params.path, operation_id, "staging");
+                let backup_path = materialize_side_path(&params.path, operation_id, "backup");
+                let stage = self.resolve_file_resource(root_id, &stage_path, grant, false)?;
+                let backup = self.resolve_file_resource(root_id, &backup_path, grant, false)?;
+                if self.directory_matches_root(root_id, &target, &params.source_root, grant)? {
+                    ("reconcile", "target-matches-source-root")
+                } else if fs::symlink_metadata(&target.absolute)
+                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+                    && self.directory_matches_root(root_id, &stage, &params.source_root, grant)?
+                {
+                    ("reconcile", "staging-root-ready-for-promotion")
+                } else if fs::symlink_metadata(&target.absolute)
+                    .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+                    && fs::symlink_metadata(&backup.absolute).is_ok()
+                {
+                    ("reconcile", "backup-can-be-restored-as-conflict")
+                } else {
+                    ("needs-attention", "materialization-state-not-provable")
+                }
+            }
+            _ => ("needs-attention", "unknown-file-operation-kind"),
+        };
+        Ok(json!({
+            "operationId": operation_id,
+            "kind": kind,
+            "state": "started",
+            "rootId": root_id,
+            "paths": paths,
+            "disposition": disposition,
+            "reason": reason,
+            "createdAt": created_at,
+            "updatedAt": updated_at,
+        }))
+    }
+
+    fn pending_file_operations_for_root(
+        &mut self,
+        root_id: &str,
+        workspace_id: &str,
+        grant: &Grant,
+    ) -> Result<Vec<Value>, KernelError> {
+        let rows = {
+            let mut statement = self.conn.prepare(
+                "SELECT o.operation_id, o.kind, o.result_json, o.created_at, o.updated_at FROM operations o JOIN operation_owners w ON w.operation_id = o.operation_id WHERE o.state = 'started' AND w.workspace_id = ?1 AND o.kind LIKE 'file.%' ORDER BY o.created_at, o.operation_id",
+            )?;
+            let rows = statement.query_map(params![workspace_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                ))
+            })?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        let mut result = Vec::new();
+        for (operation_id, kind, stored, created_at, updated_at) in rows {
+            let Some(stored) = stored else {
+                continue;
+            };
+            let envelope: Value = serde_json::from_str(&stored)?;
+            let Some(intent) = envelope.get("intent") else {
+                continue;
+            };
+            if intent.get("rootId").and_then(Value::as_str) != Some(root_id) {
+                continue;
+            }
+            result.push(self.pending_file_operation_descriptor(
+                root_id,
+                &operation_id,
+                &kind,
+                &envelope,
+                created_at,
+                updated_at,
+                grant,
+            )?);
+        }
+        Ok(result)
+    }
+
+    pub(super) fn file_operation_list(
+        &mut self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let params: KernelFileOperationListParams = parse_file_params(params_value)?;
+        self.registered_file_root(&params.root_id, grant)?;
+        let pending =
+            self.pending_file_operations_for_root(&params.root_id, &params.workspace_id, grant)?;
+        let cursor = usize::try_from(params.cursor.unwrap_or(0))
+            .map_err(|_| KernelError::Operation("file operation cursor is invalid".to_string()))?;
+        let page_size =
+            usize::try_from(params.page_size.unwrap_or(128).clamp(1, 512)).map_err(|_| {
+                KernelError::Operation("file operation page size is invalid".to_string())
+            })?;
+        if cursor > pending.len() {
+            return Err(KernelError::Operation(
+                "file operation cursor is out of range".to_string(),
+            ));
+        }
+        let end = (cursor + page_size).min(pending.len());
+        Ok(json!({
+            "operations": pending[cursor..end],
+            "nextCursor": if end < pending.len() { Some(end) } else { None },
+            "total": pending.len(),
+        }))
+    }
+
+    pub(super) fn file_operation_reconcile(
+        &mut self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let params: KernelFileOperationReconcileParams = parse_file_params(params_value)?;
+        self.registered_file_root(&params.root_id, grant)?;
+        let owned: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM operation_owners WHERE operation_id = ?1 AND workspace_id = ?2",
+                params![params.operation_id, params.workspace_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if owned.is_none() {
+            return Ok(json!({"status":"missing","operationId":params.operation_id}));
+        }
+        let row: Option<(String, String, Option<String>, i64, i64)> = self.conn.query_row(
+            "SELECT kind, state, result_json, created_at, updated_at FROM operations WHERE operation_id = ?1",
+            params![params.operation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+        ).optional()?;
+        let Some((kind, state, stored, _created_at, _updated_at)) = row else {
+            return Ok(json!({"status":"missing","operationId":params.operation_id}));
+        };
+        if !kind.starts_with("file.") {
+            return Err(KernelError::Operation(
+                "operation is not a file-resource operation".to_string(),
+            ));
+        }
+        if state == "started" {
+            let Some(stored_text) = stored.as_ref() else {
+                return Err(KernelError::Storage(
+                    "pending file operation has no intent".to_string(),
+                ));
+            };
+            let envelope: Value = serde_json::from_str(stored_text)?;
+            if envelope
+                .get("intent")
+                .and_then(|value| value.get("rootId"))
+                .and_then(Value::as_str)
+                != Some(params.root_id.as_str())
+            {
+                return Err(KernelError::Authorization(
+                    "file operation belongs to another root".to_string(),
+                ));
+            }
+            let _ = self.reconcile_file_operations_for_root(
+                &params.root_id,
+                &params.workspace_id,
+                grant,
+            )?;
+        }
+        let current: Option<(String, Option<String>, i64, i64)> = self.conn.query_row(
+            "SELECT state, result_json, created_at, updated_at FROM operations WHERE operation_id = ?1",
+            params![params.operation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()?;
+        let Some((current_state, current_result, current_created_at, current_updated_at)) = current
+        else {
+            return Ok(json!({"status":"missing","operationId":params.operation_id}));
+        };
+        if current_state == "committed" {
+            return Ok(json!({
+                "status":"reconciled",
+                "operationId":params.operation_id,
+                "kind":kind,
+                "result": current_result.map(|text| serde_json::from_str::<Value>(&text)).transpose()?,
+            }));
+        }
+        let envelope: Value =
+            serde_json::from_str(current_result.as_deref().ok_or_else(|| {
+                KernelError::Storage("pending file operation has no intent".to_string())
+            })?)?;
+        let descriptor = self.pending_file_operation_descriptor(
+            &params.root_id,
+            &params.operation_id,
+            &kind,
+            &envelope,
+            current_created_at,
+            current_updated_at,
+            grant,
+        )?;
+        Ok(json!({"status":"pending","operation":descriptor}))
     }
 
     pub(super) fn file_root_register(

@@ -1056,6 +1056,7 @@ impl Storage {
                         | "needs-attention"
                         | "undone"
                         | "awaiting-surface"
+                        | "awaiting-turn-binding"
                 )
             })
             .ok_or_else(|| KernelError::Operation("operation state is invalid".to_string()))?;
@@ -1295,6 +1296,7 @@ impl Storage {
                         | "needs-attention"
                         | "undoing"
                         | "awaiting-surface"
+                        | "awaiting-turn-binding"
                         | "applying-files"
                         | "files-restored"
                         | "navigating-conversation"

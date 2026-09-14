@@ -21,6 +21,8 @@ export type KernelMethod =
   | "storage.getBlob"
   | "storage.object.rebindOwner"
   | "file.root.register"
+  | "file.operation.list"
+  | "file.operation.reconcile"
   | "file.lease.acquire"
   | "file.lease.check"
   | "file.lease.release"
@@ -175,6 +177,19 @@ export interface KernelFileRootRegisterParams {
   workspaceId: string;
   executionWorkspaceId: string;
   canonicalRoot: string;
+}
+
+export interface KernelFileOperationListParams {
+  workspaceId: string;
+  rootId: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelFileOperationReconcileParams {
+  workspaceId: string;
+  rootId: string;
+  operationId: string;
 }
 
 export interface KernelFileLeaseResource {
@@ -641,6 +656,7 @@ export interface KernelBranchPinParams {
   expectedWriteRevision?: number;
   expectedRoot?: string;
   pinId?: string;
+  persistent?: boolean;
 }
 
 export interface KernelBranchUnpinParams {
@@ -989,6 +1005,8 @@ export type KernelMethodParams = {
   "storage.getBlob": KernelGetBlobParams;
   "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
   "file.root.register": KernelFileRootRegisterParams;
+  "file.operation.list": KernelFileOperationListParams;
+  "file.operation.reconcile": KernelFileOperationReconcileParams;
   "file.lease.acquire": KernelFileLeaseAcquireParams;
   "file.lease.check": KernelFileLeaseAcquireParams;
   "file.lease.release": KernelFileLeaseReleaseParams;
@@ -1179,6 +1197,24 @@ export type KernelRequest =
       id: string;
       method: "file.root.register";
       params: KernelFileRootRegisterParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.operation.list";
+      params: KernelFileOperationListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.operation.reconcile";
+      params: KernelFileOperationReconcileParams;
       epoch?: string;
       grantId?: string;
     }

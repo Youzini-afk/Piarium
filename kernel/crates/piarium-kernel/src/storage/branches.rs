@@ -1237,7 +1237,26 @@ impl Storage {
                 })?;
             (branch.head_revision, -1, root, "revision")
         };
-        let ephemeral = write_revision >= 0;
+        let persistent = params
+            .get("persistent")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if persistent && write_revision < 0 {
+            return Err(KernelError::Operation(
+                "persistent is only meaningful for a current working-root pin".to_string(),
+            ));
+        }
+        if persistent {
+            let grant = self.load_grant(grant_id)?;
+            if !grant.capabilities.contains("storage.maintenance")
+                && !grant.capabilities.contains("storage.admin")
+            {
+                return Err(KernelError::Authorization(
+                    "persistent current-root pin requires storage.maintenance".to_string(),
+                ));
+            }
+        }
+        let ephemeral = write_revision >= 0 && !persistent;
         if let Some((existing_branch, existing_workspace, existing_revision, existing_write_revision, existing_root, existing_grant, existing_ephemeral)) = self
             .conn
             .query_row(

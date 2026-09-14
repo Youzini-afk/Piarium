@@ -176,7 +176,7 @@ impl Storage {
             }
         }
         let mut pins = self.conn.prepare(
-            "SELECT p.pin_id, p.branch_id, p.workspace_id, p.revision, p.root_hash, b.workspace_id FROM pins p LEFT JOIN branches b ON b.branch_id = p.branch_id",
+            "SELECT p.pin_id, p.branch_id, p.workspace_id, p.revision, p.write_revision, p.root_hash, b.workspace_id, b.head_root, b.write_revision FROM pins p LEFT JOIN branches b ON b.branch_id = p.branch_id",
         )?;
         for row in pins.query_map([], |row| {
             Ok((
@@ -184,25 +184,44 @@ impl Storage {
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, Option<String>>(5)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<i64>>(8)?,
             ))
         })? {
-            let (pin_id, branch_id, workspace, revision, root, branch_workspace) = row?;
-            let revision_root = self
-                .conn
-                .query_row(
-                    "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
-                    params![branch_id, revision],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
+            let (
+                pin_id,
+                branch_id,
+                workspace,
+                revision,
+                write_revision,
+                root,
+                branch_workspace,
+                branch_head_root,
+                branch_write_revision,
+            ) = row?;
             let branch_identity_invalid = branch_workspace
                 .as_deref()
                 .is_some_and(|branch_workspace| branch_workspace != workspace);
-            let revision_invalid =
-                branch_workspace.is_some() && revision_root.as_deref() != Some(root.as_str());
-            if branch_identity_invalid || revision_invalid {
+            let pin_target_invalid = if branch_workspace.is_none() {
+                false
+            } else if write_revision >= 0 {
+                branch_head_root.as_deref() != Some(root.as_str())
+                    || branch_write_revision != Some(write_revision)
+            } else {
+                let revision_root = self
+                    .conn
+                    .query_row(
+                        "SELECT root_hash FROM revisions WHERE branch_id = ?1 AND revision = ?2",
+                        params![branch_id, revision],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?;
+                revision_root.as_deref() != Some(root.as_str())
+            };
+            if branch_identity_invalid || pin_target_invalid {
                 errors.push(format!("pin identity is inconsistent: {pin_id}"));
             }
             if let Err(error) = validate_root(&root, &mut errors) {

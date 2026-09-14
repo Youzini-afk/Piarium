@@ -362,6 +362,7 @@ export interface RecoveryDurableOperationPort {
   listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]>;
   releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>>;
   listChanges?(input: { workspaceId: string; sessionId?: string; executionId?: string; entryIds?: string[] }): Promise<DurableRecoveryChangeSelection>;
+  recordIntegrationChanges?(input: { workspaceId: string; executionId: string; operationId: string; changes: Record<string, { before: RecoveryState; after: RecoveryState }> }): Promise<boolean>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
@@ -3364,14 +3365,6 @@ export const createLocalSqliteWorkspaceRecoveryEngine = (
           }
           resolved.push(publicOperation(record));
         }
-        const integrationContext = {
-          database,
-          fileStore,
-          identity,
-          resourceOperationGate: resourceOperationGateFor(workspaceId),
-          root: storage.root,
-          ...(resolveDirectoryApplyContext ? { resolveDirectoryApplyContext } : {}),
-        };
         // Branch roots and object ownership are reconciled by the Rust kernel
         // on startup. The local WorkingStateStore reader is intentionally not
         // a production fallback.

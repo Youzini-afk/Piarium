@@ -135,6 +135,11 @@ export interface WorkingStateRootStore {
   getObjectSlice(hash: string, byteLength: number, offset: number, length: number): Promise<Buffer | null>;
   ownerIdForObject?(hash: string): string | undefined;
   pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
+  /** Kernel-only durable pin used by a persisted materialization handoff. */
+  pinBranchHandoff?(branchId: string, pinId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin>;
+  /** Reopen the exact durable pin after Host restart; never substitutes the current branch root. */
+  openBranchHandoffPin?(branchId: string, pinId: string, expected: { root: string; revision: number; writeRevision: number }, signal?: AbortSignal): Promise<WorkingStatePin>;
+  releaseBranchHandoffPin?(branchId: string, pinId: string): Promise<void>;
   putObject(bytes: Buffer): Promise<{ hash: string; byteLength: number }>;
   createDraftBaseline(workspaceId: string, paths: readonly { path: string; content: string | Buffer; mode?: number; provenance: DraftBaselinePathProvenance }[]): Promise<DraftBaseline>;
   getDraftBaseline(id: string): Promise<DraftBaseline | null>;

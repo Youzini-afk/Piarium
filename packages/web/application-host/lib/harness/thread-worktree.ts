@@ -39,6 +39,8 @@ export interface ThreadWorktreeRuntimeOptions {
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
+  /** Test seam; production uses node:child_process spawn. */
+  spawnProcess?: typeof spawn;
   fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
@@ -1434,7 +1436,7 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
           : ["-c", command];
       }
 
-      const child = spawn(shell, args, {
+      const child = (options.spawnProcess ?? spawn)(shell, args, {
         cwd: worktree.path,
         env: { ...(options.env ?? process.env), ...(options.interpreter && "env" in options.interpreter ? options.interpreter.env : {}) },
         windowsHide: true,
@@ -1443,32 +1445,47 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
       const chunks: Buffer[] = [];
       child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
       child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
-
-      const timer = typeof timeoutMs === "number" && timeoutMs > 0 ? setTimeout(() => {
-        child.kill();
+      let requestedFailure: SetupFailure | null = null;
+      let spawnFailure: SetupFailure | null = null;
+      let settled = false;
+      const settle = (failure: SetupFailure | null, code: number | null): void => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        setupSignal?.removeEventListener("abort", onAbort);
         const output = Buffer.concat(chunks).toString("utf8");
-        reject(asSetupFailure(new Error(`Setup command timed out after ${timeoutMs}ms:\n${output}`), output));
-      }, timeoutMs) : null;
-
-      setupSignal?.addEventListener("abort", () => {
-        if (timer) clearTimeout(timer);
-        child.kill();
-        reject(asSetupFailure(abortError()));
-      }, { once: true });
-
-      child.once("error", (err) => {
-        if (timer) clearTimeout(timer);
-        reject(asSetupFailure(err));
-      });
-
-      child.once("close", (code) => {
-        if (timer) clearTimeout(timer);
-        const output = Buffer.concat(chunks).toString("utf8");
-        if (code === 0) {
+        if (failure) {
+          if (failure.output === undefined) failure.output = output;
+          reject(failure);
+        } else if (code === 0) {
           resolve({ output });
         } else {
           reject(asSetupFailure(new Error(`Setup command failed with exit code ${code}:\n${output}`), output));
         }
+      };
+      const requestTermination = (failure: SetupFailure): void => {
+        requestedFailure ??= failure;
+        if (timer) clearTimeout(timer);
+        // A termination request is not an exit receipt. The promise remains
+        // pending until `close`, so callers cannot reclaim this directory while
+        // the setup process may still hold it or continue writing it.
+        child.kill();
+      };
+      const onAbort = (): void => requestTermination(asSetupFailure(abortError()));
+      const timer = typeof timeoutMs === "number" && timeoutMs > 0 ? setTimeout(() => {
+        requestTermination(asSetupFailure(new Error(`Setup command timed out after ${timeoutMs}ms`)));
+      }, timeoutMs) : null;
+      setupSignal?.addEventListener("abort", onAbort, { once: true });
+
+      child.once("error", (err) => {
+        spawnFailure = asSetupFailure(err);
+        // A failed spawn has no live child to wait for. For a started process,
+        // Node emits close after error/stream teardown and that is the exit fact.
+        if (child.pid === undefined) settle(spawnFailure, null);
+      });
+
+      child.once("close", (code) => {
+        settle(requestedFailure ?? spawnFailure, code);
       });
     });
   };
@@ -1508,6 +1525,25 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, livePath) : false;
     const liveInheritsOther = await inheritsOtherGit(livePath);
     const resolvedBase = await resolveSourceCommit(sourceRoot, baseRef);
+    const liveGitPath = pathModule.join(livePath, ".git");
+    const existingGit = await fsPromises.lstat(liveGitPath).then(() => true, (error) => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+      throw error;
+    });
+    if (existingGit) {
+      const head = await resolveLiveHead(livePath);
+      const status = (await runGit(livePath, ["status", "--porcelain=v1", "--untracked-files=all"])).stdout.trim();
+      if (status) throw new Error(`Existing execution Git context is dirty and cannot be adopted: ${livePath}`);
+      const subject = (await runGit(livePath, ["log", "-1", "--format=%s"])).stdout.trim();
+      const parents = (await runGit(livePath, ["rev-list", "--parents", "-n", "1", "HEAD"])).stdout.trim().split(/\s+/).slice(1);
+      if (subject === "Piarium execution baseline" && resolvedBase && parents.length === 1 && parents[0] === resolvedBase) {
+        return { kind: "worktree", executionBaseline: head };
+      }
+      if (subject === "Piarium isolated execution baseline" && parents.length === 0) {
+        return { kind: "init", executionBaseline: head };
+      }
+      throw new Error(`Existing Git metadata is not a provable Piarium execution baseline: ${livePath}`);
+    }
     const canDetach = Boolean(!worktree.readOnlyInput && source.isGit && resolvedBase && !liveInsideSource && !liveInheritsOther);
     if (canDetach) {
       const ref = resolvedBase!;

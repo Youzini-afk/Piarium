@@ -1,6 +1,6 @@
 # Piarium native recovery journal
 
-Status: built-in kernel provider delivered; R1 core storage complete; D-278 reopens R2/R3 recovery/lifecycle acceptance; R0 and R4–R6 retain their own remaining work.
+Status: built-in kernel provider delivered; R1–R3 acceptance complete after D-279; R0 and R4–R6 retain their own remaining work.
 
 Last updated: 2026-09-14
 

@@ -7,22 +7,23 @@ import type {
   WorkingStatePathOrigin,
   WorkingStatePin,
   WorkingStateReadOptions,
-  WorkingStateRootContext,
   WorkingStateRootStore,
   WorkingStateTreeEntry,
   WorkingStateTreeRead,
   WorkspaceWorkingStateRootAccess,
 } from "./types.js";
 import { WorkingStateStore } from "./working-state-store.js";
-import type { WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
+import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
 import type {
   WorkspaceRecoveryEngine as LocalWorkspaceRecoveryEngine,
   WorkspaceRecoveryStorageContext as LocalWorkspaceRecoveryStorageContext,
 } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { measurementFromStates } from "./thread-space.js";
-import { createInMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
+import { createInMemoryRecoveryDurablePort, type InMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
 
-export type TestWorkingStateRootAccess = TestWorkspaceWorkingStateAccess & WorkspaceWorkingStateRootAccess;
+export type TestWorkingStateRootAccess = TestWorkspaceWorkingStateAccess & WorkspaceWorkingStateRootAccess & {
+  readonly durableRecoveryStore: InMemoryRecoveryDurablePort;
+};
 
 export interface TestWorkspaceWorkingStateAccess {
   withStore<T>(
@@ -364,15 +365,17 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
 
 export const asTestWorkingStateRootStore = (
   store: WorkingStateStore,
-  context?: LocalWorkspaceRecoveryStorageContext,
+  context?: WorkspaceRecoveryStorageContext | LocalWorkspaceRecoveryStorageContext,
 ): WorkingStateRootStore => new LegacyWorkingStateRootAdapter(store, context as unknown as WorkspaceRecoveryStorageContext);
 
 export const asTestWorkingStateRootAccess = (
   access: TestWorkspaceWorkingStateAccess,
+  durableRecoveryStore: InMemoryRecoveryDurablePort = createInMemoryRecoveryDurablePort(),
 ): TestWorkingStateRootAccess => {
-  const memoryDurable = createInMemoryRecoveryDurablePort();
+  const memoryDurable = durableRecoveryStore;
   return {
     ...access,
+    durableRecoveryStore: memoryDurable,
     withBranchStore: (workspaceId, purpose, operation, mode = "exclusive") => access.withStore(
       workspaceId,
       purpose,
@@ -392,10 +395,49 @@ export const asTestWorkingStateRootAccess = (
 
 export const createTestWorkingStateRootAccess = (
   recovery: Pick<LocalWorkspaceRecoveryEngine, "withWorkspaceStorage">,
+  durableRecoveryStore: InMemoryRecoveryDurablePort = createInMemoryRecoveryDurablePort(),
 ): TestWorkingStateRootAccess => asTestWorkingStateRootAccess({
   withStore: (workspaceId, purpose, operation, mode = "exclusive") => recovery.withWorkspaceStorage(
     workspaceId,
     { mode, purpose },
     async (context) => operation(await WorkingStateStore.open(context as never), context),
   ),
-});
+}, durableRecoveryStore);
+
+export type DurableTestWorkingStateRootAccess = WorkspaceWorkingStateRootAccess & {
+  readonly durableRecoveryStore: InMemoryRecoveryDurablePort;
+  withStore<T>(
+    workspaceId: string,
+    purpose: string,
+    operation: (store: WorkingStateStore, context: WorkspaceRecoveryStorageContext) => Promise<T> | T,
+    mode?: "exclusive" | "shared",
+  ): Promise<T>;
+};
+
+/** Production durable-port variant used by integration/kernel acceptance.
+ * Keep the legacy SQLite adapter above for its own isolated unit fixtures. */
+export const createDurableTestWorkingStateRootAccess = (
+  recovery: Pick<WorkspaceRecoveryEngine, "withWorkspaceStorage">,
+  durableRecoveryStore: InMemoryRecoveryDurablePort,
+): DurableTestWorkingStateRootAccess => {
+  const withStore: DurableTestWorkingStateRootAccess["withStore"] = (
+    workspaceId,
+    purpose,
+    operation,
+    mode = "exclusive",
+  ) => recovery.withWorkspaceStorage(
+    workspaceId,
+    { mode, purpose },
+    async (context) => operation(await WorkingStateStore.open(context as never), context),
+  );
+  return {
+    durableRecoveryStore,
+    withStore,
+    withBranchStore: (workspaceId, purpose, operation, mode = "exclusive") => withStore(
+      workspaceId,
+      purpose,
+      (store, context) => operation(new LegacyWorkingStateRootAdapter(store, context), context),
+      mode,
+    ),
+  };
+};

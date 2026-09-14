@@ -4,10 +4,10 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
+import { createLocalSqliteWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions as LocalRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createRecoveryFileStore } from "../../recovery/journal-files.js";
-import { initOperationFiles, openRecoveryJournalCatalog, updateOperationFilePhase, writeOperationRow } from "../../recovery/journal-catalog.js";
-import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state-root-adapter.test-helper.js";
+import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
@@ -16,6 +16,8 @@ import { createDocumentAuthority } from "../../documents/authority.js";
 import { createInMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
 
 const roots: string[] = [];
+const recoveryEngines = new Set<{ dispose(): Promise<void> }>();
+const trackEngine = <T extends { dispose(): Promise<void> }>(engine: T): T => { recoveryEngines.add(engine); return engine; };
 const textHash = (text: string) => `sha256-${createHash("sha256").update(text).digest("hex")}`;
 const dirtyPublication = (resourceId: string, content: string, localEditRevision = 1) => ({
   ownerId: "editor-a",
@@ -33,12 +35,30 @@ const dirtyPublication = (resourceId: string, content: string, localEditRevision
   }],
 });
 
-const createHarness = async (fileStore = createRecoveryFileStore()) => {
+const createHarness = async (
+  baseFileStore = createRecoveryFileStore(),
+  durableRecoveryStore: DurableTestStore = createInMemoryRecoveryDurablePort(),
+) => {
   const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "piarium-integration-"));
   roots.push(root);
   const workspace = path.join(root, "workspace");
   const dataDir = path.join(root, "data");
+  let durableObjectRoot = path.join(root, "durable-file-objects");
   await fs.promises.mkdir(workspace, { recursive: true });
+  // createRecoveryFileStore uses its `root` argument as the content-object
+  // directory. Production kernel storage ignores this legacy parameter because
+  // it owns one durable object store. Pin the test seam to one root as well so
+  // recovery-engine restart does not accidentally change object authority.
+  const fileStore = {
+    ...baseFileStore,
+    captureState: (identity: Parameters<typeof baseFileStore.captureState>[0], _root: string, inputPath: string, options?: Parameters<typeof baseFileStore.captureState>[3]) => (
+      baseFileStore.captureState(identity, durableObjectRoot, inputPath, options)
+    ),
+    applyState: (identity: Parameters<typeof baseFileStore.applyState>[0], _root: string, inputPath: string, state: RecoveryState) => (
+      baseFileStore.applyState(identity, durableObjectRoot, inputPath, state)
+    ),
+    verifyObject: (_root: string, state: RecoveryState) => baseFileStore.verifyObject(durableObjectRoot, state),
+  };
   const directoryWorkspaces = new Map<string, string>();
   const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
     inspectWorkspace: async () => ({ root: workspace, workspaceId: "ws" }),
@@ -65,26 +85,49 @@ const createHarness = async (fileStore = createRecoveryFileStore()) => {
       },
     };
   };
-  const engine = createWorkspaceRecoveryEngine({
+  const engine = trackEngine(createWorkspaceRecoveryEngine({
     authorityId: "test",
     dataDir,
     documents,
+    durableRecoveryStore,
     fileStore,
     sessionNavigation: navigation,
     resolveDirectoryApplyContext,
-  });
-  const workingStates = createTestWorkingStateRootAccess(engine);
+  }));
+  // WorkingStateStore itself is a legacy unit fixture and still needs its own
+  // test SQLite context. Integration durable metadata does not use or inspect it.
+  const workingStateDocuments: LocalRecoveryEngineOptions["documents"] = {
+    inspectWorkspace: (workspaceId) => documents.inspectWorkspace(workspaceId),
+    listWorkspaceRegistrations: () => documents.listWorkspaceRegistrations(),
+    beginDirtyStateBarrier: (workspaceId, paths, options) => documents.beginDirtyStateBarrier!(workspaceId, paths, options),
+    inspectDirtyBuffers: async () => [],
+    runResourceOperation: (workspaceId, resources, operation) => documents.runResourceOperation!(workspaceId, resources, operation),
+  };
+  const workingStateEngine = trackEngine(createLocalSqliteWorkspaceRecoveryEngine({
+    authorityId: "working-state-test",
+    dataDir: path.join(root, "working-state-data"),
+    documents: workingStateDocuments,
+    fileStore,
+    sessionNavigation: navigation,
+  }));
+  durableObjectRoot = await workingStateEngine.withWorkspaceStorage(
+    "ws", { mode: "shared", purpose: "resolve-shared-test-object-root", create: true }, (context) => context.root,
+  );
+  const workingStates = createTestWorkingStateRootAccess(workingStateEngine, durableRecoveryStore);
   return {
     coordinator: new IntegrationCoordinator({ workingStates, resolveDirectoryApplyContext }),
     dataDir,
+    durableRecoveryStore,
     directoryWorkspaces,
     documents,
     engine,
+    fileStore,
     navigation,
     resolveDirectoryApplyContext,
     root,
     workingStates,
     workspace,
+    workingStateEngine,
   };
 };
 
@@ -95,8 +138,98 @@ const prepareResult = async (h: Awaited<ReturnType<typeof createHarness>>, child
   });
 };
 
+type DurableTestStore = ReturnType<typeof createInMemoryRecoveryDurablePort>;
+type DurableTestFile = { path: string; phase: string; revision: number; targetJson: string | null; safetyJson: string | null };
+
+const durableFiles = (operation: Record<string, unknown> | null): DurableTestFile[] => (
+  Array.isArray(operation?.files) ? operation.files as DurableTestFile[] : []
+);
+
+const durableChanges = async (durable: DurableTestStore, input: { workspaceId: string; executionId?: string }) => {
+  if (!durable.listChanges) throw new Error("durable recovery change reader is unavailable");
+  return durable.listChanges(input);
+};
+
+type DurableSeedTarget = { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState };
+
+const seedDurableOperation = async (
+  durable: DurableTestStore,
+  input: {
+    operationId: string;
+    workspaceId?: string;
+    kind?: string;
+    state?: string;
+    data: Record<string, unknown>;
+    targets?: Record<string, DurableSeedTarget>;
+    phases?: Record<string, "pending" | "apply-intent" | "target-observed" | "needs-attention">;
+    surfacePaths?: string[];
+  },
+) => {
+  const workspaceId = input.workspaceId ?? "ws";
+  const targets = input.targets ?? {};
+  const surfacePaths = new Set(input.surfacePaths ?? []);
+  const targetKinds = Object.fromEntries(Object.keys(targets).map((file) => [
+    file,
+    surfacePaths.has(file) ? "surface" : "disk",
+  ]));
+  await durable.createOperation({
+    operationId: input.operationId,
+    workspaceId,
+    kind: input.kind ?? "integration",
+    state: input.state ?? "applying",
+    data: { targetKinds, externalBindings: {}, ...input.data },
+    targets,
+    ...(input.surfacePaths ? { surfacePaths: input.surfacePaths } : {}),
+  });
+  for (const [file, desired] of Object.entries(input.phases ?? {})) {
+    if (desired === "pending") continue;
+    let operation = await durable.getOperation(workspaceId, input.operationId);
+    let row = durableFiles(operation).find((entry) => entry.path === file);
+    if (!row) throw new Error(`Seeded durable operation has no file ${file}`);
+    if (row.phase === "pending") {
+      await durable.updateOperationFile({
+        operationId: input.operationId,
+        workspaceId,
+        path: file,
+        expectedRevision: row.revision,
+        expectedPhase: "pending",
+        phase: "apply-intent",
+        ...(targets[file]?.safety ? { safety: targets[file]!.safety } : {}),
+      });
+    }
+    if (desired === "apply-intent") continue;
+    operation = await durable.getOperation(workspaceId, input.operationId);
+    row = durableFiles(operation).find((entry) => entry.path === file);
+    if (!row) throw new Error(`Seeded durable operation lost file ${file}`);
+    await durable.updateOperationFile({
+      operationId: input.operationId,
+      workspaceId,
+      path: file,
+      expectedRevision: row.revision,
+      expectedPhase: row.phase,
+      phase: desired,
+    });
+  }
+  return durable.getOperation(workspaceId, input.operationId);
+};
+
+const reopenHarnessEngine = (
+  h: Awaited<ReturnType<typeof createHarness>>,
+  overrides: { resolveDirectoryApplyContext?: CreateWorkspaceRecoveryEngineOptions["resolveDirectoryApplyContext"] } = {},
+) => trackEngine(createWorkspaceRecoveryEngine({
+  authorityId: "test",
+  dataDir: h.dataDir,
+  documents: h.documents,
+  durableRecoveryStore: h.durableRecoveryStore,
+  fileStore: h.fileStore,
+  sessionNavigation: h.navigation,
+  resolveDirectoryApplyContext: overrides.resolveDirectoryApplyContext ?? h.resolveDirectoryApplyContext,
+}));
+
 afterEach(async () => {
   vi.restoreAllMocks();
+  await Promise.allSettled([...recoveryEngines].map((engine) => engine.dispose()));
+  recoveryEngines.clear();
   for (const root of roots.splice(0)) await fs.promises.rm(root, { recursive: true, force: true });
 });
 
@@ -161,22 +294,13 @@ describe("IntegrationCoordinator", () => {
       void pending.finally(() => { settled = true; });
       await applyStarted;
       expect(settled).toBe(false);
-      const catalogFiles = (await fs.promises.readdir(h.dataDir, { recursive: true }))
-        .map(String)
-        .filter((file) => file.replace(/\\/gu, "/").endsWith("/catalog.sqlite"));
-      expect(catalogFiles).toHaveLength(1);
-      const database = await openRecoveryJournalCatalog(path.dirname(path.join(h.dataDir, catalogFiles[0]!)), { create: false });
-      if (!database) throw new Error("expected recovery catalog");
-      expect(database.prepare("SELECT state FROM operations WHERE kind = 'integration' ORDER BY created_at DESC LIMIT 1").get())
-        .toEqual({ state: "awaiting-surface" });
-      database.close();
+      const pendingOperations = await h.durableRecoveryStore.listOperations("ws", "integration");
+      expect(pendingOperations).toHaveLength(1);
+      expect(pendingOperations[0]).toMatchObject({ state: "awaiting-surface" });
       releaseApply?.();
       const merged = await pending;
       expect(merged.status).toBe("applied");
-      await h.workingStates.withStore("ws", "inspect-pending-surface", (_store, { database }) => {
-        const operation = database.prepare("SELECT state FROM operations WHERE id = ?").get(merged.operationId) as { state: string };
-        expect(operation.state).toBe("complete");
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", merged.operationId)).toMatchObject({ state: "complete" });
     } finally {
       releaseApply?.();
       await h.engine.dispose();
@@ -250,17 +374,14 @@ describe("IntegrationCoordinator", () => {
       if (symlinkSupported) expect(await fs.promises.readlink(path.join(h.workspace, "link.txt"))).toBe("a.txt");
       expect(await fs.promises.readFile(path.join(h.workspace, "parent-only.txt"), "utf8")).toBe("keep me\n");
       expect(second.resultRevision).toBe(2);
-      await h.workingStates.withStore("ws", "inspect-integration-journal", async (store, { database }) => {
-        const row = database.prepare(`
-          SELECT f.target_json AS target, f.safety_json AS safety
-          FROM operation_files f JOIN operations o ON o.id = f.operation_id
-          WHERE o.kind = 'integration' AND f.path = 'a.txt'
-          ORDER BY o.created_at DESC LIMIT 1
-        `).get() as { target: string; safety: string };
-        const target = JSON.parse(row.target) as RecoveryState;
-        const safety = JSON.parse(row.safety) as RecoveryState;
-        expect(target.kind).toBe("regular-file");
-        expect(safety.kind).toBe("regular-file");
+      const durable = await h.durableRecoveryStore.getOperation("ws", merged.operationId);
+      const row = durableFiles(durable).find((file) => file.path === "a.txt");
+      if (!row?.targetJson || !row.safetyJson) throw new Error("expected durable integration file states");
+      const target = JSON.parse(row.targetJson) as RecoveryState;
+      const safety = JSON.parse(row.safetyJson) as RecoveryState;
+      expect(target.kind).toBe("regular-file");
+      expect(safety.kind).toBe("regular-file");
+      await h.workingStates.withStore("ws", "inspect-integration-objects", async (store) => {
         if (target.kind === "regular-file") expect(await store.getObject(target.objectHash)).not.toBeNull();
         if (safety.kind === "regular-file") expect(await store.getObject(safety.objectHash)).not.toBeNull();
       }, "shared");
@@ -466,15 +587,10 @@ describe("IntegrationCoordinator", () => {
       expect(settled.status).toBe("ready");
       if (settled.status !== "ready") throw new Error("turn settlement failed");
       expect(settled.binding).toMatchObject({ status: "ready" });
-      await h.engine.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        const row = database.prepare(`
-          SELECT cc.tool_name, cc.before_json, cc.after_json
-          FROM checkpoint_changes cc JOIN turn_bindings b ON b.checkpoint_id = cc.checkpoint_id
-          WHERE b.execution_id = 'parent-execution' AND cc.path = 'a.txt'
-        `).get() as { tool_name: string; before_json: string; after_json: string };
-        expect(row.tool_name).toBe("thread.merge");
-        expect(JSON.parse(row.before_json)).not.toEqual(JSON.parse(row.after_json));
-      });
+      const selection = await durableChanges(h.durableRecoveryStore, { workspaceId: "ws", executionId: "parent-execution" });
+      const row = selection.changes.find((change) => change.path === "a.txt");
+      expect(row?.toolName).toBe("thread.merge");
+      expect(row?.before).not.toEqual(row?.after);
     } finally {
       await h.engine.dispose();
     }
@@ -506,21 +622,12 @@ describe("IntegrationCoordinator", () => {
           needsAttentionPaths: [],
           diffStats: { files: 1, insertions: 1, deletions: 0 },
         };
-        context.database.transaction(() => {
-          writeOperationRow(context.database, {
-            id: data.operationId,
-            workspaceId: "ws",
-            kind: "integration",
-            state: "applying",
-            data,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          initOperationFiles(context.database, data.operationId, targets);
-          updateOperationFilePhase(context.database, data.operationId, "a.txt", "target-observed", {
-            safetyJson: JSON.stringify(safety),
-          });
-        }).immediate();
+        await seedDurableOperation(h.durableRecoveryStore, {
+          operationId: data.operationId,
+          data: { ...data, executionId: "missing-parent-execution", requireTurnBinding: true },
+          targets: { "a.txt": { ...targets["a.txt"]!, safety } },
+          phases: { "a.txt": "target-observed" },
+        });
       });
 
       await expect(h.coordinator.mergeResult({
@@ -530,18 +637,16 @@ describe("IntegrationCoordinator", () => {
         resultRevision: 1,
         executionId: "missing-parent-execution",
         requireTurnBinding: true,
-      })).rejects.toThrow("Parent turn recovery binding is unavailable");
+      })).rejects.toThrow(/requires recovery|Parent turn recovery binding/);
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("integration-target");
-      await h.engine.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("interrupted-before-binding-check"))
-          .toEqual({ state: "applying" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", "interrupted-before-binding-check"))
+        .toMatchObject({ state: "needs-attention" });
     } finally {
       await h.engine.dispose();
     }
   });
 
-  it("keeps working-state objects when recovery history is deleted", async () => {
+  it("releasing terminal recovery metadata does not release WorkingState result objects", async () => {
     const h = await createHarness();
     try {
       await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "base");
@@ -550,32 +655,29 @@ describe("IntegrationCoordinator", () => {
       await fs.promises.writeFile(path.join(child, "a.txt"), "retained result");
       const result = await prepareResult(h, child);
       const merged = await h.coordinator.mergeResult({ workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision });
-      const deleted = await h.engine.deleteWorkspaceHistory("ws");
-      expect(deleted.status).toBe("ready");
-      await h.workingStates.withStore("ws", "read-retained-result", async (store, { database }) => {
+      expect(await h.durableRecoveryStore.releaseOperation("ws", merged.operationId)).toMatchObject({ released: true });
+      expect(await h.durableRecoveryStore.getOperation("ws", merged.operationId)).toBeNull();
+      await h.workingStates.withStore("ws", "read-retained-result", async (store) => {
         const retained = store.getResult("thread-1", result.resultRevision);
         expect(retained).not.toBeNull();
         const state = retained!.pathStates["a.txt"]!;
         expect(state.kind).toBe("regular-file");
         if (state.kind === "regular-file") expect((await store.getObject(state.objectHash))?.toString()).toBe("retained result");
-        expect(database.prepare("SELECT id FROM operations WHERE id = ?").get(merged.operationId)).toBeUndefined();
       }, "shared");
     } finally {
       await h.engine.dispose();
     }
   });
 
-  it("refuses explicit history deletion while an integration still needs recovery", async () => {
+  it("refuses explicit durable release while an integration still needs recovery", async () => {
     const h = await createHarness();
     try {
-      await h.workingStates.withStore("ws", "seed-unfinished", (_store, { database }) => {
-        writeOperationRow(database, { id: "unfinished-integration", workspaceId: "ws", kind: "integration", state: "applying", data: { operationId: "unfinished-integration" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      await seedDurableOperation(h.durableRecoveryStore, {
+        operationId: "unfinished-integration",
+        data: { operationId: "unfinished-integration", threadId: "thread-1", resultRevision: 1, targets: {}, safety: {}, conflictPaths: [], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: { files: 0, insertions: 0, deletions: 0 } },
       });
-      const deleted = await h.engine.deleteWorkspaceHistory("ws");
-      expect(deleted.status).toBe("failed");
-      await h.engine.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("unfinished-integration")).toEqual({ state: "applying" });
-      });
+      expect(await h.durableRecoveryStore.releaseOperation("ws", "unfinished-integration")).toMatchObject({ released: false });
+      expect(await h.durableRecoveryStore.getOperation("ws", "unfinished-integration")).toMatchObject({ state: "applying" });
     } finally {
       await h.engine.dispose();
     }
@@ -583,20 +685,21 @@ describe("IntegrationCoordinator", () => {
 
   it("conditionally compensates earlier paths when a later write fails", async () => {
     const native = createRecoveryFileStore();
+    const durableRecoveryStore = createInMemoryRecoveryDurablePort();
     let applies = 0;
     const fileStore = { ...native, applyState: vi.fn(async (...args: Parameters<typeof native.applyState>) => {
       applies += 1;
       if (applies === 1) {
-        const database = await openRecoveryJournalCatalog(args[1], { create: false });
-        const rows = database?.prepare("SELECT phase, safety_json FROM operation_files ORDER BY ordinal").all() as Array<{ phase: string; safety_json: string | null }>;
-        expect(rows.length).toBe(2);
-        expect(rows.every((row) => row.phase === "apply-intent" && row.safety_json)).toBe(true);
-        database?.close();
+        const operations = await durableRecoveryStore.listOperations("ws", "integration");
+        expect(operations).toHaveLength(1);
+        const operation = await durableRecoveryStore.getOperation("ws", String(operations[0]!.operationId));
+        expect(durableFiles(operation)).toHaveLength(2);
+        expect(durableFiles(operation).every((row) => row.phase === "apply-intent" && row.safetyJson)).toBe(true);
       }
       if (applies === 2) throw new Error("injected second-path failure");
       await native.applyState(...args);
     }) };
-    const h = await createHarness(fileStore);
+    const h = await createHarness(fileStore, durableRecoveryStore);
     try {
       await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "a-base");
       await fs.promises.writeFile(path.join(h.workspace, "b.txt"), "b-base");
@@ -682,13 +785,15 @@ describe("IntegrationCoordinator", () => {
       commit: async () => ({}),
       commitLeaf: async () => ({}),
     };
-    const engine = createWorkspaceRecoveryEngine({
+    const durableRecoveryStore = createInMemoryRecoveryDurablePort();
+    const engine = trackEngine(createWorkspaceRecoveryEngine({
       authorityId: "test",
       dataDir,
       documents,
+      durableRecoveryStore,
       fileStore,
       sessionNavigation: navigation,
-    });
+    }));
     try {
       await fs.promises.writeFile(path.join(workspace, "a.txt"), "base");
       const original = await documents.read({ workspaceId: identity.workspaceId, resourceId: "a.txt" });
@@ -696,7 +801,17 @@ describe("IntegrationCoordinator", () => {
       const child = path.join(root, "child-documents-gate");
       await fs.promises.mkdir(child);
       await fs.promises.writeFile(path.join(child, "a.txt"), "child");
-      const workingStates = createTestWorkingStateRootAccess(engine);
+      const workingStateDocuments: LocalRecoveryEngineOptions["documents"] = {
+        inspectWorkspace: (workspaceId) => documents.inspectWorkspace(workspaceId),
+        listWorkspaceRegistrations: () => documents.listWorkspaceRegistrations(),
+        beginDirtyStateBarrier: (workspaceId, paths, options) => documents.beginDirtyStateBarrier!(workspaceId, paths, options),
+        inspectDirtyBuffers: async () => [],
+        runResourceOperation: (workspaceId, resources, operation) => documents.runResourceOperation!(workspaceId, resources, operation),
+      };
+      const workingStateEngine = trackEngine(createLocalSqliteWorkspaceRecoveryEngine({
+        authorityId: "working-state-gate-test", dataDir: path.join(root, "working-state-data"), documents: workingStateDocuments, fileStore, sessionNavigation: navigation,
+      }));
+      const workingStates = createTestWorkingStateRootAccess(workingStateEngine, durableRecoveryStore);
       const result = await workingStates.withBranchStore(identity.workspaceId, "test-publish", async (store) => {
         await store.createBranch(identity.workspaceId, "thread-gated", await store.captureDirectory(workspace), "base");
         return store.publishDirectoryResult("thread-gated", child);
@@ -778,37 +893,22 @@ describe("IntegrationCoordinator", () => {
       await fs.promises.mkdir(child);
       await fs.promises.writeFile(path.join(child, "a.txt"), "child");
       const result = await prepareResult(h, child);
-      let operationWrites = 0;
-      const flakyStates: TestWorkspaceWorkingStateAccess = {
-        withStore: (workspaceId, purpose, operation, mode) => (
-          h.workingStates.withStore(workspaceId, purpose, (store, context) => {
-            const database = new Proxy(context.database, {
-              get(db, property) {
-                if (property === "prepare") return (sql: string) => {
-                  const statement = db.prepare(sql);
-                  if (!sql.includes("INSERT INTO operations")) return statement;
-                  return new Proxy(statement, {
-                    get(targetStatement, statementProperty) {
-                      if (statementProperty === "run") return (...args: unknown[]) => {
-                        operationWrites += 1;
-                        if (operationWrites >= 2) throw new Error("persistent final commit failure");
-                        return targetStatement.run(...args);
-                      };
-                      const value = Reflect.get(targetStatement, statementProperty);
-                      return typeof value === "function" ? value.bind(targetStatement) : value;
-                    },
-                  });
-                };
-                const value = Reflect.get(db, property);
-                return typeof value === "function" ? value.bind(db) : value;
-              },
-            });
-            return operation(store, { ...context, database });
-          }, mode)
-        ),
+      let terminalWrites = 0;
+      const flakyDurable = {
+        ...h.durableRecoveryStore,
+        completeOperation: async (input: Parameters<typeof h.durableRecoveryStore.completeOperation>[0]) => {
+          if (input.state === "complete" || input.state === "compensated" || input.state === "needs-attention") {
+            terminalWrites += 1;
+            throw new Error(terminalWrites === 1 ? "persistent final commit failure" : "persistent compensation status failure");
+          }
+          return h.durableRecoveryStore.completeOperation(input);
+        },
       };
-      const flakyCoordinator = new IntegrationCoordinator({ workingStates: asTestWorkingStateRootAccess(flakyStates) });
-      await expect(flakyCoordinator.mergeResult({ workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision })).rejects.toThrow("compensation status could not be persisted");
+      const flakyCoordinator = new IntegrationCoordinator({
+        workingStates: asTestWorkingStateRootAccess(h.workingStates, flakyDurable),
+      });
+      await expect(flakyCoordinator.mergeResult({ workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision }))
+        .rejects.toThrow("compensation status could not be persisted");
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("base");
 
       const retry = await h.coordinator.mergeResult({ workspaceId: "ws", threadId: "thread-1", branchId: "thread-1", resultRevision: result.resultRevision });
@@ -819,7 +919,7 @@ describe("IntegrationCoordinator", () => {
     }
   });
 
-  it("startup recovery uses the selected SQLite storage and restores exact regular/link/delete states", async () => {
+  it("startup recovery uses the durable recovery port and restores exact regular/link/delete states", async () => {
     const h = await createHarness();
     let symlinkSupported = true;
     try {
@@ -843,16 +943,17 @@ describe("IntegrationCoordinator", () => {
           targets["link.txt"] = { expected: linkBefore, target: { kind: "symlink", symlinkTarget: "new-target" } };
         }
         const data = { operationId: "crashed-integration", threadId: "thread-1", resultRevision: 1, targets, safety: Object.fromEntries(Object.entries(targets).map(([file, states]) => [file, states.expected])), conflictPaths: [], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: { files: Object.keys(targets).length, insertions: 0, deletions: 0 } };
-        context.database.transaction(() => {
-          writeOperationRow(context.database, { id: "crashed-integration", workspaceId: "ws", kind: "integration", state: "applying", data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-          initOperationFiles(context.database, "crashed-integration", targets);
-          for (const [file, states] of Object.entries(targets)) updateOperationFilePhase(context.database, "crashed-integration", file, "apply-intent", { safetyJson: JSON.stringify(states.expected) });
-        }).immediate();
+        await seedDurableOperation(h.durableRecoveryStore, {
+          operationId: "crashed-integration",
+          data,
+          targets: Object.fromEntries(Object.entries(targets).map(([file, states]) => [file, { ...states, safety: states.expected }])),
+          phases: Object.fromEntries(Object.keys(targets).map((file) => [file, "apply-intent" as const])),
+        });
         for (const [file, states] of Object.entries(targets)) await context.fileStore.applyState(context.identity, context.root, file, states.target);
       });
       await h.engine.dispose();
 
-      const restarted = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir: h.dataDir, documents: h.documents, sessionNavigation: h.navigation });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(h.workspace, "regular.txt"), "utf8")).toBe("before");
       expect(await fs.promises.readFile(path.join(h.workspace, "deleted.txt"), "utf8")).toBe("restore me");
@@ -862,9 +963,7 @@ describe("IntegrationCoordinator", () => {
         [expect.objectContaining({ scope: "subtree" })],
         expect.any(Function),
       );
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-integration")).toEqual({ state: "compensated" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", "crashed-integration")).toMatchObject({ state: "compensated" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();
@@ -881,21 +980,19 @@ describe("IntegrationCoordinator", () => {
         const target: RecoveryState = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(before.kind === "regular-file" && before.mode !== undefined ? { mode: before.mode } : {}) };
         const targets = { "a.txt": { expected: before, target } };
         const data = { operationId: "crashed-drift", threadId: "thread-1", resultRevision: 1, targets, safety: { "a.txt": before }, conflictPaths: [], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: { files: 1, insertions: 0, deletions: 0 } };
-        context.database.transaction(() => {
-          writeOperationRow(context.database, { id: "crashed-drift", workspaceId: "ws", kind: "integration", state: "applying", data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-          initOperationFiles(context.database, "crashed-drift", targets);
-          updateOperationFilePhase(context.database, "crashed-drift", "a.txt", "apply-intent", { safetyJson: JSON.stringify(before) });
-        }).immediate();
+        await seedDurableOperation(h.durableRecoveryStore, {
+          operationId: "crashed-drift", data,
+          targets: { "a.txt": { ...targets["a.txt"]!, safety: before } },
+          phases: { "a.txt": "apply-intent" },
+        });
         await context.fileStore.applyState(context.identity, context.root, "a.txt", target);
       });
       await fs.promises.writeFile(path.join(h.workspace, "a.txt"), "external edit");
       await h.engine.dispose();
-      const restarted = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir: h.dataDir, documents: h.documents, sessionNavigation: h.navigation });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("external edit");
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-drift")).toEqual({ state: "needs-attention" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", "crashed-drift")).toMatchObject({ state: "needs-attention" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();
@@ -917,7 +1014,7 @@ describe("IntegrationCoordinator", () => {
         };
         const surfaceBefore: RecoveryState = { kind: "regular-file", objectHash: surfaceBeforeObject.hash, byteLength: surfaceBeforeObject.byteLength };
         const surfaceTarget: RecoveryState = { kind: "regular-file", objectHash: surfaceTargetObject.hash, byteLength: surfaceTargetObject.byteLength };
-        const durableContext = { ...context, durableRecoveryStore: createInMemoryRecoveryDurablePort() };
+        const durableContext = { ...context, durableRecoveryStore: h.durableRecoveryStore };
         const pending = await applyDurableFileOperation(durableContext, {
           id: "crashed-surface-integration", workspaceId: "ws", threadId: "thread-surface-crash", resultRevision: 1,
           targets: { "disk.txt": { expected: before, target: diskTarget } },
@@ -933,15 +1030,12 @@ describe("IntegrationCoordinator", () => {
         await markDurableExternalDispatched(durableContext, pending.operationId, ["surface.txt"]);
       });
       await h.engine.dispose();
-      const restarted = createWorkspaceRecoveryEngine({ authorityId: "test", dataDir: h.dataDir, documents: h.documents, sessionNavigation: h.navigation });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(h.workspace, "disk.txt"), "utf8")).toBe("after");
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-surface-integration"))
-          .toEqual({ state: "needs-attention" });
-        expect(database.prepare("SELECT phase FROM operation_files WHERE operation_id = ? AND path = ?").get("crashed-surface-integration", "surface.txt"))
-          .toEqual({ phase: "needs-attention" });
-      });
+      const recoveredSurface = await h.durableRecoveryStore.getOperation("ws", "crashed-surface-integration");
+      expect(recoveredSurface).toMatchObject({ state: "needs-attention" });
+      expect(durableFiles(recoveredSurface).find((file) => file.path === "surface.txt")).toMatchObject({ phase: "needs-attention" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();
@@ -958,16 +1052,18 @@ describe("IntegrationCoordinator", () => {
         const target: RecoveryState = { kind: "regular-file", objectHash: object.hash, byteLength: object.byteLength, ...(current.kind === "regular-file" && current.mode !== undefined ? { mode: current.mode } : {}) };
         const targets = { "a.txt": { expected: current, target } };
         const data = { operationId: "other-workspace-operation", threadId: "other-thread", resultRevision: 1, targets, safety: { "a.txt": current }, conflictPaths: [], appliedPaths: [], compensatedPaths: [], needsAttentionPaths: [], diffStats: { files: 1, insertions: 0, deletions: 0 } };
-        writeOperationRow(context.database, { id: "other-workspace-operation", workspaceId: "other-workspace", kind: "integration", state: "applying", data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-        writeOperationRow(context.database, { id: "other-workspace-combined", workspaceId: "other-workspace", kind: "combined", state: "applying-files", data: { malformedForeignRecord: true }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-        initOperationFiles(context.database, "other-workspace-operation", targets);
-        updateOperationFilePhase(context.database, "other-workspace-operation", "a.txt", "apply-intent", { safetyJson: JSON.stringify(current) });
+        await seedDurableOperation(h.durableRecoveryStore, {
+          workspaceId: "other-workspace", operationId: "other-workspace-operation", data,
+          targets: { "a.txt": { ...targets["a.txt"]!, safety: current } }, phases: { "a.txt": "apply-intent" },
+        });
+        await seedDurableOperation(h.durableRecoveryStore, {
+          workspaceId: "other-workspace", operationId: "other-workspace-combined", kind: "combined", state: "applying-files",
+          data: { malformedForeignRecord: true },
+        });
       });
       await h.engine.fenceUnfinishedOperations();
-      await h.engine.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("other-workspace-operation")).toEqual({ state: "applying" });
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("other-workspace-combined")).toEqual({ state: "applying-files" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("other-workspace", "other-workspace-operation")).toMatchObject({ state: "applying" });
+      expect(await h.durableRecoveryStore.getOperation("other-workspace", "other-workspace-combined")).toMatchObject({ state: "applying-files" });
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("workspace-one");
     } finally {
       await h.engine.dispose();
@@ -1057,10 +1153,13 @@ describe("IntegrationCoordinator", () => {
       });
       expect(await fs.promises.readFile(path.join(h.workspace, "draft.txt"), "utf8")).toBe("disk bytes\n");
       expect(merged.preview?.mergeReady).toBe(true);
-      await h.workingStates.withStore("ws", "inspect-surface-phase", (_store, { database }) => {
-        const row = database.prepare("SELECT data_json FROM operations WHERE id = ?").get(merged.operationId) as { data_json: string };
-        const data = JSON.parse(row.data_json) as { surfacePhases?: Record<string, string> };
-        expect(data.surfacePhases?.["draft.txt"]).toBe("surface-applied");
+      const surfaceOperation = await h.durableRecoveryStore.getOperation("ws", merged.operationId);
+      expect(durableFiles(surfaceOperation).find((file) => file.path === "draft.txt")).toMatchObject({ phase: "external-target-observed" });
+      const surfaceData = (surfaceOperation?.result ?? surfaceOperation?.data) as {
+        externalBindings?: Record<string, { afterLocalEditRevision?: number; afterHash?: string }>;
+      } | undefined;
+      expect(surfaceData?.externalBindings?.["draft.txt"]).toMatchObject({
+        afterLocalEditRevision: 5, afterHash: textHash("child bytes\n"),
       });
     } finally {
       await h.engine.dispose();
@@ -1430,32 +1529,16 @@ describe("IntegrationCoordinator", () => {
           applyCanonicalRoot: parentDir,
           applyExecutionWorkspaceId: "parent-exec",
         };
-        context.database.transaction(() => {
-          writeOperationRow(context.database, {
-            id: "crashed-directory",
-            workspaceId: "ws",
-            kind: "integration",
-            state: "applying",
-            data,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          initOperationFiles(context.database, "crashed-directory", targets);
-          updateOperationFilePhase(context.database, "crashed-directory", "a.txt", "apply-intent", {
-            safetyJson: JSON.stringify(before),
-          });
-        }).immediate();
+        await seedDurableOperation(h.durableRecoveryStore, {
+          operationId: "crashed-directory", data,
+          targets: { "a.txt": { ...targets["a.txt"]!, safety: before } },
+          phases: { "a.txt": "apply-intent" },
+        });
         await context.fileStore.applyState({ ...context.identity, canonicalRoot: parentDir }, context.root, "a.txt", target);
       });
       await h.engine.dispose();
       vi.mocked(h.documents.runResourceOperation!).mockClear();
-      const restarted = createWorkspaceRecoveryEngine({
-        authorityId: "test",
-        dataDir: h.dataDir,
-        documents: h.documents,
-        sessionNavigation: h.navigation,
-        resolveDirectoryApplyContext: h.resolveDirectoryApplyContext,
-      });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
       expect(await fs.promises.readFile(path.join(h.workspace, "a.txt"), "utf8")).toBe("owning\n");
@@ -1470,9 +1553,7 @@ describe("IntegrationCoordinator", () => {
         expect.any(Function),
       );
       expect(await fs.promises.stat(path.join(parentDir, ".piarium")).then(() => true, () => false)).toBe(false);
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-directory-reconcile", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("crashed-directory")).toEqual({ state: "compensated" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", "crashed-directory")).toMatchObject({ state: "compensated" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();
@@ -1514,40 +1595,22 @@ describe("IntegrationCoordinator", () => {
           applyCanonicalRoot: parentDir,
           applyExecutionWorkspaceId: "parent-exec",
         };
-        context.database.transaction(() => {
-          writeOperationRow(context.database, {
-            id: "unresolved-directory",
-            workspaceId: "ws",
-            kind: "integration",
-            state: "applying",
-            data,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-          });
-          initOperationFiles(context.database, "unresolved-directory", targets);
-          updateOperationFilePhase(context.database, "unresolved-directory", "a.txt", "apply-intent", {
-            safetyJson: JSON.stringify(before),
-          });
-        }).immediate();
+        await seedDurableOperation(h.durableRecoveryStore, {
+          operationId: "unresolved-directory", data,
+          targets: { "a.txt": { ...targets["a.txt"]!, safety: before } },
+          phases: { "a.txt": "apply-intent" },
+        });
         await context.fileStore.applyState({ ...context.identity, canonicalRoot: parentDir }, context.root, "a.txt", target);
       });
       await h.engine.dispose();
       vi.mocked(h.documents.runResourceOperation!).mockClear();
-      const restarted = createWorkspaceRecoveryEngine({
-        authorityId: "test",
-        dataDir: h.dataDir,
-        documents: h.documents,
-        sessionNavigation: h.navigation,
-        resolveDirectoryApplyContext: async () => {
-          throw new Error("execution directory is gone");
-        },
+      const restarted = reopenHarnessEngine(h, {
+        resolveDirectoryApplyContext: async () => { throw new Error("execution directory is gone"); },
       });
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("after\n");
       expect(h.documents.runResourceOperation).not.toHaveBeenCalled();
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-unresolved-directory", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get("unresolved-directory")).toEqual({ state: "needs-attention" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", "unresolved-directory")).toMatchObject({ state: "needs-attention" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();
@@ -1587,32 +1650,23 @@ describe("IntegrationCoordinator", () => {
         resultRevision: published.resultRevision,
         parentAuthority: { kind: "branch", branchId: "thread-parent" },
       })).rejects.toThrow("injected crash after branch CAS");
-      const interrupted = await h.workingStates.withStore("ws", "inspect-crashed-branch", async (store, context) => {
-        const row = context.database.prepare(
-          `SELECT id, state FROM operations WHERE kind = 'integration'`,
-        ).get() as { id: string; state: string } | undefined;
-        const live = store.effectiveState("thread-parent")!;
-        return { row, hasChild: live["child.txt"]?.kind === "regular-file" };
-      }, "shared");
-      expect(interrupted.row).toMatchObject({ state: "applying" });
-      expect(interrupted.hasChild).toBe(true);
-      const operationId = interrupted.row!.id;
+      const branchOperations = await h.durableRecoveryStore.listOperations("ws", "integration");
+      expect(branchOperations).toHaveLength(1);
+      expect(branchOperations[0]).toMatchObject({ state: "applying" });
+      const operationId = String(branchOperations[0]!.operationId);
+      const hasChild = await h.workingStates.withStore("ws", "inspect-crashed-branch", async (store) => (
+        store.effectiveState("thread-parent")?.["child.txt"]?.kind === "regular-file"
+      ), "shared");
+      expect(hasChild).toBe(true);
       await h.engine.dispose();
-      const restarted = createWorkspaceRecoveryEngine({
-        authorityId: "test",
-        dataDir: h.dataDir,
-        documents: h.documents,
-        sessionNavigation: h.navigation,
-      });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
-      const restartedStates = createTestWorkingStateRootAccess(restarted);
+      const restartedStates = h.workingStates;
       await restartedStates.withBranchStore("ws", "reconcile-crashed-branch", (store, context) => {
         if (!context?.durableRecoveryStore) throw new Error("durable recovery storage missing");
         return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
       });
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-reconciled-branch", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(operationId)).toEqual({ state: "complete" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", operationId)).toMatchObject({ state: "complete" });
       const retry = await new IntegrationCoordinator({
         workingStates: restartedStates,
       }).mergeResult({
@@ -1658,10 +1712,8 @@ describe("IntegrationCoordinator", () => {
         parentAuthority: { kind: "branch", branchId: "thread-parent" },
       });
       expect(first).toMatchObject({ status: "applied", appliedPaths: ["child.txt"] });
-      const rows = await h.workingStates.withStore("ws", "inspect-branch-integration", async (_store, context) => (
-        context.database.prepare(`SELECT id, state FROM operations WHERE kind = 'integration'`).all() as Array<{ id: string; state: string }>
-      ), "shared");
-      expect(rows).toEqual([{ id: first.operationId, state: "complete" }]);
+      expect(await h.durableRecoveryStore.listOperations("ws", "integration"))
+        .toEqual([expect.objectContaining({ operationId: first.operationId, state: "complete" })]);
       const retry = await h.coordinator.mergeResult({
         workspaceId: "ws",
         threadId: "thread-child",
@@ -1825,25 +1877,20 @@ describe("IntegrationCoordinator", () => {
       })).rejects.toThrow("injected crash");
       crashAfterApply = false;
       await h.engine.dispose();
-      const restarted = createWorkspaceRecoveryEngine({
-        authorityId: "test", dataDir: h.dataDir, documents: h.documents,
-        sessionNavigation: h.navigation, resolveDirectoryApplyContext: h.resolveDirectoryApplyContext,
-      });
+      const restarted = reopenHarnessEngine(h);
       await restarted.fenceUnfinishedOperations();
       expect(await fs.promises.readFile(path.join(parentDir, "a.txt"), "utf8")).toBe("before\n");
-      const restartedStates = createTestWorkingStateRootAccess(restarted);
+      const restartedStates = h.workingStates;
       await restartedStates.withBranchStore("ws", "reconcile-materialized-undo-branch", (store, context) => {
         if (!context?.durableRecoveryStore) throw new Error("durable recovery storage missing");
-        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore }, store);
+        return reconcileInterruptedKernelBranchIntegrations({ ...context, durableRecoveryStore: context.durableRecoveryStore, resolveDirectoryApplyContext: h.resolveDirectoryApplyContext }, store);
       });
       const branchBytes = await restartedStates.withStore("ws", "inspect-materialized-undo-branch", async (store) => {
         const state = store.effectiveState("thread-parent-crash")?.["a.txt"];
         return state?.kind === "regular-file" ? store.getObject(state.objectHash) : null;
       }, "shared");
       expect(branchBytes).toEqual(Buffer.from("before\n"));
-      await restarted.withWorkspaceStorage("ws", { mode: "shared", purpose: "inspect-materialized-undo", create: false }, ({ database }) => {
-        expect(database.prepare("SELECT state FROM operations WHERE id = ?").get(merged.operationId)).toEqual({ state: "undone" });
-      });
+      expect(await h.durableRecoveryStore.getOperation("ws", merged.operationId)).toMatchObject({ state: "undone" });
       await restarted.dispose();
     } finally {
       await h.engine.dispose();

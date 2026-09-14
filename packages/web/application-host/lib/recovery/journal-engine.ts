@@ -113,6 +113,11 @@ export interface RecoveryDurableOperationPort {
   listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]>;
   releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>>;
   listChanges?(input: { workspaceId: string; sessionId?: string; executionId?: string; entryIds?: string[] }): Promise<DurableRecoveryChangeSelection>;
+  /** Internal Host-only binding of a completed Integration into an active recovery turn. */
+  recordIntegrationChanges?(input: {
+    workspaceId: string; executionId: string; operationId: string;
+    changes: Record<string, { before: RecoveryState; after: RecoveryState }>;
+  }): Promise<boolean>;
 }
 export interface RecoveryDurableMetadataPort extends RecoveryDurableOperationPort {
   createNamedCheckpoint(workspaceId: string, name: string): Promise<WorkspaceRecoveryCheckpointSummary>;

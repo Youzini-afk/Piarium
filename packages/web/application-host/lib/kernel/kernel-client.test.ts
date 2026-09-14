@@ -16,7 +16,7 @@ const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "p
 const clients: KernelClient[] = [];
 const roots: string[] = [];
 
-const issueActor = async (client: KernelClient, grantId: string, workspaceId: string | null, pathScopes: string[] = [""]): Promise<KernelGrantHandle> => client.issueGrant({
+const issueActor = async (client: KernelClient, grantId: string, workspaceId: string | null, pathScopes: string[] = [""], extraCapabilities: string[] = []): Promise<KernelGrantHandle> => client.issueGrant({
   grantId,
   hostGeneration: client.handshake?.hostGeneration,
   sessionId: null,
@@ -25,7 +25,7 @@ const issueActor = async (client: KernelClient, grantId: string, workspaceId: st
   owningWorkspace: workspaceId,
   executionWorkspace: workspaceId,
   storageIdentity: client.handshake?.storageRoot,
-  capabilities: ["storage.read", "storage.write", "recovery", "storage.gc"],
+  capabilities: ["storage.read", "storage.write", "recovery", "storage.gc", ...extraCapabilities],
   pathScopes,
 });
 
@@ -239,6 +239,17 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   const pinnedCurrent = await client.readPin({ pinId: String(currentPin.pinId), paths: ["src/temporary.txt"] });
   assert.equal(((pinnedCurrent.entries as Array<{ state: { objectHash?: string } }>)[0]?.state.objectHash), temporary.hash);
   await client.unpinBranch({ operationId: "op-unpin-current", branchId: "branch-test", pinId: String(currentPin.pinId) });
+  const handoffOwner = host.scoped(await issueActor(host, "kernel-handoff-maintenance", "workspace-test", [""], ["storage.maintenance"]));
+  const persistentCurrentPin = await handoffOwner.pinBranch({
+    operationId: "op-pin-current-persistent",
+    branchId: "branch-test",
+    pinId: "handoff-persistent-pin",
+    expectedWriteRevision: reverted.writeRevision,
+    expectedRoot: reverted.root,
+    persistent: true,
+  });
+  assert.equal(persistentCurrentPin.view, "current");
+  assert.equal(persistentCurrentPin.root, reverted.root);
   assert.equal((await client.health({ deep: true })).integrity, "ok");
   const diff = await client.diffRoots({ leftRoot: String(created.root), rightRoot: changed.root });
   assert.deepEqual(diff.changed, ["src/file.txt"]);
@@ -253,6 +264,11 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   const fixedAfterRestart = await reopened.readBranch({ branchId: "branch-test", revision: Number(published.revision), includeEntries: true });
   assert.equal((afterRestart.entries[0]?.state as { objectHash?: string }).objectHash, third.hash);
   assert.equal((fixedAfterRestart.entries[0]?.state as { objectHash?: string }).objectHash, second.hash);
+  const persistentAfterRestart = await reopened.readPin({ pinId: String(persistentCurrentPin.pinId), includeEntries: true });
+  assert.equal(persistentAfterRestart.root, reverted.root);
+  assert.equal(persistentAfterRestart.writeRevision, reverted.writeRevision);
+  const reopenedMaintenancePinOwner = reopenedHost.scoped(await issueActor(reopenedHost, "kernel-handoff-maintenance-restart", "workspace-test", [""], ["storage.maintenance"]));
+  assert.equal((await reopenedMaintenancePinOwner.unpinBranch({ operationId: "op-unpin-current-persistent", branchId: "branch-test", pinId: String(persistentCurrentPin.pinId) })).released, true);
   const deleted = await reopened.deleteBranch({ operationId: "op-delete", branchId: "branch-test" });
   assert.equal(deleted.deleted, true);
   assert.equal(deleted.retainedPins, 1);

@@ -6129,3 +6129,28 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | D-276 | production cutover retained; full completion claim superseded in part | D-278 | status R2；audit |
 | D-277 | primitives/consumer implementation retained; completion claim superseded in part | D-278 | status R3；audit |
 | D-278 | implemented audit repairs; R2/R3 acceptance reopened | — | rust-kernel-audit；plan/status；architecture；kernel/Documents/Harness documentation；native CI |
+
+### D-279 · 2026-09-14 · R2/R3 复核收口：未决文件操作可处置，物化跨域 handoff 可重入
+
+类型：D-278 reopen gate closure；只追加，不改写 D-276–D-278 的历史事实
+
+问题：D-278 保留了 R1 单 writer 与 R2/R3 主要原语，但指出两个不能用局部成功替代的缺口。第一，kernel 能保留低层 pending file operation，却只把数量带回 root registration；Host 无法列出“哪次操作、哪些路径、为什么未决、能否安全重试”，目录 rename 这类证据不足窗口会在产品层隐身。第二，kernel 的 materialization staging/promotion 可恢复，但 native Host 路径没有一条跨 source root/writeRevision、operationId、Git executionBaseline、Thread Registry 与 execution view 的持久握手；setup timeout/abort 还把 kill 请求当成已经退出。同期 IntegrationCoordinator 的旧 fixture 仍直接读取退役 SQLite 内部表，并暴露 operationId 复用、parent-turn binding 与 terminal commit/reconcile 的真实行为缺口。
+
+决定：
+
+1. R2 不新增 TS 恢复数据库。kernel 以 typed `file.operation.list/reconcile` 暴露未决 file operation；Host registration 保存 identity/disposition/reason，并提供显式安全 reconcile。reconcile 只执行现有证据能证明的对账；目录 rename 若不能从保存的 source state 与当前目录事实证明完成，则继续 retained/needs-attention，不提供强制成功或破坏性重放。
+2. R3 native materialization 使用 Thread Registry `materializationHandoff` 作为 Host 持久 intent/receipt：固定 branch/root/revision/writeRevision、kernel operationId、pinId、stage、Git kind/executionBaseline。current root 由 maintenance-scoped persistent kernel pin 保活；revision view 使用固定 revision pin。kernel materialize 与 Git attach 分阶段持久化，同一 operationId 重入，不重读“当前最新 root”冒充原操作。
+3. Git attach 只认可 Piarium 自己创建且可证明 parent/HEAD/clean 状态的 execution baseline；重复 attach 返回同一 receipt，未知 `.git` 明确失败。`git-attached` handoff 必须先成功 release durable pin，再清 Registry intent；release 失败保留 receipt，restart 重试同一 unpin/commit，不制造孤儿 pin。persistent current-root pin 进入 protocol schema，并在 deep health 中按 branch head_root/writeRevision 校验而不是误当 published revision。
+4. setup timeout/abort 的“已请求终止”和“进程已退出”分开：发送 kill 后只有 child `close` 才结束 setup promise，目录生命周期不能在真实退出前进入可回收状态。R4 仍负责通用 PTY/process backend，本条只关闭 R3 现有 setup 交接。
+5. IntegrationCoordinator 的验收迁到 production `journal-engine` + durable operation port 语义，不再打开旧 SQLite operation tables。文件副作用后先进入 `awaiting-turn-binding`，把 `thread.merge` before/after 绑定到 active parent turn，再 terminal CAS；restart 从 operation-file phase 重建 applied paths。terminal CAS 失败执行 conditional compensation；同 result/resulting-parent-state 的 terminal retry 复用原 operationId。legacy WorkingState/SQLite 仅保留独立 test fixture，不恢复生产双 writer。
+
+证据：正式 `bun run kernel:build` 构建的 Windows release kernel 下，统一 `bun run test:kernel` 57 passed：`kernel-client.test.ts` 25/25（含 persistent current-root pin 跨 Host restart 与 maintenance release）、`file-resource-audit.test.ts` 26/26、`storage-adapter.test.ts` 5/5、`kernel-durable-engine.test.ts` 1/1。IntegrationCoordinator 37/37；ThreadRuntime/ThreadWorktree 91 passed / 1 platform skip，覆盖 pin release 失败保留 git-attached receipt、重试完成、Git attach 幂等和 setup 等真实 close。Application Host source/test type-check、protocol generation check、Rust release build、`git diff --check` 通过。
+
+结果：D-278 重新打开的 R2/R3 两个具体验收 gate 均关闭；R2 与 R3 恢复为 Complete。R1 保持 Complete。R0 仍为 Partial，R4–R6 不变；远端 CI、未测平台 CoW、签名和物理断电不被新增为本决定门槛。
+
+## D-279 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-278 | audit repairs retained; R2/R3 reopen claims superseded | D-279 | rust-kernel-audit；status/plan；architecture |
+| D-279 | accepted / implemented / R2+R3 complete | — | status 阶段 R2/R3；plan 阶段 R2/R3；architecture；rust-kernel-design；audit |

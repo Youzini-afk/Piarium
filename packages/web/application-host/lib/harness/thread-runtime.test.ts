@@ -9,7 +9,7 @@ import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.
 import { createThreadRuntime as createRootThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
 import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { WorkingStateStore as DurableWorkingStateStore } from "./working-state/working-state-store.js";
-import type { WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
+import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
@@ -514,6 +514,66 @@ describe("thread runtime", () => {
       await virtualRuntime.dispose();
       await documents.dispose();
       database.close();
+    }
+  });
+
+  it("keeps a git-attached materialization handoff durable until pin release succeeds", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    const sessionId = "handoff-session";
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, sessionId);
+    const branchId = `thread-${thread.id}`;
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId, resultRevision: 1 });
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/thread",
+      base: "base",
+      materialized: true,
+      viewMode: "virtual",
+      preparationStage: "materializing",
+      materializationHandoff: {
+        operationId: "handoff-op", pinId: "handoff-pin", revision: 1, writeRevision: 3, root: "root-1",
+        view: "current", nextPreparationStage: "ready", stage: "git-attached", gitKind: "none",
+      },
+    });
+    const views = new ThreadExecutionViewRegistry();
+    views.bind({ sessionId, workspaceId: WORKSPACE, threadId: thread.id, runId: run.id, branchId, revision: 1, writeRevision: 3, mode: "virtual", draftBasePaths: [] });
+    let failRelease = true;
+    const releaseBranchHandoffPin = vi.fn(async () => {
+      if (failRelease) {
+        failRelease = false;
+        throw new Error("injected durable pin release failure");
+      }
+    });
+    const store = {
+      getBranchRoot: async () => ({ branchId, workspaceId: WORKSPACE, root: "root-1", revision: 1, writeRevision: 3 }),
+      materializePinManaged: vi.fn(),
+      pinBranchHandoff: vi.fn(),
+      openBranchHandoffPin: vi.fn(),
+      releaseBranchHandoffPin,
+    } as unknown as WorkingStateRootStore;
+    const handoffRuntime = createThreadRuntime({
+      registry,
+      workingStates: { withBranchStore: async (_workspaceId, _purpose, operation) => operation(store) },
+      executionViews: views,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => WORKSPACE,
+      sessions: sessionAdapter,
+      worktrees: {
+        prepare: prepareWorktree,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    try {
+      await expect(handoffRuntime.materializeExecutionView(sessionId)).resolves.toMatchObject({ status: "failed", message: expect.stringContaining("pin release failure") });
+      expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree?.materializationHandoff).toMatchObject({ stage: "git-attached", pinId: "handoff-pin" });
+      await expect(handoffRuntime.materializeExecutionView(sessionId)).resolves.toEqual({ status: "materialized", path: "/workspace/thread" });
+      expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree?.materializationHandoff).toBeUndefined();
+      expect(views.get(sessionId)).toMatchObject({ mode: "materialized", revision: 1, writeRevision: 3 });
+      expect(releaseBranchHandoffPin).toHaveBeenCalledTimes(2);
+    } finally {
+      await handoffRuntime.dispose();
     }
   });
 

@@ -152,6 +152,39 @@ it("audit: GC and operation.release preserve unfinished filesystem reconciliatio
   assert.equal((await resumed.getOperation("pending-mkdir"))?.state, "committed");
 });
 
+it("audit: unresolved directory rename is visible and remains explicitly needs-attention", async () => {
+  const f = await fixture({ PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" });
+  await fs.mkdir(path.join(f.workspace, "tree", "nested"), { recursive: true });
+  await fs.writeFile(path.join(f.workspace, "tree", "nested", "value.txt"), "preserve");
+  await assert.rejects(f.client.fileRename({
+    ...f.address, operationId: "pending-directory-rename", fromPath: "tree", toPath: "moved-tree", targetMustBeMissing: true,
+  }), /finish failure/i);
+  await f.host.close();
+  const host = createKernelClient({ hostId: "audit", storageRoot: f.storageRoot, kernelPath, buildVersion, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const adapter = new KernelStorageAdapter({ client: host, hostId: "audit", storageRoot: f.storageRoot, resolveWorkspaceRoot: async () => f.workspace });
+  try {
+    const context = await adapter.fileAuthorityContext({
+      owningWorkspaceId: "ws", executionWorkspaceId: "ws", canonicalRoot: f.workspace, capabilities: ["storage.maintenance"],
+    });
+    assert.equal(context.pendingFileOperations.length, 1);
+    assert.deepEqual(context.pendingFileOperations[0], {
+      operationId: "pending-directory-rename", kind: "file.rename", rootId: context.rootId,
+      paths: ["tree", "moved-tree"], disposition: "needs-attention",
+      reason: "directory-rename-cannot-be-proven-from-directory-metadata",
+      createdAt: context.pendingFileOperations[0]!.createdAt, updatedAt: context.pendingFileOperations[0]!.updatedAt,
+    });
+    const reconciled = await context.reconcilePendingFileOperation("pending-directory-rename");
+    assert.equal(reconciled.status, "pending");
+    assert.equal((reconciled.operation as Record<string, unknown>).reason, "directory-rename-cannot-be-proven-from-directory-metadata");
+    assert.equal(await fs.readFile(path.join(f.workspace, "moved-tree", "nested", "value.txt"), "utf8"), "preserve");
+    await assert.rejects(fs.stat(path.join(f.workspace, "tree")), { code: "ENOENT" });
+  } finally {
+    await adapter.dispose();
+  }
+});
+
 it("audit: execution-only Host maintenance hints do not require a fake session actor", async () => {
   const f = await fixture();
   const adapter = new KernelStorageAdapter({ client: f.host, hostId: "audit", storageRoot: f.storageRoot, resolveWorkspaceRoot: async () => f.workspace,

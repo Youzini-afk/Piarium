@@ -328,6 +328,23 @@ export interface ThreadWorktree {
     stage: "staging-ready" | "live-backed-up" | "staging-promoted";
   };
   /**
+   * Native Rust materialization handoff across kernel, Git metadata attach, and
+   * Thread Registry commit. The same operationId/root/writeRevision is reused
+   * after Host restart; a different current branch is a conflict, not a retry.
+   */
+  materializationHandoff?: {
+    operationId: string;
+    pinId: string;
+    revision: number;
+    writeRevision: number;
+    root: string;
+    view: "current" | "revision";
+    nextPreparationStage: "setup" | "ready";
+    stage: "intent-persisted" | "kernel-materialized" | "git-attached";
+    gitKind?: "worktree" | "init" | "none";
+    executionBaseline?: string;
+  };
+  /**
    * Durable progress through directory reconstruction and environment setup.
    * `materializing` may have a partial managed directory on disk; it is never
    * safe to open until the state advances to `setup` or `ready`.

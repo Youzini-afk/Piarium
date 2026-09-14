@@ -19,7 +19,8 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.verification.list"
         | "working.review.list"
         | "file.scan"
-        | "file.measure" => "storage.read",
+        | "file.measure"
+        | "file.operation.list" => "storage.read",
         "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
@@ -39,6 +40,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.delete"
         | "operation.release"
         | "file.root.register"
+        | "file.operation.reconcile"
         | "file.lease.acquire"
         | "file.lease.check"
         | "file.lease.release"

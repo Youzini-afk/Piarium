@@ -107,7 +107,7 @@ export interface ThreadRuntimeOptions {
   /**
    * Deletes a session's event/block/session knowledge nodes through
    * `KnowledgeStore.deleteSession` (D-242 rework). Accepted workspace/user
-   * knowledge is retained — only the thread's own session knowledge is removed.
+   * knowledge is retained —only the thread's own session knowledge is removed.
    */
   deleteKnowledgeSession?(workspaceId: string, sessionId: string): Promise<unknown>;
   /** Release retrieval evidence/receipt/artifact owners before the Thread row disappears. */
@@ -517,6 +517,133 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     await persistWorktree(input.workspaceId, input.threadId, rolled);
     return rolled;
   };
+  const clearNativeMaterializationHandoff = (
+    worktree: NonNullable<Thread["worktree"]>,
+  ): NonNullable<Thread["worktree"]> => {
+    const next = { ...worktree };
+    delete next.materializationHandoff;
+    return next;
+  };
+
+  const resumeNativeMaterializationHandoff = async (input: {
+    workspaceId: string;
+    threadId: string;
+    branchId: string;
+    sourceRoot: string;
+    worktree: NonNullable<Thread["worktree"]>;
+    signal: AbortSignal;
+  }): Promise<NonNullable<Thread["worktree"]>> => {
+    if (!options.workingStates) throw new Error("Working-state authority is unavailable for native materialization recovery");
+    const original = input.worktree.materializationHandoff;
+    if (!original) return input.worktree;
+    return options.workingStates.withBranchStore(
+      input.workspaceId,
+      "thread-native-materialization-handoff",
+      async (store) => {
+        if (!store.materializePinManaged || !store.pinBranchHandoff || !store.openBranchHandoffPin || !store.releaseBranchHandoffPin) {
+          throw new Error("Native materialization handoff requires the Rust WorkingState backend");
+        }
+        input.signal.throwIfAborted();
+        if (original.view === "current") {
+          const branch = await store.getBranchRoot(input.branchId, { signal: input.signal });
+          if (!branch || branch.root !== original.root || branch.writeRevision !== original.writeRevision) {
+            await store.releaseBranchHandoffPin(input.branchId, original.pinId);
+            const conflicted = {
+              ...clearNativeMaterializationHandoff(input.worktree),
+              preparationStage: "materializing" as const,
+              retentionReason: `Materialization source changed after intent ${original.operationId}; preserved directory requires explicit rebuild`,
+            };
+            await persistWorktree(input.workspaceId, input.threadId, conflicted);
+            throw new Error(`Materialization handoff no longer matches the current working root: ${input.branchId}@${original.writeRevision}`);
+          }
+        }
+        let worktree = input.worktree;
+        let handoff = worktree.materializationHandoff!;
+        if (handoff.stage === "git-attached") {
+          // Release is completed before the Registry intent is cleared. A
+          // failed release leaves the durable receipt intact for restart.
+          await store.releaseBranchHandoffPin(input.branchId, handoff.pinId);
+          const completed = {
+            ...clearNativeMaterializationHandoff(worktree),
+            viewMode: "materialized" as const,
+            materialized: true,
+            preparationStage: handoff.nextPreparationStage,
+            ...(handoff.executionBaseline ? { executionBaseline: handoff.executionBaseline } : {}),
+          };
+          if (!handoff.executionBaseline) delete completed.executionBaseline;
+          delete completed.materializationFingerprint;
+          delete completed.retentionReason;
+          await persistWorktree(input.workspaceId, input.threadId, completed);
+          return completed;
+        }
+        let pin: WorkingStatePin | undefined;
+        try {
+          pin = await store.openBranchHandoffPin(
+            input.branchId,
+            original.pinId,
+            { root: original.root, revision: original.revision, writeRevision: original.writeRevision },
+            input.signal,
+          );
+        } catch (error) {
+          if (!/pin not found/i.test(error instanceof Error ? error.message : String(error))) throw error;
+          pin = await store.pinBranchHandoff(
+            input.branchId,
+            original.pinId,
+            original.view === "revision"
+              ? { revision: original.revision, signal: input.signal }
+              : { signal: input.signal },
+          );
+          if (pin.root !== original.root || pin.revision !== original.revision || pin.writeRevision !== original.writeRevision) {
+            await pin.release();
+            pin = undefined;
+            throw new Error(`Materialization handoff source identity changed: ${input.branchId}`);
+          }
+        }
+
+        if (handoff.stage === "intent-persisted") {
+          await ownershipAssertion(worktree)("resume native materialization", [worktree.path]);
+          const materialized = await store.materializePinManaged(pin, worktree.path, handoff.operationId, input.signal);
+          if (materialized.cow) cowByThread.set(input.threadId, materialized.cow);
+          handoff = { ...handoff, stage: "kernel-materialized" };
+          worktree = { ...worktree, materialized: true, preparationStage: "materializing", materializationHandoff: handoff };
+          await persistWorktree(input.workspaceId, input.threadId, worktree);
+        }
+
+        if (handoff.stage === "kernel-materialized") {
+          input.signal.throwIfAborted();
+          const attached = options.worktrees.attachIsolatedGitContext
+            ? await options.worktrees.attachIsolatedGitContext(input.sourceRoot, worktree, input.signal)
+            : { kind: "none" as const };
+          handoff = {
+            ...handoff,
+            stage: "git-attached",
+            gitKind: attached.kind,
+            ...(attached.executionBaseline ? { executionBaseline: attached.executionBaseline } : {}),
+          };
+          worktree = { ...worktree, materializationHandoff: handoff };
+          await persistWorktree(input.workspaceId, input.threadId, worktree);
+        }
+
+        if (handoff.stage !== "git-attached") throw new Error("Native materialization handoff did not reach its Git receipt");
+        await store.releaseBranchHandoffPin(input.branchId, handoff.pinId);
+        pin = undefined;
+        const completed = {
+          ...clearNativeMaterializationHandoff(worktree),
+          viewMode: "materialized" as const,
+          materialized: true,
+          preparationStage: handoff.nextPreparationStage,
+          ...(handoff.executionBaseline ? { executionBaseline: handoff.executionBaseline } : {}),
+        };
+        if (!handoff.executionBaseline) delete completed.executionBaseline;
+        delete completed.materializationFingerprint;
+        delete completed.retentionReason;
+        await persistWorktree(input.workspaceId, input.threadId, completed);
+        return completed;
+      },
+      "exclusive",
+    );
+  };
+
   interface PreparationTask {
     controller: AbortController;
     promise: Promise<unknown>;
@@ -762,6 +889,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread?.workBranchId) return;
     let worktree = thread.worktree;
+    const recoveredHandoff = worktree?.materializationHandoff;
+    if (worktree?.materializationHandoff) {
+      const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+      worktree = await resumeNativeMaterializationHandoff({
+        workspaceId: input.workspaceId, threadId: input.threadId, branchId: thread.workBranchId,
+        worktree, sourceRoot, signal: abortController.signal,
+      });
+      if (worktree.preparationStage !== "ready") {
+        throw new Error(`Materialized execution view is not ready after recovery: ${worktree.preparationStage ?? "unknown"}`);
+      }
+    }
     const recoveredJournal = worktree?.materializationSwitch;
     if (worktree?.materializationSwitch) {
       const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
@@ -779,12 +917,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       "working-branch-view-bind",
       async (store) => {
         const branch = await store.getBranchRoot(thread.workBranchId!);
-        if (recoveredJournal && worktree?.viewMode === "materialized" && branch?.root !== recoveredJournal.root) {
-          throw new Error(`Materialized working root no longer matches ${thread.workBranchId}@${recoveredJournal.writeRevision}`);
+        const recoveredIdentity = recoveredHandoff ?? recoveredJournal;
+        const recoveredTracksCurrent = recoveredHandoff ? recoveredHandoff.view === "current" : Boolean(recoveredJournal);
+        if (recoveredIdentity && worktree?.viewMode === "materialized"
+          && recoveredTracksCurrent
+          && (branch?.root !== recoveredIdentity.root || branch?.writeRevision !== recoveredIdentity.writeRevision)) {
+          throw new Error(`Materialized working root no longer matches ${thread.workBranchId}@${recoveredIdentity.writeRevision}`);
         }
         return {
           draftBasePaths: branch?.draftBasePaths ?? [],
-          writeRevision: recoveredJournal && worktree?.viewMode === "materialized" ? recoveredJournal.writeRevision : branch?.writeRevision ?? 0,
+          writeRevision: recoveredIdentity && worktree?.viewMode === "materialized" ? recoveredIdentity.writeRevision : branch?.writeRevision ?? 0,
         };
       },
       "shared",
@@ -795,7 +937,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       threadId: input.threadId,
       runId: input.runId,
       branchId: thread.workBranchId,
-      revision: recoveredJournal && worktree?.viewMode === "materialized" ? recoveredJournal.revision : thread.resultRevision ?? 0,
+      revision: (recoveredHandoff ?? recoveredJournal) && worktree?.viewMode === "materialized"
+        ? (recoveredHandoff ?? recoveredJournal)!.revision
+        : thread.resultRevision ?? 0,
       writeRevision: bound.writeRevision,
       mode: isVirtualWorktree(worktree) ? "virtual" : "materialized",
       draftBasePaths: bound.draftBasePaths,
@@ -1030,6 +1174,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     signal: AbortSignal;
   }): Promise<NonNullable<Thread["worktree"]>> => {
     let worktree = input.worktree;
+    if (worktree.materializationHandoff) {
+      if (!input.branchId) throw new Error("Persisted native materialization handoff has no working branch");
+      return resumeNativeMaterializationHandoff({
+        workspaceId: input.workspaceId, threadId: input.threadId, branchId: input.branchId,
+        sourceRoot: input.sourceRoot, worktree, signal: input.signal,
+      });
+    }
     if (preparationStageOf(worktree) === "materializing") {
       await clearIncompleteMaterialization(input.workspaceId, input.threadId, worktree);
     }
@@ -1044,29 +1195,40 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     try {
       let managedMaterialized = false;
       if (input.branchId && options.workingStates) {
-        const native = await options.workingStates.withBranchStore(
+        const fixed = await options.workingStates.withBranchStore(
           input.workspaceId,
           "thread-recorded-materialize",
           async (store) => {
-            if (!store.materializePinManaged) return null;
-            if (input.resultRevision !== undefined) return store.materializeResult(input.branchId!, input.resultRevision, worktree.path);
-            const pin = await store.pinBranch(input.branchId!, { signal: input.signal });
-            try {
-              return store.materializePinManaged(pin, worktree.path, `working-recorded-materialize:${randomUUID()}`, input.signal);
-            } finally {
-              await pin.release().catch(reportError);
-            }
+            if (!store.materializePinManaged || !store.pinBranchHandoff || !store.openBranchHandoffPin || !store.releaseBranchHandoffPin) return null;
+            const pin = await store.pinBranch(input.branchId!, {
+              ...(input.resultRevision === undefined ? {} : { revision: input.resultRevision }),
+              signal: input.signal,
+            });
+            return { store, pin };
           },
         );
-        if (native) {
-          if (native.cow) cowByThread.set(input.threadId, native.cow);
-          managedMaterialized = true;
-          worktree.materialized = true;
-          if (options.worktrees.attachIsolatedGitContext) {
-            const attached = await options.worktrees.attachIsolatedGitContext(input.sourceRoot, worktree, input.signal);
-            if (attached.executionBaseline) worktree.executionBaseline = attached.executionBaseline;
-            else delete worktree.executionBaseline;
+        if (fixed) {
+          const handoff = {
+            operationId: `working-recorded-materialize:${randomUUID()}`,
+            pinId: `working-recorded-materialize-pin:${randomUUID()}`,
+            revision: fixed.pin.revision,
+            writeRevision: fixed.pin.writeRevision,
+            root: fixed.pin.root,
+            view: fixed.pin.view,
+            nextPreparationStage: input.setupRequired ? "setup" as const : "ready" as const,
+            stage: "intent-persisted" as const,
+          };
+          worktree = { ...worktree, materializationHandoff: handoff, preparationStage: "materializing", materialized: false };
+          await persistWorktree(input.workspaceId, input.threadId, worktree);
+          try {
+            worktree = await resumeNativeMaterializationHandoff({
+              workspaceId: input.workspaceId, threadId: input.threadId, branchId: input.branchId,
+              sourceRoot: input.sourceRoot, worktree, signal: input.signal,
+            });
+          } finally {
+            await fixed.pin.release().catch(reportError);
           }
+          managedMaterialized = true;
         }
       }
       if (!managedMaterialized) {
@@ -3830,7 +3992,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   /**
-   * D-242: remove every Pi session a Thread owned — live or ended. Each run's
+   * D-242: remove every Pi session a Thread owned —live or ended. Each run's
    * sessionId and the report's transcript session go through the runtime
    * broker, which settles the worker, deletes the session file, and clears
    * metadata. The durable deletion marker survives the broker's archive-by-
@@ -3863,8 +4025,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   };
 
   /**
-   * D-242: release the Thread's persisted working-state objects — every result
-   * revision, the work branch head, and the dispatch-time draft baseline — then
+   * D-242: release the Thread's persisted working-state objects —every result
+   * revision, the work branch head, and the dispatch-time draft baseline —then
    * collect objects that lost their last reference.
    */
   const releaseThreadStore = async (workspaceId: string, thread: Thread): Promise<void> => {
@@ -3872,6 +4034,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const draftBaselineId = thread.manifest.draftBaselineId ?? null;
     if (options.workingStates) {
       await options.workingStates.withBranchStore(workspaceId, "thread-delete", async (store) => {
+        if (branchId && thread.worktree?.materializationHandoff?.pinId) {
+          await store.releaseBranchHandoffPin?.(branchId, thread.worktree.materializationHandoff.pinId);
+        }
         if (branchId) {
           await store.deleteBranch(branchId);
         }
@@ -3879,7 +4044,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         try {
           await store.collectUnreachableObjects();
         } catch (error) {
-          // Metadata is the logical authority — rows are gone; unreachable-object
+          // Metadata is the logical authority —rows are gone; unreachable-object
           // collection is opportunistic and retryable by the next cleanup pass.
           reportError(error);
         }
@@ -3889,7 +4054,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   /**
    * D-242: delete the Thread's managed directory. The ownership assertion and
-   * the user/writer guard still apply — a live writer blocks deletion rather
+   * the user/writer guard still apply —a live writer blocks deletion rather
    * than losing its directory under a removed record. keep_worktree does not
    * apply to deletion: the Thread record is being removed, so a kept directory
    * would become an untracked allocation.
@@ -3932,7 +4097,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string,
   ): Promise<DeletionNodeResult> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
-    // Already removed — idempotent retry continues from observed facts (D-242 rework).
+    // Already removed —idempotent retry continues from observed facts (D-242 rework).
     if (!thread) return { threadId, status: "complete" };
     const deletion = thread.deletion;
     if (!deletion) {
@@ -3952,7 +4117,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // about to release; the Run still settles as cancelled first.
       await stopRunForArchive(workspaceId, parent, threadId, { capturePartial: false, reason: "deleted by user" });
     }
-    // Phase 1: delete sessions. Idempotent — already-deleted sessions are
+    // Phase 1: delete sessions. Idempotent —already-deleted sessions are
     // observed as empty by the registry, and the broker/deleteKnowledgeSession
     // tolerate re-deletion (D-242 rework).
     if (deletion.phase === "sessions") {
@@ -3963,29 +4128,29 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         return fail("retryable", "sessions", error);
       }
     }
-    // Phase 2: release working-state objects. Idempotent — if the branch/draft
+    // Phase 2: release working-state objects. Idempotent —if the branch/draft
     // was already released, the store operations are no-ops on missing rows.
     if (deletion.phase === "sessions" || deletion.phase === "store") try {
       await options.releaseThreadEvidence?.(workspaceId, thread.id);
       await releaseThreadStore(workspaceId, thread);
       await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, "directory");
     } catch (error) {
-      // Sessions are gone but objects remain — logically deleted, object
+      // Sessions are gone but objects remain —logically deleted, object
       // cleanup is retryable (D-242 rework).
       return fail("objects-pending", "store", error);
     }
-    // Phase 3: delete the managed directory. Idempotent — if the directory was
+    // Phase 3: delete the managed directory. Idempotent —if the directory was
     // already removed, reclaim reports it and we continue.
     if (deletion.phase !== "registry") try {
       await deleteThreadDirectory(workspaceId, thread);
       await options.registry.setDeletionPhase(workspaceId, threadId, deletion.operationId, "registry");
     } catch (error) {
-      // Objects are released but the directory remains — retryable, but the
+      // Objects are released but the directory remains —retryable, but the
       // thread record is still intact for a retry (D-242 rework).
       return fail("retryable", "directory", error);
     }
     // Phase 4: remove the thread row from the catalog. This is the
-    // irreversible commit point — after this, the thread is logically gone.
+    // irreversible commit point —after this, the thread is logically gone.
     try {
       await options.registry.removeThread(workspaceId, parent, threadId);
     } catch (error) {
@@ -4668,6 +4833,27 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       }
       livePath = worktree.path;
       const sourceRoot = await options.resolveWorkspaceRoot(latest.workspaceId);
+      const settings = await resolveEffectiveWorktreeSettings(latest.workspaceId, thread.parent);
+      if (worktree.materializationHandoff) {
+        const recovered = worktree.materializationHandoff;
+        worktree = await resumeNativeMaterializationHandoff({
+          workspaceId: latest.workspaceId, threadId: latest.threadId, branchId: latest.branchId,
+          sourceRoot, worktree, signal: switchSignal,
+        });
+        if (worktree.preparationStage === "setup" && options.worktrees.runSetup && settings?.setup) {
+          await options.worktrees.runSetup(sourceRoot, worktree, settings, switchSignal);
+          worktree.preparationStage = "ready";
+          delete worktree.retentionReason;
+          await persistWorktree(latest.workspaceId, latest.threadId, worktree);
+        }
+        if (worktree.preparationStage !== "ready") {
+          throw new Error(`Recovered materialization is not ready: ${worktree.preparationStage ?? "unknown"}`);
+        }
+        options.executionViews?.bind({
+          ...latest, revision: recovered.revision, writeRevision: recovered.writeRevision, mode: "materialized",
+        });
+        return { status: "materialized", path: worktree.path };
+      }
       if (worktree.materializationSwitch) {
         const recoveredJournal = worktree.materializationSwitch;
         worktree = await recoverPersistedSwitch({
@@ -4691,7 +4877,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         await removeOrphanMaterializationDirs(worktree, ownershipAssertion(worktree));
       }
       switchSignal.throwIfAborted();
-      const settings = await resolveEffectiveWorktreeSettings(latest.workspaceId, thread.parent);
       const fixedMaterialization = await options.workingStates.withBranchStore(
                 latest.workspaceId,
         "working-branch-materialize-estimate",
@@ -4745,16 +4930,42 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
       }
       if (!materializationStore || !materializationPin) throw new Error(`Working branch ${latest.branchId} is unavailable`);
+      const materializedRevision = materializationPin.revision;
+      const materializedWriteRevision = materializationPin.writeRevision;
       let legacyJournal: MaterializationSwitchJournal | undefined;
-      if (materializationStore.materializePinManaged) {
-        await ownershipAssertion(worktree)("materialize live worktree", [worktree.path]);
-        const materialized = await materializationStore.materializePinManaged(
-          materializationPin,
-          worktree.path,
-          `working-live-materialize:${randomUUID()}`,
-          switchSignal,
-        );
-        if (materialized.cow) cowByThread.set(latest.threadId, materialized.cow);
+      let nextWorktree: NonNullable<Thread["worktree"]>;
+      if (materializationStore.materializePinManaged
+        && materializationStore.pinBranchHandoff
+        && materializationStore.openBranchHandoffPin
+        && materializationStore.releaseBranchHandoffPin) {
+        const handoff = {
+          operationId: `working-live-materialize:${randomUUID()}`,
+          pinId: `working-live-materialize-pin:${randomUUID()}`,
+          revision: materializationPin.revision,
+          writeRevision: materializationPin.writeRevision,
+          root: materializationPin.root,
+          view: "current" as const,
+          nextPreparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+          stage: "intent-persisted" as const,
+        };
+        worktree = {
+          ...worktree,
+          materialized: false,
+          preparationStage: "materializing",
+          materializationHandoff: handoff,
+        };
+        await persistWorktree(latest.workspaceId, latest.threadId, worktree);
+        // Keep the estimation pin until the durable handoff has been opened or
+        // created inside resume; the outer finally releases the estimation pin.
+        nextWorktree = await resumeNativeMaterializationHandoff({
+          workspaceId: latest.workspaceId,
+          threadId: latest.threadId,
+          branchId: latest.branchId,
+          sourceRoot,
+          worktree,
+          signal: switchSignal,
+        });
+        worktree = nextWorktree;
       } else {
         const token = randomUUID();
         const journal: MaterializationSwitchJournal = {
@@ -4790,32 +5001,28 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         journal.stage = "staging-promoted";
         await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
         switchSignal.throwIfAborted();
+        let executionBaseline = worktree.executionBaseline;
+        if (options.worktrees.attachIsolatedGitContext) {
+          const attached = await options.worktrees.attachIsolatedGitContext(sourceRoot, worktree, switchSignal);
+          if (attached.executionBaseline) executionBaseline = attached.executionBaseline;
+        }
+        switchSignal.throwIfAborted();
+        nextWorktree = {
+          ...clearSwitchJournal(worktree),
+          viewMode: "materialized" as const,
+          materialized: true,
+          preparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
+          ...(executionBaseline ? { executionBaseline } : {}),
+        };
+        if (!executionBaseline) delete nextWorktree.executionBaseline;
+        delete nextWorktree.materializationFingerprint;
+        await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
+        activeJournal = undefined;
       }
-      let executionBaseline = worktree.executionBaseline;
-      if (options.worktrees.attachIsolatedGitContext) {
-        const attached = await options.worktrees.attachIsolatedGitContext(
-          sourceRoot,
-          worktree,
-          switchSignal,
-        );
-        if (attached.executionBaseline) executionBaseline = attached.executionBaseline;
-      }
-      switchSignal.throwIfAborted();
-      const nextWorktree = {
-        ...clearSwitchJournal(worktree),
-        viewMode: "materialized" as const,
-        materialized: true,
-        preparationStage: worktree.preparationStage === "setup" ? "setup" as const : "ready" as const,
-        ...(executionBaseline ? { executionBaseline } : {}),
-      };
-      if (!executionBaseline) delete nextWorktree.executionBaseline;
-      delete nextWorktree.materializationFingerprint;
-      await persistWorktree(latest.workspaceId, latest.threadId, nextWorktree);
-      activeJournal = undefined;
       options.executionViews?.bind({
         ...latest,
-        revision: materializationPin.revision,
-        writeRevision: materializationPin.writeRevision,
+        revision: materializedRevision,
+        writeRevision: materializedWriteRevision,
         mode: "materialized",
       });
       if (legacyJournal) {
