@@ -40,6 +40,9 @@ impl Storage {
     ) -> Result<Value, KernelError> {
         let storage = self;
         match method {
+            method if method.starts_with("process.") => {
+                storage.dispatch_process(method, authorized_params, authorized_grant)
+            }
             "storage.health" => storage.health(authorized_params),
             "storage.snapshot" => storage.snapshot(authorized_params),
             "storage.putBlob.begin" => {

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { createIsolatedTerminalSessionApi } from "./isolated-session-api.js";
+import { createIsolatedTerminalSessionApi } from "./isolated-session-api.test-helper.js";
 import type { TerminalCommandRecord } from "./session-api.js";
 
 const gitBashCandidates = [

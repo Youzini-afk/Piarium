@@ -1,7 +1,8 @@
 # Language services
 
-Application-host supervisor for language servers. Spawn, JSON-RPC, diagnostics, and feature
-requests stay in this module. Renderers never spawn language servers.
+Application-host supervisor for language servers. JSON-RPC, diagnostics, provider selection and
+feature requests stay here; production spawn and actual pipe/process-tree lifetime belong to the
+Rust kernel. Renderers never spawn language servers.
 
 ## Entrypoints
 
@@ -29,7 +30,7 @@ editor's live buffer and an agent turn's fixed text (D-087):
   `hostViewDocumentLimit`, releases after `hostViewIdleMs`, and never replays documents on restart.
 
 `inspectViews()` reports live processes, open documents, and idle time; `releaseIdleHostViews()` is the
-explicit release. Both views emit `view` on status and diagnostics events, and the renderer routes
+asynchronous release, completed only after actual process stop. Both views emit `view` on status and diagnostics events, and the renderer routes
 deliver only `surface`.
 
 ## Status
@@ -53,3 +54,11 @@ Production Web sets `isTrusted` to false. There is no HTTP route that registers 
 
 Application-host endpoint/workspace switch disposes sessions. Electron reuses this Web host.
 VS Code webviews report language services as `absent` and do not spawn.
+
+## Native owner lifetime
+
+Production receives `KernelProcessService.spawn` with no default Node fallback. Disable/restart,
+last-document close and idle release wait for pending startup and native close. Unconfirmed exits
+remain degraded/failed with the owner retained. Synchronous fake-child unit seams are explicit;
+real LSP initialization/completion/disposal is covered by the
+[native consumer tests](../kernel/process-consumers.test.ts). See [process ownership](../process/DOCUMENTATION.md).

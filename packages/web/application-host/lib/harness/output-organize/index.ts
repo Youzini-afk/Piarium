@@ -23,7 +23,7 @@ export function organizeShellOutput(input: {
   command: string;
   output: string;
   complete: boolean;
-  exitCode?: number;
+  exitCode?: number | null;
   budget?: number;
 }): OrganizedShellOutput {
   const normalized = normalizeShellText(input.output);

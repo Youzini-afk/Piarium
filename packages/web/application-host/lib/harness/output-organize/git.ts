@@ -16,7 +16,7 @@ const isDiffHeader = (line: string): boolean => (
   || line.startsWith("diff --git")
 );
 
-export function organizeGit(output: string, subcommand: string | undefined, budget: number, exitCode?: number): {
+export function organizeGit(output: string, subcommand: string | undefined, budget: number, exitCode?: number | null): {
   text: string;
   omitted: boolean;
   recognized: boolean;

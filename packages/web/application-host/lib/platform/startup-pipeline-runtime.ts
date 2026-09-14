@@ -87,6 +87,8 @@ export const createStartupPipelineRuntime = (dependencies: {
       isRequestOriginAllowed,
       rejectWebSocketUpgrade,
       TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS: terminalHeartbeatIntervalMs,
+      ...(options.loadPtyProvider ? { loadPtyProvider: options.loadPtyProvider } : {}),
+      ...(options.inspectNativeProcesses ? { inspectNativeProcesses: options.inspectNativeProcesses } : {}),
       ...(documents ? { documents } : {}),
     });
 

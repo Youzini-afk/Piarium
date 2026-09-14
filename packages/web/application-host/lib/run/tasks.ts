@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolveWorkspacePath } from '../workspace/path-safety.js';
-import type { ChildProcess } from 'node:child_process';
+import type { ManagedProcessHandle } from "../process/types.js";
+import { launchOwnedProcess, terminateOwnedProcess, managedExitConfirmed } from "../process/types.js";
 import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
 import type {
   PiariumTaskConfiguration,
@@ -22,22 +23,6 @@ const workspaceIdOf = (value: unknown): string => {
   return '';
 };
 
-const waitForChildExit = (child: ChildProcess | null): Promise<void> => new Promise((resolve) => {
-  if (!child || child.exitCode !== null || child.signalCode) {
-    resolve();
-    return;
-  }
-  let settled = false;
-  const finish = () => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    resolve();
-  };
-  const timer = setTimeout(finish, 3000);
-  child.once('exit', finish);
-  child.once('close', finish);
-});
 
 const registerProcessWriter = async (
   documents: DocumentAuthority,
@@ -50,10 +35,8 @@ const registerProcessWriter = async (
 
 const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true): Promise<void> => {
   if (!writer) return;
-  if (mutated) {
-    try { await writer.markMutated(); } catch { /* authority may already be gone */ }
-  }
-  try { await writer.close(); } catch { /* authority may already be gone */ }
+  if (mutated) await writer.markMutated();
+  await writer.close();
 };
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -110,10 +93,14 @@ export const createWorkspaceTaskRunner = ({
 
   const releaseRecordWriter = async (record: TaskRunRecord, mutated = true): Promise<void> => {
     if (!record?.writer || record.writerReleased) return;
-    record.writerReleased = true;
+    if (record.writerRelease) return record.writerRelease;
     const writer = record.writer;
-    record.writer = null;
-    await releaseProcessWriter(writer, mutated);
+    const release = releaseProcessWriter(writer, mutated).then(() => {
+      record.writerReleased = true;
+      if (record.writer === writer) record.writer = null;
+    }).finally(() => { delete record.writerRelease; });
+    record.writerRelease = release;
+    return release;
   };
 
   const emit = (workspaceId: string, event: PiariumTaskEvent): void => {
@@ -135,30 +122,28 @@ export const createWorkspaceTaskRunner = ({
     return snapshot;
   };
 
-  const disposeRun = (record: TaskRunRecord | undefined, reason = 'Task stopped'): void => {
-    if (!record) return;
-    const child = record.child;
-    try {
-      child?.kill();
-    } catch {
-      // Process may already have exited.
-    }
-    if (child) {
-      const exited = waitForChildExit(child)
-        .then(() => releaseRecordWriter(record))
-        .finally(() => {
-          if (record.pendingTermination === exited) record.pendingTermination = null;
-          pendingExits.delete(exited);
-        });
-      pendingExits.add(exited);
-      record.pendingTermination = exited;
-    } else if (!record.pendingTermination) void releaseRecordWriter(record);
-    record.child = null;
-    if (record.status === 'running') {
-      record.status = 'stopped';
-      record.message = reason;
+  const disposeRun = (record: TaskRunRecord | undefined, reason = 'Task stopped'): Promise<void> => {
+    if (!record) return Promise.resolve();
+    if (record.pendingTermination) return record.pendingTermination;
+    record.message = reason + '; waiting for process exit';
+    emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+    const exited = terminateOwnedProcess(record)
+      .then(async () => {
+        await releaseRecordWriter(record);
+        record.status = 'stopped'; record.message = reason;
+        emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+      })
+      .finally(() => {
+        if (record.pendingTermination === exited) record.pendingTermination = null;
+        pendingExits.delete(exited);
+      });
+    void exited.catch((error: unknown) => {
+      record.status = 'failed'; record.message = error instanceof Error ? error.message : String(error);
       emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-    }
+    });
+    pendingExits.add(exited);
+    record.pendingTermination = exited;
+    return exited;
   };
 
   const list = async (request: unknown): Promise<PiariumTaskListResult> => {
@@ -289,7 +274,7 @@ export const createWorkspaceTaskRunner = ({
       pendingTermination: null,
     };
     runs.set(runId, record);
-    let child: ChildProcess | null = null;
+    let child: ManagedProcessHandle | null = null;
     try {
       record.writer = await acquireWriter(workspaceId, {
         kind: 'task',
@@ -297,14 +282,15 @@ export const createWorkspaceTaskRunner = ({
         generation: record.generation,
       });
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-      child = spawn(command, args, {
+      child = await launchOwnedProcess(record, (signal) => spawn(command, args, {
         cwd: workspace.root,
         env: { ...env },
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-      });
+        signal,
+      }));
     } catch (error) {
-      await releaseRecordWriter(record, Boolean(child));
+      if (managedExitConfirmed(record.child)) await releaseRecordWriter(record, Boolean(child));
       record.status = 'failed';
       record.message = error instanceof Error ? error.message : 'Failed to start task';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
@@ -327,14 +313,25 @@ export const createWorkspaceTaskRunner = ({
         text: chunk.toString('utf8'),
       });
     });
+    child.on("error", (error: Error) => {
+      if (record.child !== child) return;
+      record.status = "failed"; record.message = error.message;
+      emit(workspaceId, { kind: "status", snapshot: snapshotFor(record) });
+    });
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
     child.on('exit', (code) => {
       if (record.child !== child) return;
-      record.child = null;
-      record.exitCode = typeof code === 'number' ? code : 0;
+      if (!record.child || record.child.exitConfirmed || typeof record.child.exitCode === "number" || record.child.signalCode) record.child = null;
+      if (typeof code === 'number') record.exitCode = code;
+      else delete record.exitCode;
       record.status = code === 0 ? 'stopped' : 'failed';
       if (code !== 0) record.message = `Task exited with code ${code}`;
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
-      void releaseRecordWriter(record);
+      void releaseRecordWriter(record).catch((error: unknown) => {
+        record.status = 'failed'; record.message = error instanceof Error ? error.message : String(error);
+        emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+      });
     });
     return snapshotFor(record);
   };
@@ -367,14 +364,14 @@ export const createWorkspaceTaskRunner = ({
       const workspaceId = workspaceIdOf(request);
       for (const [runId, record] of runs) {
         if (record.workspaceId !== workspaceId) continue;
-        disposeRun(record, 'Workspace tasks disposed');
-        runs.delete(runId);
+        await disposeRun(record, 'Workspace tasks disposed');
+        if (runs.get(runId) === record) runs.delete(runId);
       }
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
     async dispose(): Promise<void> {
-      for (const record of runs.values()) disposeRun(record, 'Task runner disposed');
+      await Promise.all([...runs.values()].map((record) => disposeRun(record, 'Task runner disposed')));
       runs.clear();
       workspaceListeners.clear();
       await Promise.all([...pendingExits]);

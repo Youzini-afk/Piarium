@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessActorIdentity } from "@piarium/protocol";
 import { createShellExecService, createShellReadService, createShellWriteService } from "./harness-services.js";
 import type { HarnessServiceContext } from "./router.js";
-import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
+import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { discoverShells } from "./shell-discovery.js";
 import { createHarnessServiceHost } from "./service-host.js";
 import { createVerificationCoordinator } from "./verification-coordinator.js";
@@ -280,7 +280,7 @@ describe("production shell assembly", () => {
 
     let child: ResultVerificationBundle | null = null;
     const store = {
-      getResult: () => ({ branchId: "thread-1", resultRevision: 1, createdAt: new Date().toISOString() }),
+      getResult: () => ({ branchId: "thread-1", root: "tree-1", resultRevision: 1, createdAt: new Date().toISOString() }),
       resultTreeIdentity: () => "tree-1",
       putChildVerification: async (_threadId: string, bundle: ResultVerificationBundle) => { child = bundle; },
       getChildVerification: () => child,

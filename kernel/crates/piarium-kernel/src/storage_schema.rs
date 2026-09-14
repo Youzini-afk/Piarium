@@ -4,6 +4,8 @@
 //! validation and atomic initialization remain one reviewable responsibility.
 
 pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+     CREATE TABLE IF NOT EXISTS process_records (process_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, execution_workspace_id TEXT NOT NULL, grant_id TEXT NOT NULL, kernel_epoch TEXT NOT NULL, cwd TEXT NOT NULL, job_name TEXT NOT NULL, params_hash TEXT NOT NULL, status_json TEXT NOT NULL);
+     CREATE INDEX IF NOT EXISTS process_records_workspace ON process_records(workspace_id);
      CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, byte_length INTEGER NOT NULL);
      CREATE TABLE IF NOT EXISTS trie_nodes (hash TEXT PRIMARY KEY, children_json TEXT NOT NULL, state_json TEXT);
      CREATE TABLE IF NOT EXISTS branches (branch_id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, create_params_hash TEXT NOT NULL, base_root TEXT NOT NULL, head_root TEXT NOT NULL, head_revision INTEGER NOT NULL, write_revision INTEGER NOT NULL, parent_ref TEXT, draft_base_paths_json TEXT NOT NULL, capture_scopes_json TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -39,7 +41,7 @@ pub(crate) const CATALOG_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS metadata (ke
      CREATE INDEX IF NOT EXISTS domain_records_thread ON domain_records(workspace_id, thread_id, record_type);
      CREATE INDEX IF NOT EXISTS domain_record_refs_hash ON domain_record_refs(object_hash);";
 
-pub(crate) const CATALOG_USER_VERSION: i64 = 9;
+pub(crate) const CATALOG_USER_VERSION: i64 = 10;
 
 pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "blobs",
@@ -53,6 +55,7 @@ pub(crate) const REQUIRED_TABLES: &[&str] = &[
     "operations",
     "pending_gc_files",
     "pins",
+    "process_records",
     "recovery_changes",
     "recovery_checkpoints",
     "recovery_operation_files",
@@ -72,6 +75,7 @@ pub(crate) const REQUIRED_INDEXES: &[&str] = &[
     "object_owners_blob",
     "object_owners_workspace",
     "pins_root",
+    "process_records_workspace",
     "recovery_changes_checkpoint",
     "recovery_checkpoints_workspace",
     "recovery_operation_files_operation",
@@ -83,6 +87,20 @@ pub(crate) const REQUIRED_INDEXES: &[&str] = &[
 ];
 
 pub(crate) const REQUIRED_COLUMNS: &[(&str, &[&str])] = &[
+    (
+        "process_records",
+        &[
+            "process_id",
+            "workspace_id",
+            "execution_workspace_id",
+            "grant_id",
+            "kernel_epoch",
+            "cwd",
+            "job_name",
+            "params_hash",
+            "status_json",
+        ],
+    ),
     ("blobs", &["hash", "byte_length"]),
     (
         "branches",

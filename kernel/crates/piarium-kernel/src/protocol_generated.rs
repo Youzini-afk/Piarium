@@ -11,6 +11,73 @@ pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessSpawnParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) root_id: String,
+    pub(crate) cwd: String,
+    pub(crate) command: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: Vec<KernelProcessEnvironmentEntry>,
+    pub(crate) mode: String,
+    pub(crate) cols: Option<i64>,
+    pub(crate) rows: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessReadParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) cursor: i64,
+    pub(crate) max_bytes: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessWriteParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) sequence: i64,
+    pub(crate) bytes_base64: String,
+    pub(crate) eof: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessResizeParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) cols: i64,
+    pub(crate) rows: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessKillParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+    pub(crate) force: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessHandleParams {
+    pub(crate) workspace_id: String,
+    pub(crate) process_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessListParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) cursor: Option<i64>,
+    pub(crate) page_size: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelHandshakeParams {
     pub(crate) protocol_version: i64,
     pub(crate) build_version: String,
@@ -787,6 +854,13 @@ pub(crate) struct KernelGcParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelProcessEnvironmentEntry {
+    pub(crate) name: String,
+    pub(crate) value: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelFileLeaseResource {
     pub(crate) path: String,
     pub(crate) scope: String,
@@ -976,6 +1050,30 @@ pub(crate) struct KernelVerificationInputIdentity {
 
 pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> Result<(), String> {
     match method {
+        "process.spawn" => serde_json::from_value::<KernelProcessSpawnParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.read" => serde_json::from_value::<KernelProcessReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.write" => serde_json::from_value::<KernelProcessWriteParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.resize" => serde_json::from_value::<KernelProcessResizeParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.kill" => serde_json::from_value::<KernelProcessKillParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.inspect" => serde_json::from_value::<KernelProcessHandleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.list" => serde_json::from_value::<KernelProcessListParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "process.release" => serde_json::from_value::<KernelProcessHandleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "kernel.handshake" => serde_json::from_value::<KernelHandshakeParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

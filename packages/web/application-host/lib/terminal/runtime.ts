@@ -1,3 +1,4 @@
+import { ManagedProcessLaunchError, managedExitConfirmed } from "../process/types.js";
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
@@ -50,21 +51,25 @@ interface WriterState {
 
 interface PtyProcess {
   kill(signal?: NodeJS.Signals): void;
+  native?: boolean;
+  terminate?(force?: boolean): Promise<void>;
+  completion?: Promise<void>;
   onData(handler: (data: string) => void): { dispose?(): void };
-  onExit(handler: (event: { exitCode: number; signal: number }) => void): { dispose?(): void };
-  pid?: number;
+  onExit(handler: (event: { exitCode: number | null; signal: number }) => void): { dispose?(): void };
+  pid?: number | undefined;
   resize(cols: number, rows: number): void;
   write(data: string): void;
 }
 
 interface PtyProvider {
   backend: string;
-  spawn(executable: string, args: string[], options: Record<string, unknown>): PtyProcess;
+  spawn(executable: string, args: string[], options: Record<string, unknown>): PtyProcess | Promise<PtyProcess>;
 }
 
 type TerminalEvent =
   | { data: string; process: PtyProcess; type: 'output'; writerState: WriterState }
-  | { exitCode: number; process: PtyProcess; signal: number; type: 'exit'; writerState: WriterState };
+  | { error: Error; process: PtyProcess; type: 'unavailable'; writerState: WriterState }
+  | { exitCode: number | null; process: PtyProcess; signal: number; type: 'exit'; writerState: WriterState };
 
 interface TerminalSession {
   backend?: string;
@@ -77,8 +82,10 @@ interface TerminalSession {
   integrationGeneration: number;
   integrationParser: ReturnType<typeof createShellIntegrationParser>;
   eventQueue: TerminalEvent[];
+  failure: Error | null;
+  errorListeners: Set<(error: Error) => void>;
   exitCode: number | null;
-  exitListeners: Set<(event: { exitCode: number; signal: number }) => void>;
+  exitListeners: Set<(event: { exitCode: number | null; signal: number }) => void>;
   history: string;
   id: string;
   lastActivity: number;
@@ -95,7 +102,7 @@ interface TerminalSession {
   shell: TerminalShellPreference;
   signal: number | null;
   spawn?: TerminalSpawnSpec;
-  status: 'exited' | 'running';
+  status: 'exited' | 'running' | 'error';
   terminalBackground: string;
   terminalForeground: string;
   themeMode: 'dark' | 'light';
@@ -122,6 +129,7 @@ interface TerminalRuntimeDependencies {
   fs: typeof fsModule;
   isExecutable(path: string): boolean;
   isRequestOriginAllowed(req: IncomingMessage): Promise<boolean>;
+  inspectNativeProcesses?: (cwd: string) => Promise<import("../kernel/protocol.generated.js").KernelProcessSnapshot[]>;
   loadPtyProvider?: () => Promise<PtyProvider>;
   path: typeof pathModule;
   rejectWebSocketUpgrade(socket: Duplex, statusCode: number, message: string): void;
@@ -235,12 +243,13 @@ const trimHistory = (history: string): string => {
 export function createTerminalRuntime({
   app, server, fs, path, uiAuthController, buildAugmentedPath, searchPathFor, isExecutable,
   isRequestOriginAllowed, rejectWebSocketUpgrade, TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
-  loadPtyProvider, terminalTerminationGraceMs = TERMINATION_GRACE_MS,
+  loadPtyProvider, inspectNativeProcesses, terminalTerminationGraceMs = TERMINATION_GRACE_MS,
   terminalIdleTimeoutMs = IDLE_TIMEOUT_MS,
   terminalIdleSweepMs = 5 * 60 * 1000,
   documents,
 }: TerminalRuntimeDependencies) {
   const sessions = new Map<string, TerminalSession>();
+  let shuttingDown = false;
   const pendingSessionCreates = new Map<string, SessionCreationIdentity & {
     cwd: string;
     promise: Promise<TerminalSession>;
@@ -279,11 +288,7 @@ export function createTerminalRuntime({
   const getPtyProvider = async (): Promise<PtyProvider> => {
     if (!ptyProviderPromise) {
       ptyProviderPromise = loadPtyProvider ? loadPtyProvider() : (async () => {
-        if ('Bun' in globalThis) {
-          try { const pty = await import('bun-pty'); return { spawn: pty.spawn as PtyProvider['spawn'], backend: 'bun-pty' }; } catch { /* fall through */ }
-        }
-        const pty = await import('node-pty');
-        return { spawn: pty.spawn as PtyProvider['spawn'], backend: 'node-pty' };
+        throw new Error("Native kernel PTY provider is unavailable; no Host PTY fallback is installed");
       })();
     }
     return ptyProviderPromise;
@@ -304,7 +309,7 @@ export function createTerminalRuntime({
     stripAppImageArgv0Leak(env);
     const launch = resolveLinuxPtyLaunch(spawn.executable, spawn.args);
     const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
-    return { process: provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: 'auto' as TerminalShellPreference, loginShell: false };
+    return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: 'auto' as TerminalShellPreference, loginShell: false };
   };
 
   const spawnPty = async (input: StartSessionInput) => {
@@ -319,7 +324,7 @@ export function createTerminalRuntime({
       try {
         const env: NodeJS.ProcessEnv = { ...process.env, PATH: buildAugmentedPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', COLORFGBG: themeMode === 'light' ? '0;15' : '15;0' };
         // The daemon's IPC fd is closed inside the PTY. An explicit override is
-        // required because bun-pty also inherits Bun's native process environment.
+        // never forwarded into a native child as an inherited Node IPC channel.
         env.NODE_CHANNEL_FD = '';
         delete env.BASH_XTRACEFD; delete env.BASH_ENV; delete env.ENV; delete env.ELECTRON_RUN_AS_NODE;
         stripAppImageArgv0Leak(env);
@@ -329,8 +334,11 @@ export function createTerminalRuntime({
         if (integration) Object.assign(env, integration.env);
         const launch = resolveLinuxPtyLaunch(executable, integration?.args ?? args);
         const options = { name: 'xterm-256color', cwd, cols, rows, env, ...(process.platform === 'win32' ? { useConpty: true } : {}) };
-        return { process: provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
-      } catch (error) { lastError = error; }
+        return { process: await provider.spawn(launch.executable, launch.args, options), backend: provider.backend, shell: resolvedShell.id, loginShell };
+      } catch (error) {
+        if (error instanceof ManagedProcessLaunchError && (error.child.pid !== undefined || !managedExitConfirmed(error.child))) throw error;
+        lastError = error;
+      }
     }
     throw lastError ?? new Error('No executable shell found');
   };
@@ -338,7 +346,7 @@ export function createTerminalRuntime({
   const killProcess = (ptyProcess: PtyProcess | null, force = false): void => {
     if (!ptyProcess) return;
     const pid = ptyProcess.pid;
-    if (process.platform !== 'win32' && typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+    if (!ptyProcess.native && process.platform !== 'win32' && typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
       try { process.kill(-pid, force ? 'SIGKILL' : 'SIGTERM'); } catch { /* already gone */ }
     }
     try { ptyProcess.kill(force ? 'SIGKILL' : undefined); } catch { /* already gone */ }
@@ -346,6 +354,20 @@ export function createTerminalRuntime({
 
   const terminateProcess = (ptyProcess: PtyProcess | null, force = false, waitForExit = false): Promise<void> => {
     if (!ptyProcess) return Promise.resolve();
+    if (ptyProcess.terminate && ptyProcess.completion) {
+      const nativeTermination = (async () => {
+        await ptyProcess.terminate!(force);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          await Promise.race([ptyProcess.completion!, new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Native terminal exit is unconfirmed; directory writer is retained")), terminalTerminationGraceMs);
+          })]);
+        } finally { if (timer) clearTimeout(timer); }
+      })();
+      const tracked = nativeTermination.finally(() => pendingTerminations.delete(tracked));
+      pendingTerminations.add(tracked);
+      return tracked;
+    }
     if (force && !waitForExit) { killProcess(ptyProcess, true); return Promise.resolve(); }
     const completion = new Promise<void>((resolve, reject) => {
       let settled = false;
@@ -440,6 +462,13 @@ export function createTerminalRuntime({
               for (const listener of commandObservers) listener(record);
             }
           }
+        } else if (event.type === 'unavailable') {
+          session.status = 'error'; session.failure = event.error;
+          // No exit receipt: keep the process and writer, reject waiters and
+          // show an explicit error without manufacturing command completion.
+          publish(session, { ...snapshot(session), t: 'snapshot' });
+          publish(session, { t: 'error', code: 'PROCESS_UNAVAILABLE', message: event.error.message, fatal: false });
+          for (const listener of [...session.errorListeners]) listener(event.error);
         } else {
           session.status = 'exited';
           session.exitCode = Number.isInteger(event.exitCode) ? event.exitCode : null;
@@ -449,7 +478,7 @@ export function createTerminalRuntime({
           session.writerReleasePromise = releaseWriterState(event.writerState);
           void session.writerReleasePromise;
           publish(session, { t: 'exit', exitCode: session.exitCode, signal: session.signal });
-          const exitEvent = { exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 };
+          const exitEvent = { exitCode: session.exitCode, signal: session.signal ?? 0 };
           const listeners = [...session.exitListeners];
           session.exitListeners.clear();
           for (const listener of listeners) listener(exitEvent);
@@ -461,6 +490,10 @@ export function createTerminalRuntime({
   const wire = (session: TerminalSession, ptyProcess: PtyProcess, writerState: WriterState): void => {
     ptyProcess.onData((data) => { session.eventQueue.push({ type: 'output', process: ptyProcess, writerState, data }); drainEvents(session); });
     ptyProcess.onExit(({ exitCode, signal }) => { session.eventQueue.push({ type: 'exit', process: ptyProcess, writerState, exitCode, signal }); drainEvents(session); });
+    void ptyProcess.completion?.catch((cause: unknown) => {
+      const error = new Error('Native terminal state is unavailable; command outcome and process exit are unconfirmed', { cause });
+      session.eventQueue.push({ type: 'unavailable', process: ptyProcess, writerState, error }); drainEvents(session);
+    });
   };
 
   const resolveTerminalWorkingDirectory = async ({ cwd, workspacePath }: {
@@ -568,7 +601,7 @@ export function createTerminalRuntime({
     session.cwd = cwd; session.cols = cols; session.rows = rows; session.process = spawned.process;
     session.writerState = spawned.writerState; session.writerGeneration = spawned.generation;
     delete session.writerReleasePromise;
-    session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.exitCode = null; session.signal = null;
+    session.backend = spawned.backend; session.shell = spawned.shell; session.loginShell = spawned.loginShell; session.status = 'running'; session.failure = null; session.exitCode = null; session.signal = null;
     session.themeMode = themeMode === 'light' ? 'light' : 'dark';
     session.terminalBackground = typeof terminalBackground === 'string' ? terminalBackground : session.terminalBackground;
     session.terminalForeground = typeof terminalForeground === 'string' ? terminalForeground : session.terminalForeground;
@@ -600,6 +633,7 @@ export function createTerminalRuntime({
     value: unknown,
     options: { allowSpawn?: boolean; creationSource?: SessionCreationSource } = {},
   ): Promise<TerminalSession> => {
+    if (shuttingDown) throw new Error("Terminal runtime is shutting down");
     const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
     const { sessionId, cwd, workspacePath, cols = 80, rows = 24, themeMode, terminalBackground, terminalForeground, shell = 'auto', loginShell = false } = input;
     if (!validateSize(cols, 1000) || !validateSize(rows, 500)) throw new Error('Invalid terminal dimensions');
@@ -647,6 +681,7 @@ export function createTerminalRuntime({
       return session;
     }
     if (owner === 'user' && !existing && userSessionCount() >= MAX_SESSIONS) throw new Error('Maximum terminal sessions reached');
+    if (shuttingDown) throw new Error("Terminal runtime is shutting down");
     const creation = (async () => {
       const session: TerminalSession = {
         id,
@@ -663,6 +698,8 @@ export function createTerminalRuntime({
         eventQueue: [],
         draining: false,
         exitCode: null,
+        failure: null,
+        errorListeners: new Set(),
         exitListeners: new Set(),
         closing: false,
         lastActivity: Date.now(),
@@ -773,21 +810,31 @@ export function createTerminalRuntime({
     onExit(handler) {
       if (session.status === 'exited') {
         let active = true;
-        const event = { exitCode: session.exitCode ?? 0, signal: session.signal ?? 0 };
+        const event = { exitCode: session.exitCode, signal: session.signal ?? 0 };
         queueMicrotask(() => { if (active) handler(event); });
         return { dispose: () => { active = false; } };
       }
       session.exitListeners.add(handler);
       return { dispose: () => { session.exitListeners.delete(handler); } };
     },
+    onError(handler) {
+      session.errorListeners.add(handler);
+      let active = true;
+      if (session.failure) { const failure = session.failure; queueMicrotask(() => { if (active) handler(failure); }); }
+      return { dispose: () => { active = false; session.errorListeners.delete(handler); } };
+    },
     waitForExit() {
+      if (session.failure) return Promise.reject(session.failure);
       if (session.status === 'exited') {
         return Promise.resolve({ exitCode: session.exitCode, signal: session.signal });
       }
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const disposable = makeHandle(session).onExit((event) => {
-          disposable.dispose();
+          disposable.dispose(); errors?.dispose();
           resolve({ exitCode: event.exitCode, signal: event.signal });
+        });
+        const errors = makeHandle(session).onError?.((error) => {
+          disposable.dispose(); errors?.dispose(); reject(error);
         });
       });
     },
@@ -878,6 +925,14 @@ export function createTerminalRuntime({
     };
   };
 
+  app.get('/api/terminal/processes', async (req, res) => {
+    try {
+      if (!inspectNativeProcesses) { res.status(503).json({ error: 'Native process authority is unavailable' }); return; }
+      const cwd = typeof req.query.cwd === 'string' ? req.query.cwd : '';
+      if (!cwd || !path.isAbsolute(cwd)) { res.status(400).json({ error: 'An admitted absolute cwd is required' }); return; }
+      res.json({ processes: await inspectNativeProcesses(cwd) });
+    } catch (error) { res.status(400).json({ error: errorMessage(error, 'Native process inspection failed') }); }
+  });
   app.get('/api/terminal/shells', async (_req: Request, res: Response) => {
     try {
       const shells = await shellResolver.list();
@@ -1028,27 +1083,31 @@ export function createTerminalRuntime({
   }, terminalIdleSweepMs);
 
   const shutdown = async (): Promise<void> => {
+    shuttingDown = true;
     server.off('upgrade', upgradeHandler); clearInterval(idleSweep);
+    await Promise.allSettled([...pendingSessionCreates.values()].map((pending) => pending.promise));
     await Promise.allSettled([...pendingSessionRestarts.values()]);
-    const terminations: Promise<void>[] = [];
-    for (const session of sessions.values()) {
-      const processToTerminate = session.process;
-      const writerState = session.writerState;
-      session.process = null;
-      session.writerState = null;
-      terminations.push(terminateProcess(processToTerminate, true).then(() => releaseWriterState(writerState)));
+    const terminations = [...sessions.values()].map(async (session) => {
+      // Keep the live event wiring until an actual native tree receipt arrives.
+      // Failed termination retains the session for diagnosis and a later retry.
+      await terminateProcess(session.process, true);
+      await releaseWriterState(session.writerState);
+      if (session.writerReleasePromise) await session.writerReleasePromise;
+      if (sessions.get(session.id) === session) sessions.delete(session.id);
+    });
+    const results = await Promise.allSettled(terminations);
+    if (wsServer) {
+      for (const client of wsServer.clients) client.terminate();
+      await Promise.race([
+        new Promise<void>((resolve) => wsServer?.close(() => resolve())),
+        new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+      ]);
+      wsServer = null;
     }
-    sessions.clear();
-    await Promise.allSettled(terminations);
-    await Promise.allSettled([...pendingTerminations]);
-    if (!wsServer) return;
-    for (const client of wsServer.clients) client.terminate();
-    await Promise.race([
-      new Promise<void>((resolve) => wsServer?.close(() => resolve())),
-      new Promise<void>((resolve) => setTimeout(resolve, 1000)),
-    ]);
-    wsServer = null;
+    const failures = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+    if (failures.length) throw new AggregateError(failures, 'Terminal process exit or writer release remains unconfirmed');
   };
+
   const subscribeCommands = (handler: (event: TerminalCommandRecord) => void): { dispose(): void } => {
     commandObservers.add(handler);
     return { dispose: () => { commandObservers.delete(handler); } };

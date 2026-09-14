@@ -40,6 +40,8 @@ run(process.execPath, ['--import', 'tsx', '--test',
 ]);
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run',
   'packages/web/application-host/lib/kernel/file-resource-audit.test.ts',
+  'packages/web/application-host/lib/kernel/kernel-process.test.ts',
+  'packages/web/application-host/lib/kernel/process-consumers.test.ts',
   'packages/web/application-host/lib/kernel/storage-adapter.test.ts',
   'packages/web/application-host/lib/recovery/kernel-durable-engine.test.ts',
 ]);

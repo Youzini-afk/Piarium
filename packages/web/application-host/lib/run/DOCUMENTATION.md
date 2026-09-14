@@ -1,13 +1,13 @@
 # Run, debug, and test
 
 Application-host supervisors for workspace tasks, DAP adapters, and test providers.
-Spawn, JSON-RPC, process lifetime, and stdout stay in this module. Renderers never
-start a debugger, test runner, or task process.
+JSON-RPC and product lifecycle stay in this module. Production spawn, raw streams and actual
+process-tree lifetime come from the Rust kernel. Renderers never spawn these processes.
 
 ## Entrypoints
 
 - `runtime.ts`: `createRunRuntime({ documents, spawn, pathModule, env, isTrusted })`
-- `tasks.ts`: `piarium.tasks.tson` configurations; host-owned `node` scripts use `process.execPath`
+- `tasks.ts`: `piarium.tasks.json` configurations; host-owned `node` scripts use `process.execPath`
 - `debug-supervisor.ts`: DAP session per workspace, generation, breakpoints, watch
 - `test-supervisor.ts`: discovery/run tree; builtin Node test runner plus extension adapters
 - `routes.ts`: authenticated `/api/tasks/*`, `/api/debug/*`, `/api/tests/*` and SSE events
@@ -43,3 +43,11 @@ Credentials stay in headers. Payloads must not include file bodies.
 Application-host endpoint/workspace switch disposes owners. Electron reuses this Web host.
 VS Code webviews report run/debug/test as `absent`/`unsupported` and do not spawn.
 The official IDE Run view unsubscribes when hidden and does not keep refreshing.
+
+## Native lifetime handoff
+
+[Process owner helpers](../process/DOCUMENTATION.md) include pending launches in cancellation,
+replacement and disposal. Closing RPC is not process exit. Rejected native completion or denied
+termination preserves the owner/writer; markMutated/close failures are retryable. Builtin tests wait
+for native completion, not an exit-only Promise that could hang on kernel loss. Stream errors reject
+RPC rather than throw from event callbacks. Native consumer tests run in `bun run test:kernel`.

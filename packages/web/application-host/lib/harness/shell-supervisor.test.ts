@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { discoverShells } from "./shell-discovery.js";
-import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
+import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import {
   createShellSupervisor,
   selectInterpreter,

@@ -11,7 +11,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 
 ## Responsibility table
 
-| Resource | Current authority | Kernel boundary through R2 |
+| Resource | Current authority | Kernel boundary through R4 |
 | --- | --- | --- |
 | Thread/Run product catalog | TS `ThreadRegistry` | remains TS; kernel receives an actor/grant and operation IDs |
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
@@ -59,7 +59,7 @@ durable `baseStates/pathStates` payloads or a Host-side compatibility projection
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with
 `node scripts/generate-kernel-protocol.mjs --check`. Request, cancel, and ordered data frames have
-separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v9; startup validates
+separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v10; startup validates
 its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
 
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
@@ -148,3 +148,16 @@ Run `bun run test:kernel` from the repository root (or invoke its script by abso
 requires a release binary and runs Node-only transport tests separately from Vitest authority/adapter/recovery tests.
 CI uses `node scripts/test-kernel-authority.mjs --build` in the existing Linux/Windows jobs. Generic tests may skip
 native cases in an unbuilt checkout; the dedicated acceptance command cannot silently skip them.
+
+## Native process adapter
+
+`process-service.ts` exposes pipe streams and the sole production PTY provider over generated
+`process.*` DTOs. It holds grant/canonical-root context, not a second PID authority. Binary
+stdout/stderr, input sequence receipts and actual exit codes come from Rust. PTY display uses an
+incremental UTF-8 decoder. Close follows output drainage; failed native release retains the handle
+for retry rather than suppressing its actual exit/close events.
+
+Kernel transport loss invalidates live handles, rejects completion and keeps writer status unknown.
+Pending launches participate in shutdown; consumers drain while native grants remain valid.
+Startup errors carrying an owned child cannot trigger another interpreter as a fallback.
+See [process ownership](../process/DOCUMENTATION.md). Web/Electron use the same production injection.

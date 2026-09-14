@@ -1,6 +1,6 @@
 # Piarium native recovery journal
 
-Status: built-in kernel provider delivered; R1–R3 acceptance complete after D-279; R0 and R4–R6 retain their own remaining work.
+Status: built-in kernel provider delivered; R1–R4 accepted through D-280; R0 and R5–R6 retain separate work.
 
 Last updated: 2026-09-14
 
@@ -350,3 +350,10 @@ Evidence required by the accepted revisions:
   the heartbeat window and a live holder is not (R4);
 - retry after `stale-plan` produces a new plan revision (R5);
 - an object referenced only by the knowledge store survives cleanup and retention (R7).
+
+## Native process writers (D-280)
+
+R4 registers actual process-tree ownership with the same Rust file-resource boundary. Deleting or
+materializing an ancestor of a live/unknown cwd is denied. Process kill is only a request; exit
+receipts, not closed protocol sockets or missing Host handles, release that protection. Recovery
+and Registry retain their prior responsibilities. See [process ownership](../packages/web/application-host/lib/process/DOCUMENTATION.md).

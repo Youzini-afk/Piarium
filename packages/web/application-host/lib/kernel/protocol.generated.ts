@@ -7,6 +7,14 @@ export const KERNEL_PROTOCOL_VERSION = 1 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "piarium.kernel.v1" as const;
 
 export type KernelMethod =
+  | "process.spawn"
+  | "process.read"
+  | "process.write"
+  | "process.resize"
+  | "process.kill"
+  | "process.inspect"
+  | "process.list"
+  | "process.release"
   | "kernel.handshake"
   | "kernel.ping"
   | "kernel.shutdown"
@@ -87,6 +95,104 @@ export type KernelMethod =
   | "operation.get"
   | "operation.release"
   | "storage.gc";
+
+export interface KernelProcessEnvironmentEntry {
+  name: string;
+  value: string;
+}
+
+export interface KernelProcessSpawnParams {
+  workspaceId: string;
+  processId: string;
+  rootId: string;
+  cwd: string;
+  command: string;
+  args: string[];
+  env: KernelProcessEnvironmentEntry[];
+  mode: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface KernelProcessReadParams {
+  workspaceId: string;
+  processId: string;
+  cursor: number;
+  maxBytes?: number;
+}
+
+export interface KernelProcessWriteParams {
+  workspaceId: string;
+  processId: string;
+  sequence: number;
+  bytesBase64: string;
+  eof?: boolean;
+}
+
+export interface KernelProcessResizeParams {
+  workspaceId: string;
+  processId: string;
+  cols: number;
+  rows: number;
+}
+
+export interface KernelProcessKillParams {
+  workspaceId: string;
+  processId: string;
+  force?: boolean;
+}
+
+export interface KernelProcessHandleParams {
+  workspaceId: string;
+  processId: string;
+}
+
+export interface KernelProcessListParams {
+  workspaceId: string;
+  rootId: string;
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelProcessListResult {
+  processes: KernelProcessSnapshot[];
+  nextCursor: number | null;
+}
+
+export interface KernelProcessSnapshot {
+  processId: string;
+  kernelEpoch: string;
+  workspaceId: string;
+  cwd: string;
+  mode: string;
+  status: "starting" | "running" | "exited" | "failed" | "unknown" | "released";
+  pid: number | null;
+  exitCode: number | null;
+  signal: string | null;
+  reason: string | null;
+  writerActive: boolean;
+  outputAvailable: boolean;
+}
+
+export interface KernelProcessOutputChunk {
+  channel: "stdout" | "stderr";
+  offset: number;
+  bytesBase64: string;
+}
+
+export interface KernelProcessReadResult {
+  process: KernelProcessSnapshot;
+  chunks: KernelProcessOutputChunk[];
+  nextCursor: number;
+  endCursor: number;
+  inputSequence: number;
+  inputError: string | null;
+}
+
+export interface KernelProcessWriteResult {
+  sequence: number;
+  queued: boolean;
+}
 
 export interface KernelEmptyParams {
 
@@ -991,6 +1097,14 @@ export interface KernelHealthResult {
 }
 
 export type KernelMethodParams = {
+  "process.spawn": KernelProcessSpawnParams;
+  "process.read": KernelProcessReadParams;
+  "process.write": KernelProcessWriteParams;
+  "process.resize": KernelProcessResizeParams;
+  "process.kill": KernelProcessKillParams;
+  "process.inspect": KernelProcessHandleParams;
+  "process.list": KernelProcessListParams;
+  "process.release": KernelProcessHandleParams;
   "kernel.handshake": KernelHandshakeParams;
   "kernel.ping": KernelEmptyParams;
   "kernel.shutdown": KernelEmptyParams;
@@ -1074,6 +1188,78 @@ export type KernelMethodParams = {
 };
 
 export type KernelRequest =
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.spawn";
+      params: KernelProcessSpawnParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.read";
+      params: KernelProcessReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.write";
+      params: KernelProcessWriteParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.resize";
+      params: KernelProcessResizeParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.kill";
+      params: KernelProcessKillParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.inspect";
+      params: KernelProcessHandleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.list";
+      params: KernelProcessListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "process.release";
+      params: KernelProcessHandleParams;
+      epoch?: string;
+      grantId?: string;
+    }
   | {
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";

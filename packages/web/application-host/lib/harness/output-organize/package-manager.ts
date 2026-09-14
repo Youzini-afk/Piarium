@@ -69,21 +69,12 @@ const isFailureRelevantNoise = (line: string): boolean => {
   return NOISE_KEEP_KEYWORDS.test(trimmed);
 };
 
-/**
- * Whether a noise line is safe to fold: it must be noise AND not carry
- * failure-relevant content (D-241 rework). Unique warnings are kept — only
- * provably duplicate noise (repeated identical lines) is collapsed.
- */
-const isFoldableNoise = (line: string): boolean => (
-  isNoise(line) && !isFailureRelevantNoise(line)
-);
-
 const innerOrganizer = (
   kind: OrganizedCommandKind,
   subcommand: string | undefined,
   body: string,
   budget: number,
-  exitCode?: number,
+  exitCode?: number | null,
 ): { text: string; omitted: boolean; recognized: boolean } => {
   if (kind === "vitest") return organizeVitest(body, budget);
   if (kind === "tsc") return organizeTsc(body, budget, exitCode);
@@ -101,7 +92,7 @@ const sniffBody = (body: string): OrganizedCommandKind | undefined => {
 
 const unquote = (text: string): string => text.replace(/^["']+|["']+$/g, "").trim();
 
-export function organizePackageManager(output: string, budget: number, exitCode?: number): {
+export function organizePackageManager(output: string, budget: number, exitCode?: number | null): {
   text: string;
   omitted: boolean;
   recognized: boolean;

@@ -12,7 +12,7 @@ Build locally with:
 
 ```text
 cargo check --manifest-path kernel/Cargo.toml
-cargo build --manifest-path kernel/Cargo.toml --release --bin piarium-kernel
+bun run kernel:build
 ```
 
 Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
@@ -43,6 +43,27 @@ There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
 authority, storage adapter, and combined Recovery suites. `node scripts/test-kernel-authority.mjs --build` builds
 with the toolchain pinned in this workspace before acceptance; existing Linux/Windows CI jobs run it.
 
-The D-278 [audit](../docs/rust-kernel-audit.md) reopens R2/R3 completion claims. Physical leases, object ownership,
-operation replay and GC/pin lifetime have independent real-kernel regression cases. Safe preservation of pending
-state is not yet a complete Host-visible recovery or kernel/Git/Registry lifecycle handshake.
+The D-278 [audit](../docs/rust-kernel-audit.md) repairs retain independent native regression cases.
+D-279 subsequently closes its specific R2 pending-operation and R3 kernel/Git/Registry handoff gaps.
+Current milestone evidence is in [harness status](../docs/agent-harness-status.md).
+
+## R4 native process resources
+
+The format-v10 catalog adds process identities and outcomes to the same Storage. Scoped
+`process.spawn/inspect/list/read/write/resize/kill/release` operate on admitted roots/grants.
+A guardian is another invocation of this packaged executable, not another kernel/database or Node
+PTY shim. It owns a pipe or real PTY and reports a durable native tree-exit receipt.
+
+Raw channel-tagged output has a bounded 1 MiB per-process queue and at most 64 KiB read chunks.
+Slow readers apply backpressure. Input has sequence/content identity and acknowledgements;
+termination does not wait for output drainage. Release discards output but retains an identity
+tombstone to prevent replay. Listing is paged. Command/env plaintext is not in the process catalog.
+
+Windows uses named kill-on-close Jobs; Unix uses managed-session guardians, with Linux subreaper
+tracking for adopted descendants. Unproven epoch-loss exits remain unknown and protect directory
+reclamation. Storage retains its lock through process drainage. Guardian receipts precede terminal
+responses. No hostile OS-sandbox or physical power-cut claim follows from this implementation.
+
+Use `bun run kernel:build` to supply Application Host build identity and architecture. A plain
+Cargo build defaults to the crate identity and is not a production acceptance artifact. See
+[the Host consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).

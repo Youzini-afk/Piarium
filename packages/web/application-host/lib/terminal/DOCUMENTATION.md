@@ -2,7 +2,7 @@
 
 ## Ownership
 
-`runtime.js` owns terminal identity, PTY processes, status, ordered output, bounded scrollback, WebSocket attachments, and lifecycle routes. Programmatic `createTerminalSession` / `attachTerminalSession` / `inspectSession` are the same authority used by HTTP and WebSocket. Harness background shells create sessions with `owner: 'harness'` and `retainWhenDetached: true`; the runtime allocates their process-wide `sh_N` ids. HTTP create ignores client `owner` / `spawn` / retain flags and cannot reuse a programmatic Harness identity. Closing a retained session detaches viewers and leaves the process running. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
+`runtime.ts` owns terminal identity, status projections, ordered display, bounded scrollback, WebSocket attachments and lifecycle routes. Rust owns actual PTY/process trees, raw byte offsets, input receipts and writer lifetime; `KernelProcessService.ptyProvider` is the production backend. Programmatic `createTerminalSession` / `attachTerminalSession` / `inspectSession` are the same authority used by HTTP and WebSocket. Harness background shells create sessions with `owner: 'harness'` and `retainWhenDetached: true`; the runtime allocates their process-wide `sh_N` ids. HTTP create ignores client `owner` / `spawn` / retain flags and cannot reuse a programmatic Harness identity. Closing a retained session detaches viewers and leaves the process running. `shells.js` discovers executable shell families and resolves the persisted shell ID without accepting command strings or arguments. Clients own tab arrangement and choose stable terminal IDs. Electron uses this same runtime in-process; VS Code returns an explicit unsupported error.
 
 ## Protocol
 
@@ -30,7 +30,7 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - User sessions inject a Piarium-owned OSC 633 script for bash, PowerShell, and zsh. Command text, cwd, and exit codes come only from those sequences. A finished sequence without command text is dropped; PTY process exit is never turned into a command. Harness `spawn` sessions are not injected and their output is not parsed. `inspectSession.integration` is `ready` after the first observed sequence, otherwise `not-observed`. `subscribeCommands` is the Host observation API. PowerShell compares `LASTEXITCODE` with the command-start value; an unchanged nonzero value cannot be attributed to the new command and falls back to exit 1. zsh sources user startup files with the original `ZDOTDIR` semantics, then restores the Piarium injection directory; zsh is not claimed as live-tested here.
 - Exited sessions remain attachable until explicit close or idle cleanup.
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID.
-- Close uses SIGTERM with bounded SIGKILL escalation. Harness kill/close and explicit force-kill wait for a real PTY exit and process-writer release before evicting the session; failure leaves the same identity observable and retryable. Idle cleanup and runtime shutdown terminate process groups immediately where supported. Attached terminals are not considered idle.
+- Close uses SIGTERM with bounded SIGKILL escalation. Harness kill/close and explicit force-kill wait for a real PTY exit and process-writer release before evicting the session; failure leaves the same identity observable and retryable. Idle cleanup and shutdown request native tree termination; unconfirmed exits retain the same process/session and report failure. Attached terminals are not considered idle.
 
 ## Security And Relay
 
@@ -41,6 +41,15 @@ The WebSocket path must remain in both `isUrlAuthWebSocketPath` and relay `ALLOW
 Run:
 
 ```sh
-bun test packages/web/application-host/lib/terminal/runtime.test.js packages/web/application-host/lib/terminal/terminal-ws-protocol.test.js
-bun test packages/web/application-host/lib/ui-auth/ui-auth.test.js packages/web/application-host/lib/relay/cross-compat.test.js
+node node_modules/vitest/vitest.mjs run packages/web/application-host/lib/terminal/runtime.test.ts packages/web/application-host/lib/terminal/terminal-ws-protocol.test.ts
+bun run test:kernel
 ```
+
+## Authority loss
+
+Rejected native completion projects `status: error` / `PROCESS_UNAVAILABLE`, not `exit`.
+Programmatic `onError` / `waitForExit` report the same failure. Harness work fails explicitly while
+its command writer stays retained. Reconnect sees the error in the snapshot. Unknown exit codes
+never become zero; an uncertain launch never falls back to another interpreter. Shutdown stops new
+admissions, drains pending creates, retains failed owners and closes transports without clearing the
+session map before native receipts. See [process ownership](../process/DOCUMENTATION.md).

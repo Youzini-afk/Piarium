@@ -198,10 +198,12 @@ impl Storage {
             verified_objects: BTreeSet::new(),
             file_roots: HashMap::new(),
             file_leases: HashMap::new(),
+            processes: crate::process::ProcessManager::default(),
         };
         // A process may have exited after the SQLite commit and before the
         // object unlink. Retry durable cleanup on the next owner start; a
         // failure remains visible through health instead of being swallowed.
+        storage.refresh_process_records()?;
         storage.sweep_orphan_objects()?;
         storage.drain_gc_files()?;
         Ok(storage)

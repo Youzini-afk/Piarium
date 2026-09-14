@@ -37,11 +37,12 @@ mod gc;
 mod maintenance;
 mod objects;
 mod operations;
+mod process_resources;
 mod records;
 mod recovery;
 mod state_tree;
 
-fn sync_directory(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_directory(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         File::open(path)?.sync_all()
@@ -53,7 +54,7 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     }
 }
 
-fn durable_rename(source: &Path, target: &Path) -> io::Result<()> {
+pub(crate) fn durable_rename(source: &Path, target: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         fs::rename(source, target)
@@ -176,4 +177,13 @@ pub(crate) struct Storage {
     verified_objects: BTreeSet<String>,
     file_roots: HashMap<String, FileRoot>,
     file_leases: HashMap<String, FileLease>,
+    processes: crate::process::ProcessManager,
+}
+
+impl Drop for Storage {
+    fn drop(&mut self) {
+        // Keep the catalog and storage lock alive through process drainage.
+        // Field drop order alone would unlock before native children stop.
+        let _ = self.shutdown_processes();
+    }
 }

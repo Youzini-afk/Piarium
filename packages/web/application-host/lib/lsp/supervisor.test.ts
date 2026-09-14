@@ -361,7 +361,7 @@ describe('language supervisor', () => {
       expect(language.syncedContentRevision(harness.identity.workspaceId, 'typescript', 'c.ts')).toBe('disk-c.ts');
 
       clock += 501;
-      language.releaseIdleHostViews();
+      await language.releaseIdleHostViews();
       expect(language.inspectViews()).toEqual([]);
       expect(language.getStatus(harness.identity.workspaceId, 'typescript', 'agent').status).toBe('absent');
     } finally {

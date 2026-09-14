@@ -22,7 +22,7 @@ interface FakePtyProcess {
   kills: Array<NodeJS.Signals | string>;
   kill(signal?: NodeJS.Signals): void;
   onData(handler: (data: string) => void): { dispose: () => boolean };
-  onExit(handler: (event: { exitCode: number; signal: number }) => void): { dispose: () => boolean };
+  onExit(handler: (event: { exitCode: number | null; signal: number }) => void): { dispose: () => boolean };
   options: Record<string, unknown> & { cwd?: string; env: NodeJS.ProcessEnv };
   pid: number;
   resizes: Array<[number, number]>;
@@ -97,7 +97,7 @@ describe('terminal runtime', () => {
       backend: 'fake-pty',
       spawn: (shell: string, args: string[], options: Record<string, unknown> & { cwd?: string; env: NodeJS.ProcessEnv }) => {
         const dataHandlers = new Set<(data: string) => void>();
-        const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+        const exitHandlers = new Set<(event: { exitCode: number | null; signal: number }) => void>();
         const process = {
           pid: 123 + processes.length,
           shell,
@@ -111,7 +111,7 @@ describe('terminal runtime', () => {
           resize(cols: number, rows: number) { this.resizes.push([cols, rows]); },
           kill(signal?: NodeJS.Signals) { this.killed = true; this.kills.push(signal ?? 'SIGTERM'); },
           onData(handler: (data: string) => void) { dataHandlers.add(handler); return { dispose: () => dataHandlers.delete(handler) }; },
-          onExit(handler: (event: { exitCode: number; signal: number }) => void) { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
+          onExit(handler: (event: { exitCode: number | null; signal: number }) => void) { exitHandlers.add(handler); return { dispose: () => exitHandlers.delete(handler) }; },
           emitData(data: string) { for (const handler of dataHandlers) handler(data); },
           emitExit(exitCode = 0, signal = 0) { for (const handler of exitHandlers) handler({ exitCode, signal }); },
         } satisfies FakePtyProcess;
@@ -629,7 +629,7 @@ describe('terminal runtime', () => {
     try {
       const handle = await harness.runtime.createTerminalSession({ sessionId: 'term-reuse', cwd: '/repo' });
       requiredProcess(harness.processes, 0).emitExit(7, 0);
-      const calls: Array<{ exitCode: number; signal: number }> = [];
+      const calls: Array<{ exitCode: number | null; signal: number }> = [];
       const subscription = handle.onExit((event) => { calls.push(event); });
 
       await new Promise<void>((resolve) => queueMicrotask(resolve));
@@ -685,7 +685,7 @@ describe('terminal runtime', () => {
       backend: 'fake-pty',
       spawn: () => {
         const data = new Set<(value: string) => void>();
-        const exits = new Set<(event: { exitCode: number; signal: number }) => void>();
+        const exits = new Set<(event: { exitCode: number | null; signal: number }) => void>();
         const process = {
           pid: 99123,
           killed: false,
@@ -695,7 +695,7 @@ describe('terminal runtime', () => {
             for (const handler of exits) handler({ exitCode: 137, signal: 9 });
           },
           onData(handler: (value: string) => void) { data.add(handler); return { dispose: () => data.delete(handler) }; },
-          onExit(handler: (event: { exitCode: number; signal: number }) => void) { exits.add(handler); return { dispose: () => exits.delete(handler) }; },
+          onExit(handler: (event: { exitCode: number | null; signal: number }) => void) { exits.add(handler); return { dispose: () => exits.delete(handler) }; },
           emitData(value: string) { for (const handler of data) handler(value); },
           emitExit(exitCode: number) { for (const handler of exits) handler({ exitCode, signal: 0 }); },
         };

@@ -14,7 +14,7 @@ function isErrorStart(line: string): boolean {
     || TOP_ERROR.test(line);
 }
 
-export function organizeTsc(output: string, budget: number, exitCode?: number): { text: string; omitted: boolean; recognized: boolean } {
+export function organizeTsc(output: string, budget: number, exitCode?: number | null): { text: string; omitted: boolean; recognized: boolean } {
   const lines = output.split("\n");
   const errors: string[] = [];
   const summaries: string[] = [];

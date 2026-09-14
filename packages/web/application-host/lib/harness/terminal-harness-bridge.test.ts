@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.js";
+import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { createOutputStore } from "./output-store.js";
 import { createShellSupervisor, type PtyProcess, type PtyProvider } from "./shell-supervisor.js";
 

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
+import { terminateManagedProcess, type ManagedSpawn } from "../process/types.js";
 import type { HarnessWorktreeSettings, ThreadDiffStats, ThreadSpaceMeasurement, ThreadWorktree } from "@piarium/protocol";
 import type { WorktreeBootstrapState } from "../git/types.js";
 import { assertAbsolutePathInWorkspace } from "../workspace/path-safety.js";
@@ -39,8 +40,8 @@ export interface ThreadWorktreeRuntimeOptions {
   getWorktreeBootstrapStatus(directory: string): Promise<WorktreeBootstrapState>;
   gitBinary?: string;
   env?: NodeJS.ProcessEnv;
-  /** Test seam; production uses node:child_process spawn. */
-  spawnProcess?: typeof spawn;
+  /** Production injects the kernel process service; standalone tests may inject a local child. */
+  spawnProcess?: ManagedSpawn;
   fsPromises?: Pick<typeof fs.promises, "chmod" | "copyFile" | "lstat" | "mkdir" | "readdir" | "readFile" | "readlink" | "realpath" | "rename" | "rm" | "stat" | "symlink" | "unlink" | "writeFile">;
   pathModule?: typeof path;
   runGit?: (cwd: string, args: string[], input?: Buffer | string) => Promise<{ stdout: string; stderr: string; stdoutBuffer?: Buffer }>;
@@ -1414,34 +1415,30 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
   ): Promise<{ output: string }> => {
     if (!settings?.setup) return { output: "" };
     await assertOwnership(worktree, "run worktree setup");
-
-    const timeoutMs = settings?.setupTimeoutMs;
+    if (setupSignal?.aborted) throw asSetupFailure(abortError());
+    const timeoutMs = settings.setupTimeoutMs;
     const command = settings.setup;
+    let shell: string;
+    let args: string[];
+    if (options.interpreter && "command" in options.interpreter) {
+      shell = options.interpreter.command;
+      args = [...options.interpreter.args.filter((a) => a !== "-"), command];
+    } else {
+      const isWindows = process.platform === "win32";
+      shell = isWindows ? (process.env.ComSpec || "powershell.exe") : "/bin/sh";
+      args = isWindows
+        ? (shell.toLowerCase().endsWith("cmd.exe") ? ["/d", "/s", "/c", command] : ["-Command", command])
+        : ["-c", command];
+    }
+    const launchProcess: ManagedSpawn = options.spawnProcess ?? spawn;
+    const child = await Promise.resolve().then(() => launchProcess(shell, args, {
+      cwd: worktree.path,
+      env: { ...(options.env ?? process.env), ...(options.interpreter && "env" in options.interpreter ? options.interpreter.env : {}) },
+      windowsHide: true,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(setupSignal ? { signal: setupSignal } : {}),
+    })).catch((error: unknown) => { throw asSetupFailure(error instanceof Error ? error : new Error(String(error))); });
     return new Promise((resolve, reject) => {
-      if (setupSignal?.aborted) {
-        reject(asSetupFailure(abortError()));
-        return;
-      }
-
-      let shell: string;
-      let args: string[];
-      if (options.interpreter && "command" in options.interpreter) {
-        shell = options.interpreter.command;
-        args = [...options.interpreter.args.filter((a) => a !== "-"), command];
-      } else {
-        const isWindows = process.platform === "win32";
-        shell = isWindows ? (process.env.ComSpec || "powershell.exe") : "/bin/sh";
-        args = isWindows
-          ? (shell.toLowerCase().endsWith("cmd.exe") ? ["/d", "/s", "/c", command] : ["-Command", command])
-          : ["-c", command];
-      }
-
-      const child = (options.spawnProcess ?? spawn)(shell, args, {
-        cwd: worktree.path,
-        env: { ...(options.env ?? process.env), ...(options.interpreter && "env" in options.interpreter ? options.interpreter.env : {}) },
-        windowsHide: true,
-      });
-
       const chunks: Buffer[] = [];
       child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
       child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
@@ -1454,39 +1451,33 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
         if (timer) clearTimeout(timer);
         setupSignal?.removeEventListener("abort", onAbort);
         const output = Buffer.concat(chunks).toString("utf8");
-        if (failure) {
-          if (failure.output === undefined) failure.output = output;
-          reject(failure);
-        } else if (code === 0) {
-          resolve({ output });
-        } else {
-          reject(asSetupFailure(new Error(`Setup command failed with exit code ${code}:\n${output}`), output));
-        }
+        if (failure) { failure.output ??= output; reject(failure); }
+        else if (code === 0) resolve({ output });
+        else reject(asSetupFailure(new Error("Setup command failed with exit code " + code + ":\n" + output), output));
       };
       const requestTermination = (failure: SetupFailure): void => {
         requestedFailure ??= failure;
         if (timer) clearTimeout(timer);
-        // A termination request is not an exit receipt. The promise remains
-        // pending until `close`, so callers cannot reclaim this directory while
-        // the setup process may still hold it or continue writing it.
-        child.kill();
+        // Timeout requests termination. Only the native tree/close receipt
+        // permits normal completion; an authority loss is a retained failure.
+        void terminateManagedProcess(child, true).catch((error: unknown) => settle(asSetupFailure(new Error(
+          'Setup process stop is unconfirmed; its writer remains retained: ' + (error instanceof Error ? error.message : String(error)),
+        )), null));
       };
       const onAbort = (): void => requestTermination(asSetupFailure(abortError()));
       const timer = typeof timeoutMs === "number" && timeoutMs > 0 ? setTimeout(() => {
-        requestTermination(asSetupFailure(new Error(`Setup command timed out after ${timeoutMs}ms`)));
+        requestTermination(asSetupFailure(new Error("Setup command timed out after " + timeoutMs + "ms")));
       }, timeoutMs) : null;
       setupSignal?.addEventListener("abort", onAbort, { once: true });
-
       child.once("error", (err) => {
         spawnFailure = asSetupFailure(err);
-        // A failed spawn has no live child to wait for. For a started process,
-        // Node emits close after error/stream teardown and that is the exit fact.
         if (child.pid === undefined) settle(spawnFailure, null);
       });
-
-      child.once("close", (code) => {
-        settle(requestedFailure ?? spawnFailure, code);
-      });
+      child.once("close", (code) => settle(requestedFailure ?? spawnFailure, code));
+      void child.completion?.catch((error: unknown) => settle(asSetupFailure(new Error(
+        "Setup process exit is unconfirmed; native directory writer is retained: " + (error instanceof Error ? error.message : String(error)),
+      )), null));
+      if (setupSignal?.aborted) onAbort();
     });
   };
 

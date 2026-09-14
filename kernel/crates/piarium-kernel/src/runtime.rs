@@ -295,6 +295,9 @@ impl Kernel {
             )));
         }
         if method == "kernel.shutdown" {
+            if let Some(storage) = self.storage.as_mut() {
+                storage.shutdown_processes()?;
+            }
             return Ok(Some(response_ok(id, json!({"stopping": true}))));
         }
         let storage = self

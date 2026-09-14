@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; R1–R3 complete after D-279 closes the D-278 recovery/lifecycle gaps. R0 and R4–R6 retain their own scope.
+Status: Pi-native workbench/harness in production; R1–R4 complete through D-280; R0 and R5–R6 retain separate acceptance.
 
 Last updated: 2026-09-14
 
@@ -14,8 +14,7 @@ source fork remains read-only; all Piarium edits and history live in this reposi
 
 The accepted next architecture separates a Rust system kernel from the TypeScript product and Agent
 orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the target responsibilities;
-[agent-harness-plan.md](agent-harness-plan.md) stage R defines the complete transition. This decision
-does not claim a Rust runtime is already shipped; delivery remains in [agent-harness-status.md](agent-harness-status.md).
+[agent-harness-plan.md](agent-harness-plan.md) stage R defines the complete transition. The storage/file/materialization and native process boundaries are wired through R4; full release evidence remains in [agent-harness-status.md](agent-harness-status.md).
 
 Desktop was the first surface to ship, and Windows, Linux, and macOS packages are published from
 matching runners. The same process and protocol boundaries carry the remote host, browser client, and
@@ -1200,3 +1199,23 @@ CI now has an explicit native authority command; editing that workflow is not ev
 ## D-279 R2/R3 acceptance closure
 
 D-279 closes the two concrete acceptance gaps left by D-278 without adding another authority. Low-level file operations are now exposed through typed `file.operation.list/reconcile` state carrying operation identity, paths, disposition and reason; operations such as an unprovable directory rename remain retained/needs-attention rather than being forced to success. Native materialization persists a fixed source root/revision/writeRevision, kernel operationId and durable pin in the Thread Registry handoff, then advances explicit kernel-materialized and Git-attached receipts. Git attachment is idempotent for Piarium-owned baselines, the durable pin is released before the handoff intent is cleared, and a failed release leaves the receipt available for restart retry. Setup timeout/abort completes only after the spawned child actually closes. R2 and R3 are therefore Complete; R0 and R4–R6 remain independent.
+
+## D-280 native process authority
+
+The Host injects `KernelProcessService` into the same user/Harness terminal, Thread setup, LSP,
+DAP, task and test consumers. Rust owns actual PTYs, piped processes, tagged raw bytes, stdin
+receipts and process-tree writers. TypeScript owns OSC/terminal display, protocol clients and
+product startup/cancellation; no Node/Bun PTY provider or generic Node spawn is a production fallback.
+
+Format-v10 process records share the single Storage. A per-process guardian is the same packaged
+executable, has no database and sends durable native exit evidence. Jobs/sessions and Linux
+subreaper observation guard deletion/materialization until tree exit. Unknown outcomes survive as
+retained state; a PID is not an ownership transfer. Consuming/releasing output retains launch
+identity against replay. All producer disposal occurs while native grants remain valid.
+
+Kernel loss reaches the terminal as error, rejects pending shell/protocol requests and preserves
+unconfirmed writers. Async launch is included in stop/replacement, and failed writer close is not
+silently cleared. See [the consumer map](../packages/web/application-host/lib/process/DOCUMENTATION.md).
+Pi broker processes, short Git semantic commands and bootstrap/discovery adapters retain their
+existing ownership; unused native-addon distribution dependencies and full package/performance
+acceptance remain R6/R0 work, not a competing process backend.

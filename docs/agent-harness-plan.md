@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
@@ -699,10 +699,10 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
 | --- | --- | --- |
 | R0 | Partial：framed kernel、同源 DTO、代际与现有取消已接入；D-278 补 native CI 入口 | 继续按实际 process/package 边界验收；跨平台用 CI，当前可选 signing 不作为 kernel gate |
-| R1 | **Complete**：format v9、typed path state、AVL immutable root/trie、revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped identity、分页 root read、typed recovery 与 GC | Application Host 的 WorkingState、result/draft/verification/review/retrieval/history/materialize/delete 和 combined Recovery/Integration/agent-mutation 元数据均走 Rust root/path/domain/recovery API；TS 不再有生产 compatibility projection 或 SQLite recovery writer。旧实现仅保留为测试 helper。内置 Recovery 固定共用 kernel application-data root，`storageManagement:false`；可替换 provider 的位置管理仍是公开 v5 可选能力。落盘顺序、事务故障注入与重启对账构成 R1 durability evidence |
+| R1 | **Complete**：format v10（D-280 增 process records）、typed path state、AVL immutable root/trie、revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped identity、分页 root read、typed recovery 与 GC | Application Host 的 WorkingState、result/draft/verification/review/retrieval/history/materialize/delete 和 combined Recovery/Integration/agent-mutation 元数据均走 Rust root/path/domain/recovery API；TS 不再有生产 compatibility projection 或 SQLite recovery writer。旧实现仅保留为测试 helper。内置 Recovery 固定共用 kernel application-data root，`storageManagement:false`；可替换 provider 的位置管理仍是公开 v5 可选能力。落盘顺序、事务故障注入与重启对账构成 R1 durability evidence |
 | R2 | **Complete**：单一 Rust file authority + Host-visible pending-operation disposition | Registry 保持 buffer authority；low-level operationId/path/reason/disposition 可列举并可安全 reconcile，证据不足保留 needs-attention；不恢复 TS writer |
 | R3 | **Complete**：fixed baseline + kernel materialization + durable Host/Git/Registry handoff | native operationId/root/writeRevision、persistent handoff pin、Git executionBaseline、Registry/binding 使用同一可重入 intent/receipt；setup timeout/abort 等真实 child close 后才结束；旧 seam 仍仅为测试夹具 |
-| R4 | PTY/命令、外部语言/调试/任务进程和原始输出的统一资源后端 | 用户终端、bash/get_output/write/kill、LSP/DAP/任务/测试启动器；移除对同一进程的旧 provider/进程表 |
+| R4 | **Complete（D-280）**：统一 Rust PTY/pipe、process tree/raw output/writer authority | 用户终端、Harness shell、Thread setup、LSP/DAP、任务/测试均经实际 native backend；未确认退出/失联保留 writer，控制不依赖输出排空；Host 保留协议与启动取消编排。Pi broker 仍拥有 Pi worker；Git 短命令和 shell 发现留作领域适配，不另建通用进程 authority |
 | R5 | 固定视图文件检索、遍历/哈希、结构解析/切块的原生计算 | read/grep/find/ls/explore、目录/语义建设的文件与结构输入；移除被替代的扫描/解析实现和重复正文缓存 |
 | R6 | 完整生产与故障验收、性能定标、发行更新、遗留实现清理 | Desktop/Web/远程和既有 surface，实际 packaged binary；状态/模块文档指向唯一实现 |
 
@@ -781,6 +781,10 @@ stdin/resize、输出原字节/游标、自动后台、退出码、终止与 wri
 接管发生在实际进程生命周期边界，不把 PID 当可移交 PTY。Host 或 kernel 崩溃后，按平台进程证据处置遗留进程，
 不重放命令、不在未知状态回收目录；恢复新 epoch 后旧 handle 不复用。用户 shell hooks 与现有 OSC 命令事实不退化为猜测。
 验证本机真实 shell、UI attach/输入、后台自然退出、停止失败、Host/kernel 单独退出、LSP/DAP 流和已有任务消费者。
+
+D-280 已完成本节生产接管，消费者与 native failure evidence 见 [唯一状态记录](agent-harness-status.md) 及 [process ownership](../packages/web/application-host/lib/process/DOCUMENTATION.md)。kernel 使用同一 executable 的 guardian 隔离阻塞 I/O/进程树；guardian 不开 SQLite，唯一 Storage 保留 durable identity/tombstone。Window Job、Unix session（Linux subreaper）提供实际生命周期证据；未证明旧进程退出就保持 unknown。不存在 Node/Bun PTY 生产 fallback，也不把死亡会话重启成另一个 shell。进程作用域与 R2 file gate 共用物理目录边界。
+
+R4 不声称新增恶意代码 OS sandbox，也不要求用户本地其他平台/签名/物理断电。旧分发依赖与 rebuild probe 的移除、完整 packaged smoke、受控多进程性能仍按 R0/R6；已定义的短命 Git 语义命令和发现/bootstrap 探测不因此迁成第二套 Rust 调度器。
 
 ### R5. 文件与结构检索计算
 

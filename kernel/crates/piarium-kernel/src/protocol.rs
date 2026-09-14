@@ -20,17 +20,18 @@ pub(crate) const KERNEL_ARCH: &str = match option_env!("PIARIUM_KERNEL_ARCH") {
     Some(value) => value,
     None => "unknown-arch",
 };
-pub(crate) const STORAGE_FORMAT_VERSION: &str = "9";
+pub(crate) const STORAGE_FORMAT_VERSION: &str = "10";
 // Control frames are deliberately bounded. Content bytes travel through the
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
 pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
-pub(crate) const KERNEL_CAPABILITIES: [&str; 8] = [
+pub(crate) const KERNEL_CAPABILITIES: [&str; 9] = [
     "storage",
     "workingState",
     "recovery",
     "fileResources",
     "materialization",
+    "processResources",
     "branchCas",
     "pins",
     "gc",

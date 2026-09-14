@@ -1,0 +1,368 @@
+import { randomUUID } from "node:crypto";
+import { EventEmitter } from "node:events";
+import path from "node:path";
+import os from "node:os";
+import type { SpawnOptions } from "node:child_process";
+import { Readable, Writable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
+import { ManagedProcessLaunchError, type ManagedPipedProcessHandle } from "../process/types.js";
+import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
+import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
+
+export interface NativeProcessIdentity {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  canonicalRoot: string;
+}
+interface Options {
+  client: KernelClient;
+  resolveIdentity(cwd: string): Promise<NativeProcessIdentity>;
+  onError?: (error: Error) => void;
+}
+interface Address { workspaceId: string; processId: string }
+const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const asError = (value: unknown): Error => value instanceof Error ? value : new Error(String(value));
+const nativeSignal = (value: string | null): NodeJS.Signals | null => {
+  if (!value) return null;
+  const name = value.startsWith("SIG") ? value : "SIG" + value.toUpperCase();
+  return Object.hasOwn(os.constants.signals, name) ? name as NodeJS.Signals : null;
+};
+function validateSnapshot(value: KernelProcessSnapshot, address: Address, epoch: string): void {
+  if (value.processId !== address.processId || value.workspaceId !== address.workspaceId || value.kernelEpoch !== epoch
+      || !["starting", "running", "exited", "failed", "unknown", "released"].includes(value.status)
+      || typeof value.writerActive !== "boolean" || typeof value.outputAvailable !== "boolean"
+      || (value.exitCode !== null && !Number.isSafeInteger(value.exitCode))) {
+    throw new Error("Native process response identity or state is invalid");
+  }
+}
+
+/** One local stream projection of one kernel handle. It never owns an OS child. */
+export class KernelManagedProcess extends EventEmitter implements ManagedPipedProcessHandle {
+  readonly stdout: Readable;
+  readonly stderr: Readable;
+  readonly stdin: Writable;
+  readonly completion: Promise<void>;
+  private resolveCompletion!: () => void;
+  private rejectCompletion!: (error: Error) => void;
+  private current: KernelProcessSnapshot;
+  private cursor = 0;
+  private inputSequence = 0;
+  private acknowledgedInput = -1;
+  private inputError: string | null = null;
+  private lost: Error | null = null;
+  private polling = false;
+  private ready = false;
+  private readyResolve!: () => void;
+  private readyReject!: (error: Error) => void;
+  private readonly readyPromise: Promise<void>;
+  private finishing = false;
+  private releasePromise: Promise<void> | undefined;
+  private stopRequested = false;
+  private closed = false;
+  private ignoreOutput = false;
+  private readonly epoch: string;
+
+  constructor(private readonly scoped: KernelScopedClient, readonly address: Address, initial: KernelProcessSnapshot,
+    private readonly reportError: (error: Error) => void, private readonly released: () => void) {
+    super();
+    this.current = initial;
+    this.epoch = initial.kernelEpoch;
+    this.completion = new Promise<void>((resolve, reject) => { this.resolveCompletion = resolve; this.rejectCompletion = reject; });
+    this.readyPromise = new Promise<void>((resolve, reject) => { this.readyResolve = resolve; this.readyReject = reject; });
+    void this.completion.catch(() => undefined);
+    void this.readyPromise.catch(() => undefined);
+    this.stdout = new Readable({ read() {}, highWaterMark: 64 * 1024 });
+    this.stderr = new Readable({ read() {}, highWaterMark: 64 * 1024 });
+    this.stdin = new Writable({
+      write: (chunk: Buffer, _encoding, done) => { void this.writeBytes(Buffer.from(chunk), false).then(() => done(), (error: unknown) => done(asError(error))); },
+      final: (done) => { void this.writeBytes(Buffer.alloc(0), true).then(() => done(), (error: unknown) => done(asError(error))); },
+      highWaterMark: 64 * 1024,
+    });
+    // Consumers can observe errors, but a broken pipe must not crash the Host.
+    this.stdin.on("error", (error) => this.reportError(error));
+    this.stdout.on("error", (error) => this.reportError(error));
+    this.stderr.on("error", (error) => this.reportError(error));
+    this.on("error", (error: Error) => this.reportError(error));
+  }
+  get pid(): number | undefined { return this.current.pid ?? undefined; }
+  get exitCode(): number | null { return this.current.exitCode; }
+  get signalCode(): NodeJS.Signals | null { return nativeSignal(this.current.signal); }
+  get exitConfirmed(): boolean { return this.finishing && !this.current.writerActive; }
+  get killed(): boolean { return this.stopRequested; }
+  get snapshot(): KernelProcessSnapshot { return { ...this.current }; }
+
+  async start(): Promise<void> {
+    if (!this.polling) { this.polling = true; void this.poll(); }
+    return this.readyPromise;
+  }
+  invalidate(error: Error): void {
+    if (this.closed || this.lost || this.exitConfirmed) return;
+    this.lost = error;
+    this.current = { ...this.current, status: "unknown", writerActive: true, reason: "Native process connection was lost; exit is unconfirmed" };
+    this.readyReject(error);
+    this.rejectCompletion(error);
+    this.emit("error", error);
+    this.stdin.destroy(error);
+    this.stdout.destroy(error);
+    this.stderr.destroy(error);
+    // No exit/close event: only native tree evidence permits writer release.
+  }
+  private async poll(): Promise<void> {
+    try {
+      while (!this.closed && !this.lost) {
+        const result = await this.scoped.processRead({ ...this.address, cursor: this.cursor });
+        validateSnapshot(result.process, this.address, this.epoch);
+        this.current = result.process;
+        this.acknowledgedInput = result.inputSequence;
+        this.inputError = result.inputError;
+        if (!this.ready && this.current.pid !== null) {
+          this.ready = true;
+          this.readyResolve();
+          // Let a newly returned handle install its protocol/output listeners.
+          await pause(0);
+        }
+        if (!this.current.writerActive && !this.ready) {
+          const error = new Error(this.current.reason ?? "Native process failed to start");
+          this.readyReject(error);
+        }
+        const capacity = this.ignoreOutput || (this.stdout.readableLength < 128 * 1024 && this.stderr.readableLength < 128 * 1024);
+        if (capacity) {
+          for (const chunk of result.chunks) {
+            if (chunk.offset !== this.cursor || (chunk.channel !== "stdout" && chunk.channel !== "stderr")) throw new Error("Native output cursor or channel is invalid");
+            const bytes = Buffer.from(chunk.bytesBase64, "base64");
+            this.cursor += bytes.length;
+            if (!this.ignoreOutput) (chunk.channel === "stdout" ? this.stdout : this.stderr).push(bytes);
+          }
+          if (this.cursor !== result.nextCursor) throw new Error("Native process output cursor did not match its bytes");
+        }
+        if (!this.current.writerActive && this.cursor === result.endCursor) {
+          this.finishing = true;
+          this.stdout.push(null);
+          this.stderr.push(null);
+          this.emit("exit", this.exitCode, this.signalCode);
+          // Native exit and cleanup are distinct facts. A failed catalog release
+          // must neither lose the handle nor suppress close for real consumers.
+          await this.release().catch((error: unknown) => this.reportError(asError(error)));
+          this.closed = true;
+          this.emit("close", this.exitCode, this.signalCode);
+          this.resolveCompletion();
+          return;
+        }
+        if (this.current.status === "unknown") throw new Error(this.current.reason ?? "Native process exit remains unknown");
+        await pause(result.chunks.length > 0 && capacity ? 0 : 10);
+      }
+    } catch (error) {
+      if (this.exitConfirmed) { this.reportError(asError(error)); this.rejectCompletion(asError(error)); }
+      else this.invalidate(asError(error));
+    }
+  }
+  private async writeBytes(bytes: Buffer, eof: boolean): Promise<void> {
+    await this.readyPromise;
+    for (let offset = 0; offset < bytes.length || (eof && offset === 0); offset += 64 * 1024) {
+      if (this.lost) throw this.lost;
+      if (this.finishing || this.stopRequested) throw new Error("Native process input is closed");
+      const sequence = this.inputSequence;
+      const chunk = bytes.subarray(offset, offset + 64 * 1024);
+      await this.scoped.processWrite({ ...this.address, sequence, bytesBase64: chunk.toString("base64"), ...(eof ? { eof: true } : {}) });
+      this.inputSequence += 1;
+      while (this.acknowledgedInput < sequence) {
+        if (this.lost) throw this.lost;
+        if (this.finishing || this.closed) throw new Error("Native process exited before acknowledging stdin");
+        await pause(5);
+      }
+      if (this.inputError) throw new Error(this.inputError);
+      if (eof) break;
+    }
+  }
+  kill(signal?: NodeJS.Signals | number): boolean {
+    if (this.lost) { this.emit("error", this.lost); return false; }
+    if (this.exitConfirmed) return false;
+    void this.requestTermination(signal === "SIGKILL" || signal === 9).catch((error: unknown) => this.emit("error", asError(error)));
+    return true;
+  }
+  async requestTermination(force = false): Promise<void> {
+    if (this.lost) throw this.lost;
+    if (this.exitConfirmed) return;
+    await this.scoped.processKill({ ...this.address, force });
+    this.stopRequested = true;
+  }
+  async resize(cols: number, rows: number): Promise<void> {
+    if (this.lost) throw this.lost;
+    await this.scoped.processResize({ ...this.address, cols, rows });
+  }
+  async release(): Promise<void> {
+    if (!this.exitConfirmed) throw new Error("Native process exit is unconfirmed; handle is retained");
+    if (!this.releasePromise) {
+      this.releasePromise = this.scoped.processRelease(this.address).then(() => { this.released(); });
+      void this.releasePromise.catch(() => { this.releasePromise = undefined; });
+    }
+    await this.releasePromise;
+  }
+  discardOutput(): void {
+    this.ignoreOutput = true;
+    this.stdout.resume(); this.stderr.resume();
+  }
+}
+
+export function createKernelProcessService(options: Options) {
+  const handles = new Set<KernelManagedProcess>();
+  const launches = new Set<Promise<KernelManagedProcess>>();
+  const grants = new Map<string, Promise<{ grant: KernelGrantHandle; client: KernelScopedClient; rootId: string; identity: NativeProcessIdentity }>>();
+  let stopping = false;
+  const report = (error: Error): void => { try { options.onError?.(error); } catch { /* diagnostics are not process facts */ } };
+  const unsubscribe = options.client.subscribeExit((error) => {
+    stopping = true;
+    for (const handle of handles) handle.invalidate(error);
+  });
+  const context = async (cwd: string) => {
+    const identity = await options.resolveIdentity(cwd);
+    const key = JSON.stringify(identity);
+    let existing = grants.get(key);
+    if (!existing) {
+      existing = (async () => {
+        const grant = await options.client.issueGrant({
+          grantId: "process-host:" + randomUUID(),
+          owningWorkspace: identity.workspaceId, executionWorkspace: identity.executionWorkspaceId,
+          capabilities: ["storage.read", "storage.write", "process", "process.maintenance"], pathScopes: [""],
+        });
+        const client = options.client.scoped(grant);
+        const root = await client.fileRootRegister({ workspaceId: identity.workspaceId, executionWorkspaceId: identity.executionWorkspaceId, canonicalRoot: identity.canonicalRoot });
+        if (typeof root.rootId !== "string") throw new Error("Native process root registration returned no identity");
+        return { grant, client, rootId: root.rootId, identity };
+      })();
+      grants.set(key, existing);
+      void existing.catch(() => { grants.delete(key); });
+    }
+    return existing;
+  };
+  const launch = async (command: string, args: readonly string[], input: SpawnOptions, mode: "pipe" | "pty", cols = 80, rows = 24): Promise<KernelManagedProcess> => {
+    input.signal?.throwIfAborted();
+    if (stopping || !options.client.isReady) throw new Error("Native process authority is unavailable or stopping");
+    if (typeof input.cwd !== "string" || !path.isAbsolute(input.cwd)) throw new Error("Native process launch requires an admitted absolute cwd");
+    if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
+    const resolved = await context(input.cwd);
+    if (stopping) throw new Error("Native process authority is stopping");
+    const cwd = path.relative(resolved.identity.canonicalRoot, input.cwd).replaceAll("\\", "/");
+    if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");
+    input.signal?.throwIfAborted();
+    const params: KernelMethodParams["process.spawn"] = {
+      processId: "process:" + randomUUID(), workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId,
+      cwd, command, args: [...args], mode, cols, rows,
+      env: Object.entries(input.env ?? process.env).flatMap(([name, value]) => value === undefined || name === "NODE_CHANNEL_FD" ? [] : [{ name, value }]),
+    };
+    const initial = await resolved.client.processSpawn(params);
+    const epoch = options.client.kernelEpoch;
+    if (!epoch) throw new Error("Native process epoch was lost during startup");
+    validateSnapshot(initial, params, epoch);
+    const handle = new KernelManagedProcess(resolved.client, { workspaceId: params.workspaceId, processId: params.processId }, initial, report, () => { handles.delete(handle); });
+    handles.add(handle);
+    try {
+      await handle.start();
+      if (stopping || input.signal?.aborted) {
+        handle.discardOutput();
+        await handle.requestTermination(true);
+        await handle.completion;
+        input.signal?.throwIfAborted();
+        throw new Error('Native process launch was stopped before handoff');
+      }
+    } catch (error) {
+      throw new ManagedProcessLaunchError(handle, error);
+    }
+    const stdio = input.stdio;
+    if (stdio === "ignore") handle.discardOutput();
+    if (Array.isArray(stdio) && stdio[0] === "ignore") handle.stdin.end();
+    const onAbort = () => { handle.kill(); };
+    input.signal?.addEventListener("abort", onAbort, { once: true });
+    void handle.completion.finally(() => input.signal?.removeEventListener("abort", onAbort)).catch(() => undefined);
+    if (input.signal?.aborted) onAbort();
+    return handle;
+  };
+  const trackedLaunch: typeof launch = (...args) => {
+    const pending = launch(...args);
+    launches.add(pending);
+    void pending.finally(() => launches.delete(pending)).catch(() => undefined);
+    return pending;
+  };
+  return {
+    spawn: (command: string, args: readonly string[], input: SpawnOptions) => trackedLaunch(command, args, input, "pipe"),
+    ptyProvider: {
+      backend: "rust-kernel",
+      async spawn(command: string, args: string[], input: Record<string, unknown>) {
+        const child = await trackedLaunch(command, args, { cwd: String(input.cwd ?? ""), env: input.env as NodeJS.ProcessEnv }, "pty", Number(input.cols ?? 80), Number(input.rows ?? 24));
+        const decoder = new StringDecoder("utf8");
+        const events = new EventEmitter();
+        const pending: string[] = [];
+        let attached = false;
+        let exited: { exitCode: number | null; signal: number } | undefined;
+        child.stdout.on("data", (bytes: Buffer) => {
+          const data = decoder.write(bytes);
+          if (!data) return;
+          if (!attached) pending.push(data); else events.emit("data", data);
+        });
+        child.stderr.resume();
+        child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+          const remaining = decoder.end();
+          if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
+          exited = { exitCode: code, signal: signal ? os.constants.signals[signal] : 0 };
+          events.emit("exit", exited);
+        });
+        return {
+          native: true as const,
+          get pid() { return child.pid; },
+          kill: (signal?: NodeJS.Signals) => { child.kill(signal); },
+          terminate: (force = false) => child.requestTermination(force),
+          completion: child.completion,
+          resize: (cols: number, rows: number) => { void child.resize(cols, rows).catch(report); },
+          write: (data: string) => { child.stdin.write(data); },
+          onData(handler: (data: string) => void) {
+            events.on("data", handler);
+            attached = true;
+            for (const data of pending.splice(0)) handler(data);
+            return { dispose: () => { events.off("data", handler); } };
+          },
+          onExit(handler: (event: { exitCode: number | null; signal: number }) => void) {
+            events.on("exit", handler);
+            let active = true;
+            if (exited) queueMicrotask(() => { if (active) handler(exited!); });
+            return { dispose: () => { active = false; events.off("exit", handler); } };
+          },
+        };
+      },
+    },
+    async list(cwd: string): Promise<KernelProcessSnapshot[]> {
+      const resolved = await context(cwd);
+      const result: KernelProcessSnapshot[] = [];
+      let cursor = 0;
+      for (;;) {
+        const page = await resolved.client.processList({ workspaceId: resolved.identity.workspaceId, rootId: resolved.rootId, cursor });
+        result.push(...page.processes);
+        if (page.nextCursor === null) return result;
+        if (!Number.isSafeInteger(page.nextCursor) || page.nextCursor <= cursor) throw new Error('Invalid native process list continuation');
+        cursor = page.nextCursor;
+      }
+    },
+    async dispose(): Promise<void> {
+      if (stopping && !options.client.isReady) { unsubscribe(); return; }
+      stopping = true;
+      await Promise.allSettled([...launches]);
+      const active = [...handles];
+      for (const handle of active) handle.discardOutput();
+      const requests = await Promise.allSettled(active.map((handle) => handle.requestTermination(true)));
+      for (const request of requests) if (request.status === "rejected") report(asError(request.reason));
+      const refused = requests.find((result) => result.status === "rejected");
+      if (refused?.status === "rejected") throw asError(refused.reason);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const exits = await Promise.race([
+        Promise.allSettled(active.map((handle) => handle.completion)),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Native process exit is unconfirmed; writers remain retained")), 5000); }),
+      ]).finally(() => { if (timer) clearTimeout(timer); });
+      unsubscribe();
+      const failed = exits.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw asError(failed.reason);
+      await Promise.all(active.map((handle) => handle.release()));
+      await Promise.all([...grants.values()].map(async (pending) => options.client.revokeGrant((await pending).grant.grantId)));
+      grants.clear();
+    },
+  };
+}
+export type KernelProcessService = ReturnType<typeof createKernelProcessService>;

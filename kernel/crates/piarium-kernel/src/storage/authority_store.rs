@@ -186,7 +186,12 @@ impl Storage {
                 self.conn.execute_batch("COMMIT")?;
                 self.file_leases
                     .retain(|_, lease| lease.grant_id != grant_id);
-                Ok(json!({"grantId": grant_id, "revoked": true}))
+                let process_stop = self.revoke_processes_for_grant(grant_id).unwrap_or_else(|error| {
+                    json!({"pendingProcesses": [], "processStopFailures": [{"reason": error.to_string()}]})
+                });
+                Ok(json!({"grantId": grant_id, "revoked": true,
+                    "pendingProcesses": process_stop["pendingProcesses"],
+                    "processStopFailures": process_stop["processStopFailures"]}))
             }
             Err(error) => {
                 let _ = self.conn.execute_batch("ROLLBACK");

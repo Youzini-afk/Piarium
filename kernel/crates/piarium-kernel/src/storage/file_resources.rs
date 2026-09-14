@@ -1302,6 +1302,17 @@ impl Storage {
                     let backup_path = materialize_side_path(&params.path, &operation_id, "backup");
                     let stage = self.resolve_file_resource(root_id, &stage_path, grant, false)?;
                     let backup = self.resolve_file_resource(root_id, &backup_path, grant, false)?;
+                    if self
+                        .assert_process_directory_idle(&target.absolute)
+                        .is_err()
+                        || self.assert_process_directory_idle(&stage.absolute).is_err()
+                        || self
+                            .assert_process_directory_idle(&backup.absolute)
+                            .is_err()
+                    {
+                        unresolved += 1;
+                        continue;
+                    }
                     if self.directory_matches_root(root_id, &target, &params.source_root, grant)? {
                         Some((
                             json!({
@@ -2067,6 +2078,7 @@ impl Storage {
             self.finish_file_operation(&params.operation_id, &result)?;
             return Ok(result);
         }
+        self.assert_process_directory_idle(&resource.absolute)?;
         match fs::symlink_metadata(&resource.absolute) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                 if params.recursive {
@@ -2196,6 +2208,8 @@ impl Storage {
             "UPDATE operations SET result_json = ?2 WHERE operation_id = ?1",
             params![params.operation_id, serde_json::to_string(&envelope)?],
         )?;
+        self.assert_process_directory_idle(&source.absolute)?;
+        self.assert_process_directory_idle(&target.absolute)?;
         durable_rename(&source.absolute, &target.absolute)?;
         if let Some(parent) = source.absolute.parent() {
             sync_directory(parent)?;
@@ -2270,6 +2284,9 @@ impl Storage {
             return Ok(committed);
         }
 
+        self.assert_process_directory_idle(&target.absolute)?;
+        self.assert_process_directory_idle(&stage.absolute)?;
+        self.assert_process_directory_idle(&backup.absolute)?;
         if self.directory_matches_root(&params.root_id, &target, &params.source_root, grant)? {
             let result = json!({
                 "status": "materialized",

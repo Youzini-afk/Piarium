@@ -56,7 +56,7 @@ export interface ShellOutputOrganization {
 
 export interface ShellExecResultCompleted {
   kind: "completed";
-  exitCode: number;
+  exitCode: number | null;
   durationMs: number;
   cwd: string;
   stdout: string;

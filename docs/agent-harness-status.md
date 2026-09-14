@@ -18,9 +18,9 @@ Last updated: 2026-09-14
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-279 已关闭 D-278 重新打开的 R2/R3 验收缺口：R1、R2、R3 现均为 Complete。R2 的低层 pending file operation 已进入 Host 可列举/可解释/可重入的处置链；R3 的 kernel→Git→Thread Registry/execution view 已有持久 handoff intent/receipt 与 durable root pin，setup timeout/abort 也等待真实 child close。R0 仍为 Partial，R4–R6 未完成，因此阶段 R 整体仍未完成。**
+**D-280 完成 R4 原生进程接管：R1–R4 现按各自可执行契约为 Complete。PTY、command/process tree、原始输出与 writer 生命周期归唯一 Rust process authority；Host 保留终端和 LSP/DAP/任务/测试的产品协议。D-279 的 R2/R3 恢复/物化 handoff 保持。R0 仍为 Partial，R5/R6 未完成，阶段 R 整体仍未完成。**
 目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
-R0 的 process/package 验收与 R4–R6 仍需分别完成；不以 R1–R3 完成代替阶段 R 的其余工作。
+R0 的 process/package 验收与 R5/R6 仍需分别完成；不以 R1–R4 完成代替阶段 R 的其余工作。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -169,10 +169,10 @@ D-277 接入了 R3 filesystem capture、immutable-root materialization、目录�
 | 里程碑 | 当前交付事实 | 剩余工作与证据要求 |
 | --- | --- | --- |
 | R0 协议与进程 | Partial（implemented / wired） | 同源协议、framed 子进程、epoch/grant、现有取消和 Windows release 纵切已实现；D-278 将显式 native kernel 验收接入现有 Linux/Windows CI。饱和队列取消、断线与完整 packaged/任意 cwd 证据仍按 R0 验收。代码签名按当前产品合同可选，不作为阻塞项；修改 workflow 不等于远端 CI 已绿 |
-| R1 状态与存储 | **Complete**（production authority / consumer cutover / durability semantics） | 当前唯一 catalog 格式为 v9，握手报告同一版本。Rust 拥有 blob、AVL/Merkle root、branch metadata/revision/pin、result/draft/verification/review、retrieval records、typed recovery operation/file、reference 与 GC；生产 ThreadRuntime/Integration/verification/review/history/materialize/delete 使用 root/path/domain API，combined Recovery/Integration/agent-mutation 以 Rust 为唯一耐久元数据 writer。旧 WorkingState 与 SQLite recovery engine 仅是测试 helper，生产 import graph 不可达。内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，固定报告 `application-data` / `storageManagement:false`，不独立迁移；replacement provider 仍可实现公开 v5 的可选位置管理。跨平台 packaged smoke 属于 R0/发行 CI，代码签名按现有产品合同可选；物理断电 campaign 不作为 R1 实现完成门槛。D-278 已修复 GC 陈旧清理意图、pending operation/source-root 保留及 ephemeral query pin 跨 epoch 泄漏；核心单 writer 接管保持成立 |
+| R1 状态与存储 | **Complete**（production authority / consumer cutover / durability semantics） | 当前唯一 catalog 格式为 v10（D-280 新增 process records），握手报告同一版本。Rust 拥有 blob、AVL/Merkle root、branch metadata/revision/pin、result/draft/verification/review、retrieval records、typed recovery operation/file、reference 与 GC；生产 ThreadRuntime/Integration/verification/review/history/materialize/delete 使用 root/path/domain API，combined Recovery/Integration/agent-mutation 以 Rust 为唯一耐久元数据 writer。旧 WorkingState 与 SQLite recovery engine 仅是测试 helper，生产 import graph 不可达。内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，固定报告 `application-data` / `storageManagement:false`，不独立迁移；replacement provider 仍可实现公开 v5 的可选位置管理。跨平台 packaged smoke 属于 R0/发行 CI，代码签名按现有产品合同可选；物理断电 campaign 不作为 R1 实现完成门槛。D-278 已修复 GC 陈旧清理意图、pending operation/source-root 保留及 ephemeral query pin 跨 epoch 泄漏；核心单 writer 接管保持成立 |
 | R2 文件与恢复 | **Complete**（production authority / pending-operation disposition / restart reconciliation） | Documents/Files/Recovery/Integration 与 fs.lock 共用 Rust file authority；D-278 的物理互斥、coverage、owner、重试和真实 Documents 装配修复保持。D-279 新增 `file.operation.list/reconcile`：Host 注册 root 后保留 operationId/kind/path/disposition/reason，可显式重试可证明的安全对账；证据不足的目录 rename 保持 `needs-attention`/retained，不强制重放或猜成功。Registry 仍是 buffer 权威 |
 | R3 基线与物化 | **Complete**（fixed baseline / durable materialization handoff / managed lifecycle） | Rust scan/capture/materialize/measure/remove、Git execution metadata 与 writeback 已接入；D-278 的真实 owning/execution、managed-root admission、分页、未收集内容和 readonly 修复保持。D-279 将固定 source root/revision/writeRevision、kernel operationId、persistent handoff pin、Git executionBaseline receipt、Thread Registry 与 execution view 串成可重入 handoff；pin release 成功后才清 intent，失败保留 receipt 供重启重试。setup timeout/abort 只有收到 child `close` 才结束。Windows 只证明实际 copy；未测平台不虚报 CoW |
-| R4 进程与终端 | 未实现 | 同一真实 PTY/输出/writer 后端，终端及外部工具进程退出/故障证据 |
+| R4 进程与终端 | **Complete**（native process authority / production consumers / failure evidence，D-280） | format v10 增加同一 Storage 下的 process records；真实 PTY/pipe、原字节 cursor、stdin sequence/ack、process tree 与 writer 归 Rust。用户 terminal、Harness shell、Thread setup、LSP/DAP、任务、内置 Node 测试与测试 provider 均接同一后端；Host/kernel loss、kill refusal、权限撤销与未确认退出保留 handle/writer，不猜 code 0 或盲重放。Host 产品 startup owner 等异步 spawn/close，不是另一套 PID authority。现有 native CI 执行真实测试；本地只声明 Windows 验证，完整发行/旧分发依赖清理和性能对照仍归 R0/R6 |
 | R5 文件与结构计算 | 未实现 | 固定视图检索和结构输入、scope/取消、前台与后台负载；保留 TriviumDB/Pi 原归属 |
 | R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
 
@@ -245,6 +245,10 @@ bytes、catalog 文件和 WAL 文件大小，并暴露 operation/temporary owner
 节点数与单路径墙钟只保留为结构线索，不外推为磁盘字节、提速倍数、硬配额或跨平台结论。
 
 同一路径的 4096-entry 空 `baseRef` fork 返回相同 root，节点数 4101→4101；这是 root identity/SQLite 计数证据，不是把整树展开后再比较的 helper 统计。
+
+**D-280 R4 本机验收（2026-09-14）**：正确 app build identity 的 Windows release kernel 下，统一 `bun run test:kernel` **80 passed**：Node kernel-client 25、file audit 26、storage adapter 5、combined recovery 1、native process 16、真实消费者/身份 7。原生用例覆盖 binary pipes/stdout+stderr、输入去重、3 MiB 输出在 1 MiB 背压边界下完整读取、12 次连续 PTY/resize/final-output/exit、cwd/actor/lease/revoke、自然退出清子孙、kill refusal、kernel restart 不重放、真实 Host 进程退出和 terminal/shell loss 无假成功。消费者使用实际 LSP/DAP/Node-test/task 进程；Thread 目录在 Documents enrollment 前后分别保持合法 owning/execution 身份且拒绝未保留 sibling。Shell/Terminal/LSP/Run/Thread/verification/output focused **233 passed / 1 Windows symlink skip**；这些包含明确 unit seams，不冒充全部是 native 证明。
+
+另一次临时真实 `startWebUiServer` smoke 在显式授权的独立工作区，通过 HTTP terminal create → native process inspection → DELETE/confirmed close → awaited Host stop/fixture cleanup；关闭 Pi warmup，无付费模型、无完整 Electron/browser 或 remote release CI 声明。fixture 完成后显式退出 Node，不以该 smoke 证明所有 incidental timer 均自动清空。过程中的未授权目录请求正确返回 400，没有通过放宽权限修复夹具。
 
 ## 当前缺口与后续顺序
 

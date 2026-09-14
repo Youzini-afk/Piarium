@@ -23,6 +23,10 @@ import {
   type KernelRequest,
   type KernelResponse,
   type KernelWriteResult,
+  type KernelProcessSnapshot,
+  type KernelProcessListResult,
+  type KernelProcessReadResult,
+  type KernelProcessWriteResult,
 } from "./protocol.generated.js";
 
 export interface KernelClientOptions {
@@ -99,6 +103,38 @@ export class KernelScopedClient {
 
   constructor(private readonly owner: KernelClient, grant: KernelGrantHandle) {
     this.grant = owner.assertGrantForScope(grant);
+  }
+
+  processSpawn(params: KernelMethodParams["process.spawn"], signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.owner.processSpawn(params, this.grant, signal);
+  }
+
+  processRead(params: KernelMethodParams["process.read"], signal?: AbortSignal): Promise<KernelProcessReadResult> {
+    return this.owner.processRead(params, this.grant, signal);
+  }
+
+  processWrite(params: KernelMethodParams["process.write"], signal?: AbortSignal): Promise<KernelProcessWriteResult> {
+    return this.owner.processWrite(params, this.grant, signal);
+  }
+
+  processResize(params: KernelMethodParams["process.resize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.processResize(params, this.grant, signal);
+  }
+
+  processKill(params: KernelMethodParams["process.kill"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.processKill(params, this.grant, signal);
+  }
+
+  processInspect(params: KernelMethodParams["process.inspect"], signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.owner.processInspect(params, this.grant, signal);
+  }
+
+  processList(params: KernelMethodParams["process.list"], signal?: AbortSignal): Promise<KernelProcessListResult> {
+    return this.owner.processList(params, this.grant, signal);
+  }
+
+  processRelease(params: KernelMethodParams["process.release"], signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.owner.processRelease(params, this.grant, signal);
   }
 
   health(options: { deep?: boolean; signal?: AbortSignal | undefined } = {}): Promise<KernelHealthResult> {
@@ -439,6 +475,7 @@ export class KernelClient {
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
   private started = false;
+  private readonly exitListeners = new Set<(error: Error) => void>();
   private closed = false;
   private epoch: string | null = null;
   private readonly clientToken = Symbol("piarium-kernel-client");
@@ -452,6 +489,11 @@ export class KernelClient {
   }
 
   get isReady(): boolean { return this.started && !this.closed; }
+  subscribeExit(listener: (error: Error) => void): () => void {
+    this.exitListeners.add(listener);
+    return () => { this.exitListeners.delete(listener); };
+  }
+
   get kernelEpoch(): string | null { return this.epoch; }
   get handshake(): KernelHandshakeResult | null { return this.handshakeResult; }
 
@@ -635,6 +677,9 @@ export class KernelClient {
   private failAll(error: Error, terminate = false): void {
     for (const pending of this.pending.values()) pending.reject(error);
     this.pending.clear();
+    for (const listener of this.exitListeners) {
+      try { listener(error); } catch { /* A projection cannot prevent other handle invalidations. */ }
+    }
     this.started = false;
     this.epoch = null;
     this.managementGrant = null;
@@ -817,6 +862,38 @@ export class KernelClient {
 
   async fileMeasure(params: KernelMethodParams["file.measure"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant });
+  }
+
+  async processSpawn(params: KernelMethodParams["process.spawn"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.requestRaw<KernelProcessSnapshot>("process.spawn", params, { signal, grant });
+  }
+
+  async processRead(params: KernelMethodParams["process.read"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessReadResult> {
+    return this.requestRaw<KernelProcessReadResult>("process.read", params, { signal, grant });
+  }
+
+  async processWrite(params: KernelMethodParams["process.write"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessWriteResult> {
+    return this.requestRaw<KernelProcessWriteResult>("process.write", params, { signal, grant });
+  }
+
+  async processResize(params: KernelMethodParams["process.resize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("process.resize", params, { signal, grant });
+  }
+
+  async processKill(params: KernelMethodParams["process.kill"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("process.kill", params, { signal, grant });
+  }
+
+  async processInspect(params: KernelMethodParams["process.inspect"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.requestRaw<KernelProcessSnapshot>("process.inspect", params, { signal, grant });
+  }
+
+  async processList(params: KernelMethodParams["process.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessListResult> {
+    return this.requestRaw<KernelProcessListResult>("process.list", params, { signal, grant });
+  }
+
+  async processRelease(params: KernelMethodParams["process.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {
+    return this.requestRaw<KernelProcessSnapshot>("process.release", params, { signal, grant });
   }
 
   async fileMaterialize(params: KernelMethodParams["file.materialize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

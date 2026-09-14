@@ -6,7 +6,7 @@ export function presentOrganizedOutput(input: {
   command: string;
   output: string;
   complete: boolean;
-  exitCode?: number;
+  exitCode?: number | null;
   existingHandle?: string | null;
   store?: OutputStore;
   sessionId?: string;

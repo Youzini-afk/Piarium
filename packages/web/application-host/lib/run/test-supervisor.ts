@@ -3,7 +3,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createJsonRpcClient } from '../lsp/jsonrpc.js';
 import { walkWorkspaceTestFiles } from './walk.js';
-import type { ChildProcess } from 'node:child_process';
+import type { ManagedProcessHandle } from "../process/types.js";
+import { launchOwnedProcess, terminateOwnedProcess, managedExitConfirmed, waitForManagedExit, type ManagedProcessOwner } from "../process/types.js";
 import type { DocumentAuthority, MutationOwner } from '../documents/authority.js';
 import type {
   ExtensionRunOwner,
@@ -39,22 +40,6 @@ const exactOwnerKey = (owner?: ExtensionRunOwner) => owner
   ? `${ownerScopeKey(owner)}\0${owner.generation}`
   : 'piarium.host\0host';
 
-const waitForChildExit = (child: ChildProcess | null): Promise<void> => new Promise((resolve) => {
-  if (!child || child.exitCode !== null || child.signalCode) {
-    resolve();
-    return;
-  }
-  let settled = false;
-  const finish = () => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timer);
-    resolve();
-  };
-  const timer = setTimeout(finish, 3000);
-  child.once('exit', finish);
-  child.once('close', finish);
-});
 
 const registerProcessWriter = async (
   documents: DocumentAuthority,
@@ -67,10 +52,8 @@ const registerProcessWriter = async (
 
 const releaseProcessWriter = async (writer: ProcessWriter | null, mutated = true): Promise<void> => {
   if (!writer) return;
-  if (mutated) {
-    try { await writer.markMutated(); } catch { /* authority may already be gone */ }
-  }
-  try { await writer.close(); } catch { /* authority may already be gone */ }
+  if (mutated) await writer.markMutated();
+  await writer.close();
 };
 
 const parseTap = (text: string, resourceId: string): PiariumTestItem[] => {
@@ -121,6 +104,7 @@ export const createTestSupervisor = ({
   const pendingExits = new Set<Promise<void>>();
   const generations = new Map<string, number>();
   const discoveryGenerations = new Map<string, number>();
+  const discoveryProcesses = new Map<ManagedProcessOwner, { workspaceId: string; writer: ProcessWriter | null }>();
 
   const acquireWriter = (scopeId: string, owner: MutationOwner, purpose: string): Promise<ProcessWriter | null> => {
     return registerProcessWriter(documents, scopeId, owner, purpose);
@@ -128,10 +112,14 @@ export const createTestSupervisor = ({
 
   const releaseRecordWriter = async (record: TestRunRecord, mutated = true): Promise<void> => {
     if (!record?.writer || record.writerReleased) return;
-    record.writerReleased = true;
+    if (record.writerRelease) return record.writerRelease;
     const writer = record.writer;
-    record.writer = null;
-    await releaseProcessWriter(writer, mutated);
+    const release = releaseProcessWriter(writer, mutated).then(() => {
+      record.writerReleased = true;
+      if (record.writer === writer) record.writer = null;
+    }).finally(() => { delete record.writerRelease; });
+    record.writerRelease = release;
+    return release;
   };
 
   const nextGeneration = (workspaceId: string): number => {
@@ -174,35 +162,28 @@ export const createTestSupervisor = ({
     )) ?? providers.find((item) => !item.workspaceId || item.workspaceId === workspaceId) ?? null;
   };
 
-  const disposeChild = (record: TestRunRecord | null | undefined): void => {
-    if (!record) return;
+  const disposeChild = (record: TestRunRecord | null | undefined): Promise<void> => {
+    if (!record) return Promise.resolve();
     record.cancelled = true;
-    if (!record.child) {
-      if (!record.pendingTermination) void releaseRecordWriter(record);
-      return;
-    }
-    try {
-      record.rpc?.notify('cancel', {});
-    } catch {
-      // Provider may already have exited.
-    }
+    if (record.pendingTermination) return record.pendingTermination;
+    record.rpc?.rejectAll(new Error('Test process stopped'));
     record.rpc?.dispose();
     record.rpc = null;
-    const child = record.child;
-    try {
-      child.kill();
-    } catch {
-      // Process may already have exited.
-    }
-    const exited = waitForChildExit(child)
-      .then(() => releaseRecordWriter(record))
-      .finally(() => {
-        if (record.pendingTermination === exited) record.pendingTermination = null;
-        pendingExits.delete(exited);
-      });
+    const exited = terminateOwnedProcess(record).then(async () => {
+      await releaseRecordWriter(record);
+      if (record.status !== 'failed') record.status = 'stopped';
+      emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+    }).finally(() => {
+      if (record.pendingTermination === exited) record.pendingTermination = null;
+      pendingExits.delete(exited);
+    });
+    void exited.catch((error: unknown) => {
+      record.status = 'failed'; record.message = error instanceof Error ? error.message : String(error);
+      emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+    });
     pendingExits.add(exited);
     record.pendingTermination = exited;
-    record.child = null;
+    return exited;
   };
 
   const discoverBuiltin = async (workspace: InspectedRunWorkspace): Promise<PiariumTestItem[]> => {
@@ -222,13 +203,20 @@ export const createTestSupervisor = ({
     owner,
     purpose = 'test-provider-process',
     canSpawn = () => true,
+    lifecycle,
   }: {
+    lifecycle?: TestRunRecord;
     canSpawn?: () => boolean;
     owner: MutationOwner;
     purpose?: string;
   }): Promise<ProviderProcess> => {
+    const processOwner: ManagedProcessOwner = lifecycle ?? { child: null };
+    const discovery = { workspaceId: workspace.workspaceId, writer: null as ProcessWriter | null };
+    if (!lifecycle) discoveryProcesses.set(processOwner, discovery);
     let writer = await acquireWriter(workspace.workspaceId, owner, purpose);
-    let child: ChildProcess | null = null;
+    if (lifecycle) { lifecycle.writer = writer; lifecycle.writerReleased = false; }
+    else discovery.writer = writer;
+    let child: ManagedProcessHandle | null = null;
     let rpc: ReturnType<typeof createJsonRpcClient> | null = null;
     try {
       if (!canSpawn()) {
@@ -236,29 +224,23 @@ export const createTestSupervisor = ({
         writer = null;
         throw Object.assign(new Error('Test run was cancelled'), { code: 'cancelled' as const });
       }
-      child = spawn(provider.command, provider.args ?? [], {
+      child = await launchOwnedProcess(processOwner, (signal) => spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
         env: { ...env, ...provider.env },
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-      });
+        signal,
+      }));
+      if (!canSpawn()) throw new Error('Test provider startup was cancelled');
       if (!child.stdout || !child.stdin) {
         throw new Error('Test provider did not expose protocol streams');
       }
-      // A crashed provider closes the pipe; writing `initialized` (or a follow-up
-      // RPC frame) then emits uncaught `write EPIPE` and makes the suite exit 1
-      // while every assertion still passed (D-103 / D-133). Only a dead pipe is
-      // absorbed — any other stdio error is rethrown so it stays uncaught, since
-      // attaching a listener at all is what suppresses the default throw (D-139).
-      const ignoreClosedPipe = (stream: NodeJS.EventEmitter | null | undefined): void => {
-        stream?.on('error', (error: NodeJS.ErrnoException) => {
-          if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') return;
-          throw error;
-        });
-      };
-      ignoreClosedPipe(child.stdin);
-      ignoreClosedPipe(child.stdout);
-      ignoreClosedPipe(child.stderr);
+      // Stream failure rejects this protocol owner. It must never escape as an
+      // uncaught Host exception, nor be mistaken for a native exit receipt.
+      for (const stream of [child.stdin, child.stdout, child.stderr]) {
+        stream?.on('error', (error: Error) => { rpc?.rejectAll(error); });
+      }
+      child.on('error', (error: Error) => { rpc?.rejectAll(error); });
       rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
       const processChild = child;
       const processRpc = rpc;
@@ -278,12 +260,13 @@ export const createTestSupervisor = ({
         })(),
         exited,
       ]);
-      return { child: processChild, rpc: processRpc, writer };
+      if (!canSpawn()) throw new Error('Test provider startup was cancelled');
+      return { child: processChild, rpc: processRpc, writer, owner: processOwner };
     } catch (error) {
       rpc?.dispose();
-      try { child?.kill(); } catch { /* already gone */ }
-      await waitForChildExit(child);
-      await releaseProcessWriter(writer, Boolean(child));
+      await terminateOwnedProcess(processOwner);
+      if (lifecycle) await releaseRecordWriter(lifecycle, Boolean(child));
+      else { await releaseProcessWriter(writer, Boolean(child)); discoveryProcesses.delete(processOwner); }
       throw error;
     }
   };
@@ -336,6 +319,7 @@ export const createTestSupervisor = ({
           generation: discoveryGeneration,
         },
         purpose: 'test-provider-discovery',
+        canSpawn: () => discoveryGenerations.get(workspaceId) === discoveryGeneration && providers.includes(provider),
       });
     } catch (error) {
       return {
@@ -389,8 +373,9 @@ export const createTestSupervisor = ({
       } catch {
         // Ignore.
       }
-      await waitForChildExit(processPair.child);
+      await terminateOwnedProcess(processPair.owner);
       await releaseProcessWriter(processPair.writer);
+      discoveryProcesses.delete(processPair.owner);
     }
   };
 
@@ -412,24 +397,26 @@ export const createTestSupervisor = ({
       emitRunEvent(record, { kind: 'test', test: { ...item, status: 'running' } });
       const filePath = pathModule.join(workspace.root, resourceId);
       const chunks: string[] = [];
-      let child: ChildProcess | null = null;
+      let child: ManagedProcessHandle | null = null;
       let spawned = false;
       const writer = await acquireWriter(record.workspaceId, {
         kind: 'test',
         id: record.runId,
         generation: record.generation,
       }, 'test-process');
+      record.writer = writer; record.writerReleased = false;
       try {
         if (record.cancelled || sessions.get(record.workspaceId) !== record) {
-          await releaseProcessWriter(writer, false);
+          await releaseRecordWriter(record, false);
           return snapshotFor(record);
         }
-        child = spawn(execPath, ['--test', '--test-reporter=tap', filePath], {
+        child = await launchOwnedProcess(record, (signal) => spawn(execPath, ['--test', '--test-reporter=tap', filePath], {
           cwd: workspace.root,
           env: { ...env, NODE_OPTIONS: '' },
           windowsHide: true,
           stdio: ['ignore', 'pipe', 'pipe'],
-        });
+          signal,
+        }));
         spawned = true;
         record.child = child;
         const processChild = child;
@@ -440,10 +427,10 @@ export const createTestSupervisor = ({
         processChild.stderr?.on('data', (chunk) => {
           emitRunEvent(record, { kind: 'output', channel: 'test', text: chunk.toString('utf8') });
         });
-        const code = await new Promise<number>((resolve) => {
-          processChild.once('exit', (exitCode) => resolve(exitCode ?? 1));
-        });
-        record.child = null;
+        processChild.stdout?.setEncoding('utf8'); processChild.stderr?.setEncoding('utf8');
+        await waitForManagedExit(processChild);
+        const code = processChild.exitCode;
+        if (!record.child || record.child.exitConfirmed || typeof record.child.exitCode === "number" || record.child.signalCode) record.child = null;
         if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
         const parsed = parseTap(chunks.join(''), resourceId);
         if (parsed.length === 0) {
@@ -461,8 +448,10 @@ export const createTestSupervisor = ({
           }
         }
       } finally {
-        if (record.child === child) record.child = null;
-        await releaseProcessWriter(writer, spawned);
+        if (managedExitConfirmed(record.child)) {
+          if (record.child === child) record.child = null;
+          await releaseRecordWriter(record, spawned);
+        }
       }
     }
     if (record.cancelled || sessions.get(record.workspaceId) !== record) return snapshotFor(record);
@@ -484,6 +473,7 @@ export const createTestSupervisor = ({
         id: record.runId,
         generation: record.generation,
       },
+      lifecycle: record,
       purpose: 'test-provider-process',
       canSpawn: () => !record.cancelled && sessions.get(record.workspaceId) === record,
     });
@@ -498,9 +488,12 @@ export const createTestSupervisor = ({
     }
     processPair.child.on('exit', (code) => {
       if (record.child !== processPair.child) return;
-      record.child = null;
+      if (!record.child || record.child.exitConfirmed || typeof record.child.exitCode === "number" || record.child.signalCode) record.child = null;
       record.rpc = null;
-      void releaseRecordWriter(record);
+      void releaseRecordWriter(record).catch((error: unknown) => {
+        record.status = 'failed'; record.message = error instanceof Error ? error.message : String(error);
+        emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+      });
       if (record.status === 'running') {
         record.status = 'failed';
         record.message = `Test provider exited${code === null ? '' : ` with code ${code}`}`;
@@ -568,8 +561,8 @@ export const createTestSupervisor = ({
     }
     const existing = sessions.get(workspaceId);
     if (existing) {
-      disposeChild(existing);
-      sessions.delete(workspaceId);
+      await disposeChild(existing);
+      if (sessions.get(workspaceId) === existing) sessions.delete(workspaceId);
     }
     const record: TestRunRecord = {
       workspaceId,
@@ -634,8 +627,9 @@ export const createTestSupervisor = ({
       if (existing) {
         for (const [workspaceId, record] of sessions) {
           if (record.providerId !== existing.providerId) continue;
-          disposeChild(record);
-          sessions.delete(workspaceId);
+          void disposeChild(record).then(() => {
+            if (sessions.get(workspaceId) === record) sessions.delete(workspaceId);
+          }).catch(() => undefined);
           trees.delete(workspaceId);
         }
       }
@@ -649,8 +643,7 @@ export const createTestSupervisor = ({
       providers.splice(index, 1);
       for (const [workspaceId, record] of sessions) {
         if (record.providerId !== providerId) continue;
-        disposeChild(record);
-        record.status = 'stopped';
+        await disposeChild(record);
         record.message = 'Test provider disabled';
         emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
         sessions.delete(workspaceId);
@@ -666,8 +659,7 @@ export const createTestSupervisor = ({
       const record = sessions.get(workspaceId);
       if (!record) return { status: 'absent', workspaceId };
       disposeChild(record);
-      record.status = 'stopped';
-      record.message = 'Test run cancelled';
+      record.message = 'Test run cancelled; waiting for process exit';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       return snapshotFor(record);
     },
@@ -694,16 +686,22 @@ export const createTestSupervisor = ({
       const workspaceId = workspaceIdOf(request);
       const record = sessions.get(workspaceId);
       if (record) {
-        disposeChild(record);
-        sessions.delete(workspaceId);
+        await disposeChild(record);
+        if (sessions.get(workspaceId) === record) sessions.delete(workspaceId);
       }
-      trees.delete(workspaceId);
       discoveryGenerations.delete(workspaceId);
+      await Promise.all([...discoveryProcesses].filter(([, state]) => state.workspaceId === workspaceId).map(async ([owner, state]) => {
+        await terminateOwnedProcess(owner); await releaseProcessWriter(state.writer); discoveryProcesses.delete(owner);
+      }));
+      trees.delete(workspaceId);
       workspaceListeners.delete(workspaceId);
       await Promise.all([...pendingExits]);
     },
     async dispose(): Promise<void> {
-      for (const record of sessions.values()) disposeChild(record);
+      await Promise.all([...sessions.values()].map((record) => disposeChild(record)));
+      await Promise.all([...discoveryProcesses].map(async ([owner, state]) => {
+        await terminateOwnedProcess(owner); await releaseProcessWriter(state.writer); discoveryProcesses.delete(owner);
+      }));
       sessions.clear();
       providers.length = 0;
       trees.clear();

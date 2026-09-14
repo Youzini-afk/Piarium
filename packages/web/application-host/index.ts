@@ -18,6 +18,8 @@ import {
 } from '@piarium/extension-host';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
 import { createManagedRootAdmission } from './lib/kernel/managed-root-admission.js';
+import { createKernelProcessService } from './lib/kernel/process-service.js';
+import { createKernelProcessIdentityResolver } from './lib/kernel/process-identity.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
 import { toJsonValue } from './lib/extensions/json-value.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
@@ -1249,10 +1251,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   if (fencedRecoveryOperations.length > 0) await combinedRecoveryStartup;
   else void combinedRecoveryStartup;
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
+  const nativeProcesses = createKernelProcessService({
+    client: kernelClient,
+    // Registry/admission are initialized before the first product process is
+    // launched; keep that startup dependency explicit without creating a fake root.
+    resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
+      documents: documentsAuthority,
+      registry: threadRegistry,
+      admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
+    })(cwd),
+    onError: (error) => console.error("[PiariumProcess]", error.message),
+  });
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
     documents: documentsAuthority,
-    spawn,
+    spawn: nativeProcesses.spawn,
     pathModule: path,
     env: process.env,
     // Workspaces become executable only after their canonical root is an
@@ -1377,6 +1390,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     readSessionEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, 'all'),
   });
   const threadWorktreeRuntime = createThreadWorktreeRuntime({
+    spawnProcess: nativeProcesses.spawn,
     authorizeManagedRoot: async (candidate) => {
       const normalize = (value: string) => {
         const resolved = path.resolve(value).replace(/\\/g, '/');
@@ -2429,7 +2443,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   );
   const runRuntime = createRunRuntime({
     documents: documentsAuthority,
-    spawn,
+    spawn: nativeProcesses.spawn,
     pathModule: path,
     env: process.env,
     isTrusted: workspaceRootGuard,
@@ -2778,6 +2792,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isRequestOriginAllowed,
     rejectWebSocketUpgrade,
     terminalHeartbeatIntervalMs: TERMINAL_INPUT_WS_HEARTBEAT_INTERVAL_MS,
+    loadPtyProvider: async () => nativeProcesses.ptyProvider,
+    inspectNativeProcesses: (cwd) => nativeProcesses.list(cwd),
     staticRoutesRuntime,
     process,
     crypto,
@@ -2840,9 +2856,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminalCommandSubscription.dispose();
       for (const subscription of knowledgeLanguageSubscriptions.values()) subscription.close();
       knowledgeLanguageSubscriptions.clear();
-      await languageSupervisor.dispose();
-      await runRuntime.dispose();
-      await threadRuntime.dispose();
+      // Stop producers and drain their receipts while process grants are valid.
+      // One refused exit must not prevent the other domains from shutting down.
+      const processShutdown = await Promise.allSettled([
+        threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), runRuntime.dispose(),
+      ]);
+      const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+      await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
+      for (const error of processShutdownErrors) console.error('[PiariumKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();
       await recoveryTurnCoordinator.dispose();
       await piWriterTracker.dispose();
@@ -2872,7 +2893,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       clearInterval(relayReconcileTimer);
       relayService.stop();
       dictationRuntime?.stop?.();
-      return gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+      const stopped = await gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+      if (processShutdownErrors.length) throw new AggregateError(processShutdownErrors, 'Native process shutdown requires attention');
+      return stopped;
     },
   };
 }

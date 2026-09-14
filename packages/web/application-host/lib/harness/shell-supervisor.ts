@@ -123,7 +123,7 @@ function buildCommandWrapper(command: string, token: string, kind: ShellInterpre
 export interface PtyProcess {
   kill(signal?: NodeJS.Signals): void;
   onData(handler: (data: string) => void): { dispose?(): void };
-  onExit(handler: (event: { exitCode: number; signal: number }) => void): { dispose?(): void };
+  onExit(handler: (event: { exitCode: number | null; signal: number }) => void): { dispose?(): void };
   pid?: number;
   resize(cols: number, rows: number): void;
   write(data: string): void;
@@ -152,7 +152,7 @@ export function createTerminalSessionApiFromPtyProvider(ptyProvider: PtyProvider
         env: { ...globalThis.process.env, ...spawn.env },
       });
       const dataHandlers = new Set<(data: string) => void>();
-      const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
+      const exitHandlers = new Set<(event: { exitCode: number | null; signal: number }) => void>();
       let status: TerminalHandle["status"] = "running";
       let exitCode: number | null = null;
       let signal: number | null = null;
@@ -254,7 +254,7 @@ export interface ShellCommandStartedEvent {
 
 export interface ShellCommandCompletedEvent extends ShellCommandStartedEvent {
   endedAt: number;
-  exitCode: number;
+  exitCode: number | null;
   cancelled: boolean;
   outputHandle?: string;
   outputPreview?: string;
@@ -308,6 +308,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   let disposed = false;
   let sessionHandle: TerminalHandle | null = null;
   const liveHandles = new Set<TerminalHandle>();
+  const unavailableHandles = new Map<TerminalHandle, Error>();
   const handleBindings = new Map<TerminalHandle, Set<{ dispose?(): void }>>();
   const terminalApi: TerminalSessionApi | null = deps.createTerminalSession
     ? {
@@ -339,6 +340,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     commandRunId: string;
     command: string;
     resolve: (result: ShellExecResult) => void;
+    reject: (error: Error) => void;
     timeout: ReturnType<typeof setTimeout>;
     cwd: string;
     writer: ShellWriter | null;
@@ -404,7 +406,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return closing;
   };
 
-  const completeBackgroundCommand = (background: BackgroundShell, exitCode: number): Promise<void> => {
+  const completeBackgroundCommand = (background: BackgroundShell, exitCode: number | null): Promise<void> => {
     if (background.lifecycleCompleted) return background.lifecyclePromise ?? closeBackgroundWriter(background);
     background.lifecycleCompleted = true;
     background.exited = true;
@@ -554,7 +556,18 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       }
     }));
 
+    if (handle.onError) trackDisposable(handle, handle.onError((error) => {
+      unavailableHandles.set(handle, error);
+      if (isCurrentSession()) {
+        shellReady = false;
+        shellReadyReject?.(error);
+        if (pendingCommand) { clearTimeout(pendingCommand.timeout); pendingCommand.reject(error); }
+      }
+      // Keep handles and writers until a real exit, not merely a broken pipe.
+    }));
+
     trackDisposable(handle, handle.onExit((event) => {
+      unavailableHandles.delete(handle);
       const wasCurrent = isCurrentSession();
       const wasInitializing = wasCurrent && !shellReady;
       liveHandles.delete(handle);
@@ -599,6 +612,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const ensureShell = async (): Promise<void> => {
     if (disposed) throw new Error("Shell supervisor has been disposed");
+    if (sessionHandle && unavailableHandles.has(sessionHandle)) throw unavailableHandles.get(sessionHandle)!;
     if (shellReady && sessionHandle?.status === "running") return;
     if (sessionHandle?.status === "running") return shellReadyPromise ?? Promise.resolve();
 
@@ -702,7 +716,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }
   };
 
-  const completeCommand = (exitCode: number, cancelled: boolean, disposedResult = false): void => {
+  const completeCommand = (exitCode: number | null, cancelled: boolean, disposedResult = false): void => {
     if (!pendingCommand) return;
     clearTimeout(pendingCommand.timeout);
     const cmd = pendingCommand;
@@ -862,7 +876,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         };
       }
 
-      return new Promise<ShellExecResult>((resolvePromise) => {
+      return new Promise<ShellExecResult>((resolvePromise, rejectPromise) => {
         outputBuffer = "";
         const timeout = setTimeout(() => {
           const handle = sessionHandle;
@@ -920,6 +934,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           commandRunId,
           command,
           resolve: resolvePromise,
+          reject: rejectPromise,
           timeout,
           cwd,
           writer,
@@ -982,6 +997,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     // Check background shells
     const bg = backgroundShells.get(id);
     if (bg) {
+      if (unavailableHandles.has(bg.handle)) throw unavailableHandles.get(bg.handle)!;
       const slice = sliceUtf8ByBytes(stripControlSequences(bg.output), offset, length);
       return {
         ...slice,
@@ -1013,11 +1029,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const bg = backgroundShells.get(id);
     if (!bg) return false;
     if (bg.exited) {
-      try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
+      try { await completeBackgroundCommand(bg, bg.exitCode); } catch { return false; }
       return true;
     }
     if (bg.handle.status === "exited") {
-      try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
+      try { await completeBackgroundCommand(bg, bg.exitCode); } catch { return false; }
       return bg.exited;
     }
     bg.cancelRequested = true;
@@ -1029,8 +1045,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     } catch {
       return false;
     }
-    if (!bg.exited && bg.handle.status === "running") return false;
-    try { await completeBackgroundCommand(bg, bg.exitCode ?? 0); } catch { return false; }
+    if (!bg.exited && (bg.handle.status as TerminalHandle["status"]) !== "exited") return false;
+    try { await completeBackgroundCommand(bg, bg.exitCode); } catch { return false; }
     return bg.exited;
   };
 
@@ -1112,17 +1128,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const finalized = await finalizeStoppedResources();
       if (!finalized) throw new Error("Shell writers did not close after process exit");
 
-      // unref any lingering Socket handles from node-pty pipes
-      if (process.platform === "win32") {
-        try {
-          const handles = (process as unknown as { _getActiveHandles?: () => Array<{ unref?: () => void; constructor?: { name?: string } }> })._getActiveHandles?.() ?? [];
-          for (const h of handles) {
-            if (h?.constructor?.name === "Socket" && typeof h.unref === "function") {
-              h.unref();
-            }
-          }
-        } catch { /* _getActiveHandles not available */ }
-      }
+
     })();
     disposePromise = work.finally(() => {
       disposePromise = null;

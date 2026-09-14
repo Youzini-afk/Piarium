@@ -661,3 +661,13 @@ materialization persists a fixed root/revision/writeRevision plus operationId an
 then records kernel-materialized and Git-attached receipts. The pin is released before the Registry handoff is cleared;
 a release failure leaves the receipt available for restart retry. Setup timeout/abort waits for the actual child
 `close` event. R2/R3 are Complete; local platform machines and code signing remain outside those stage gates.
+
+## D-280 native command lifetime
+
+Harness shell and user terminals share the injected Rust PTY backend. The terminal runtime keeps
+OSC 633 command framing and display; Rust owns bytes, process tree and directory writer. Shell
+request/command errors caused by kernel loss never become exit code zero or a replacement shell.
+Incomplete stop keeps the command/writer retained and rejects callers. The old global Node socket
+unref workaround is removed. Thread setup also uses native pipes, awaits actual close and keeps
+unconfirmed native writers protected. Fixed-result verification accepts an unknown process exit
+without converting it to successful evidence. See [the process consumer map](../process/DOCUMENTATION.md).

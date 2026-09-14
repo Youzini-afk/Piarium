@@ -36,7 +36,7 @@ export interface VerificationCommandCompleted {
   cwd: string;
   startedAt: number;
   endedAt: number;
-  exitCode: number;
+  exitCode: number | null;
   cancelled: boolean;
   outputHandle?: string;
   outputPreview?: string;
@@ -75,7 +75,7 @@ interface PendingCommandObservation {
   cwd: string;
   startedAt: number;
   endedAt?: number;
-  exitCode?: number;
+  exitCode?: number | null;
   cancelled?: boolean;
   outputHandle?: string;
   outputPreview?: string;

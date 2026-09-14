@@ -1,4 +1,5 @@
-import type { ChildProcess, SpawnOptions } from 'node:child_process';
+import type { SpawnOptions } from "node:child_process";
+import type { ManagedProcessHandle, ManagedProcessOwner } from "../process/types.js";
 import type path from 'node:path';
 import type {
   PiariumBreakpoint,
@@ -45,7 +46,7 @@ export type {
   PiariumTestRunStatus,
 };
 
-export type RunSpawn = (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
+export type RunSpawn = (command: string, args: readonly string[], options: SpawnOptions) => ManagedProcessHandle | Promise<ManagedProcessHandle>;
 export type RunPathModule = typeof path;
 export type RunTrustCheck = (root: string) => boolean | Promise<boolean>;
 export type RunListener<Event> = (event: Event) => void;
@@ -104,10 +105,10 @@ export interface RegisteredDebugAdapter {
   workspaceId?: string;
 }
 
-export interface DebugSessionRecord {
+export interface DebugSessionRecord extends ManagedProcessOwner {
   adapterId: string;
   adapterOwnerKey: string;
-  child: ChildProcess | null;
+  child: ManagedProcessHandle | null;
   generation: number;
   message: string;
   pendingTermination: Promise<void> | null;
@@ -120,6 +121,7 @@ export interface DebugSessionRecord {
   workspaceId: string;
   writer: ProcessWriter | null;
   writerReleased: boolean;
+  writerRelease?: Promise<void>;
 }
 
 export interface DebugStartRequest {
@@ -167,9 +169,9 @@ export interface RegisteredTestProvider {
   workspaceId?: string;
 }
 
-export interface TestRunRecord {
+export interface TestRunRecord extends ManagedProcessOwner {
   cancelled: boolean;
-  child: ChildProcess | null;
+  child: ManagedProcessHandle | null;
   generation: number;
   message: string;
   pendingTermination: Promise<void> | null;
@@ -181,10 +183,11 @@ export interface TestRunRecord {
   workspaceId: string;
   writer: ProcessWriter | null;
   writerReleased: boolean;
+  writerRelease?: Promise<void>;
 }
 
-export interface TaskRunRecord {
-  child: ChildProcess | null;
+export interface TaskRunRecord extends ManagedProcessOwner {
+  child: ManagedProcessHandle | null;
   exitCode?: number;
   generation: number;
   message: string;
@@ -195,6 +198,7 @@ export interface TaskRunRecord {
   workspaceId: string;
   writer: ProcessWriter | null;
   writerReleased: boolean;
+  writerRelease?: Promise<void>;
 }
 
 export interface InspectedRunWorkspace {
@@ -203,7 +207,8 @@ export interface InspectedRunWorkspace {
 }
 
 export interface ProviderProcess {
-  child: ChildProcess;
+  owner: ManagedProcessOwner;
+  child: ManagedProcessHandle;
   rpc: JsonRpcClient;
   writer: ProcessWriter | null;
 }

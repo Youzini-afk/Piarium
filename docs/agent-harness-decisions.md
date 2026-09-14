@@ -6154,3 +6154,27 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | --- | --- | --- | --- |
 | D-278 | audit repairs retained; R2/R3 reopen claims superseded | D-279 | rust-kernel-audit；status/plan；architecture |
 | D-279 | accepted / implemented / R2+R3 complete | — | status 阶段 R2/R3；plan 阶段 R2/R3；architecture；rust-kernel-design；audit |
+
+### D-280 · 2026-09-14 · R4 原生进程权威：共享 PTY/pipe、实际退出与 writer 生命周期
+
+类型：R4 production process authority closure；只追加，不改写 D-279 历史证据
+
+背景：R1–R3 已接管状态、文件与物化，但 TS terminal/provider、setup 和 LSP/DAP/tasks/tests 仍自行拥有 OS process。只搬一个 spawn 函数会留下平行 PTY、失联假退出、异步启动取消漏 child 和提前释放目录等问题。
+
+决定：Rust format-v10 catalog 在唯一 Storage 中持久 process identity/status/tombstone；生成 `process.*` 契约，scope/canonical root/grant 和已有文件资源边界共同准入。阻塞 PTY/pipe 工作由同一 executable 的 guardian 持有，guardian 无数据库、无公网端口，不重建 Pi broker。原字节 channel/cursor、bounded output backpressure、stdin sequence/content/ack、resize、kill/实际树退出与 release 属于该后端。Windows Job、Unix managed session 与 Linux subreaper 为实际退出提供证据；旧 epoch 无证据时 unknown，不盲杀 PID、不重放命令。
+
+Host 注入同一 native service 到用户终端、Harness shell、Thread setup、LSP/DAP、task、Node test 和测试 provider；TS 保留协议、展示、provider selection 与 product startup owner。pending launch 纳入取消/替换/dispose；失败 handoff 携带 child，停止失败保留 row/writer。RPC/pipe 断开不伪造 exit，kernel loss 使 terminal/shell/protocol 明确失败；writer close 失败可重试，不吞错。startup owning/execution admission 由真实 retained Thread 与 Documents 注册证明，不根据临时目录前缀猜授权。
+
+实现中反例修复：spawn 参数误传给 process.read；stdin/close cleanup race；取消期间晚到 child；Node-test 的 exit-only wait；协议流 error 回调抛出；terminal shutdown 先删 owner 后忽略 kill failure；shell unknown exit 被投影为 0；全局 Socket unref workaround；ConPTY 最后输出尚未排完就清理 console-host Job 成员所造成的输出/exit receipt 丢失。最后一项以 12 次连续真实 PTY startup/resize/final-output/code-0 验证，未放宽断言。
+
+边界：Pi session/catalog/inference worker 生命周期仍归 runtime-broker；Git 短命令、shell 发现/bootstrap 留作既有领域适配，不另造统一调度框架。生产不选择 Node/Bun PTY；剩余 unused distribution dependency/rebuild probe 清理属于 R6。没有新增敌对代码 OS sandbox、物理断电、付费模型、本地 macOS/Linux 或签名验收门槛。旧内部 catalog 直接按 v10 校验，不自动迁移或删除用户 Workspace/Pi/Git 数据。
+
+证据：Windows release `bun run test:kernel` 80 passed（Node 25 + authority audit 26 + storage 5 + combined Recovery 1 + native process 16 + consumer/admission 7）；affected focused suites 233 passed / 1 platform symlink skip；Application Host source/test、Protocol 与 UI 类型检查、Protocol build、targeted lint 通过。Rust release build、check、unit tests 4/4 与 format/protocol drift 已验证。独立真实 Host 进程退出、kernel death/restart、后代进程清理、kill refusal、lease/revoke、backpressure 和不重放均有原生反例。另有显式授权 temp workspace 的真实 Application Host HTTP terminal create/inspect/delete/stop smoke；不是完整 browser/Electron smoke，远端 CI 结果另行记录。准确证据与后续范围见 [status](agent-harness-status.md)。
+
+结果：R4 按生产 process authority/consumer/failure 契约 Complete，R1–R3 保持 Complete。R0 Partial，R5/R6 未完成；整个阶段 R 未完成。
+
+## D-280 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-280 | accepted / implemented / R4 complete | — | plan/status R4；architecture；rust-kernel-design；kernel/process/terminal/LSP/run/Harness documentation；native acceptance |

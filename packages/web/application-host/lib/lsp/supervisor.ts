@@ -1,9 +1,9 @@
 import path from 'node:path';
 import type {
-  ChildProcessWithoutNullStreams,
   SpawnOptionsWithStdioTuple,
   StdioPipe,
 } from 'node:child_process';
+import { launchOwnedProcess, terminateOwnedProcess, type ManagedProcessOwner, type ManagedPipedProcessHandle } from "../process/types.js";
 import { pathToFileURL } from 'node:url';
 import { createJsonRpcClient } from './jsonrpc.js';
 import {
@@ -93,9 +93,10 @@ type ResolveCollectionName =
   | 'documentLinkResolveItems'
   | 'inlayHintResolveItems';
 
-interface LanguageSessionRecord {
+interface LanguageSessionRecord extends ManagedProcessOwner<ManagedPipedProcessHandle> {
+  pendingTermination?: Promise<void>;
   callHierarchyItems: Map<string, unknown>;
-  child: ChildProcessWithoutNullStreams | null;
+  child: ManagedPipedProcessHandle | null;
   codeActionResolveItems: Map<string, unknown>;
   completionResolveItems: Map<string, unknown>;
   documentLinkResolveItems: Map<string, unknown>;
@@ -181,7 +182,7 @@ interface LanguageSupervisorOptions {
     command: string,
     args: readonly string[],
     options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>,
-  ) => ChildProcessWithoutNullStreams;
+  ) => ManagedPipedProcessHandle | Promise<ManagedPipedProcessHandle>;
   /** Host-owned views release their server after this much inactivity. */
   hostViewIdleMs?: number;
   /** Documents a Host-owned view keeps open before closing the least recently used. */
@@ -392,22 +393,6 @@ export const createLanguageSupervisor = ({
     return { status: 'absent', workspaceId, languageId, view };
   };
 
-  const waitForChildExit = (child: ChildProcessWithoutNullStreams | null): Promise<void> => new Promise((resolve) => {
-    if (!child || child.exitCode !== null || child.signalCode) {
-      resolve();
-      return;
-    }
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve();
-    };
-    const timer = setTimeout(finish, 3000);
-    child.once('exit', finish);
-    child.once('close', finish);
-  });
 
   const pendingExits = new Set<Promise<void>>();
 
@@ -426,40 +411,37 @@ export const createLanguageSupervisor = ({
     }
   };
 
-  const disposeRecord = (record: LanguageSessionRecord | null | undefined, reason = 'Language server stopped'): void => {
-    if (!record) return;
+  const disposeRecord = (record: LanguageSessionRecord | null | undefined, reason = 'Language server stopped'): Promise<void> => {
+    if (!record) return Promise.resolve();
+    if (record.pendingTermination) return record.pendingTermination;
     clearRecordDiagnostics(record);
-    emit(record.workspaceId, {
-      kind: 'status',
-      snapshot: {
-        status: 'absent',
-        workspaceId: record.workspaceId,
-        languageId: record.languageId,
-        view: record.view,
-        providerId: record.providerId,
-        generation: record.generation,
-      },
-    });
+    record.status = 'degraded'; record.message = reason + '; waiting for process exit';
+    emit(record.workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
     record.rpc?.rejectAll(new Error(reason));
     record.rpc?.dispose();
     record.rpc = null;
-    const child = record.child;
-    try {
-      child?.kill();
-    } catch {
-      // Process may already have exited.
-    }
-    if (child) {
-      const exited = waitForChildExit(child).finally(() => pendingExits.delete(exited));
-      pendingExits.add(exited);
-    }
-    record.child = null;
+    const exited = terminateOwnedProcess(record).then(() => {
+      emit(record.workspaceId, { kind: 'status', snapshot: {
+        status: 'absent', workspaceId: record.workspaceId, languageId: record.languageId,
+        view: record.view, providerId: record.providerId, generation: record.generation,
+      } });
+    }).finally(() => { delete record.pendingTermination; pendingExits.delete(exited); });
+    void exited.catch((error: unknown) => setFailed(record, error instanceof Error ? error.message : String(error)));
+    record.pendingTermination = exited;
+    pendingExits.add(exited);
     record.documents.clear();
     record.callHierarchyItems?.clear();
     record.completionResolveItems?.clear();
     record.codeActionResolveItems?.clear();
     record.inlayHintResolveItems?.clear();
     record.documentLinkResolveItems?.clear();
+    return exited;
+  };
+
+  const retireRecord = (key: string, record: LanguageSessionRecord, reason: string): void => {
+    void disposeRecord(record, reason).then(() => {
+      if (sessions.get(key) === record) sessions.delete(key);
+    }).catch(() => undefined); // disposeRecord publishes the retained failure.
   };
 
   const setFailed = (record: LanguageSessionRecord, message: string): void => {
@@ -541,7 +523,7 @@ export const createLanguageSupervisor = ({
       provider = findProvider(workspaceId, languageId);
     }
     if (!provider) return null;
-    if (existing) disposeRecord(existing);
+    if (existing) await disposeRecord(existing);
     const run = startSession(workspaceId, languageId, view, provider, existing);
     inflight.set(key, run);
     try {
@@ -614,9 +596,9 @@ export const createLanguageSupervisor = ({
     sessions.set(key, record);
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
 
-    let child: ChildProcessWithoutNullStreams;
+    let child: ManagedPipedProcessHandle;
     try {
-      child = spawn(provider.command, provider.args ?? [], {
+      child = await launchOwnedProcess(record, (signal) => spawn(provider.command, provider.args ?? [], {
         cwd: workspace.root,
         env: {
           ...env,
@@ -628,7 +610,8 @@ export const createLanguageSupervisor = ({
         },
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
-      });
+        signal,
+      }));
     } catch (error) {
       setFailed(record, error instanceof Error ? error.message : 'Failed to start language server');
       return record;
@@ -673,6 +656,10 @@ export const createLanguageSupervisor = ({
     });
     child.stderr.on('data', () => {
       // stderr may contain paths; never log language-server payloads.
+    });
+    child.on("error", (error: Error) => {
+      if (record.child !== child) return;
+      rpc.rejectAll(error); setFailed(record, error.message);
     });
     child.on('exit', (code) => {
       if (record.child !== child) return;
@@ -827,12 +814,12 @@ export const createLanguageSupervisor = ({
 
   let idleTimer: ReturnType<typeof setInterval> | null = null;
 
-  const releaseIdleHostViews = (): void => {
+  const releaseIdleHostViews = async (): Promise<void> => {
     const deadline = now() - hostViewIdleMs;
     for (const [key, record] of [...sessions]) {
       if (!isHostOwnedView(record.view) || record.usedAt > deadline) continue;
-      disposeRecord(record, 'Host language view released after idle');
-      sessions.delete(key);
+      await disposeRecord(record, 'Host language view released after idle');
+      if (sessions.get(key) === record) sessions.delete(key);
       inflight.delete(key);
       desiredDocuments.delete(key);
     }
@@ -844,7 +831,7 @@ export const createLanguageSupervisor = ({
 
   const ensureIdleReaper = (): void => {
     if (idleTimer || hostViewIdleMs <= 0) return;
-    idleTimer = setInterval(releaseIdleHostViews, Math.max(1000, Math.floor(hostViewIdleMs / 4)));
+    idleTimer = setInterval(() => { void releaseIdleHostViews().catch(() => undefined); }, Math.max(1000, Math.floor(hostViewIdleMs / 4)));
     idleTimer.unref?.();
   };
 
@@ -882,17 +869,17 @@ export const createLanguageSupervisor = ({
       if (desired.size === 0) desiredDocuments.delete(key);
       const record = sessions.get(key);
       const open = record?.documents.get(resourceId);
-      const releaseEmptyRecord = (): void => {
+      const releaseEmptyRecord = async (): Promise<void> => {
         // Only the editor view disappears with its last tab. A Host-owned view
         // stays until it goes idle so closing one document cannot cancel work in
         // the other view (D-087).
         if (!record || hostOwned || desired.size > 0) return;
-        disposeRecord(record, 'Last language document closed');
-        sessions.delete(key);
+        await disposeRecord(record, 'Last language document closed');
+        if (sessions.get(key) === record) sessions.delete(key);
         inflight.delete(key);
       };
       if (!record || !record.rpc || !open) {
-        releaseEmptyRecord();
+        await releaseEmptyRecord();
         return { status: 'absent' };
       }
       record.documents.delete(resourceId);
@@ -903,7 +890,7 @@ export const createLanguageSupervisor = ({
         providerId: record.providerId,
         generation: record.generation,
       };
-      releaseEmptyRecord();
+      await releaseEmptyRecord();
       return result;
     }
     if (!hostOwned && previousDesired && requestedVersion < previousDesired.documentVersion) {
@@ -1268,8 +1255,7 @@ export const createLanguageSupervisor = ({
       if (existing) {
         for (const [key, record] of sessions) {
           if (record.providerId !== existing.providerId) continue;
-          disposeRecord(record, 'Language provider updated');
-          sessions.delete(key);
+          retireRecord(key, record, 'Language provider updated');
           inflight.delete(key);
         }
       }
@@ -1285,7 +1271,7 @@ export const createLanguageSupervisor = ({
       if (!removed) return { status: 'not-owned', providerId };
       for (const [key, record] of sessions) {
         if (record.providerId !== removed.providerId) continue;
-        disposeRecord(record, 'Language provider disabled');
+        await disposeRecord(record, 'Language provider disabled');
         sessions.delete(key);
         inflight.delete(key);
       }
@@ -1525,7 +1511,7 @@ export const createLanguageSupervisor = ({
       // Restarting one view leaves the other owner's session alone.
       const key = sessionKey(workspaceId, languageId, view);
       const existing = sessions.get(key);
-      disposeRecord(existing, 'Language server restart');
+      await disposeRecord(existing, 'Language server restart');
       if (existing) sessions.delete(key);
       inflight.delete(key);
       const record = await ensureSession(workspaceId, languageId, view);
@@ -1536,7 +1522,7 @@ export const createLanguageSupervisor = ({
       for (const [key, record] of sessions) {
         if (record.workspaceId !== workspaceId) continue;
         if (ownerKey && record.providerOwnerKey !== ownerKey) continue;
-        disposeRecord(record, 'Workspace language services disposed');
+        await disposeRecord(record, 'Workspace language services disposed');
         sessions.delete(key);
         inflight.delete(key);
       }
@@ -1549,7 +1535,7 @@ export const createLanguageSupervisor = ({
       await Promise.all([...pendingExits]);
     },
     async dispose() {
-      for (const record of sessions.values()) disposeRecord(record, 'Language supervisor disposed');
+      await Promise.all([...sessions.values()].map((record) => disposeRecord(record, 'Language supervisor disposed')));
       sessions.clear();
       desiredDocuments.clear();
       inflight.clear();

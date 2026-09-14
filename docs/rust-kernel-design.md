@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1–R3 complete after D-279 closes the D-278 acceptance gaps; R0 and R4–R6 remain separate.
+Status: accepted architecture; R1–R4 production cutover complete through D-280; R0 and R5–R6 remain separate.
 
 Last updated: 2026-09-14
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-14
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。当前 R1–R3 均按各自可执行契约完成；[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 随后把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust，同一 Host 内 terminal/shell/setup/LSP/DAP/任务/测试共用该后端。当前 R1–R4 均按各自可执行契约完成；[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
 
 ## 1. 产品与阶段目标
 
@@ -263,3 +263,21 @@ R0–R6 都是本阶段交付范围。每个里程碑记录生产消费者、已
 - [Node.js event loop](https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop)：重计算和大对象操作对共享请求循环的影响。
 - [SQLite atomic commit](https://www.sqlite.org/atomiccommit.html)：数据库事务的原子性依赖其存储/刷新协议，不自动覆盖数据库外文件。
 - [Child process transport](https://nodejs.org/api/child_process.html)：Node Host 的子进程与 stdio 传输机制；实现按仓库钉住的 Node/Electron 验证。
+
+## D-280 原生进程的实际交付边界
+
+catalog v10 的 process records 与既有 root/recovery 共用一个 Storage。主 kernel 授权后启动
+同一 executable 的私有 guardian，后者不拥有数据库，负责原生 PTY/pipe 和树退出回执。
+控制面是生成的 `process.*` DTO，原始字节按有界 cursor 通道传递；stdin 用 sequence/content
+identity 与实际 write receipt，release 留 tombstone 防重放。命令/env 正文不写入 catalog。
+
+Host 持有产品请求、版本和 stream projection，不再创建目标 OS 进程。异步启动被取消时包含
+未交付 child 的停止；RPC 关闭不能伪造 native close，writer 清理失败仍可重试。kernel loss
+向 terminal 和 shell 投影明确 error/unknown，既不返回 code 0 也不静默再启动 shell。
+受管 Thread 凭 retained ownership admission 而不是 application-data 前缀取得 cwd 权限。
+
+Windows ConPTY 先关闭 master 并排完最后输出，再清理 Job 残余成员；不能提前杀 console host
+导致丢字节/exit receipt。Linux subreaper 处理 reparented descendants；其他 Unix 用会话证据。
+这些是管理进程生命周期，不构成恶意进程 sandbox。跨平台实际结果交由 native CI，本文不以
+Windows 用例外推所有平台。完整消费者图和测试边界见
+[process module](../packages/web/application-host/lib/process/DOCUMENTATION.md)。
