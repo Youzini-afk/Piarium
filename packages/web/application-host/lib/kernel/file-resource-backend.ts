@@ -19,7 +19,7 @@ export interface KernelExecutionRoot {
 }
 
 export interface KernelFileResourceBackendOptions {
-  resolveExecutionRoot?: (canonicalRoot: string) => Promise<KernelExecutionRoot>;
+  resolveExecutionRoot?: (canonicalRoot: string, owningWorkspaceId: string) => Promise<KernelExecutionRoot>;
   authorityPurpose?: string;
   authorityCapabilities?: string[];
   busyRetryMs?: number;
@@ -81,7 +81,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
 
   private async bind(identity: RecoveryIdentity): Promise<BoundFileContext> {
     const execution = this.options.resolveExecutionRoot
-      ? await this.options.resolveExecutionRoot(identity.canonicalRoot)
+      ? await this.options.resolveExecutionRoot(identity.canonicalRoot, identity.workspaceId)
       : { workspaceId: identity.workspaceId, canonicalRoot: identity.canonicalRoot };
     const canonicalRoot = path.resolve(execution.canonicalRoot);
     const requestedRoot = path.resolve(identity.canonicalRoot);
@@ -265,12 +265,12 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     if (value.status !== "created") throw new Error("Kernel failed to create workspace directory");
   }
 
-  async remove(identity: RecoveryIdentity, relativePath: string, options: { recursive?: boolean; force?: boolean } = {}): Promise<void> {
+  async remove(identity: RecoveryIdentity, relativePath: string, options: { recursive?: boolean; force?: boolean; operationId?: string } = {}): Promise<void> {
     const context = await this.bind(identity);
     const pathId = this.translated(context, normalizeRelative(relativePath));
     const lease = this.leaseFor(context);
     const value = await context.client.fileRemove({
-      operationId: `file-remove:${randomUUID()}`,
+      operationId: options.operationId ?? `file-remove:${randomUUID()}`,
       workspaceId: context.owningWorkspaceId,
       rootId: context.rootId,
       path: pathId,
@@ -309,6 +309,102 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       throw new Error("Kernel returned an invalid file rename result");
     }
     return value.status;
+  }
+
+  async scanPaths(
+    identity: RecoveryIdentity,
+    relativePath = "",
+    scopes?: readonly string[],
+    options: { signal?: AbortSignal } = {},
+  ): Promise<string[]> {
+    const context = await this.bind(identity);
+    const output: string[] = [];
+    let cursor: number | undefined;
+    do {
+      const value = await context.client.fileScan({
+        workspaceId: context.owningWorkspaceId,
+        rootId: context.rootId,
+        path: this.translated(context, normalizeRelative(relativePath)),
+        ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalizeRelative) } : {}),
+        ...(cursor === undefined ? {} : { cursor }),
+        pageSize: 1024,
+      }, options.signal);
+      const page = Array.isArray(value.paths) && value.paths.every((entry) => typeof entry === "string")
+        ? value.paths as string[]
+        : null;
+      if (!page) throw new Error("Kernel returned an invalid file scan page");
+      output.push(...page.map(normalizeRelative));
+      cursor = typeof value.nextCursor === "number" ? value.nextCursor : undefined;
+    } while (cursor !== undefined);
+    return [...new Set(output)].sort();
+  }
+
+  async measure(
+    identity: RecoveryIdentity,
+    relativePath = "",
+    options: { signal?: AbortSignal } = {},
+  ): Promise<{ logicalBytes: number | null; allocatedBytes: number | null; unknown: boolean }> {
+    const context = await this.bind(identity);
+    const value = await context.client.fileMeasure({
+      workspaceId: context.owningWorkspaceId,
+      rootId: context.rootId,
+      path: this.translated(context, normalizeRelative(relativePath)),
+    }, options.signal);
+    const logicalBytes = value.logicalBytes === null || value.logicalBytes === undefined
+      ? null
+      : Number(value.logicalBytes);
+    const allocatedBytes = value.allocatedBytes === null || value.allocatedBytes === undefined
+      ? null
+      : Number(value.allocatedBytes);
+    if ((logicalBytes !== null && (!Number.isSafeInteger(logicalBytes) || logicalBytes < 0))
+      || (allocatedBytes !== null && (!Number.isSafeInteger(allocatedBytes) || allocatedBytes < 0))) {
+      throw new Error("Kernel returned an invalid file measurement");
+    }
+    return {
+      logicalBytes,
+      allocatedBytes,
+      unknown: value.unknown === true,
+    };
+  }
+
+  async materializeRoot(
+    identity: RecoveryIdentity,
+    relativePath: string,
+    sourceRoot: string,
+    options: { operationId: string; signal?: AbortSignal },
+  ): Promise<{
+    status: "materialized" | "conflict";
+    reconciled: boolean;
+    cow: { reflink: number; copy: number };
+  }> {
+    const context = await this.bind(identity);
+    const existing = this.leaseFor(context);
+    if (!existing) {
+      return this.gateFor(identity).run(
+        [{ resourceId: relativePath, scope: "subtree" }],
+        () => this.materializeRoot(identity, relativePath, sourceRoot, options),
+      );
+    }
+    const value = await context.client.fileMaterialize({
+      operationId: options.operationId,
+      workspaceId: context.owningWorkspaceId,
+      rootId: context.rootId,
+      path: this.translated(context, normalizeRelative(relativePath)),
+      sourceRoot,
+      leaseId: existing.leaseId,
+    }, options.signal);
+    if (value.status !== "materialized" && value.status !== "conflict") {
+      throw new Error("Kernel returned an invalid materialization result");
+    }
+    const cow = value.cow && typeof value.cow === "object" ? value.cow as Record<string, unknown> : {};
+    return {
+      status: value.status,
+      reconciled: value.reconciled === true,
+      cow: {
+        reflink: typeof cow.reflink === "number" ? cow.reflink : 0,
+        copy: typeof cow.copy === "number" ? cow.copy : 0,
+      },
+    };
   }
 
   hashFile(filePath: string) {

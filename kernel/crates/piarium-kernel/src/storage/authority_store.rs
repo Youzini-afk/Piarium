@@ -484,7 +484,12 @@ impl Storage {
             }
         }
         if let Some(path) = params.get("path").and_then(Value::as_str) {
-            let canonical = Self::validate_path(path)?.join("/");
+            let canonical =
+                if (method == "file.scan" || method == "file.measure") && path.is_empty() {
+                    String::new()
+                } else {
+                    Self::validate_path(path)?.join("/")
+                };
             if !path_allowed(&grant, &canonical) {
                 return Err(KernelError::Authorization(format!(
                     "path is outside grant scope: {canonical}"

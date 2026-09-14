@@ -45,6 +45,13 @@ export interface ThreadWorktreeRuntimeOptions {
   interpreter?: ShellInterpreter | undefined;
   /** Host/backend authority used to revalidate persisted roots after restart. */
   authorizeManagedRoot?: (managedRoot: string) => boolean | Promise<boolean>;
+  /** Production R3 resource backend for destructive managed-directory removal. */
+  removeManagedPath?: (input: {
+    workspaceId: string;
+    managedRoot: string;
+    path: string;
+    operationId: string;
+  }) => Promise<void>;
 }
 
 export interface PrepareThreadWorktreeInput {
@@ -1088,9 +1095,25 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     };
   };
 
+  const gitCommonDirFor = async (worktree: ThreadWorktree): Promise<string | null> => {
+    if (worktree.base === "zero-commit" || worktree.materialized === false) return null;
+    try {
+      const common = (await runGit(worktree.path, ["rev-parse", "--path-format=absolute", "--git-common-dir"])).stdout.trim();
+      return common ? pathModule.resolve(worktree.path, common) : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const pruneGitWorktreeMetadata = async (worktree: ThreadWorktree, commonGitDir: string | null): Promise<void> => {
+    if (!commonGitDir) return;
+    const cwd = worktree.managedRoot ?? pathModule.dirname(worktree.path);
+    await runGit(cwd, ["--git-dir", commonGitDir, "worktree", "prune"]).catch(() => undefined);
+  };
+
   const reclaim = async (
     worktree: ThreadWorktree,
-    extras?: { nativeVerified?: boolean },
+    extras?: { nativeVerified?: boolean; workspaceId?: string },
   ): Promise<{ reclaimed: boolean; reason?: string }> => {
     if (worktree.materialized === false) {
       worktree.preparationStage = "materialize";
@@ -1143,8 +1166,19 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     }
     await assertOwnership(worktree, "reclaim worktree");
     try {
-      const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
-      await rmFn(worktree.path, { recursive: true, force: true });
+      const commonGitDir = await gitCommonDirFor(worktree);
+      if (options.removeManagedPath && extras?.workspaceId && worktree.managedRoot) {
+        await options.removeManagedPath({
+          workspaceId: extras.workspaceId,
+          managedRoot: worktree.managedRoot,
+          path: worktree.path,
+          operationId: `thread-reclaim:${randomUUID()}`,
+        });
+      } else {
+        const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
+        await rmFn(worktree.path, { recursive: true, force: true });
+      }
+      await pruneGitWorktreeMetadata(worktree, commonGitDir);
       worktree.materialized = false;
       worktree.preparationStage = "materialize";
       delete worktree.materializationFingerprint;
@@ -1468,8 +1502,8 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     if (signal?.aborted) throw abortError();
     const livePath = worktree.path;
     const baseRef = worktree.base;
-    const overlay = `${livePath}.git-overlay-${randomUUID()}`;
-    await assertOwnership(worktree, "attach isolated Git context", [overlay]);
+    const metadataPath = `${livePath}.git-metadata-${randomUUID()}`;
+    await assertOwnership(worktree, "attach isolated Git context", [metadataPath]);
     const source = await inspectSourceGit(sourceRoot);
     const liveInsideSource = source.toplevel ? await isInsideDirectory(source.toplevel, livePath) : false;
     const liveInheritsOther = await inheritsOtherGit(livePath);
@@ -1477,16 +1511,55 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     const canDetach = Boolean(!worktree.readOnlyInput && source.isGit && resolvedBase && !liveInsideSource && !liveInheritsOther);
     if (canDetach) {
       const ref = resolvedBase!;
-      await fsPromises.rename(livePath, overlay);
+      let adminGitDir: string | null = null;
       try {
         if (signal?.aborted) throw abortError();
-        await runGit(sourceRoot, ["worktree", "add", "--detach", livePath, ref]);
-        await copyDirRecursive(overlay, livePath);
-        await fsPromises.rm(overlay, { recursive: true, force: true });
+        await runGit(sourceRoot, ["worktree", "prune"]).catch(() => undefined);
+        // Create only Git worktree metadata in a disposable empty directory.
+        // The immutable workspace body already came from the Rust materializer
+        // and must never be copied back through a second TS file writer.
+        await runGit(sourceRoot, ["worktree", "add", "--no-checkout", "--detach", metadataPath, ref]);
+        const metadataGitFile = pathModule.join(metadataPath, ".git");
+        const gitFile = (await fsPromises.readFile(metadataGitFile, "utf8")).toString();
+        const match = /^gitdir:\s*(.+?)\s*$/u.exec(gitFile.trim());
+        if (!match?.[1]) throw new Error("Git worktree metadata did not expose its gitdir");
+        adminGitDir = pathModule.isAbsolute(match[1])
+          ? match[1]
+          : pathModule.resolve(metadataPath, match[1]);
+        const liveGitFile = pathModule.join(livePath, ".git");
+        await fsPromises.writeFile(liveGitFile, gitFile.endsWith("\n") ? gitFile : `${gitFile}\n`, "utf8");
+        await fsPromises.writeFile(
+          pathModule.join(adminGitDir, "gitdir"),
+          `${liveGitFile.replace(/\\/g, "/")}\n`,
+          "utf8",
+        );
+        // The no-checkout worktree starts with an empty index. Seed it from
+        // the selected parent tree, then commit the already-materialized bytes
+        // as this execution generation's baseline. `git add` is intentional:
+        // it applies the repository's real clean/LFS/EOL filters and fails if
+        // required filter configuration is unavailable, while leaving the
+        // Rust-materialized working-tree bytes untouched.
+        await runGit(livePath, ["read-tree", ref]);
+        await runGit(livePath, ["add", "-A"]);
+        await runGit(livePath, [
+          "-c", "user.name=Piarium Thread Baseline",
+          "-c", "user.email=thread-baseline@piarium.local",
+          "commit", "--no-verify", "--no-gpg-sign", "--allow-empty",
+          "-m", "Piarium execution baseline",
+        ]);
+        await fsPromises.rm(metadataPath, { recursive: true, force: true });
         return { kind: "worktree", executionBaseline: await resolveLiveHead(livePath) };
       } catch (error) {
-        await fsPromises.rm(livePath, { recursive: true, force: true }).catch(() => undefined);
-        await fsPromises.rename(overlay, livePath).catch(() => undefined);
+        await fsPromises.unlink(pathModule.join(livePath, ".git")).catch(() => undefined);
+        if (adminGitDir) {
+          await fsPromises.writeFile(
+            pathModule.join(adminGitDir, "gitdir"),
+            `${pathModule.join(metadataPath, ".git").replace(/\\/g, "/")}\n`,
+            "utf8",
+          ).catch(() => undefined);
+        }
+        await runGit(sourceRoot, ["worktree", "remove", "--force", metadataPath]).catch(() => undefined);
+        await fsPromises.rm(metadataPath, { recursive: true, force: true }).catch(() => undefined);
         throw error;
       }
     }
@@ -1496,16 +1569,25 @@ export function createThreadWorktreeRuntime(options: ThreadWorktreeRuntimeOption
     return { kind: "none" };
   };
 
-  const discardInput = async (worktree: ThreadWorktree): Promise<void> => {
+  const discardInput = async (worktree: ThreadWorktree, workspaceId?: string): Promise<void> => {
     const extras = [
       ...(worktree.materializationSwitch
         ? [worktree.materializationSwitch.stagingPath, worktree.materializationSwitch.backupPath]
         : []),
     ];
     await assertOwnership(worktree, "discard retrieval input", extras);
-    const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
-    await rmFn(worktree.path, { recursive: true, force: true });
-    for (const extra of extras) await rmFn(extra, { recursive: true, force: true });
+    if (options.removeManagedPath && workspaceId && worktree.managedRoot) {
+      await options.removeManagedPath({
+        workspaceId,
+        managedRoot: worktree.managedRoot,
+        path: worktree.path,
+        operationId: `thread-discard:${randomUUID()}`,
+      });
+    } else {
+      const rmFn = (fsPromises as typeof fs.promises).rm ?? fs.promises.rm;
+      await rmFn(worktree.path, { recursive: true, force: true });
+      for (const extra of extras) await rmFn(extra, { recursive: true, force: true });
+    }
     worktree.materialized = false;
     worktree.viewMode = "virtual";
     worktree.preparationStage = "ready";

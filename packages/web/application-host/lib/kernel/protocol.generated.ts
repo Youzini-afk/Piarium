@@ -28,6 +28,9 @@ export type KernelMethod =
   | "file.mkdir"
   | "file.remove"
   | "file.rename"
+  | "file.scan"
+  | "file.measure"
+  | "file.materialize"
   | "storage.record.put"
   | "storage.record.get"
   | "storage.record.list"
@@ -239,6 +242,30 @@ export interface KernelFileRenameParams {
   targetMustBeMissing?: boolean;
   expectedFromJson?: string;
   expectedToJson?: string;
+  leaseId?: string;
+}
+
+export interface KernelFileScanParams {
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  scopes?: string[];
+  cursor?: number;
+  pageSize?: number;
+}
+
+export interface KernelFileMeasureParams {
+  workspaceId: string;
+  rootId: string;
+  path: string;
+}
+
+export interface KernelFileMaterializeParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  sourceRoot: string;
   leaseId?: string;
 }
 
@@ -967,6 +994,9 @@ export type KernelMethodParams = {
   "file.mkdir": KernelFileMkdirParams;
   "file.remove": KernelFileRemoveParams;
   "file.rename": KernelFileRenameParams;
+  "file.scan": KernelFileScanParams;
+  "file.measure": KernelFileMeasureParams;
+  "file.materialize": KernelFileMaterializeParams;
   "storage.record.put": KernelRecordPutParams;
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
@@ -1209,6 +1239,33 @@ export type KernelRequest =
       id: string;
       method: "file.rename";
       params: KernelFileRenameParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.scan";
+      params: KernelFileScanParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.measure";
+      params: KernelFileMeasureParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.materialize";
+      params: KernelFileMaterializeParams;
       epoch?: string;
       grantId?: string;
     }

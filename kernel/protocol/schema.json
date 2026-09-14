@@ -30,6 +30,9 @@
     "file.mkdir": "KernelFileMkdirParams",
     "file.remove": "KernelFileRemoveParams",
     "file.rename": "KernelFileRenameParams",
+    "file.scan": "KernelFileScanParams",
+    "file.measure": "KernelFileMeasureParams",
+    "file.materialize": "KernelFileMaterializeParams",
     "storage.record.put": "KernelRecordPutParams",
     "storage.record.get": "KernelRecordGetParams",
     "storage.record.list": "KernelRecordListParams",
@@ -158,6 +161,15 @@
     }},
     "KernelFileRenameParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "fromPath": {"type": "string"}, "toPath": {"type": "string"}, "targetMustBeMissing": {"type": "boolean", "optional": true}, "expectedFromJson": {"type": "string", "optional": true}, "expectedToJson": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileScanParams": {"fields": {
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
+    }},
+    "KernelFileMeasureParams": {"fields": {
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}
+    }},
+    "KernelFileMaterializeParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "sourceRoot": {"type": "string"}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelRecordReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}}},
     "KernelRecordPutParams": {"fields": {
@@ -441,6 +453,9 @@
     "file.mkdir": "create a workspace directory through the kernel resource authority",
     "file.remove": "remove a workspace path through the kernel resource authority",
     "file.rename": "rename a workspace path through the kernel resource authority",
+    "file.scan": "page a fixed filesystem inventory for baseline capture without reading bodies in the Host",
+    "file.measure": "measure one managed filesystem subtree without Host-side recursive scanning",
+    "file.materialize": "durably materialize one immutable kernel root into a managed filesystem directory",
     "storage.record.put": "publish a typed durable product record and its object references",
     "storage.record.get": "read a durable product record by identity",
     "storage.record.list": "page durable product records by workspace and owner identity",

@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1 state/storage and R2 file/recovery authority are complete. R0 and R3–R6 retain their own remaining delivery evidence
+Status: accepted architecture; R1 state/storage, R2 file/recovery authority, and R3 baseline/materialization lifecycle are complete. R0 and R4–R6 retain their own remaining delivery evidence
 
 Last updated: 2026-09-14
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-14
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer。D-276 又完成 R2 file-resource authority：Documents-authorized canonical execution root、exact/subtree overlap lease、稳定 file-state capture、内容对象安装、conditional apply、mkdir/remove/rename 与 started-operation restart reconciliation 均由 Rust 持有；Documents/Files/Recovery/Integration 与生产 `fs.lock` 进入同一资源边界。Registry 仍是未保存 buffer/grouped undo 的唯一权威，Host 负责 surface receipt 协调，不把编辑器正文复制到 Rust。Piarium 模式下 Pi `write`/`edit`/`apply_patch` 不再退回 worker 本地磁盘 writer。旧 TS file/recovery helpers 仅作测试 seam，不是运行时兼容路径。R1 的 storage location 产品语义仍为：内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，不独立迁移并声明 `storageManagement: false`；可替换 provider 仍可实现公开 v5 的可选位置管理。R0 与 R3–R6 仍按各自状态验收；尤其 Git baseline/materialization/CoW/执行目录生命周期继续属于 R3。
+WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer。D-276 又完成 R2 file-resource authority：Documents-authorized canonical execution root、exact/subtree overlap lease、稳定 file-state capture、内容对象安装、conditional apply、mkdir/remove/rename 与 started-operation restart reconciliation 均由 Rust 持有；Documents/Files/Recovery/Integration 与生产 `fs.lock` 进入同一资源边界。Registry 仍是未保存 buffer/grouped undo 的唯一权威，Host 负责 surface receipt 协调，不把编辑器正文复制到 Rust。Piarium 模式下 Pi `write`/`edit`/`apply_patch` 不再退回 worker 本地磁盘 writer。旧 TS file/recovery helpers 仅作测试 seam，不是运行时兼容路径。R1 的 storage location 产品语义仍为：内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，不独立迁移并声明 `storageManagement: false`；可替换 provider 仍可实现公开 v5 的可选位置管理。D-277 已完成 R3：生产 baseline 的目录枚举与正文 capture 由 Rust `file.scan` / `file.capture` 执行；Git 仅提供真实 inventory/index/filter 身份与稳定性校验。immutable root → execution directory 的 staging/backup/promotion、对象完整性、copy/clone backend 事实、restart reconciliation、managed directory remove 与空间测量都进入 kernel file-resource authority。Git execution context 只迁移 linked-worktree metadata，并用真实 `read-tree` / `add` / baseline commit 建立可解析执行基线，不再把 workspace bytes 从 TS copy 回 live。native result root 取代生产 mandatory `.snapshot`；旧 TS materializer/snapshot/switch helper 仅保留测试 seam。R0 与 R4–R6 仍按各自状态验收。
 
 ## 1. 产品与阶段目标
 
@@ -173,6 +173,8 @@ settle 收回变化并发布新结果；结果未耐久、后台写者未退出�
 文件复制使用平台真实 clone/CoW 能力，普通复制是能力不支持时的正式后端；权限/对象损坏等错误正常传播。
 不以硬链接共享可写文件替代 CoW。目录复制、ignored 输入、恢复临时文件均走同一原语，结果保留 bytes/backend/失败原因，
 在既有空间/操作投影中呈现。真实磁盘占用不能从逻辑大小猜测。
+
+D-277 的生产实现使用 kernel `file.scan` / `file.capture` 形成固定 baseline，并在完整捕获后再次按同一路径集合核对 file state；Git dirty inventory 额外保留内容身份窗口，目录 inventory 变化同样拒绝混合 root。Git materialized settle 由 Git 提供 tracked/untracked/index-mode 与真实 filter 语义，冻结 `captureScopes` 的 prior/current 路径再并入 Rust capture；非 Git 结果由 Rust inventory 收全。`file.materialize` 从 immutable root 构建 operation-specific staging，验证对象后在 Linux 尝试 FICLONE、macOS 尝试 `clonefile`，不支持时正式退回 byte copy；Windows 当前验收只证明 copy，因此报告 `reflink:0`，不能据实现代码宣称该平台已有 CoW。staging/backup/promotion 在 durable operation 下可重入；live backup 后崩溃的真实 release-kernel 反例会在重启 root registration 时完成 staging promotion，无法证明时恢复 backup 或报告 conflict。`file.measure` 在 Unix 使用实际 block 计数；Windows 当前没有已验证的 physical-allocation backend，`allocatedBytes` 明确为 `null` 而不是用 logical bytes 猜测。reclaim/discard/delete 的生产受管目录走 kernel subtree remove，linked Git worktree 只迁移/清理 admin metadata；Thread/Run 是否允许回收仍由 Registry/Host policy 决定。
 
 ## 7. 进程、终端与重启
 

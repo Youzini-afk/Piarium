@@ -84,7 +84,25 @@ compensation, and Harness `fs.lock` use this boundary. Piarium-mode Pi `write`/`
 disk/surface work through Host `document.surfaceWrite`; if that Host mutation backend is unavailable the worker
 fails rather than falling back to its own disk writer. Document Registry still owns unsaved buffers and grouped
 undo. Workspace/Git/bulk adapters that are not yet native Rust operations register exact/subtree writers with
-the same gate; their baseline/materialization lifecycle remains R3.
+the same gate.
+
+R3 extends the same file-resource authority to baseline and managed execution directories. `file.scan` pages
+Host-admitted filesystem inventories while excluding `.git`/`.piarium`; `file.capture` installs the selected
+body bytes as same-grant objects so WorkingState branch creation can consume them without owner rebinding.
+WorkingState recaptures the selected paths before publishing a baseline or materialized result and refuses a
+mixed view when content, metadata, or inventory changes. Git still supplies staged/unstaged/untracked, index
+mode, dirty-content identity, and real filter/EOL semantics; frozen capture scopes are merged with Git changes.
+
+`file.materialize` installs one immutable root through operation-specific staging and backup directories,
+verifies every content object, reports actual reflink/copy counts, and reconciles an interrupted switch after
+restart. Linux attempts FICLONE and macOS `clonefile`; unsupported filesystems use the formal byte-copy backend.
+Windows acceptance currently proves copy only and therefore reports zero reflinks. Materialized Git execution
+moves only linked-worktree metadata into the Rust-built body, runs `read-tree`/`add`/an internal baseline commit,
+and propagates required filter failures without copying workspace bytes through TS. Native result roots replace
+production mandatory side snapshots. Reclaim/discard/delete use kernel subtree removal and prune linked-worktree
+metadata. `file.measure` reports actual block allocation on Unix; Windows leaves `allocatedBytes` null until a
+verified physical-allocation backend exists. Legacy TS materializer/switch/snapshot code remains only as an
+injectable test seam.
 
 ## Rust source ownership
 
@@ -97,8 +115,9 @@ one transaction owner with bounded source visibility, not independent stores. St
 open their own catalog connections or bypass dispatch identity checks.
 
 The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
-the current run covers the original R0/R1 invariants plus R2 file root/lease, conditional filesystem apply,
-restart reconciliation and production Harness path-lock delegation.
+the current run covers the original R0/R1 invariants, R2 file root/lease and conditional filesystem apply,
+and R3 filesystem scan/measurement, immutable-root materialization, managed-directory lifecycle, and restart
+reconciliation across the live-backup-before-promote failure window.
 The production adapter longitudinal path is assembled in `application-host/index.ts`; actor-bound recovery calls
 derive session identity from the persisted turn and use an explicit maintenance grant only for startup/list/GC
 operations, never the Host-management grant for domain calls. `KernelRecoveryContentStore` is explicitly bound after adapter construction;

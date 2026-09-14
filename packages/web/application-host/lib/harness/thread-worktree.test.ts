@@ -800,11 +800,13 @@ describe("thread worktree runtime", () => {
     try {
       mkdirSync(live, { recursive: true });
       writeFileSync(join(live, "child-only.txt"), "from working state\n");
-      const attached = await runtime.attachIsolatedGitContext(fixture.repo, {
+      const worktree = {
         path: live,
         managedRoot: fixture.worktrees,
         base: parentHead,
-      });
+        materialized: true,
+      };
+      const attached = await runtime.attachIsolatedGitContext(fixture.repo, worktree);
       expect(attached.kind).toBe("worktree");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
       const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
@@ -820,6 +822,38 @@ describe("thread worktree runtime", () => {
       expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
       expect(git(fixture.repo, ["branch"])).toBe(parentBranches);
       expect(existsSync(join(fixture.repo, ".git", "worktrees"))).toBe(true);
+      const reclaimed = await runtime.reclaim(worktree, { nativeVerified: true });
+      expect(reclaimed.reclaimed).toBe(true);
+      expect(git(fixture.repo, ["worktree", "list", "--porcelain"]).replace(/\\/g, "/").toLowerCase())
+        .not.toContain(live.replace(/\\/g, "/").toLowerCase());
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails materialized Git baseline attachment when a required clean filter cannot run", async () => {
+    const fixture = createRepo();
+    const runtime = runtimeFor(fixture.worktrees);
+    const live = join(fixture.worktrees, "required-filter-live");
+    try {
+      writeFileSync(join(fixture.repo, ".gitattributes"), "filtered.txt filter=piarium-required\n");
+      writeFileSync(join(fixture.repo, "filtered.txt"), "base bytes\n");
+      git(fixture.repo, ["add", ".gitattributes", "filtered.txt"]);
+      git(fixture.repo, ["commit", "-m", "filter fixture"]);
+      git(fixture.repo, ["config", "filter.piarium-required.clean", "false"]);
+      git(fixture.repo, ["config", "filter.piarium-required.smudge", "cat"]);
+      git(fixture.repo, ["config", "filter.piarium-required.required", "true"]);
+      const parentHead = git(fixture.repo, ["rev-parse", "HEAD"]);
+      mkdirSync(live, { recursive: true });
+      writeFileSync(join(live, ".gitattributes"), "filtered.txt filter=piarium-required\n");
+      writeFileSync(join(live, "filtered.txt"), "materialized bytes\n");
+      await expect(runtime.attachIsolatedGitContext(fixture.repo, {
+        path: live,
+        managedRoot: fixture.worktrees,
+        base: parentHead,
+        materialized: true,
+      })).rejects.toThrow(/filter|clean|failed|exit/i);
+      expect(readFileSync(join(live, "filtered.txt"), "utf8")).toBe("materialized bytes\n");
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

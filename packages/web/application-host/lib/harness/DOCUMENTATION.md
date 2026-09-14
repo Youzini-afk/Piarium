@@ -360,36 +360,21 @@ Run launch includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
-An isolated child fixes its execution baseline when dispatch creates the
-WorkingBranch, not when the Pi session later starts. Git inventories HEAD plus
-staged, unstaged, tracked, deleted, and non-ignored untracked paths and stores
-workdir bytes; a command failure is a failed capture, not an empty inventory.
-Unborn HEAD is `baseRef: "zero-commit"` and does not run `diff HEAD`. Gitlinks
-are listed and rejected rather than captured as empty directories. The Host
-fingerprints the inventory or directory path list plus dirty/untracked content
-identities before and after capture and refuses a complete branch when the parent
-changed, file contents were replaced with the same path set, or an active
-Documents writer is present (`baseline-changed`, retryable). The Documents
-capture generation and dirty-state barrier cover the whole window. Unsupported
-states cannot be silently skipped during materialization. New virtual regular
-files receive the umask-derived default mode without creating a probe file in the
-user tree, so apply and compensation compare full `sameState` identities. Git
-capture records the bytes already materialized for tools. Settle fixes the
-result snapshot first, captures its real files, and revalidates that source
-before publishing the catalog; it does not replay custom filters or contact
-Git LFS. The index mode (100644/100755) restores the executable bit where the
-filesystem cannot stat it and participates in the capture fingerprint.
-Materialization and the non-Git worktree/baseline
-copies share `workspace/reflink.ts`: a forced reflink shares extents with the
-content-addressed object file where the filesystem supports it (ReFS/APFS/
-Btrfs) and reports the real backend otherwise (`MaterializeResult.cow`).
-`state-trie.ts` and the schema-4 TS catalog now remain test fixtures. Production
-WorkingState authority is the Rust format-v8 branch/root store. Direct read,
-grep/find/ls/explore pin, virtual write and materializer inputs use asynchronous
-root/path/range operations and do not retain an expanded workspace tree. The
-still-synchronous ThreadRuntime and IntegrationCoordinator interfaces receive a
-callback-scoped projection which is discarded afterward; removing that projection
-is remaining R1 work rather than a second persistent authority. Old internal
+An isolated child fixes its logical baseline during dispatch, before the Pi session starts. Git still inventories
+HEAD plus staged, unstaged, tracked, deleted, and non-ignored untracked paths, index modes, and dirty-path content
+identities; a command failure is a failed capture, not an empty inventory. Unborn HEAD is `baseRef: "zero-commit"`
+and does not run `diff HEAD`. Gitlinks are listed and rejected rather than captured as empty directories. Actual
+filesystem inventory and body capture use kernel `file.scan` / `file.capture` through the same Host-admitted root
+and scoped grant that will create the WorkingBranch. The complete captured path set is recaptured before publish;
+Git inventory/content identity and frozen `captureScopes` are also rechecked, while the Documents capture generation
+and dirty-state barrier cover controlled writers. A mixed baseline is retryable `baseline-changed`, never a complete
+branch assembled from different moments. New virtual regular files receive the umask-derived default mode without
+creating a probe file in the user tree, so apply and compensation compare full `sameState` identities.
+
+Production WorkingState authority is the Rust format-v9 immutable root store; the old TS trie/catalog and local
+materializer remain test fixtures only. Direct read, grep/find/ls/explore pin, virtual write, baseline capture,
+materialization input, result publication, history release, and deletion use asynchronous root/path/domain APIs and
+do not retain an expanded workspace tree or a callback projection as a second production authority. Old internal
 WorkingState formats are rejected rather than migrated.
 Failed prepare deletes an
 unbound branch and scratch without touching a still-attached draft baseline.
@@ -397,31 +382,29 @@ Spawn recaptures only when no `workBranchId` exists. The child stays on a
 virtual scratch until a path-binding tool runs. Same-name `edit` / `write` / `apply_patch` call `document.branchWrite`,
 which commits text into the unpublished WorkingState delta with `writeRevision` CAS
 and never writes the parent directory. Directory, binary, symlink, and unsupported
-states are rejected. The first `bash` or LSP navigation tool asks
-`workingBranch.ensureMaterialized`: the Host freezes the current `writeRevision`, waits for
-in-flight virtual writes, materializes into a staging directory, journals
-`materializationSwitch`, then atomically replaces the scratch. Callers that arrive
-during the switch re-read the execution view: materialized returns disk, a still-virtual
-branch accepts another WorkingState write. A Git parent then receives an isolated context via
-`git worktree add --detach` (this writes `.git/worktrees` and does not create a
-user-visible branch) or `git init` when HEAD is unborn or the directory would
-otherwise inherit another worktree. The parent identity stays on `worktree.base`;
-the execution repository records `executionBaseline` after init, detach, crash
-recovery, and rematerialize. Inspect/snapshot/settle resolve that execution
-commit, not the logical parent SHA. Reclaim deletes `executionBaseline` with the
-directory. Ordinary WorkingBranch reads re-fetch the current view after the store
-lease. `explore.query.start` copies an immutable effective-state snapshot and
-`writeRevision` in that same shared lease; lexical, structural, semantic, and
-original-text reads consume it. Failure or caller abort rolls back to the virtual
-branch; restart recovers one authoritative view from the journal.
-Settlement publishes `publishHeadResult` while virtual, or inspects the directory and
-publishes that fold after the switch, including unpublished virtual deltas so an
-isolated init cannot drop writes already committed into the execution baseline. Git commits and immutable copy snapshots remain
-migration/reconstruction sources. Merge reads the selected native revision, never the
-live child directory, and applies only baseline-to-result paths through the recovery
-store's selected location, SQLite journal, object store, and workspace lease. Reopen
-of a materialized result rebuilds that directory at the same path; a still-virtual
-branch reopens on scratch and reads the branch view.
+states are rejected. The first `bash` or LSP navigation tool asks `workingBranch.ensureMaterialized`: the Host freezes the current
+`writeRevision` and waits for in-flight virtual writes, then the kernel materializes that pinned immutable root
+directly into the admitted managed path. Rust owns operation-specific staging/backup/promotion, object verification,
+and restart reconciliation; the older TS `materializationSwitch` journal is only a test/legacy seam when a kernel
+root store is not injected. Callers that arrive during the switch re-read the execution view: materialized returns
+disk, while a still-virtual branch accepts another WorkingState write.
+
+A Git parent receives only execution metadata after the Rust body exists. The Host creates a temporary linked
+`--no-checkout --detach` worktree, moves its `.git` admin binding to the live path, seeds the selected tree with
+`read-tree`, then runs `git add -A` and an internal baseline commit. Those Git operations establish the real index,
+clean/LFS/EOL/filter semantics and `executionBaseline` without copying workspace bytes back through TypeScript;
+a required filter failure aborts attachment and leaves the materialized file bytes unchanged. Unborn/inherited
+contexts use the existing isolated-init path. Reclaim removes the managed body through the kernel and prunes linked
+worktree metadata. Ordinary WorkingBranch reads still re-fetch the current view after the store lease;
+`explore.query.start` pins one immutable root/revision for lexical, structural, semantic, and original-text reads.
+
+Settlement publishes `publishHeadResult` while virtual. Once materialized, Git supplies tracked/untracked changed
+paths and index modes, while frozen `captureScopes` contribute both prior branch paths and current disk paths so
+ignored additions, edits, and deletions remain visible; non-Git views use the complete Rust inventory. Rust captures
+and revalidates those states, advances the branch root, and publishes an immutable WorkingResult. That root is the
+retained production result/archive identity, so no mandatory adjacent `.snapshot` is created. Merge and reopen read
+the selected native revision rather than the live child directory. Combined Integration/recovery uses the Rust typed
+operation/file journal and kernel file-resource apply path; there is no production TS SQLite recovery writer.
 Nested children reuse the same registry, Run, review, archive, and lost-resume
 path. Host restart resumes lost Runs for the snapshot session's owning Thread
 parent from the persisted session binding, so an execution-workspace snapshot
@@ -463,8 +446,9 @@ User archive keeps the report, transcript reference, native results, and origina
 Pi session file; it does not use the session-delete path that clears `report`.
 Restore rematerializes the published result at the same path. If that path is
 occupied by other content, Host reports `path-occupied` and does not delete it.
-Occupancy distinguishes materialized logical size, allocated blocks when the
-platform reports them, and shared content-addressed objects. Reclaim stays
+Occupancy uses kernel `file.measure` for production managed directories: logical bytes are always counted from the
+observed filesystem, Unix reports actual allocated blocks, and Windows leaves `allocatedBytes` unknown instead of
+copying logical size into a physical-allocation field. Shared content-addressed objects remain a separate projection. Reclaim stays
 blocked for `keep_worktree`, unfinished Integration, active writers, editor
 surfaces, background commands, or unverified/uncollected content. Budget uses
 only the user-configured `harness.worktree.budget`, across all parent sessions in

@@ -94,7 +94,7 @@ export interface HostFileResourceBackend {
   remove(
     identity: RecoveryIdentity,
     relativePath: string,
-    options?: { recursive?: boolean; force?: boolean },
+    options?: { recursive?: boolean; force?: boolean; operationId?: string },
   ): Promise<void>;
   rename(
     identity: RecoveryIdentity,
@@ -107,6 +107,27 @@ export interface HostFileResourceBackend {
       operationId?: string;
     },
   ): Promise<"renamed" | "target-exists" | "conflict">;
+  scanPaths(
+    identity: RecoveryIdentity,
+    relativePath?: string,
+    scopes?: readonly string[],
+    options?: { signal?: AbortSignal },
+  ): Promise<string[]>;
+  measure(
+    identity: RecoveryIdentity,
+    relativePath?: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<{ logicalBytes: number | null; allocatedBytes: number | null; unknown: boolean }>;
+  materializeRoot(
+    identity: RecoveryIdentity,
+    relativePath: string,
+    sourceRoot: string,
+    options: { operationId: string; signal?: AbortSignal },
+  ): Promise<{
+    status: "materialized" | "conflict";
+    reconciled: boolean;
+    cow: { reflink: number; copy: number };
+  }>;
 }
 
 export type ResolveDirectoryApplyContext = (directory: string, owningWorkspaceId?: string) => Promise<{

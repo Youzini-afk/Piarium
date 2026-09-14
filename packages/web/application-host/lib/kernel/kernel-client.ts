@@ -149,6 +149,18 @@ export class KernelScopedClient {
     return this.owner.fileRename(params, this.grant, signal);
   }
 
+  fileScan(params: KernelMethodParams["file.scan"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileScan(params, this.grant, signal);
+  }
+
+  fileMeasure(params: KernelMethodParams["file.measure"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileMeasure(params, this.grant, signal);
+  }
+
+  fileMaterialize(params: KernelMethodParams["file.materialize"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileMaterialize(params, this.grant, signal);
+  }
+
   createBranch(params: KernelCreateBranchInput, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.createBranch(params, this.grant, signal);
   }
@@ -773,6 +785,18 @@ export class KernelClient {
 
   async fileRename(params: KernelMethodParams["file.rename"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.rename", params, { signal, grant });
+  }
+
+  async fileScan(params: KernelMethodParams["file.scan"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.scan", params, { signal, grant });
+  }
+
+  async fileMeasure(params: KernelMethodParams["file.measure"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant });
+  }
+
+  async fileMaterialize(params: KernelMethodParams["file.materialize"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.materialize", params, { signal, grant });
   }
 
   async createBranch(params: KernelCreateBranchInput, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

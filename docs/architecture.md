@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage and R2 file/recovery authority are complete. R0 packaging/process evidence remains tracked separately, and R3–R6 retain their defined resource migrations.
+Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage, R2 file/recovery authority, and R3 baseline/materialization lifecycle are complete. R0 packaging/process evidence remains tracked separately, and R4–R6 retain their defined migrations.
 
 Last updated: 2026-09-14
 
@@ -730,7 +730,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources and disk gate; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts while real controlled disk capture/apply uses the Rust R2 file-resource backend. R3 still owns baseline/materialization/CoW and execution-directory lifecycle |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources, fixed baseline/materialization and managed-directory lifecycle; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts and Git semantics while controlled disk capture/apply, baseline body capture, immutable-root materialization, reclaim and measurement use the Rust R2/R3 file-resource backend |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
@@ -1173,5 +1173,17 @@ reconciliation after an already-applied side effect loses its terminal response.
 workspace-scoped Files CRUD, Recovery/Integration disk apply and compensation, and production `fs.lock` use
 that authority. Registry remains the sole unsaved-buffer/grouped-undo authority; Host surface receipts advance
 the durable mixed operation without copying editor text into Rust. Piarium `write`/`edit`/`apply_patch` no
-longer fall back to direct pi-host disk mutation when the Host backend is unavailable. R3 still owns Git/non-Git
-baseline capture, materialization/CoW, shell settle/writeback, execution-directory reclaim and lifecycle.
+longer fall back to direct pi-host disk mutation when the Host backend is unavailable.
+
+D-277 closes R3. Production baseline inventory and file-body capture now use the same Host-admitted,
+same-grant Rust file authority that owns WorkingState objects; Git remains the semantic adapter for staged/
+unstaged/untracked paths, index modes and configured clean/filter behavior rather than a second body writer.
+Immutable roots materialize through kernel-owned staging/backup/promotion with object verification, truthful
+reflink-or-copy reporting and restart reconciliation. Materialized Git execution attaches only linked-worktree
+metadata, seeds the real index, and commits an internal execution baseline without copying workspace bytes back
+through TypeScript. Settle republishes Rust roots from Git changed paths plus frozen capture scopes, or from the
+full Rust inventory for non-Git views. Native result roots replace mandatory production side snapshots;
+reclaim/discard/delete use kernel subtree removal and prune linked-worktree metadata. Kernel measurement reports
+real allocated blocks where the platform exposes them; Windows currently reports `allocatedBytes: null` rather
+than guessing. Thread/Run retention policy, active-writer/command guards, unsaved buffers and Git product policy
+remain in their existing Host/Registry domains. R4–R6 are unchanged.

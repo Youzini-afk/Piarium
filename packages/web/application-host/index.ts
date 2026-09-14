@@ -1052,11 +1052,35 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
     },
   });
-  const resolveKernelExecutionRoot = async (canonicalRoot: string) => {
-    const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot });
-    const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId);
-    return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root };
+  const resolveKernelExecutionRoot = async (canonicalRoot: string, owningWorkspaceId: string) => {
+    try {
+      const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot });
+      const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId);
+      return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root };
+    } catch (error) {
+      const candidate = path.resolve(canonicalRoot);
+      const normalize = (value: string) => {
+        const resolved = path.resolve(value).replace(/\\/g, '/');
+        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+      };
+      const normalizedCandidate = normalize(candidate);
+      for (const rootName of ['thread-scratch', 'worktrees']) {
+        const root = path.resolve(PIARIUM_DATA_DIR, rootName);
+        const relative = path.relative(root, candidate);
+        const segments = relative.split(/[\\/]/).filter(Boolean);
+        if (!relative
+          || relative.startsWith('..')
+          || path.isAbsolute(relative)
+          || segments.length === 0
+          || !normalizedCandidate.startsWith(`${normalize(root)}/`)) continue;
+        const managedRoot = path.join(root, segments[0]!);
+        await fs.promises.mkdir(managedRoot, { recursive: true });
+        return { workspaceId: owningWorkspaceId, canonicalRoot: managedRoot };
+      }
+      throw error;
+    }
   };
+  kernelStorageAdapter.bindFileRootResolver(resolveKernelExecutionRoot);
   const kernelFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
     resolveExecutionRoot: resolveKernelExecutionRoot,
   });
@@ -1077,6 +1101,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     kernelRecoveryFileResources,
   );
   kernelStorageAdapter.bindFileStore(kernelRecoveryContentStore);
+  kernelStorageAdapter.bindFileResources(kernelFileResources);
   const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
   const workspaceConfig = createWorkspaceConfig({
     env: process.env,
@@ -1396,6 +1421,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         return false;
       }
     },
+    removeManagedPath: async ({ workspaceId, managedRoot, path: targetPath, operationId }) => {
+      const relative = path.relative(managedRoot, targetPath).replace(/\\/g, '/');
+      if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
+        throw new Error(`Managed directory removal escaped its ownership root: ${targetPath}`);
+      }
+      const identity = {
+        authorityId: extensionRuntime.services.hostId,
+        canonicalRoot: managedRoot,
+        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
+        workspaceId,
+      };
+      await kernelFileResources.gateFor(identity).run(
+        [{ resourceId: relative, scope: 'subtree' }],
+        () => kernelFileResources.remove(identity, relative, {
+          recursive: true,
+          force: true,
+          operationId,
+        }),
+      );
+    },
     createScratch: async (sourceRoot, threadId) => {
       const workspaceKey = crypto.createHash('sha256').update(path.resolve(sourceRoot)).digest('hex');
       const managedRoot = path.join(PIARIUM_DATA_DIR, 'thread-scratch', workspaceKey);
@@ -1553,6 +1598,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     workingStates: harnessWorkingStates,
     executionViews: threadExecutionViews,
     virtualWriteGate,
+    measureManagedDirectory: async (workspaceId, worktree) => {
+      if (!worktree.managedRoot) {
+        return { logicalBytes: null, allocatedBytes: null, unknown: true };
+      }
+      const relative = path.relative(worktree.managedRoot, worktree.path).replace(/\\/g, '/');
+      if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
+        return { logicalBytes: null, allocatedBytes: null, unknown: true };
+      }
+      return kernelFileResources.measure({
+        authorityId: extensionRuntime.services.hostId,
+        canonicalRoot: worktree.managedRoot,
+        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
+        workspaceId,
+      }, relative);
+    },
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),

@@ -17,7 +17,9 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.draft.get"
         | "working.draft.list"
         | "working.verification.list"
-        | "working.review.list" => "storage.read",
+        | "working.review.list"
+        | "file.scan"
+        | "file.measure" => "storage.read",
         "storage.putBlob.begin"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
@@ -44,6 +46,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.mkdir"
         | "file.remove"
         | "file.rename"
+        | "file.materialize"
         | "storage.record.put"
         | "storage.record.release"
         | "working.result.put"

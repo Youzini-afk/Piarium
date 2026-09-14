@@ -1,14 +1,14 @@
 import { randomUUID, createHash } from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
 import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
+import type { HostFileResourceBackend } from "../recovery/durable-file-operation.js";
 import { type RecoveryFileStore, type RecoveryIdentity } from "../recovery/journal-files.js";
-import { materializeWorkingState, type MaterializeResult } from "../harness/working-state/materializer.js";
+import type { MaterializeResult } from "../harness/working-state/materializer.js";
 import { applyIndexModes } from "../harness/working-state/git-index-mode.js";
-import { sameState } from "../recovery/journal-files.js";
+import { parseRecoveryState, sameState } from "../recovery/journal-files.js";
 import type {
   DraftBaseline,
   DraftBaselinePathProvenance,
@@ -62,7 +62,14 @@ export interface KernelStorageContext {
   actor?: KernelActorIdentity;
   identity: RecoveryIdentity;
   root: string;
+  resolveFileRoot(directory: string): Promise<{
+    rootId: string;
+    canonicalRoot: string;
+    basePath: string;
+    executionWorkspaceId: string;
+  }>;
   fileStore: RecoveryFileStore;
+  fileResources?: HostFileResourceBackend;
   resourceOperationGate: { run<T>(resources: readonly unknown[], operation: () => Promise<T>): Promise<T> };
   collectUnreachableObjects?: () => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>;
   durableRecoveryStore?: RecoveryDurableOperationPort;
@@ -209,6 +216,96 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly sourceByHash = new Map<string, { branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
+
+  private kernelFileRoot(directory: string): ReturnType<KernelStorageContext["resolveFileRoot"]> {
+    return this.context.resolveFileRoot(directory);
+  }
+
+  private async kernelScanPaths(
+    directory: string,
+    scopes?: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<string[]> {
+    const root = await this.kernelFileRoot(directory);
+    const output: string[] = [];
+    let cursor: number | undefined;
+    do {
+      signal?.throwIfAborted();
+      const page = await this.context.client.fileScan({
+        workspaceId: this.context.identity.workspaceId,
+        rootId: root.rootId,
+        path: root.basePath,
+        ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalize) } : {}),
+        ...(cursor === undefined ? {} : { cursor }),
+        pageSize: 1024,
+      }, signal);
+      if (!Array.isArray(page.paths) || !page.paths.every((entry) => typeof entry === "string")) {
+        throw new Error("Kernel returned an invalid WorkingState file scan page");
+      }
+      output.push(...(page.paths as string[]).map(normalize));
+      cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
+    } while (cursor !== undefined);
+    return [...new Set(output)].sort();
+  }
+
+  private async kernelMaterialize(
+    sourceRoot: string,
+    directory: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<MaterializeResult> {
+    const root = await this.kernelFileRoot(directory);
+    const relativePath = root.basePath;
+    if (!relativePath) {
+      throw new Error(`Managed materialization target must be below its admitted root: ${directory}`);
+    }
+    const leaseId = `materialize-lease:${randomUUID()}`;
+    for (;;) {
+      signal?.throwIfAborted();
+      const lease = await this.context.client.fileLeaseAcquire({
+        workspaceId: this.context.identity.workspaceId,
+        rootId: root.rootId,
+        leaseId,
+        resources: [{ path: relativePath, scope: "subtree" }],
+      }, signal);
+      if (lease.status === "acquired") break;
+      if (lease.status !== "busy") throw new Error("Kernel returned an invalid materialization lease result");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    try {
+      const result = await this.context.client.fileMaterialize({
+        operationId,
+        workspaceId: this.context.identity.workspaceId,
+        rootId: root.rootId,
+        path: relativePath,
+        sourceRoot,
+        leaseId,
+      }, signal);
+      if (result.status === "conflict") {
+        throw new Error(`Managed materialization target changed after promotion: ${directory}`);
+      }
+      if (result.status !== "materialized") {
+        throw new Error("Kernel returned an invalid WorkingState materialization result");
+      }
+      const cow = result.cow && typeof result.cow === "object" ? result.cow as Record<string, unknown> : {};
+      return {
+        targetDir: directory,
+        materializedPaths: [],
+        cleanedPaths: [],
+        removedPaths: [],
+        cow: {
+          reflink: typeof cow.reflink === "number" ? cow.reflink : 0,
+          copy: typeof cow.copy === "number" ? cow.copy : 0,
+        },
+      };
+    } finally {
+      await this.context.client.fileLeaseRelease({
+        workspaceId: this.context.identity.workspaceId,
+        rootId: root.rootId,
+        leaseId,
+      }).catch(() => undefined);
+    }
+  }
 
   private assertPinForBranch(branchId: string, pin: WorkingStatePinnedRoot): void {
     if (pin.branchId !== branchId || pin.workspaceId !== this.context.identity.workspaceId) {
@@ -981,48 +1078,53 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async materializeResult(branchId: string, revision: number, directory: string): Promise<MaterializeResult> {
-    const read = await this.listPaths(branchId, [""], { revision });
-    if (!read) throw new Error(`Working result not found: ${branchId}@${revision}`);
-    const entries = new Map(read.entries.map((entry) => [entry.state, entry]));
-    return materializeWorkingState({
-      targetDir: directory,
-      states: Object.fromEntries(read.entries.map((entry) => [entry.path, entry.state])),
-      readContent: async (state) => {
-        const entry = entries.get(state);
-        return entry ? this.readContent(entry) : null;
-      },
-      objectPathFor: () => null,
-      cleanUnreferenced: true,
-    });
+    const read = await this.context.client.readBranch({ branchId, revision, includeEntries: false });
+    if (typeof read.root !== "string" || read.root.length === 0) {
+      throw new Error(`Working result not found: ${branchId}@${revision}`);
+    }
+    return this.kernelMaterialize(read.root, directory, `working-materialize:${randomUUID()}`);
   }
 
   async materializePin(pin: WorkingStatePin, directory: string): Promise<MaterializeResult> {
-    const read = await this.listPaths(pin.branchId, [""], { pin });
-    if (!read) throw new Error(`Working-state pin is unavailable: ${pin.pinId}`);
-    const entries = new Map(read.entries.map((entry) => [entry.state, entry]));
-    return materializeWorkingState({
-      targetDir: directory,
-      states: Object.fromEntries(read.entries.map((entry) => [entry.path, entry.state])),
-      readContent: async (state) => {
-        const entry = entries.get(state);
-        return entry ? this.readContent(entry) : null;
-      },
-      objectPathFor: () => null,
-      cleanUnreferenced: true,
-    });
+    this.assertPinForBranch(pin.branchId, pin);
+    return this.kernelMaterialize(pin.root, directory, `working-materialize:${randomUUID()}`);
+  }
+
+  async materializePinManaged(
+    pin: WorkingStatePin,
+    directory: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<MaterializeResult> {
+    this.assertPinForBranch(pin.branchId, pin);
+    return this.kernelMaterialize(pin.root, directory, operationId, signal);
   }
 
   async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string> }): Promise<Record<string, RecoveryState>> {
-    const files = relativePaths?.map(normalize) ?? await this.scanDirectory(directory);
+    const files = relativePaths?.map(normalize) ?? await this.kernelScanPaths(directory, undefined, options?.signal);
+    const root = await this.kernelFileRoot(directory);
     const result: Record<string, RecoveryState> = {};
     let done = 0;
     for (const file of files) {
       options?.signal?.throwIfAborted();
-      const captured = await this.context.fileStore.captureState({ ...this.context.identity, canonicalRoot: directory }, this.context.root, file, { store: false });
-      let state = captured.state;
-      if (state.kind === "regular-file" && options?.store !== false) {
-        const object = await this.putObject(await fs.promises.readFile(path.join(directory, ...file.split("/"))));
-        state = { ...state, objectHash: object.hash, byteLength: object.byteLength };
+      const value = await this.context.client.fileCapture({
+        operationId: `working-capture:${randomUUID()}`,
+        workspaceId: this.context.identity.workspaceId,
+        rootId: root.rootId,
+        path: root.basePath ? `${root.basePath}/${file}` : file,
+        store: options?.store !== false,
+      }, options?.signal);
+      if (typeof value.stateJson !== "string") {
+        throw new Error(`Kernel returned an invalid baseline state for ${file}`);
+      }
+      const state = parseRecoveryState(JSON.parse(value.stateJson));
+      if (state.kind === "regular-file" && options?.store !== false && typeof value.ownerId === "string") {
+        const existingOwner = this.ownerByHash.get(state.objectHash);
+        if (existingOwner && existingOwner !== value.ownerId) {
+          await this.context.client.releaseBlob(value.ownerId);
+        } else {
+          this.ownerByHash.set(state.objectHash, value.ownerId);
+        }
       }
       result[file] = state;
       done += 1;
@@ -1031,35 +1133,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return applyIndexModes(result, options?.indexModes);
   }
 
-  private async scanDirectory(directory: string, base = directory): Promise<string[]> {
-    const output: string[] = [];
-    for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
-      if (entry.name === ".git" || entry.name === ".piarium") continue;
-      const absolute = path.join(directory, entry.name);
-      const relative = normalize(path.relative(base, absolute));
-      output.push(relative);
-      if (entry.isDirectory()) output.push(...await this.scanDirectory(absolute, base));
-    }
-    return output.sort();
-  }
-
   async listCaptureScopePaths(directory: string, scopes: readonly string[]): Promise<string[]> {
-    const output = new Set<string>();
-    for (const rawScope of scopes) {
-      const scope = normalize(rawScope);
-      const absolute = path.join(directory, ...scope.split("/"));
-      let stat: fs.Stats;
-      try { stat = await fs.promises.lstat(absolute); } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
-      }
-      output.add(scope);
-      if (stat.isDirectory() && !stat.isSymbolicLink()) for (const child of await this.scanDirectory(absolute, directory)) output.add(child);
-    }
-    return [...output].sort();
+    return this.kernelScanPaths(directory, scopes);
   }
 
-  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> { return this.scanDirectory(directory); }
+  async listWorkspaceBaselinePaths(directory: string): Promise<string[]> {
+    return this.kernelScanPaths(directory);
+  }
 
   private async publishCaptured(branchId: string, captured: Record<string, RecoveryState>, changedPaths?: string[], fixedPin?: WorkingStatePin): Promise<WorkingResult> {
     const branch = await this.getBranchRoot(branchId);
@@ -1157,9 +1237,46 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async publishDirectoryResult(branchId: string, directory: string, changedPaths?: string[], options?: { indexModes?: Map<string, string> | Record<string, string>; validateFixedSource?: () => Promise<boolean> }): Promise<WorkingResult> {
-    const captured = await this.captureDirectory(directory, changedPaths, options);
-    if (options?.validateFixedSource && !await options.validateFixedSource()) throw new Error("Working-state source changed while it was being captured");
-    return this.publishCaptured(branchId, captured, changedPaths);
+    const ownersBefore = new Map(this.ownerByHash);
+    const normalizedPaths = changedPaths?.map(normalize);
+    const captured = await this.captureDirectory(directory, normalizedPaths, options);
+    const releaseNewOwners = async (): Promise<void> => {
+      const releases: Promise<unknown>[] = [];
+      for (const state of Object.values(captured)) {
+        if (state.kind !== "regular-file") continue;
+        const ownerId = this.ownerByHash.get(state.objectHash);
+        if (!ownerId || ownersBefore.get(state.objectHash) === ownerId) continue;
+        this.ownerByHash.delete(state.objectHash);
+        releases.push(this.context.client.releaseBlob(ownerId));
+      }
+      await Promise.allSettled(releases);
+    };
+    try {
+      const initialPaths = (normalizedPaths ?? Object.keys(captured)).sort();
+      const observedPaths = normalizedPaths ?? await this.kernelScanPaths(directory);
+      if (initialPaths.length !== observedPaths.length
+        || initialPaths.some((file, index) => file !== observedPaths[index])) {
+        throw new Error("Working-state directory inventory changed while it was being captured");
+      }
+      const observed = await this.captureDirectory(directory, observedPaths, {
+        ...options,
+        store: false,
+      });
+      const changed = observedPaths.filter((file) => !sameState(
+        captured[file] ?? { kind: "missing" },
+        observed[file] ?? { kind: "missing" },
+      ));
+      if (changed.length > 0) {
+        throw new Error(`Working-state directory changed while it was being captured: ${changed.slice(0, 8).join(",")}`);
+      }
+      if (options?.validateFixedSource && !await options.validateFixedSource()) {
+        throw new Error("Working-state source changed while it was being captured");
+      }
+      return await this.publishCaptured(branchId, captured, normalizedPaths);
+    } catch (error) {
+      await releaseNewOwners();
+      throw error;
+    }
   }
 
   async captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null> {
@@ -1287,11 +1404,18 @@ export interface KernelStorageAdapterOptions {
   durableRecoveryStore?: RecoveryDurableOperationPort;
 }
 
+export type KernelFileRootResolver = (
+  canonicalRoot: string,
+  owningWorkspaceId: string,
+) => Promise<{ workspaceId: string; canonicalRoot: string }>;
+
 export class KernelStorageAdapter {
   readonly client: KernelClient;
   private readonly options: KernelStorageAdapterOptions;
   private readonly grants = new Map<string, Promise<KernelGrantHandle>>();
   private boundFileStore: RecoveryFileStore | undefined;
+  private boundFileResources: HostFileResourceBackend | undefined;
+  private fileRootResolver: KernelFileRootResolver | undefined;
   private readonly fileStoreProxy: RecoveryFileStore;
   constructor(options: KernelStorageAdapterOptions) {
     this.options = options;
@@ -1311,6 +1435,20 @@ export class KernelStorageAdapter {
       throw new Error("Kernel recovery file store is already bound");
     }
     this.boundFileStore = fileStore;
+  }
+
+  bindFileResources(fileResources: HostFileResourceBackend): void {
+    if (this.boundFileResources && this.boundFileResources !== fileResources) {
+      throw new Error("Kernel file-resource backend is already bound");
+    }
+    this.boundFileResources = fileResources;
+  }
+
+  bindFileRootResolver(resolver: KernelFileRootResolver): void {
+    if (this.fileRootResolver && this.fileRootResolver !== resolver) {
+      throw new Error("Kernel file-root resolver is already bound");
+    }
+    this.fileRootResolver = resolver;
   }
 
   async fileAuthorityContext(input: {
@@ -1398,9 +1536,42 @@ export class KernelStorageAdapter {
       },
       reviewRelease: (operationId: string, recordId: string) => scoped.workingReviewRelease({ operationId, workspaceId, recordId }),
     };
+    const resolveFileRoot = async (directory: string) => {
+      const requestedRoot = path.resolve(directory);
+      const resolved = this.fileRootResolver
+        ? await this.fileRootResolver(requestedRoot, workspaceId)
+        : {
+            workspaceId: grant.executionWorkspace ?? workspaceId,
+            canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId),
+          };
+      const canonicalRoot = path.resolve(resolved.canonicalRoot);
+      const relative = path.relative(canonicalRoot, requestedRoot);
+      if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
+        throw new Error(`WorkingState file root was not admitted by the Host: ${directory}`);
+      }
+      const executionWorkspaceId = grant.executionWorkspace ?? workspaceId;
+      if (resolved.workspaceId !== executionWorkspaceId) {
+        throw new Error(`WorkingState execution workspace mismatch: expected ${executionWorkspaceId}, got ${resolved.workspaceId}`);
+      }
+      const registered = await scoped.fileRootRegister({
+        workspaceId,
+        executionWorkspaceId,
+        canonicalRoot,
+      });
+      if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string") {
+        throw new Error("Kernel returned an invalid WorkingState file root registration");
+      }
+      return {
+        rootId: registered.rootId,
+        canonicalRoot: registered.canonicalRoot,
+        basePath: relative ? relative.replace(/\\/g, "/") : "",
+        executionWorkspaceId,
+      };
+    };
     return {
       identity,
       root,
+      resolveFileRoot,
       actor: {
         ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
         ...(grant.authorityInstanceId ? { authorityInstanceId: grant.authorityInstanceId } : {}),
@@ -1414,6 +1585,7 @@ export class KernelStorageAdapter {
         capabilities: [...grant.capabilities],
       },
       fileStore: this.fileStoreProxy,
+      ...(this.boundFileResources ? { fileResources: this.boundFileResources } : {}),
       resourceOperationGate: {
         run: async () => { throw new Error("Kernel resource operation gate is not bound"); },
       },

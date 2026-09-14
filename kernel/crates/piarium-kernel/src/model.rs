@@ -131,6 +131,7 @@ pub(crate) struct BranchWriteBuilder {
 #[derive(Clone, Debug)]
 pub(crate) struct FileRoot {
     pub(crate) root_id: String,
+    pub(crate) owning_workspace_id: String,
     pub(crate) execution_workspace_id: String,
     pub(crate) canonical_root: PathBuf,
 }

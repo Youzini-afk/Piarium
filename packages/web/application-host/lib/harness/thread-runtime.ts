@@ -18,6 +18,7 @@ import type {
   ThreadRun,
   ThreadRunOutcome,
   ThreadOccupancy,
+  ThreadSpaceMeasurement,
   ThreadRestoreStatus,
   WorkingBranchEnsureMaterializedResult,
   WorkspaceThreadSpace,
@@ -64,7 +65,6 @@ import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.
 import {
   directoryBaselineFingerprint,
   gitBaselineFingerprint,
-  workdirContentIdentities,
   withAncestorDirectories,
   type GitBaselineInventory,
 } from "./working-state/workspace-baseline.js";
@@ -116,6 +116,8 @@ export interface ThreadRuntimeOptions {
     Partial<Pick<ThreadWorktreeRuntime, "assertOwnership" | "attachIsolatedGitContext" | "discardInput" | "estimatePrepare" | "inspectGitBaselineInventory" | "inspectIndexModes" | "inspectWorkspaceIdentity" | "prepareInputs" | "reclaim" | "materialize" | "runSetup" | "measureDiskUsage" | "verifyFixedResult">>;
   resolveWorkspaceRoot(workspaceId: string): Promise<string>;
   resolveRuntimeWorkspaceId(cwd: string): Promise<string>;
+  /** Production R3 measurement of a managed execution directory through the kernel. */
+  measureManagedDirectory?(workspaceId: string, worktree: NonNullable<Thread["worktree"]>): Promise<ThreadSpaceMeasurement>;
   inspectBaselineWriters?(workspaceId: string, root: string): Promise<Array<{ id: string; purpose?: string }>>;
   beginBaselineCapture?(workspaceId: string): Promise<unknown>;
   completeBaselineCapture?(capture: unknown): Promise<{ stable: boolean; reasons: string[] }>;
@@ -1004,7 +1006,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         (error as NodeJS.ErrnoException).code = "EEXIST";
         throw error;
       }
-      const reclaimed = await options.worktrees.reclaim(worktree, { nativeVerified: true });
+      const reclaimed = await options.worktrees.reclaim(worktree, { nativeVerified: true, workspaceId });
       if (!reclaimed.reclaimed) {
         throw new ThreadRuntimeError("unavailable", reclaimed.reason ?? "The incomplete managed directory could not be reclaimed for retry");
       }
@@ -1032,24 +1034,55 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await clearIncompleteMaterialization(input.workspaceId, input.threadId, worktree);
     }
     await assertMaterializationPathAvailable(worktree.path);
-    if (!options.worktrees.materialize) throw new Error("Thread worktree materialization is unavailable");
+    if (!options.worktrees.materialize && !(input.branchId && options.workingStates)) {
+      throw new Error("Thread worktree materialization is unavailable");
+    }
     worktree.materialized = false;
     worktree.preparationStage = "materializing";
     delete worktree.materializationFingerprint;
     await persistWorktree(input.workspaceId, input.threadId, worktree);
     try {
-      worktree = await options.worktrees.materialize(input.sourceRoot, worktree, input.signal);
+      let managedMaterialized = false;
+      if (input.branchId && options.workingStates) {
+        const native = await options.workingStates.withBranchStore(
+          input.workspaceId,
+          "thread-recorded-materialize",
+          async (store) => {
+            if (!store.materializePinManaged) return null;
+            if (input.resultRevision !== undefined) return store.materializeResult(input.branchId!, input.resultRevision, worktree.path);
+            const pin = await store.pinBranch(input.branchId!, { signal: input.signal });
+            try {
+              return store.materializePinManaged(pin, worktree.path, `working-recorded-materialize:${randomUUID()}`, input.signal);
+            } finally {
+              await pin.release().catch(reportError);
+            }
+          },
+        );
+        if (native) {
+          if (native.cow) cowByThread.set(input.threadId, native.cow);
+          managedMaterialized = true;
+          worktree.materialized = true;
+          if (options.worktrees.attachIsolatedGitContext) {
+            const attached = await options.worktrees.attachIsolatedGitContext(input.sourceRoot, worktree, input.signal);
+            if (attached.executionBaseline) worktree.executionBaseline = attached.executionBaseline;
+            else delete worktree.executionBaseline;
+          }
+        }
+      }
+      if (!managedMaterialized) {
+        worktree = await options.worktrees.materialize!(input.sourceRoot, worktree, input.signal);
+        if (input.branchId && input.resultRevision !== undefined && options.workingStates) {
+          const overlaid = await options.workingStates.withBranchStore(
+            input.workspaceId,
+            "thread-recorded-materialize-legacy-overlay",
+            (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
+          );
+          if (overlaid?.cow) cowByThread.set(input.threadId, overlaid.cow);
+        }
+      }
       worktree.materialized = true;
       worktree.preparationStage = "materializing";
       await persistWorktree(input.workspaceId, input.threadId, worktree);
-      if (input.branchId && input.resultRevision && options.workingStates) {
-        const result = await options.workingStates.withBranchStore(
-          input.workspaceId,
-          "thread-result-materialize",
-          (store) => store.materializeResult(input.branchId!, input.resultRevision!, worktree.path),
-        );
-        if (result?.cow) cowByThread.set(input.threadId, result.cow);
-      }
       worktree.preparationStage = input.setupRequired ? "setup" : "ready";
       delete worktree.materializationFingerprint;
       delete worktree.retentionReason;
@@ -1244,6 +1277,26 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     terminatingSessions.delete(binding.sessionId);
   };
 
+  const materializedPublishPaths = async (
+    store: WorkingStateRootStore,
+    branchId: string,
+    directory: string,
+    gitChangedPaths: readonly string[] | undefined,
+  ): Promise<string[] | undefined> => {
+    if (gitChangedPaths === undefined) return undefined;
+    const branch = await store.getBranchRoot(branchId).catch(() => null);
+    if (!branch || branch.captureScopes.length === 0) return [...new Set(gitChangedPaths)].sort();
+    const [currentScopePaths, priorScope] = await Promise.all([
+      store.listCaptureScopePaths(directory, branch.captureScopes),
+      store.listPaths(branchId, branch.captureScopes),
+    ]);
+    return [...new Set([
+      ...gitChangedPaths,
+      ...currentScopePaths,
+      ...(priorScope?.entries.map((entry) => entry.path) ?? []),
+    ])].sort();
+  };
+
   const publishPartialResult = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (thread?.role === "retrieval") return;
@@ -1251,24 +1304,43 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const result = isVirtualWorktree(thread.worktree)
       ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
       : await (async () => {
-        const inspected = await options.worktrees.inspect(thread.worktree!, "live");
+        const inspected = thread.worktree!.base === "zero-commit"
+          ? null
+          : await options.worktrees.inspect(thread.worktree!, "live");
         const indexModes = await options.worktrees.inspectIndexModes?.(thread.worktree!.path);
-        return options.workingStates!.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishDirectoryResult(thread.workBranchId!, thread.worktree!.path, inspected.changedFiles, indexModes === undefined ? {} : { indexModes }));
+        return options.workingStates!.withBranchStore(
+          workspaceId,
+          "thread-partial-result-publish",
+          async (store) => {
+            const paths = await materializedPublishPaths(
+              store,
+              thread.workBranchId!,
+              thread.worktree!.path,
+              inspected?.changedFiles,
+            );
+            return store.publishDirectoryResult(
+              thread.workBranchId!,
+              thread.worktree!.path,
+              paths,
+              indexModes === undefined ? {} : { indexModes },
+            );
+          },
+        );
       })();
     let worktree = thread.worktree;
-    try {
-      worktree = await options.worktrees.snapshot(worktree);
-    } catch (error) {
-      reportError(error);
-      // A published native result without its corresponding retained
-      // worktree snapshot is not a complete archive capture. Propagate the
-      // failure so stopRunForArchive keeps the binding and active Run for a
-      // retry instead of reporting a successful archive over a stale path.
-      throw new ThreadRuntimeError(
-        "unavailable",
-        `Unable to snapshot the thread worktree before archive: ${error instanceof Error ? error.message : String(error)}`,
-        { cause: error },
-      );
+    if (!result.root) {
+      try {
+        worktree = await options.worktrees.snapshot(worktree);
+      } catch (error) {
+        reportError(error);
+        // Test/legacy stores without a native immutable result still need their
+        // own fixed snapshot. A Rust result root is already the retained archive.
+        throw new ThreadRuntimeError(
+          "unavailable",
+          `Unable to snapshot the thread worktree before archive: ${error instanceof Error ? error.message : String(error)}`,
+          { cause: error },
+        );
+      }
     }
     await options.registry.setWorkingState(workspaceId, threadId, {
       branchId: thread.workBranchId,
@@ -1447,13 +1519,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const directoryWindow = async (store: { listWorkspaceBaselinePaths?(directory: string): Promise<string[]> }): Promise<string | null> => {
       if (typeof store.listWorkspaceBaselinePaths !== "function") return null;
       const paths = await store.listWorkspaceBaselinePaths(sourceRoot);
-      const contentIdentities = await workdirContentIdentities(sourceRoot, paths, {
-        readFile: fs.promises.readFile,
-        lstat: fs.promises.lstat,
-        readlink: fs.promises.readlink,
-        join: path.join,
-      });
-      return directoryBaselineFingerprint(paths, contentIdentities);
+      return directoryBaselineFingerprint(paths);
     };
     const inspectInventory = async (): Promise<GitBaselineInventory | { kind: "directory" } | null> => {
       if (typeof options.worktrees.inspectGitBaselineInventory !== "function") return null;
@@ -1570,6 +1636,21 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             throw baselineChanged("directory paths");
           }
         }
+        const capturedPaths = Object.keys(baseline).sort();
+        if (capturedPaths.length > 0) {
+          const afterStates = await store.captureDirectory(sourceRoot, capturedPaths, {
+            signal: preparationSignal,
+            store: false,
+            ...(beforeInventory?.kind === "git" ? { indexModes: beforeInventory.indexModes } : {}),
+          });
+          const changedPaths = capturedPaths.filter((file) => !sameState(
+            baseline[file] ?? { kind: "missing" },
+            afterStates[file] ?? { kind: "missing" },
+          ));
+          if (changedPaths.length > 0) {
+            throw baselineChanged(`captured content or metadata: ${changedPaths.slice(0, 8).join(",")}`);
+          }
+        }
         if (canListCaptureScopes && (frozenCaptureScopePaths.length > 0 || captureScopes.length > 0)) {
           const afterScopePaths = [...new Set(await store.listCaptureScopePaths(sourceRoot, captureScopes))].sort();
           if (afterScopePaths.length !== frozenCaptureScopePaths.length
@@ -1596,7 +1677,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           }
         }
         await createFromStates(store, baseline, baseRef);
-      });
+      }, "exclusive", { executionWorkspace: captureWorkspaceId });
       const setupPending = existing.manifest.tools.includes("bash")
         && Boolean(options.worktrees.runSetup)
         && Boolean(effectiveSettings?.setup);
@@ -2310,7 +2391,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await closeBinding(binding, false);
       const settled = await options.registry.getThreadById(binding.workspaceId, binding.threadId);
       if (settled?.worktree && options.worktrees.discardInput) {
-        await options.worktrees.discardInput(settled.worktree).catch(reportError);
+        await options.worktrees.discardInput(settled.worktree, binding.workspaceId).catch(reportError);
         await options.registry.setWorktree(binding.workspaceId, binding.threadId, settled.worktree).catch(reportError);
       }
       await releasePendingMaterializeReservation(binding.threadId);
@@ -2324,7 +2405,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       let fixedSnapshotReady = false;
       const inspectVirtualWithoutBranch = isVirtualWorktree(currentWorktree)
         && (!options.workingStates || !thread.workBranchId);
-      if (!isVirtualWorktree(currentWorktree)) {
+      const nativeMaterializedResult = Boolean(options.workingStates && thread.workBranchId && !isVirtualWorktree(currentWorktree));
+      if (nativeMaterializedResult && currentWorktree.base !== "zero-commit") {
+        try {
+          inspected = await options.worktrees.inspect(currentWorktree, "live");
+          changedFiles = inspected.changedFiles;
+          diffStats = inspected.diffStats;
+        } catch (error) {
+          nativeResultUnavailable = true;
+          unresolved.push(`Unable to inspect Git execution result: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      if (!isVirtualWorktree(currentWorktree) && !nativeMaterializedResult) {
         try {
           currentWorktree = await options.worktrees.snapshot(currentWorktree);
           if (!currentWorktree.resultPath && options.worktrees.verifyFixedResult
@@ -2347,7 +2439,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           if (thread.workBranchId) nativeResultUnavailable = true;
         }
       }
-      if (options.workingStates && thread.workBranchId && (isVirtualWorktree(currentWorktree) || inspected)) {
+      if (options.workingStates && thread.workBranchId && !nativeResultUnavailable) {
         try {
           const publishedIndexModes = !isVirtualWorktree(currentWorktree)
             ? await options.worktrees.inspectIndexModes?.(currentWorktree!.path)
@@ -2355,17 +2447,21 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const published = await options.workingStates.withBranchStore(
             binding.workspaceId,
             "thread-result-publish",
-            (store) => isVirtualWorktree(currentWorktree)
-              ? store.publishHeadResult(thread.workBranchId!)
-              : store.publishDirectoryResult(
+            async (store) => {
+              if (isVirtualWorktree(currentWorktree)) return store.publishHeadResult(thread.workBranchId!);
+              const paths = await materializedPublishPaths(
+                store,
                 thread.workBranchId!,
-                currentWorktree!.resultPath ?? currentWorktree!.path,
-                inspected!.changedFiles,
-                {
-                  ...(publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes }),
-                  ...(options.worktrees.verifyFixedResult ? { validateFixedSource: () => options.worktrees.verifyFixedResult!(currentWorktree!) } : {}),
-                },
-              ),
+                currentWorktree!.path,
+                currentWorktree!.base === "zero-commit" ? undefined : inspected!.changedFiles,
+              );
+              return store.publishDirectoryResult(
+                thread.workBranchId!,
+                currentWorktree!.path,
+                paths,
+                publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes },
+              );
+            },
           );
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;
@@ -2472,9 +2568,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           diffStats,
         );
       }
-      if (options.worktrees.measureDiskUsage) {
+      if (options.measureManagedDirectory || options.worktrees.measureDiskUsage) {
         try {
-          await options.worktrees.measureDiskUsage(currentWorktree);
+          if (options.measureManagedDirectory) {
+            const measured = await options.measureManagedDirectory(binding.workspaceId, currentWorktree);
+            if (measured.logicalBytes === null) delete currentWorktree.diskBytes;
+            else currentWorktree.diskBytes = measured.logicalBytes;
+          } else {
+            await options.worktrees.measureDiskUsage!(currentWorktree);
+          }
           await options.registry.setWorktree(binding.workspaceId, binding.threadId, currentWorktree);
         } catch (error) {
           unresolved.push(`Unable to measure worktree disk usage: ${error instanceof Error ? error.message : String(error)}`);
@@ -2970,7 +3072,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         }
         const killed = await options.registry.getThreadById(binding.workspaceId, threadId);
         if (killed?.role === "retrieval" && killed.worktree && options.worktrees.discardInput) {
-          await options.worktrees.discardInput(killed.worktree).catch(reportError);
+          await options.worktrees.discardInput(killed.worktree, binding.workspaceId).catch(reportError);
           await options.registry.setWorktree(binding.workspaceId, threadId, killed.worktree).catch(reportError);
         }
       }
@@ -3340,12 +3442,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   ): Promise<ThreadOccupancy> => {
     const materialized = !thread.worktree || thread.worktree.materialized === false
       ? { logicalBytes: 0, allocatedBytes: 0, unknown: false }
-      : await measureDirectory(thread.worktree.path).catch((error) => {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-          return { logicalBytes: null, allocatedBytes: null, unknown: true };
-        }
-        throw error;
-      });
+      : await (options.measureManagedDirectory
+        ? options.measureManagedDirectory(workspaceId, thread.worktree)
+        : measureDirectory(thread.worktree.path)).catch((error) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+            return { logicalBytes: null, allocatedBytes: null, unknown: true };
+          }
+          throw error;
+        });
     const occupancyInput: Parameters<typeof projectThreadOccupancy>[0] = {
       thread,
       materialized,
@@ -3538,7 +3642,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const nativeVerified = Boolean(latest.workBranchId && latest.resultRevision);
       let result: { reclaimed: boolean; reason?: string };
       try {
-        result = await options.worktrees.reclaim(latest.worktree, nativeVerified ? { nativeVerified } : undefined);
+        result = await options.worktrees.reclaim(latest.worktree, {
+          workspaceId,
+          ...(nativeVerified ? { nativeVerified: true } : {}),
+        });
       } catch (error) {
         latest.worktree.retentionReason = error instanceof Error ? error.message : String(error);
         await persistWorktree(workspaceId, latest.id, latest.worktree).catch(reportError);
@@ -3794,7 +3901,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       // nativeVerified skips the result-snapshot diff: the snapshot itself is
       // being released in the same cascade, so the directory is removed on the
       // strength of managed ownership alone.
-      const result = await options.worktrees.reclaim(thread.worktree, { nativeVerified: true });
+      const result = await options.worktrees.reclaim(thread.worktree, { nativeVerified: true, workspaceId });
       if (!result.reclaimed) {
         throw new ThreadRuntimeError("unavailable", result.reason ?? "The managed directory could not be removed");
       }
@@ -4629,42 +4736,53 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           return { status: "failed", message: `Worktree budget unavailable: ${reservation.failure}` };
         }
       }
-      const token = randomUUID();
-      const journal: MaterializationSwitchJournal = {
-        revision: materializationPin.revision,
-        writeRevision: materializationPin.writeRevision,
-        root: materializationPin.root,
-        stagingPath: `${worktree.path}.materializing-${token}`,
-        backupPath: `${worktree.path}.virtual-backup-${token}`,
-        stage: "staging-ready",
-      };
-      activeJournal = journal;
-      await ownershipAssertion(worktree)("switch materialized worktree", [
-        journal.stagingPath,
-        journal.backupPath,
-      ]);
       if (!materializationStore || !materializationPin) throw new Error(`Working branch ${latest.branchId} is unavailable`);
-      await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
-      const materialized = await materializationStore.materializePin(materializationPin, journal.stagingPath);
-      if (materialized.cow) cowByThread.set(latest.threadId, materialized.cow);
-      switchSignal.throwIfAborted();
-      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: journal });
-      switchSignal.throwIfAborted();
-      await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
-      try {
-        await fs.promises.rename(worktree.path, journal.backupPath);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-          throw error;
+      let legacyJournal: MaterializationSwitchJournal | undefined;
+      if (materializationStore.materializePinManaged) {
+        await ownershipAssertion(worktree)("materialize live worktree", [worktree.path]);
+        const materialized = await materializationStore.materializePinManaged(
+          materializationPin,
+          worktree.path,
+          `working-live-materialize:${randomUUID()}`,
+          switchSignal,
+        );
+        if (materialized.cow) cowByThread.set(latest.threadId, materialized.cow);
+      } else {
+        const token = randomUUID();
+        const journal: MaterializationSwitchJournal = {
+          revision: materializationPin.revision,
+          writeRevision: materializationPin.writeRevision,
+          root: materializationPin.root,
+          stagingPath: `${worktree.path}.materializing-${token}`,
+          backupPath: `${worktree.path}.virtual-backup-${token}`,
+          stage: "staging-ready",
+        };
+        legacyJournal = journal;
+        activeJournal = journal;
+        await ownershipAssertion(worktree)("switch materialized worktree", [
+          journal.stagingPath,
+          journal.backupPath,
+        ]);
+        await fs.promises.rm(journal.stagingPath, { recursive: true, force: true });
+        const materialized = await materializationStore.materializePin(materializationPin, journal.stagingPath);
+        if (materialized.cow) cowByThread.set(latest.threadId, materialized.cow);
+        switchSignal.throwIfAborted();
+        await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: journal });
+        switchSignal.throwIfAborted();
+        await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
+        try {
+          await fs.promises.rename(worktree.path, journal.backupPath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
+        journal.stage = "live-backed-up";
+        await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
+        switchSignal.throwIfAborted();
+        await fs.promises.rename(journal.stagingPath, worktree.path);
+        journal.stage = "staging-promoted";
+        await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
+        switchSignal.throwIfAborted();
       }
-      journal.stage = "live-backed-up";
-      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
-      switchSignal.throwIfAborted();
-      await fs.promises.rename(journal.stagingPath, worktree.path);
-      journal.stage = "staging-promoted";
-      await persistWorktree(latest.workspaceId, latest.threadId, { ...worktree, materializationSwitch: { ...journal } });
-      switchSignal.throwIfAborted();
       let executionBaseline = worktree.executionBaseline;
       if (options.worktrees.attachIsolatedGitContext) {
         const attached = await options.worktrees.attachIsolatedGitContext(
@@ -4692,8 +4810,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         writeRevision: materializationPin.writeRevision,
         mode: "materialized",
       });
-      await fs.promises.rm(journal.backupPath, { recursive: true, force: true });
-      await removeOrphanMaterializationDirs(worktree, ownershipAssertion(worktree));
+      if (legacyJournal) {
+        await fs.promises.rm(legacyJournal.backupPath, { recursive: true, force: true });
+        await removeOrphanMaterializationDirs(worktree, ownershipAssertion(worktree));
+      }
       keepSpawnReservation = false;
       if (nextWorktree.preparationStage === "setup" && options.worktrees.runSetup && settings?.setup) {
         try {

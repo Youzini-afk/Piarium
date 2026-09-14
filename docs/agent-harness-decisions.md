@@ -6078,3 +6078,28 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-276 | accepted / implemented / R2 complete | — | status 阶段 R2；plan 阶段 R2；architecture；rust-kernel-design；kernel/Documents/Harness/pi-host documentation |
+
+### D-277 · 2026-09-14 · R3 收口：固定 baseline、durable materialization 与受管目录生命周期统一到 kernel
+
+类型：R3 production baseline/materialization closure；只追加，不改写 D-276 及更早历史事实
+
+问题：R2 已统一文件 resource gate 和受控磁盘 mutation，但 baseline 枚举/正文捕获、virtual→materialized staging/rename、Git execution body copy、materialized result snapshot、reclaim/space measurement 仍有 TS 文件系统实现。如果只把物化写文件改成 Rust、却继续让 ThreadRuntime 自己扫描/复制/交换目录或让 Git worktree checkout 重写正文，仍会存在第二个 execution-directory writer；如果把 Git filter/LFS/EOL/index 语义直接重写成 Rust，又会丢失 Git 真实配置。R3 还必须能解释 staging 已完成、live 已移成 backup、进程在 promote 前崩溃的中间状态，而不是只覆盖成功路径。
+
+决定：
+
+1. 生产 baseline 的 filesystem inventory 与 body capture 统一使用 kernel `file.scan` / `file.capture`。Application Host 先按 Documents 或受管 application-data root 做 admission，WorkingState 使用创建 branch 的同一 scoped grant 注册 file root，因此 capture object owner 可被 branch create 原子消费，不需要放松 R2 的跨 grant owner 规则。Git 继续负责 staged/unstaged/untracked、index mode、dirty-content identity 与 gitlink/filter 身份；完整 capture 后再按同一路径集合核对 typed file state，并在 Git/目录 inventory 与 frozen `captureScopes` 两端复核，变化即 `baseline-changed`。
+2. `file.materialize` 从 immutable root 构建 operation-specific staging，逐对象验证 hash/length 后安装正文。Linux 尝试 FICLONE、macOS 尝试 `clonefile`，能力不支持时普通 byte copy 是正式后端；权限/对象损坏等真实错误不降级。Windows 当前实现和本机验收只证明普通 copy，因此 `reflink:0`；未测文件系统不得因代码存在 clone 调用就声称已证明 CoW。
+3. materialization 切换由 kernel durable operation 拥有 staging/backup/promotion。live 已移到 backup 后、staging promote 前的故障有专用注入反例；重启重新注册 root 时，若 staging 可证明等于 source root 则完成 promotion，若 staging 不完整而 backup 可用则恢复 backup 并返回 conflict，若 live 被后写则保留可证明状态而不猜成功。native result root 是生产 archive/history 的固定身份，不再要求相邻 `.snapshot` 才算结果已保留；旧 TS materializer/snapshot/materialization-switch 只保留测试/未注入 kernel store 的 seam，不是生产 fallback。
+4. Git execution context 不再通过 `live→overlay→git checkout→copy body back` 建立。Host 只创建临时 `--no-checkout --detach` linked-worktree metadata，把 `.git` admin binding 指向已由 Rust 构造的 live body，然后执行 `read-tree`、`git add -A` 与内部 baseline commit。这样真实 `.gitattributes`、clean/LFS/EOL/working-tree-encoding/index 语义继续由 Git 决定；required clean filter 失败必须中止并保持 materialized bytes 不变。reclaim 后 prune linked-worktree metadata。
+5. materialized settle/writeback 对 Git 使用其真实 changed paths/index modes，并把 branch 冻结 `captureScopes` 的 prior/current 路径并入 Rust capture，因此 ignored scope 的新增、修改、删除不会遗漏；非 Git 使用完整 Rust inventory。capture 后再次 Rust recapture，稳定后才推进 WorkingState root/result。reclaim、retrieval discard 与 Thread delete 在生产通过 kernel subtree remove；Thread/Run 是否允许回收、活动 writer/command/editor/Integration guard 仍由 Host/Registry policy 决定。
+6. `file.measure` 把执行目录空间扫描迁进 kernel。Unix 使用 `stat.blocks * 512` 报实际 allocated bytes；Windows 当前没有已验证 physical-allocation backend，故 `allocatedBytes:null`，不以 logical bytes 猜测。共享 object store 的空间引用仍由 R1 GC/引用规则单独统计。
+
+证据：Windows release `piarium-kernel` child-process suite 25/25，其中 R3 真实子进程反例覆盖 scan/capture→immutable root→materialize/reclaim/rematerialize、Windows truthful copy/measure，以及 `live→backup` 后故障→kernel restart→staging promotion/operation reconciliation；R1/R2 原 23 项同时保持全绿。真实 release-kernel `storage-adapter.test.ts` 5/5；ThreadRuntime 66/66；ThreadWorktree 23 pass / 1 platform skip，并新增 required clean filter 失败时正文不变和 linked-worktree metadata reclaim；execution-baseline 与 materialization-switch focused tests继续通过。Application Host source/test TypeScript、Rust cargo check、release build均通过。未在本机证明的 Linux/macOS filesystem clone 行为只作为实现能力，后续 release/platform QA 可补证据但不反向制造 Windows R3 blocker。
+
+结果：R3 基线、物化与资源生命周期标记为 Complete。R0 保留独立 process/package evidence；R4–R6 不因本决定提前完成。Registry 仍拥有 unsaved buffer；Git 仍拥有 Git 语义；Thread/Run 生命周期策略仍归 Host。
+
+## D-277 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-277 | accepted / implemented / R3 complete | — | status 阶段 R3；plan 阶段 R3；architecture；rust-kernel-design；kernel/Harness documentation |

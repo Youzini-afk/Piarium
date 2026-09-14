@@ -27,5 +27,12 @@ R2 adds a scoped file-resource domain rather than a generic filesystem escape ha
 Documents-authorized canonical root; the kernel owns exact/subtree overlap leases, typed file capture,
 conditional apply, mkdir/remove/rename, and restart reconciliation for started filesystem operations. Regular-file
 capture/apply reuses the kernel content-object store. Production Documents/Files/Recovery/Integration and Harness
-`fs.lock` share this authority. Registry buffers remain outside Rust, and R3 still owns baseline/materialization.
+`fs.lock` share this authority. Registry buffers remain outside Rust.
+
+R3 extends that domain with `file.scan`, `file.measure`, and `file.materialize`. Production WorkingState baseline
+capture uses Host-admitted roots and same-grant content owners; immutable roots materialize through verified
+staging/backup/promotion with restart reconciliation. Linux/macOS attempt real clone backends and unsupported
+filesystems fall back to byte copy; Windows currently reports copy only and leaves physical allocation unknown.
+Managed directory reclaim/delete also runs through the kernel. Git remains a semantic adapter for inventory,
+index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.

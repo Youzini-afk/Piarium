@@ -7,8 +7,9 @@
 use super::*;
 use crate::protocol_generated::{
     KernelFileApplyParams, KernelFileCaptureParams, KernelFileLeaseAcquireParams,
-    KernelFileLeaseReleaseParams, KernelFileMkdirParams, KernelFileRemoveParams,
-    KernelFileRenameParams, KernelFileRootRegisterParams,
+    KernelFileLeaseReleaseParams, KernelFileMaterializeParams, KernelFileMeasureParams,
+    KernelFileMkdirParams, KernelFileRemoveParams, KernelFileRenameParams,
+    KernelFileRootRegisterParams, KernelFileScanParams,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -178,6 +179,157 @@ fn remove_existing(path: &Path) -> Result<(), KernelError> {
     }
 }
 
+fn remove_tree(path: &Path) -> Result<(), KernelError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
+            fs::remove_dir_all(path).map_err(Into::into)
+        }
+        Ok(_) => fs::remove_file(path).map_err(Into::into),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn materialize_side_path(path: &str, operation_id: &str, kind: &str) -> String {
+    let digest = hex::encode(Sha256::digest(operation_id.as_bytes()));
+    format!("{path}.piarium-{kind}-{}", &digest[..16])
+}
+
+fn materialized_expected_state(state: &PathState) -> FileState {
+    match state {
+        PathState::RegularFile {
+            object_hash,
+            byte_length,
+            mode: _mode,
+        } => FileState::RegularFile {
+            object_hash: object_hash.clone(),
+            byte_length: *byte_length,
+            #[cfg(unix)]
+            mode: Some(*_mode),
+            #[cfg(not(unix))]
+            mode: None,
+        },
+        PathState::Directory { mode: _mode } => FileState::Directory {
+            #[cfg(unix)]
+            mode: *_mode,
+            #[cfg(not(unix))]
+            mode: None,
+        },
+        PathState::Symlink {
+            symlink_target,
+            mode: _mode,
+        } => FileState::Symlink {
+            symlink_target: symlink_target.clone(),
+            #[cfg(unix)]
+            mode: *_mode,
+            #[cfg(not(unix))]
+            mode: None,
+        },
+        PathState::Missing => FileState::Missing,
+        PathState::Unsupported => FileState::Unsupported,
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
+    use std::os::fd::AsRawFd;
+    const FICLONE: std::os::raw::c_ulong = 0x4004_9409;
+    unsafe extern "C" {
+        fn ioctl(
+            fd: std::os::raw::c_int,
+            request: std::os::raw::c_ulong,
+            ...
+        ) -> std::os::raw::c_int;
+    }
+    let source_file = File::open(source)?;
+    let target_file = OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .open(destination)?;
+    let result = unsafe { ioctl(target_file.as_raw_fd(), FICLONE, source_file.as_raw_fd()) };
+    if result == 0 {
+        target_file.sync_all()?;
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    let unsupported = matches!(error.raw_os_error(), Some(18 | 22 | 25 | 38 | 95));
+    drop(target_file);
+    let _ = fs::remove_file(destination);
+    if unsupported {
+        return Ok(false);
+    }
+    Err(error.into())
+}
+
+#[cfg(target_os = "macos")]
+fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    unsafe extern "C" {
+        fn clonefile(
+            source: *const std::os::raw::c_char,
+            target: *const std::os::raw::c_char,
+            flags: u32,
+        ) -> i32;
+    }
+    let source_c = CString::new(source.as_os_str().as_bytes())
+        .map_err(|_| KernelError::Operation("materialize source contains NUL".to_string()))?;
+    let target_c = CString::new(destination.as_os_str().as_bytes())
+        .map_err(|_| KernelError::Operation("materialize destination contains NUL".to_string()))?;
+    let result = unsafe { clonefile(source_c.as_ptr(), target_c.as_ptr(), 0) };
+    if result == 0 {
+        OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(destination)?
+            .sync_all()?;
+        return Ok(true);
+    }
+    let error = io::Error::last_os_error();
+    let unsupported = matches!(error.raw_os_error(), Some(18 | 22 | 45 | 78));
+    let _ = fs::remove_file(destination);
+    if unsupported {
+        return Ok(false);
+    }
+    Err(error.into())
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn clone_file(_source: &Path, _destination: &Path) -> Result<bool, KernelError> {
+    Ok(false)
+}
+
+fn copy_object_to(source: &Path, destination: &Path) -> Result<&'static str, KernelError> {
+    if clone_file(source, destination)? {
+        return Ok("reflink");
+    }
+    fs::copy(source, destination)?;
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(destination)?
+        .sync_all()?;
+    Ok("copy")
+}
+
+fn durable_directory_rename(source: &Path, target: &Path) -> Result<(), KernelError> {
+    #[cfg(windows)]
+    {
+        // Windows MoveFileExW with WRITE_THROUGH is reliable for installed
+        // object files, but directory replacement can be rejected by the OS.
+        // R3 only renames to an absent sibling and persists an operation/backup
+        // around the move, so use the native directory rename primitive here.
+        fs::rename(source, target)?;
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        durable_rename(source, target)?;
+        Ok(())
+    }
+}
+
 fn create_symlink(target: &str, path: &Path) -> Result<(), KernelError> {
     #[cfg(unix)]
     {
@@ -215,15 +367,14 @@ impl Storage {
                 "file root is not registered for this kernel epoch".to_string(),
             )
         })?;
-        let execution = grant
-            .execution_workspace
-            .as_deref()
-            .or(grant.owning_workspace.as_deref());
-        if execution != Some(root.execution_workspace_id.as_str())
+        let owning = grant.owning_workspace.as_deref();
+        let execution = grant.execution_workspace.as_deref().or(owning);
+        if (owning != Some(root.owning_workspace_id.as_str())
+            || execution != Some(root.execution_workspace_id.as_str()))
             && !grant.capabilities.contains("storage.admin")
         {
             return Err(KernelError::Authorization(
-                "grant execution workspace does not own file root".to_string(),
+                "grant workspace identity does not own file root".to_string(),
             ));
         }
         Ok(root)
@@ -619,6 +770,316 @@ impl Storage {
         }
     }
 
+    fn scan_directory_paths(
+        &self,
+        root_id: &str,
+        grant: &Grant,
+        base_path: &str,
+        directory: &Path,
+        prefix: &str,
+        output: &mut Vec<String>,
+    ) -> Result<(), KernelError> {
+        self.check_cancelled()?;
+        let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+        entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
+        for entry in entries {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == ".git" || name == ".piarium" {
+                continue;
+            }
+            let relative = if prefix.is_empty() {
+                name.clone()
+            } else {
+                format!("{prefix}/{name}")
+            };
+            let full = if base_path.is_empty() {
+                relative.clone()
+            } else {
+                format!("{base_path}/{relative}")
+            };
+            let allowed = path_allowed(grant, &full);
+            let may_contain_allowed = grant.path_scopes.iter().any(|scope| {
+                scope.is_empty() || scope == &full || scope.starts_with(&(full.clone() + "/"))
+            });
+            if !allowed && !may_contain_allowed {
+                continue;
+            }
+            let resource = self.resolve_file_resource(root_id, &full, grant, false)?;
+            let metadata = match fs::symlink_metadata(&resource.absolute) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            if allowed {
+                output.push(relative.clone());
+            }
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                self.scan_directory_paths(
+                    root_id,
+                    grant,
+                    base_path,
+                    &resource.absolute,
+                    &relative,
+                    output,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn scan_paths(
+        &self,
+        root_id: &str,
+        base: &ResolvedFileResource,
+        scopes: Option<&[String]>,
+        grant: &Grant,
+    ) -> Result<Vec<String>, KernelError> {
+        let mut output = Vec::new();
+        let effective_scopes = scopes
+            .filter(|values| !values.is_empty())
+            .map(|values| values.to_vec())
+            .unwrap_or_else(|| vec![String::new()]);
+        for raw_scope in effective_scopes {
+            let (scope, _) = normalized_relative_path(&raw_scope, true)?;
+            if scope.is_empty() {
+                self.scan_directory_paths(
+                    root_id,
+                    grant,
+                    &base.path,
+                    &base.absolute,
+                    "",
+                    &mut output,
+                )?;
+                continue;
+            }
+            let full = if base.path.is_empty() {
+                scope.clone()
+            } else {
+                format!("{}/{}", base.path, scope)
+            };
+            if !path_allowed(grant, &full) {
+                return Err(KernelError::Authorization(format!(
+                    "scan scope is outside grant scope: {full}"
+                )));
+            }
+            let resource = self.resolve_file_resource(root_id, &full, grant, false)?;
+            let metadata = match fs::symlink_metadata(&resource.absolute) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error.into()),
+            };
+            output.push(scope.clone());
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                self.scan_directory_paths(
+                    root_id,
+                    grant,
+                    &base.path,
+                    &resource.absolute,
+                    &scope,
+                    &mut output,
+                )?;
+            }
+        }
+        output.sort();
+        output.dedup();
+        Ok(output)
+    }
+
+    fn measure_directory(
+        &self,
+        directory: &Path,
+        logical: &mut u64,
+        allocated: &mut u64,
+    ) -> Result<(), KernelError> {
+        self.check_cancelled()?;
+        let entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
+        for entry in entries {
+            self.check_cancelled()?;
+            let path = entry.path();
+            let metadata = fs::symlink_metadata(&path)?;
+            if metadata.is_dir() && !metadata.file_type().is_symlink() {
+                self.measure_directory(&path, logical, allocated)?;
+                continue;
+            }
+            *logical = logical.checked_add(metadata.len()).ok_or_else(|| {
+                KernelError::Storage("materialized logical size overflow".to_string())
+            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                *allocated = allocated
+                    .checked_add(metadata.blocks().saturating_mul(512))
+                    .ok_or_else(|| {
+                        KernelError::Storage("materialized allocated size overflow".to_string())
+                    })?;
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = allocated;
+            }
+        }
+        Ok(())
+    }
+
+    fn directory_matches_root(
+        &mut self,
+        root_id: &str,
+        target: &ResolvedFileResource,
+        source_root: &str,
+        grant: &Grant,
+    ) -> Result<bool, KernelError> {
+        let metadata = match fs::symlink_metadata(&target.absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(error.into()),
+        };
+        if !metadata.is_dir() || metadata.file_type().is_symlink() {
+            return Ok(false);
+        }
+        let expected = self
+            .root_entries(source_root)?
+            .into_iter()
+            .filter(|(_, state)| !matches!(state, PathState::Missing))
+            .collect::<Vec<_>>();
+        let actual_paths = self.scan_paths(root_id, target, None, grant)?;
+        let expected_paths = expected
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect::<Vec<_>>();
+        if actual_paths != expected_paths {
+            return Ok(false);
+        }
+        for (path, state) in expected {
+            if matches!(state, PathState::Unsupported) {
+                return Ok(false);
+            }
+            let full = if target.path.is_empty() {
+                path
+            } else {
+                format!("{}/{}", target.path, path)
+            };
+            let resource = self.resolve_file_resource(root_id, &full, grant, false)?;
+            let observed = self.observe_state(&resource)?;
+            if !Self::file_state_matches(&observed, &materialized_expected_state(&state)) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn build_materialized_root(
+        &mut self,
+        source_root: &str,
+        destination: &Path,
+    ) -> Result<(usize, usize), KernelError> {
+        remove_tree(destination)?;
+        fs::create_dir_all(destination)?;
+        let mut entries = self.root_entries(source_root)?;
+        entries.sort_by(|left, right| {
+            let left_depth = left.0.split('/').count();
+            let right_depth = right.0.split('/').count();
+            left_depth
+                .cmp(&right_depth)
+                .then_with(|| left.0.cmp(&right.0))
+        });
+        let mut reflink = 0usize;
+        let mut copy = 0usize;
+        for (relative, state) in entries {
+            self.check_cancelled()?;
+            if relative.is_empty() || matches!(state, PathState::Missing) {
+                continue;
+            }
+            let (_, path_part) = normalized_relative_path(&relative, false)?;
+            let target = destination.join(path_part);
+            if !path_inside(destination, &target) {
+                return Err(KernelError::Authorization(
+                    "materialize path escaped staging directory".to_string(),
+                ));
+            }
+            match state {
+                PathState::Directory { mode } => {
+                    remove_existing(&target).or_else(|error| {
+                        if target.is_dir() {
+                            Ok(())
+                        } else {
+                            Err(error)
+                        }
+                    })?;
+                    fs::create_dir_all(&target).map_err(|error| {
+                        KernelError::Storage(format!(
+                            "materialize mkdir failed for {relative}: {error}"
+                        ))
+                    })?;
+                    apply_mode(&target, mode).map_err(|error| {
+                        KernelError::Storage(format!(
+                            "materialize directory mode failed for {relative}: {error}"
+                        ))
+                    })?;
+                }
+                PathState::RegularFile {
+                    object_hash,
+                    byte_length,
+                    mode,
+                } => {
+                    if let Some(parent) = target.parent() {
+                        fs::create_dir_all(parent).map_err(|error| {
+                            KernelError::Storage(format!(
+                                "materialize parent mkdir failed for {relative}: {error}"
+                            ))
+                        })?;
+                    }
+                    remove_tree(&target)?;
+                    let source = object_path(&self.root, &object_hash)?;
+                    let (actual_hash, actual_length) = hash_file(&source)?;
+                    if actual_hash != object_hash || actual_length != byte_length {
+                        return Err(KernelError::Storage(format!(
+                            "materialize object is corrupt: {object_hash}"
+                        )));
+                    }
+                    match copy_object_to(&source, &target).map_err(|error| {
+                        KernelError::Storage(format!(
+                            "materialize object copy failed for {relative}: {error}"
+                        ))
+                    })? {
+                        "reflink" => reflink += 1,
+                        _ => copy += 1,
+                    }
+                    apply_mode(&target, Some(mode)).map_err(|error| {
+                        KernelError::Storage(format!(
+                            "materialize file mode failed for {relative}: {error}"
+                        ))
+                    })?;
+                }
+                PathState::Symlink {
+                    symlink_target,
+                    mode: _,
+                } => {
+                    if let Some(parent) = target.parent() {
+                        fs::create_dir_all(parent).map_err(|error| {
+                            KernelError::Storage(format!(
+                                "materialize symlink parent mkdir failed for {relative}: {error}"
+                            ))
+                        })?;
+                    }
+                    remove_tree(&target)?;
+                    create_symlink(&symlink_target, &target).map_err(|error| {
+                        KernelError::Storage(format!(
+                            "materialize symlink failed for {relative}: {error}"
+                        ))
+                    })?;
+                }
+                PathState::Unsupported => {
+                    return Err(KernelError::Operation(format!(
+                        "unsupported state cannot be materialized: {relative}"
+                    )))
+                }
+                PathState::Missing => {}
+            }
+        }
+        sync_directory(destination)?;
+        Ok((reflink, copy))
+    }
+
     fn begin_file_operation(
         &mut self,
         operation_id: &str,
@@ -813,6 +1274,101 @@ impl Storage {
                         None
                     }
                 }
+                "file.materialize" => {
+                    let params: KernelFileMaterializeParams = parse_file_params(intent)?;
+                    let target = self.resolve_file_resource(root_id, &params.path, grant, false)?;
+                    let stage_path = materialize_side_path(&params.path, &operation_id, "staging");
+                    let backup_path = materialize_side_path(&params.path, &operation_id, "backup");
+                    let stage = self.resolve_file_resource(root_id, &stage_path, grant, false)?;
+                    let backup = self.resolve_file_resource(root_id, &backup_path, grant, false)?;
+                    if self.directory_matches_root(root_id, &target, &params.source_root, grant)? {
+                        Some((
+                            json!({
+                                "status":"materialized",
+                                "root": params.source_root,
+                                "reconciled": true,
+                                "cow": {"reflink": 0, "copy": 0},
+                            }),
+                            None,
+                            None,
+                        ))
+                    } else if fs::symlink_metadata(&target.absolute)
+                        .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+                    {
+                        if self.directory_matches_root(
+                            root_id,
+                            &stage,
+                            &params.source_root,
+                            grant,
+                        )? {
+                            durable_directory_rename(&stage.absolute, &target.absolute)?;
+                            if let Some(parent) = target.absolute.parent() {
+                                sync_directory(parent)?;
+                            }
+                            Some((
+                                json!({
+                                    "status":"materialized",
+                                    "root": params.source_root,
+                                    "reconciled": true,
+                                    "cow": {"reflink": 0, "copy": 0},
+                                }),
+                                None,
+                                None,
+                            ))
+                        } else if fs::symlink_metadata(&backup.absolute).is_ok() {
+                            let _ = remove_tree(&stage.absolute);
+                            durable_directory_rename(&backup.absolute, &target.absolute)?;
+                            if let Some(parent) = target.absolute.parent() {
+                                sync_directory(parent)?;
+                            }
+                            Some((
+                                json!({
+                                    "status":"conflict",
+                                    "root": params.source_root,
+                                    "reconciled": true,
+                                    "reason":"restored backup after incomplete materialization",
+                                }),
+                                None,
+                                None,
+                            ))
+                        } else {
+                            let _ = remove_tree(&stage.absolute);
+                            Some((
+                                json!({
+                                    "status":"conflict",
+                                    "root": params.source_root,
+                                    "reconciled": true,
+                                    "reason":"incomplete materialization left no live or backup directory",
+                                }),
+                                None,
+                                None,
+                            ))
+                        }
+                    } else if fs::symlink_metadata(&backup.absolute).is_ok() {
+                        Some((
+                            json!({
+                                "status":"conflict",
+                                "root": params.source_root,
+                                "reconciled": true,
+                                "reason":"materialized target changed after promotion",
+                            }),
+                            None,
+                            None,
+                        ))
+                    } else {
+                        let _ = remove_tree(&stage.absolute);
+                        Some((
+                            json!({
+                                "status":"conflict",
+                                "root": params.source_root,
+                                "reconciled": true,
+                                "reason":"materialization target is not the immutable source root",
+                            }),
+                            None,
+                            None,
+                        ))
+                    }
+                }
                 _ => None,
             };
             if let Some((result, owner_id, owner_workspace)) = result {
@@ -822,6 +1378,23 @@ impl Storage {
                     owner_id.as_deref(),
                     owner_workspace.as_deref(),
                 )?;
+                if kind == "file.materialize" {
+                    let params: KernelFileMaterializeParams = parse_file_params(intent)?;
+                    let stage_path = materialize_side_path(&params.path, &operation_id, "staging");
+                    let backup_path = materialize_side_path(&params.path, &operation_id, "backup");
+                    if let Ok(stage) =
+                        self.resolve_file_resource(root_id, &stage_path, grant, false)
+                    {
+                        let _ = remove_tree(&stage.absolute);
+                    }
+                    if result.get("status").and_then(Value::as_str) == Some("materialized") {
+                        if let Ok(backup) =
+                            self.resolve_file_resource(root_id, &backup_path, grant, false)
+                        {
+                            let _ = remove_tree(&backup.absolute);
+                        }
+                    }
+                }
                 reconciled += 1;
             } else {
                 unresolved += 1;
@@ -836,15 +1409,14 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         let params: KernelFileRootRegisterParams = parse_file_params(params_value)?;
-        let expected_execution = grant
-            .execution_workspace
-            .as_deref()
-            .or(grant.owning_workspace.as_deref());
-        if expected_execution != Some(params.execution_workspace_id.as_str())
+        let expected_owning = grant.owning_workspace.as_deref();
+        let expected_execution = grant.execution_workspace.as_deref().or(expected_owning);
+        if (expected_owning != Some(params.workspace_id.as_str())
+            || expected_execution != Some(params.execution_workspace_id.as_str()))
             && !grant.capabilities.contains("storage.admin")
         {
             return Err(KernelError::Authorization(
-                "grant execution workspace does not match file root registration".to_string(),
+                "grant workspace identity does not match file root registration".to_string(),
             ));
         }
         let requested = Path::new(&params.canonical_root);
@@ -859,16 +1431,11 @@ impl Storage {
                 "file root is not a directory".to_string(),
             ));
         }
-        if let Some(existing) = self
-            .file_roots
-            .values()
-            .find(|root| root.execution_workspace_id == params.execution_workspace_id)
-        {
-            if existing.canonical_root != canonical {
-                return Err(KernelError::Authorization(
-                    "execution workspace root changed during this kernel epoch".to_string(),
-                ));
-            }
+        if let Some(existing) = self.file_roots.values().find(|root| {
+            root.owning_workspace_id == params.workspace_id
+                && root.execution_workspace_id == params.execution_workspace_id
+                && root.canonical_root == canonical
+        }) {
             let root_id = existing.root_id.clone();
             let execution_workspace_id = existing.execution_workspace_id.clone();
             let canonical_root = existing.canonical_root.clone();
@@ -883,7 +1450,8 @@ impl Storage {
             }));
         }
         let identity = format!(
-            "file-root-v1\0{}\0{}",
+            "file-root-v2\0{}\0{}\0{}",
+            params.workspace_id,
             params.execution_workspace_id,
             canonical.to_string_lossy()
         );
@@ -893,6 +1461,7 @@ impl Storage {
         );
         let root = FileRoot {
             root_id: root_id.clone(),
+            owning_workspace_id: params.workspace_id.clone(),
             execution_workspace_id: params.execution_workspace_id.clone(),
             canonical_root: canonical.clone(),
         };
@@ -1002,6 +1571,74 @@ impl Storage {
         }
         self.file_leases.remove(&params.lease_id);
         Ok(json!({"leaseId": params.lease_id, "released": true}))
+    }
+
+    pub(super) fn file_scan(
+        &mut self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let params: KernelFileScanParams = parse_file_params(params_value)?;
+        let base = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
+        let paths = self.scan_paths(&params.root_id, &base, params.scopes.as_deref(), grant)?;
+        let cursor = params.cursor.unwrap_or(0) as usize;
+        let page_size = params.page_size.unwrap_or(512).clamp(1, 4096) as usize;
+        if cursor > paths.len() {
+            return Err(KernelError::Operation(
+                "file scan cursor is out of range".to_string(),
+            ));
+        }
+        let end = (cursor + page_size).min(paths.len());
+        let page = paths[cursor..end].to_vec();
+        Ok(json!({
+            "paths": page,
+            "cursor": cursor,
+            "nextCursor": if end < paths.len() { Some(end) } else { None },
+            "total": paths.len(),
+        }))
+    }
+
+    pub(super) fn file_measure(
+        &mut self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let params: KernelFileMeasureParams = parse_file_params(params_value)?;
+        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
+        let metadata = match fs::symlink_metadata(&resource.absolute) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(json!({
+                    "logicalBytes": Value::Null,
+                    "allocatedBytes": Value::Null,
+                    "unknown": true,
+                    "missing": true,
+                }));
+            }
+            Err(error) => return Err(error.into()),
+        };
+        let mut logical = 0u64;
+        let mut allocated = 0u64;
+        if metadata.is_dir() && !metadata.file_type().is_symlink() {
+            self.measure_directory(&resource.absolute, &mut logical, &mut allocated)?;
+        } else {
+            logical = metadata.len();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                allocated = metadata.blocks().saturating_mul(512);
+            }
+        }
+        #[cfg(unix)]
+        let allocated_value = json!(allocated);
+        #[cfg(not(unix))]
+        let allocated_value = Value::Null;
+        Ok(json!({
+            "logicalBytes": logical,
+            "allocatedBytes": allocated_value,
+            "unknown": false,
+            "missing": false,
+        }))
     }
 
     pub(super) fn file_capture(
@@ -1275,6 +1912,144 @@ impl Storage {
         }
         let result = json!({"status": "renamed", "reconciled": resuming});
         self.finish_file_operation(&params.operation_id, &result)?;
+        Ok(result)
+    }
+
+    pub(super) fn file_materialize(
+        &mut self,
+        params_value: &Value,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let params: KernelFileMaterializeParams = parse_file_params(params_value)?;
+        if params.path.is_empty() {
+            return Err(KernelError::Authorization(
+                "materialize target must be below the registered managed root".to_string(),
+            ));
+        }
+        if !self.root_owned_by_workspace(&params.source_root, &params.workspace_id)? {
+            return Err(KernelError::Authorization(
+                "materialize source root is not owned by workspace".to_string(),
+            ));
+        }
+        self.load_node(&params.source_root)?;
+        let target = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
+        self.assert_file_lease(
+            grant,
+            &params.root_id,
+            &[FileLeaseResource {
+                path: target.path.clone(),
+                subtree: true,
+            }],
+            params.lease_id.as_deref(),
+        )?;
+        let stage_path = materialize_side_path(&target.path, &params.operation_id, "staging");
+        let backup_path = materialize_side_path(&target.path, &params.operation_id, "backup");
+        let stage = self.resolve_file_resource(&params.root_id, &stage_path, grant, false)?;
+        let backup = self.resolve_file_resource(&params.root_id, &backup_path, grant, false)?;
+
+        let (_hash, committed, resuming) =
+            self.begin_file_operation(&params.operation_id, "file.materialize", params_value)?;
+        if let Some(committed) = committed {
+            let _ = remove_tree(&stage.absolute);
+            if committed.get("status").and_then(Value::as_str) == Some("materialized") {
+                let _ = remove_tree(&backup.absolute);
+            }
+            return Ok(committed);
+        }
+
+        if self.directory_matches_root(&params.root_id, &target, &params.source_root, grant)? {
+            let result = json!({
+                "status": "materialized",
+                "root": params.source_root,
+                "reconciled": resuming,
+                "cow": {"reflink": 0, "copy": 0},
+            });
+            self.finish_file_operation(&params.operation_id, &result)?;
+            let _ = remove_tree(&stage.absolute);
+            let _ = remove_tree(&backup.absolute);
+            return Ok(result);
+        }
+
+        if resuming
+            && fs::symlink_metadata(&backup.absolute).is_ok()
+            && fs::symlink_metadata(&target.absolute).is_ok()
+        {
+            let result = json!({
+                "status": "conflict",
+                "root": params.source_root,
+                "reconciled": true,
+                "reason": "materialized target changed after promotion",
+            });
+            self.finish_file_operation(&params.operation_id, &result)?;
+            return Ok(result);
+        }
+
+        let (reflink, copy) = self
+            .build_materialized_root(&params.source_root, &stage.absolute)
+            .map_err(|error| {
+                KernelError::Storage(format!("materialize staging build failed: {error}"))
+            })?;
+        if fs::symlink_metadata(&target.absolute).is_ok() {
+            if fs::symlink_metadata(&backup.absolute).is_ok() {
+                if resuming {
+                    return Err(KernelError::Operation(
+                        "materialize recovery found both live and backup directories".to_string(),
+                    ));
+                }
+                remove_tree(&backup.absolute)?;
+            }
+            durable_directory_rename(&target.absolute, &backup.absolute).map_err(|error| {
+                KernelError::Storage(format!("materialize live backup failed: {error}"))
+            })?;
+            if let Some(parent) = target.absolute.parent() {
+                sync_directory(parent)?;
+            }
+            if std::env::var_os("PIARIUM_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP").is_some() {
+                return Err(KernelError::Storage(
+                    "injected materialize failure after backup".to_string(),
+                ));
+            }
+        }
+        if let Some(parent) = target.absolute.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if let Err(error) =
+            durable_directory_rename(&stage.absolute, &target.absolute).map_err(|error| {
+                KernelError::Storage(format!("materialize staging promote failed: {error}"))
+            })
+        {
+            if fs::symlink_metadata(&backup.absolute).is_ok()
+                && fs::symlink_metadata(&target.absolute)
+                    .is_err_and(|value| value.kind() == io::ErrorKind::NotFound)
+            {
+                let _ = durable_directory_rename(&backup.absolute, &target.absolute);
+            }
+            return Err(error);
+        }
+        if let Some(parent) = target.absolute.parent() {
+            sync_directory(parent)?;
+        }
+        if !self.directory_matches_root(&params.root_id, &target, &params.source_root, grant)? {
+            let _ = remove_tree(&target.absolute);
+            if fs::symlink_metadata(&backup.absolute).is_ok() {
+                let _ = durable_directory_rename(&backup.absolute, &target.absolute);
+            }
+            return Err(KernelError::Storage(
+                "materialized directory did not match immutable source root".to_string(),
+            ));
+        }
+        let result = json!({
+            "status": "materialized",
+            "root": params.source_root,
+            "reconciled": resuming,
+            "cow": {"reflink": reflink, "copy": copy},
+        });
+        // Keep the backup until the durable terminal record commits. If the
+        // response/finish is lost, the next call or root registration can
+        // prove the live directory equals sourceRoot before deleting it.
+        self.finish_file_operation(&params.operation_id, &result)?;
+        remove_tree(&backup.absolute)?;
+        let _ = remove_tree(&stage.absolute);
         Ok(result)
     }
 }

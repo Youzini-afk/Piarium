@@ -1,6 +1,6 @@
 # Piarium native recovery journal
 
-Status: delivered; Rust kernel R1 state/storage and R2 file/recovery authority are complete; R0 release-process evidence and R3–R6 retain their own remaining work
+Status: delivered; Rust kernel R1 state/storage, R2 file/recovery authority, and R3 baseline/materialization lifecycle are complete; R0 release-process evidence and R4–R6 retain their own remaining work
 
 Last updated: 2026-09-14
 

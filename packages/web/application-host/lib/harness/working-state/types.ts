@@ -151,6 +151,13 @@ export interface WorkingStateRootStore {
   ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }>;
   materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
   materializePin(pin: WorkingStatePin, directory: string): Promise<import("./materializer.js").MaterializeResult>;
+  /** Production Rust backend can atomically materialize directly into the live managed directory. */
+  materializePinManaged?(
+    pin: WorkingStatePin,
+    directory: string,
+    operationId: string,
+    signal?: AbortSignal,
+  ): Promise<import("./materializer.js").MaterializeResult>;
   measurePin(pin: WorkingStatePin): Promise<import("@piarium/protocol").ThreadSpaceMeasurement>;
   directoryMatchesResult(branchId: string, revision: number, directory: string): Promise<boolean>;
   captureBranchCandidateIdentity(branchId: string, directory: string, changedPaths: string[]): Promise<string | null>;
@@ -182,7 +189,7 @@ export interface WorkspaceWorkingStateRootAccess {
     purpose: string,
     operation: (store: WorkingStateRootStore, context?: WorkingStateRootContext) => Promise<T> | T,
     mode?: "exclusive" | "shared",
-    actor?: { sessionId: string; threadId?: string; runId?: string },
+    actor?: { sessionId?: string; threadId?: string; runId?: string; executionWorkspace?: string },
   ): Promise<T>;
 }
 

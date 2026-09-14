@@ -1199,14 +1199,12 @@ test("R2 kernel file authority gates paths and applies conditional filesystem st
   });
   assert.equal(typeof registered.rootId, "string");
   const rootId = String(registered.rootId);
-  await assert.rejects(
-    first.fileRootRegister({
-      workspaceId: "file-workspace",
-      executionWorkspaceId: "file-workspace",
-      canonicalRoot: alternateRoot,
-    }),
-    /root changed|workspace root changed|authorization/i,
-  );
+  const alternateRegistration = await first.fileRootRegister({
+    workspaceId: "file-workspace",
+    executionWorkspaceId: "file-workspace",
+    canonicalRoot: alternateRoot,
+  });
+  assert.notEqual(alternateRegistration.rootId, rootId, "R3 permits multiple Host-admitted roots under one workspace identity");
 
   const before = await first.fileCapture({
     operationId: "file-capture-before",
@@ -1418,4 +1416,249 @@ test("R2 production fs.lock delegates overlap admission to the Rust file lease a
   assert.equal(await locks.release("session-two", second), true);
   await locks.dispose();
   await adapter.dispose();
+});
+
+test("R3 kernel scans a fixed workspace view and materializes an immutable root without Host body copies", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-materialize-"));
+  const source = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-source-"));
+  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-managed-"));
+  roots.push(storageRoot, source, managed);
+  await fs.mkdir(path.join(source, "nested"), { recursive: true });
+  await fs.mkdir(path.join(source, ".git"), { recursive: true });
+  await fs.mkdir(path.join(source, ".piarium"), { recursive: true });
+  await fs.writeFile(path.join(source, "plain.txt"), "fixed plain\n");
+  await fs.writeFile(path.join(source, "nested", "b.txt"), "fixed nested\n");
+  await fs.writeFile(path.join(source, ".git", "ignored"), "git metadata\n");
+  await fs.writeFile(path.join(source, ".piarium", "ignored"), "piarium metadata\n");
+
+  const host = createKernelClient({
+    hostId: "r3-materialize-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "r3-materialize-actor", "r3-materialize-workspace"));
+  const sourceRegistration = await client.fileRootRegister({
+    workspaceId: "r3-materialize-workspace",
+    executionWorkspaceId: "r3-materialize-workspace",
+    canonicalRoot: source,
+  });
+  const sourceRootId = String(sourceRegistration.rootId);
+  const scanned: string[] = [];
+  let cursor: number | undefined;
+  do {
+    const page = await client.fileScan({
+      workspaceId: "r3-materialize-workspace",
+      rootId: sourceRootId,
+      path: "",
+      pageSize: 2,
+      ...(cursor === undefined ? {} : { cursor }),
+    });
+    assert.ok(Array.isArray(page.paths));
+    scanned.push(...page.paths as string[]);
+    cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
+  } while (cursor !== undefined);
+  assert.deepEqual(scanned, ["nested", "nested/b.txt", "plain.txt"]);
+
+  const entries: Array<{ path: string; state: Record<string, unknown>; ownerId?: string }> = [];
+  for (const relative of scanned) {
+    const captured = await client.fileCapture({
+      operationId: `r3-capture:${relative}`,
+      workspaceId: "r3-materialize-workspace",
+      rootId: sourceRootId,
+      path: relative,
+      store: true,
+    });
+    entries.push({
+      path: relative,
+      state: JSON.parse(String(captured.stateJson)),
+      ...(typeof captured.ownerId === "string" ? { ownerId: captured.ownerId } : {}),
+    });
+  }
+  const branch = await client.createBranch({
+    operationId: "r3-branch-create",
+    branchId: "r3-branch",
+    workspaceId: "r3-materialize-workspace",
+    draftBasePaths: [],
+    captureScopes: [],
+    entries: entries as never,
+  });
+  const immutableRoot = String(branch.root);
+
+  const managedRegistration = await client.fileRootRegister({
+    workspaceId: "r3-materialize-workspace",
+    executionWorkspaceId: "r3-materialize-workspace",
+    canonicalRoot: managed,
+  });
+  const managedRootId = String(managedRegistration.rootId);
+  const target = path.join(managed, "thread-one");
+  await fs.mkdir(target, { recursive: true });
+  await fs.writeFile(path.join(target, "old.txt"), "replace me\n");
+  const first = await client.fileMaterialize({
+    operationId: "r3-materialize-first",
+    workspaceId: "r3-materialize-workspace",
+    rootId: managedRootId,
+    path: "thread-one",
+    sourceRoot: immutableRoot,
+  });
+  assert.equal(first.status, "materialized");
+  assert.equal(await fs.readFile(path.join(target, "plain.txt"), "utf8"), "fixed plain\n");
+  assert.equal(await fs.readFile(path.join(target, "nested", "b.txt"), "utf8"), "fixed nested\n");
+  await assert.rejects(fs.stat(path.join(target, "old.txt")), { code: "ENOENT" });
+  await assert.rejects(fs.stat(path.join(target, ".git")), { code: "ENOENT" });
+  const cow = first.cow as { reflink?: number; copy?: number };
+  assert.equal((cow.reflink ?? 0) + (cow.copy ?? 0), 2);
+  if (process.platform === "win32") {
+    assert.equal(cow.reflink ?? 0, 0, "Windows must not claim reflink without an implemented block-clone backend");
+    assert.equal(cow.copy ?? 0, 2);
+  }
+  const measured = await client.fileMeasure({
+    workspaceId: "r3-materialize-workspace",
+    rootId: managedRootId,
+    path: "thread-one",
+  });
+  assert.equal(measured.unknown, false);
+  assert.equal(Number(measured.logicalBytes) >= Buffer.byteLength("fixed plain\n") + Buffer.byteLength("fixed nested\n"), true);
+  if (process.platform === "win32") {
+    assert.equal(measured.allocatedBytes, null, "Windows allocated bytes stay unknown until a verified physical-allocation backend exists");
+  } else {
+    assert.equal(typeof measured.allocatedBytes, "number");
+  }
+
+  await fs.writeFile(path.join(source, "plain.txt"), "live parent drift\n");
+  assert.equal(await fs.readFile(path.join(target, "plain.txt"), "utf8"), "fixed plain\n");
+  await client.fileRemove({
+    operationId: "r3-reclaim-first",
+    workspaceId: "r3-materialize-workspace",
+    rootId: managedRootId,
+    path: "thread-one",
+    recursive: true,
+    force: true,
+  });
+  await assert.rejects(fs.stat(target), { code: "ENOENT" });
+  const missingMeasurement = await client.fileMeasure({
+    workspaceId: "r3-materialize-workspace",
+    rootId: managedRootId,
+    path: "thread-one",
+  });
+  assert.equal(missingMeasurement.unknown, true);
+  assert.equal(missingMeasurement.logicalBytes, null);
+  const second = await client.fileMaterialize({
+    operationId: "r3-materialize-second",
+    workspaceId: "r3-materialize-workspace",
+    rootId: managedRootId,
+    path: "thread-one",
+    sourceRoot: immutableRoot,
+  });
+  assert.equal(second.status, "materialized");
+  assert.equal(await fs.readFile(path.join(target, "plain.txt"), "utf8"), "fixed plain\n");
+});
+
+test("R3 materialization reconciles a crash after live backup before staging promotion", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-reconcile-"));
+  const managed = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-r3-reconcile-managed-"));
+  roots.push(storageRoot, managed);
+
+  const seedHost = createKernelClient({
+    hostId: "r3-reconcile-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(seedHost);
+  await seedHost.start();
+  const seed = seedHost.scoped(await issueActor(seedHost, "r3-reconcile-seed", "r3-reconcile-workspace"));
+  const body = await seed.putBlob(Buffer.from("new immutable body\n"), "r3-reconcile-object");
+  const branch = await seed.createBranch({
+    operationId: "r3-reconcile-branch",
+    branchId: "r3-reconcile-branch",
+    workspaceId: "r3-reconcile-workspace",
+    draftBasePaths: [],
+    captureScopes: [],
+    entries: [{
+      path: "result.txt",
+      state: { kind: "regular-file", objectHash: body.hash, byteLength: body.byteLength, mode: 0o644 },
+      ownerId: body.ownerId,
+    }],
+  });
+  await seedHost.close();
+  clients.splice(clients.indexOf(seedHost), 1);
+
+  const live = path.join(managed, "thread-crash");
+  await fs.mkdir(live, { recursive: true });
+  await fs.writeFile(path.join(live, "old.txt"), "old live body\n");
+  const faultedHost = createKernelClient({
+    hostId: "r3-reconcile-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+    env: { PIARIUM_KERNEL_FAIL_MATERIALIZE_AFTER_BACKUP: "1" },
+  });
+  clients.push(faultedHost);
+  await faultedHost.start();
+  const faulted = faultedHost.scoped(await issueActor(faultedHost, "r3-reconcile-faulted", "r3-reconcile-workspace"));
+  const registration = await faulted.fileRootRegister({
+    workspaceId: "r3-reconcile-workspace",
+    executionWorkspaceId: "r3-reconcile-workspace",
+    canonicalRoot: managed,
+  });
+  const rootId = String(registration.rootId);
+  await assert.rejects(
+    faulted.fileMaterialize({
+      operationId: "r3-crash-materialize",
+      workspaceId: "r3-reconcile-workspace",
+      rootId,
+      path: "thread-crash",
+      sourceRoot: String(branch.root),
+    }),
+    /injected materialize failure after backup/i,
+  );
+  await assert.rejects(fs.stat(live), { code: "ENOENT" });
+  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.piarium-staging-")));
+  assert.ok((await fs.readdir(managed)).some((name) => name.startsWith("thread-crash.piarium-backup-")));
+  await faultedHost.close();
+  clients.splice(clients.indexOf(faultedHost), 1);
+
+  const reopenedHost = createKernelClient({
+    hostId: "r3-reconcile-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(reopenedHost);
+  await reopenedHost.start();
+  const reopened = reopenedHost.scoped(await issueActor(reopenedHost, "r3-reconcile-reopened", "r3-reconcile-workspace"));
+  const reopenedRegistration = await reopened.fileRootRegister({
+    workspaceId: "r3-reconcile-workspace",
+    executionWorkspaceId: "r3-reconcile-workspace",
+    canonicalRoot: managed,
+  });
+  assert.equal(reopenedRegistration.rootId, rootId);
+  assert.equal(reopenedRegistration.reconciledOperations, 1);
+  assert.equal(reopenedRegistration.pendingOperations, 0);
+  assert.equal(await fs.readFile(path.join(live, "result.txt"), "utf8"), "new immutable body\n");
+  assert.deepEqual((await fs.readdir(managed)).filter((name) => name.includes(".piarium-staging-") || name.includes(".piarium-backup-")), []);
+  const retried = await reopened.fileMaterialize({
+    operationId: "r3-crash-materialize",
+    workspaceId: "r3-reconcile-workspace",
+    rootId,
+    path: "thread-crash",
+    sourceRoot: String(branch.root),
+  });
+  assert.equal(retried.status, "materialized");
+  assert.equal(retried.reconciled, true);
 });
