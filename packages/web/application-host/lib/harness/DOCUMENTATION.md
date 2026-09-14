@@ -198,15 +198,17 @@ automatic trigger.
 
 ### HarnessSearchService (`search-service.ts`)
 
-Wraps `createWorkspaceContentSearch` with hit grouping, scoring, and
-formatting. It intersects an explicit request path with the child scope before
-launching ripgrep, passes those canonical workspace-contained roots to the
-search process, and validates returned resource IDs again. Returns
-`SearchContentResult` with files, hits, and totals. For a surface input it reads
-all in-scope dirty snapshots first, removes their disk hits before the backend
-result cap, applies the same regex/fixed/case/glob semantics to the frozen text,
-and ranks the combined set. Context lines come from the same source revision;
-source drift makes that context partial instead of attaching unrelated lines.
+Wraps the native workspace/WorkingState compute boundary with hit grouping,
+scoring, and formatting. It intersects an explicit request path with the actor
+or child scope before dispatch and validates returned resource IDs again.
+Root-session search uses the Host-admitted live root plus Registry-owned fixed
+draft/tombstone overlays; an isolated Thread uses a `WorkingBranchQuerySnapshot`
+whose `search`/`compute` operations remain bound to one immutable pin. There is
+no branch corpus/body mirror and no Host ripgrep fallback. Returns
+`SearchContentResult` with files, hits, and totals. Regex/fixed/case/glob
+semantics, result limits, and context lines are evaluated against the same
+native source revision; live-source drift becomes partial/failure evidence
+instead of attaching unrelated lines.
 
 ### Native read source (`document.readSource`, pi-host `read-tool.ts`)
 
@@ -218,8 +220,11 @@ native offset/limit truncation and disk image attachments. The wrapper is
 registered only when the Host handshake advertises `harnessDocumentRead`.
 An isolated Thread Run bound to a WorkingBranch never returns the disk sentinel
 for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
-`effectiveState = base ∪ delta` with tombstones hidden, and provenance names
-the branch, revision, and origin. Missing branch content stays unavailable.
+the pinned native fixed view (`base ∪ delta`) with tombstones hidden before
+candidate selection, and provenance names the branch, revision, and origin.
+`find`/`ls` use native inventory, `grep` uses native search, and structure/chunk
+requests execute against that same pin. Missing branch content stays
+unavailable; none of these operations may fall back to the parent live tree.
 
 The fixed draft is one turn's input, not a standing authority. A confirmed Host-backed disk write
 supersedes that path so later read/search/enumeration/navigation/dispatch return to disk (D-088).

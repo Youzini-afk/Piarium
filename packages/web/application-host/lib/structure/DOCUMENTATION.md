@@ -8,6 +8,10 @@ in a renderer and is not a language-server replacement.
 
 - Language identity is `languageIdForPath` from `@piarium/protocol`. This module
   does not keep a third extension table.
+- Tree-sitter workspace parsing is a Rust-kernel compute responsibility. The
+  Host resolves a language spec, registers the grammar/query recipe, validates
+  bounded records, and projects them into `StructureProvider` DTOs; it does not
+  keep a second parse tree or source-body cache.
 - Text binding for the LSP provider reuses `createLanguageViewBinder`. Explore
   calls it with `text: "input-context"` (this turn's fixed draft, otherwise disk).
   A dirty path whose draft is unavailable does not fall back to disk.
@@ -145,15 +149,20 @@ nodes as slice containers. Caps: depth 8, 256 symbols; the document root is
 always kept. `literalCalls` / `imports` are `unsupported`. JSON files do not
 enter the cold catalog — key names are not what `searchSymbols` answers.
 
-The parse cache pins in-use trees so LRU eviction cannot `tree.delete()` a
-wasm object a caller still holds after `await`.
+Native grammar runtimes are cached by the kernel from the registered recipe and
+actual wasm digest. Parsing and query cancellation happen in the compute worker;
+the Host never holds a live tree across an `await`.
 
 ## Wiring
 
 `createHarnessServiceHost({ structureSource })` is optional, same shape as
-`lspNavigationServices`. Production `index.ts` installs tree-sitter first, then
-the LSP provider (D-097). Explore consumes the interface only; it does not call
-`documentSymbols` itself.
+`lspNavigationServices`. Production `index.ts` installs the native tree-sitter
+provider first, then the LSP provider (D-097). Explore consumes the interface
+only; it does not call `documentSymbols` itself. Live files use
+`KernelComputeService.directory`; captured Registry text uses fixed objects;
+virtual Threads call the provider with a pin-bound compute function. Semantic
+chunking uses native structural units and keeps only tokenizer-aware packing and
+embedding decoration in TypeScript.
 
 Runtime wasm lives in `lib/structure/runtime/` (`web-tree-sitter.wasm` plus the
 TS/TSX grammars from `tree-sitter-typescript@0.23.2`, JavaScript from
@@ -167,8 +176,10 @@ plus `index.json`. `resolveStructureRuntimeFile` looks at the bundled
 `runtime/` directory first and only then at the download store (D-126). Host
 never starts a grammar download by itself; the settings page Install click is
 the consent (D-124). User-supplied wasm uses the same store with
-`source: 'user'` and stays `user-unverified` (D-123). ABI is still enforced in
-`loadLanguage`.
+`source: 'user'` and stays `user-unverified` (D-123). Host `web-tree-sitter`
+remains only as the install-time ABI admission probe. Production workspace
+source is parsed by the kernel after `compute.grammar.register` verifies the
+actual wasm/query recipe identity; there is no Host parser fallback.
 
 An on-demand grammar gets its outline from the pack's own upstream
 `queries/tags.scm`. `treeSitterTagsSpec` turns that query into a runtime
@@ -191,11 +202,12 @@ language-support runtime turns that error into `grammarStore: 'unreadable'`
 with per-language `unknown`, which disables install instead of inviting a
 click that would overwrite real records (D-129).
 
-`STRUCTURE_PARSE_BUDGET_MS` bounds parse plus query after the wasm is loaded.
-It is a wall clock and a runaway guard, not a latency target: a value near an
-ordinary file's parse time makes a busy Host report `failed` and silently drop
-to ±3 windows. Tests that assert a real parse pin their own budget rather than
-inheriting the production value (D-102).
+`STRUCTURE_PARSE_BUDGET_MS` is passed to the native parser/query job. It is a
+wall-clock runaway guard, not a latency target: a value near an ordinary file's
+parse time can make a busy computation report `failed` and fall back to ±3
+windows. Tests that assert a real parse pin their own budget rather than
+inheriting the production value (D-102). An abort also reaches the native parse
+callback rather than merely discarding a late Host result.
 
 Hit classification (D-095) runs only after a file is materialized. Candidate
 ranking before `readFile` is unchanged. `windowScore` then adds

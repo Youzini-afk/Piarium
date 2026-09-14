@@ -37,6 +37,18 @@ Managed directory reclaim/delete also runs through the kernel. Git remains a sem
 index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
 
+R5 adds read-only `compute.start/read/cancel/release` and grammar-recipe registration over those admitted
+resources. A job reads exactly one source class: an immutable WorkingState pin, a registered live root, or
+explicit fixed objects. Pinned jobs clone a short-lived reader pin; live records carry the revision actually
+read; fixed Registry drafts arrive as content objects/tombstones. Scope and requested roots are applied before
+candidate selection. Native operations cover list/read/bytes/search and tree-sitter structure/chunks.
+
+Compute output uses bounded cursor records with backpressure. Two foreground workers are isolated from one
+background indexing worker, and cancellation reaches traversal/parser work before the reader reference is
+released. The Host still owns request policy, DTO projection, grammar installation admission, tokenizer-aware
+packing, embeddings/vector stores, TriviumDB, LSP protocol, and Pi/model orchestration. The kernel does not
+become another public search service or model runtime.
+
 ## Authority regression acceptance
 
 `bun run test:kernel` requires the built release executable and executes the Node transport suite plus the Vitest
@@ -45,6 +57,8 @@ with the toolchain pinned in this workspace before acceptance; existing Linux/Wi
 
 The D-278 [audit](../docs/rust-kernel-audit.md) repairs retain independent native regression cases.
 D-279 subsequently closes its specific R2 pending-operation and R3 kernel/Git/Registry handoff gaps.
+D-280 closes native process authority, and D-281 closes fixed/live file and structure computation through the
+production search, Harness, symbol, and semantic consumers.
 Current milestone evidence is in [harness status](../docs/agent-harness-status.md).
 
 ## R4 native process resources
