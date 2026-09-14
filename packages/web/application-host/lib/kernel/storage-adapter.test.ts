@@ -150,9 +150,10 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
     assert.ok(pinned);
     assert.equal(pinned.root, pinnedRoot.root);
     assert.equal(pinned.writeRevision, 2);
-    assert.equal(pinned.files.find((file) => file.path === "mode.txt")?.text, "pinned body\n");
+    assert.equal((await pinned.readFile("mode.txt")).status, "ready");
+    assert.equal((await pinned.readFile("mode.txt") as { status: "ready"; content: string }).content, "pinned body\n");
     const scoped = await lookups.pinQuery(sessionId, { roots: ["src"], deadlineAt: Date.now() + 10_000 });
-    assert.deepEqual(scoped?.files.map((file) => file.path), ["src/nested.ts"]);
+    assert.deepEqual((await scoped?.listFiles())?.map((file) => file.path), ["src/nested.ts"]);
     await scoped?.release();
 
     const later = await writes.branchWrite(sessionId, [{ resourceId: "mode.txt", action: "write", content: "later body\n" }]);

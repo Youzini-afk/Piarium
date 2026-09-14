@@ -53,7 +53,8 @@ type SmartSearchSpawn = NonNullable<SmartSearchDependencies['spawn']>;
 export interface PlatformRouteDependencies {
   __dirname: string;
   buildAugmentedPath: EnvironmentRuntime['buildAugmentedPath'];
-  createFsSearchRuntime: ProjectIconDependencies['createFsSearchRuntime'];
+  fileSearch: ProjectIconDependencies['fileSearch'];
+  contentSearch: ReturnType<typeof import('../search/content.js').createWorkspaceContentSearch>;
   crypto: typeof cryptoModule;
   documents?: DocumentAuthority;
   fileResources?: FsRouteDependencies['fileResources'];
@@ -146,7 +147,8 @@ export const createPlatformRoutesRuntime = ({
       fsPromises,
       spawn,
       resolveGitBinaryForSpawn,
-      createFsSearchRuntime,
+      fileSearch,
+      contentSearch,
       piariumDataDir,
       piariumUserConfigRoot,
       piariumVersion,
@@ -255,9 +257,7 @@ export const createPlatformRoutesRuntime = ({
       sanitizeProjects,
       readSettingsFromDisk,
       persistSettings,
-      createFsSearchRuntime,
-      spawn,
-      resolveGitBinaryForSpawn,
+      fileSearch,
     });
     registerScheduledTaskRoutes(app, {
       readSettingsFromDisk,
@@ -302,16 +302,7 @@ export const createPlatformRoutesRuntime = ({
     if (documents) {
       registerDocumentRoutes(app, { documents, uiAuthController });
       registerWorkspaceSearchRoutes(app, {
-        documents,
-        uiAuthController,
-        fsPromises,
-        path,
-        os,
-        spawn,
-        resolveGitBinaryForSpawn,
-        normalizeDirectoryPath,
-        resolveProjectDirectory,
-        env: process.env,
+        contentSearch, fileSearch, uiAuthController, path, os, normalizeDirectoryPath, resolveProjectDirectory,
       });
     }
     if (languageSupervisor) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createStructureSource } from "../../structure/source.js";
-import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { contentHashOf } from "./identity.js";
 import { relocateSemanticFocus } from "./relocate.js";
 

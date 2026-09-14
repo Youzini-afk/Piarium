@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { createKernelComputeService } from './lib/kernel/compute-service.js';
 import compression from 'compression';
 import crypto from 'crypto';
 import express, { type Request, type Response } from 'express';
@@ -1273,12 +1274,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // authority, so renderer or extension input cannot expand this boundary.
     isTrusted: workspaceRootGuard,
   });
-  const workspaceContentSearch = createWorkspaceContentSearch({
-    documents: documentsAuthority,
-    spawn,
-    pathModule: path,
-    env: process.env,
+  const nativeCompute = createKernelComputeService({
+    client: kernelClient,
+    resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
+      documents: documentsAuthority, registry: threadRegistry,
+      admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
+    })(cwd),
   });
+  const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
   // per-session shell supervisors. Registered with the harness router
@@ -1972,12 +1975,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (error) => console.error('[HarnessKnowledge] Decision suggestion failed:', errorMessage(error)),
   });
   observeKnowledgeBlockChange = decisionSuggestionRuntime.observeBlockChange;
-  const catalogFileSearch = createFsSearchRuntimeFactory({
-    fsPromises,
-    path,
-    spawn,
-    resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
-  });
+  const catalogFileSearch = createFsSearchRuntimeFactory({ compute: nativeCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
   let grammarManifest = EMPTY_GRAMMAR_PACK_MANIFEST;
@@ -2003,6 +2001,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const structureSource = createStructureSource([
     createTreeSitterStructureProvider({
+      compute: nativeCompute,
       onLanguageRequest: (languageId, workspaceId) => languageSupportRuntime.noteRequest(languageId, workspaceId),
       resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
       resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
@@ -2018,6 +2017,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     supervisor: languageSupervisor,
     structureSource,
     searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
+    isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
+      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal,
+    ),
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
   const localEmbedder = createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR });
@@ -2216,7 +2218,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
       });
     },
-    branchCorpus: (sessionId) => workingBranchLookups.searchCorpus(sessionId),
     pinWorkingBranchQuery: (sessionId, pinOptions) => workingBranchLookups.pinQuery(sessionId, pinOptions),
     agentInputDraftPaths: (sessionId, context) => documentsAuthority.agentInputDraftPaths(sessionId, context),
     documentReadSource: async (sessionId, context, resourceId) => {
@@ -2260,6 +2261,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       query: request.query,
       workspaceId: request.workspaceId,
       maxResults: request.maxResults,
+      ...(request.before === undefined ? {} : { before: request.before }),
+      ...(request.after === undefined ? {} : { after: request.after }),
       ...(request.paths === undefined ? {} : { paths: request.paths }),
       ...(request.glob === undefined ? {} : { glob: request.glob }),
       ...(request.excludeResourceIds === undefined ? {} : { excludeResourceIds: request.excludeResourceIds }),
@@ -2721,7 +2724,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     fsPromises,
     spawn,
     resolveGitBinaryForSpawn: platformEnvironmentRuntime.resolveGitBinaryForSpawn,
-    createFsSearchRuntime: createFsSearchRuntimeFactory,
+    fileSearch: catalogFileSearch,
+    contentSearch: workspaceContentSearch,
     piariumDataDir: PIARIUM_DATA_DIR,
     piariumUserConfigRoot: PIARIUM_USER_CONFIG_ROOT,
     piariumVersion: PIARIUM_VERSION,
@@ -2870,14 +2874,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await documentsAuthority.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
+      await semanticRuntime.dispose();
+      await symbolGraphRuntime.dispose();
+      await nativeCompute.dispose();
       await kernelStorageAdapter.dispose().catch((error) => console.error('[PiariumKernel] Failed to revoke storage grants:', errorMessage(error)));
       await kernelClient?.close();
       await knowledgeVectors?.close();
-      await semanticRuntime.dispose();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
       observeKnowledgeBlockChange = () => undefined;
-      await symbolGraphRuntime.dispose();
       await decisionSuggestionRuntime.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);

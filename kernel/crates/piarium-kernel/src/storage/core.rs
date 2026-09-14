@@ -199,6 +199,7 @@ impl Storage {
             file_roots: HashMap::new(),
             file_leases: HashMap::new(),
             processes: crate::process::ProcessManager::default(),
+            computations: crate::compute::ComputeManager::default(),
         };
         // A process may have exited after the SQLite commit and before the
         // object unlink. Retry durable cleanup on the next owner start; a

@@ -854,6 +854,72 @@ pub(crate) struct KernelGcParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeStartParams {
+    pub(crate) workspace_id: String,
+    pub(crate) job_id: String,
+    pub(crate) lane: String,
+    pub(crate) operation: String,
+    pub(crate) pin_id: Option<String>,
+    pub(crate) root_id: Option<String>,
+    pub(crate) objects: Option<Vec<KernelComputeObject>>,
+    pub(crate) paths: Option<Vec<String>>,
+    pub(crate) globs: Option<Vec<String>>,
+    pub(crate) exclude_paths: Option<Vec<String>>,
+    pub(crate) exclude_directories: Option<Vec<String>>,
+    pub(crate) respect_gitignore: Option<bool>,
+    pub(crate) include_hidden: Option<bool>,
+    pub(crate) query: Option<String>,
+    pub(crate) ignore_case: Option<bool>,
+    pub(crate) fixed_strings: Option<bool>,
+    pub(crate) max_results: Option<i64>,
+    pub(crate) before: Option<i64>,
+    pub(crate) after: Option<i64>,
+    pub(crate) start_line: Option<i64>,
+    pub(crate) end_line: Option<i64>,
+    pub(crate) byte_offset: Option<i64>,
+    pub(crate) byte_length: Option<i64>,
+    pub(crate) immediate: Option<bool>,
+    pub(crate) files: Option<Vec<KernelComputeFile>>,
+    pub(crate) parse_budget_ms: Option<i64>,
+    pub(crate) chunk_lines: Option<i64>,
+    pub(crate) include_text: Option<bool>,
+    pub(crate) include_tracked: Option<bool>,
+    pub(crate) include_revisions: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeReadParams {
+    pub(crate) workspace_id: String,
+    pub(crate) job_id: String,
+    pub(crate) cursor: i64,
+    pub(crate) max_bytes: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeHandleParams {
+    pub(crate) workspace_id: String,
+    pub(crate) job_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeGrammarParams {
+    pub(crate) recipe_id: String,
+    pub(crate) grammar_path: String,
+    pub(crate) grammar_name: String,
+    pub(crate) style: String,
+    pub(crate) definition_query: String,
+    pub(crate) import_query: Option<String>,
+    pub(crate) literal_call_query: Option<String>,
+    pub(crate) max_depth: Option<i64>,
+    pub(crate) max_symbols: Option<i64>,
+    pub(crate) grammar_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelProcessEnvironmentEntry {
     pub(crate) name: String,
     pub(crate) value: String,
@@ -976,6 +1042,25 @@ pub(crate) struct KernelRecoveryOperationFile {
     pub(crate) safety_json: Option<String>,
     pub(crate) phase: Option<String>,
     pub(crate) references: Option<Vec<KernelRecoveryReference>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeObject {
+    pub(crate) path: String,
+    pub(crate) revision: String,
+    pub(crate) object_hash: Option<String>,
+    pub(crate) owner_id: Option<String>,
+    pub(crate) missing: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelComputeFile {
+    pub(crate) path: String,
+    pub(crate) recipe_id: Option<String>,
+    pub(crate) revision: Option<String>,
+    pub(crate) lines: Option<Vec<i64>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1416,6 +1501,23 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "storage.gc" => serde_json::from_value::<KernelGcParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "compute.start" => serde_json::from_value::<KernelComputeStartParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "compute.read" => serde_json::from_value::<KernelComputeReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "compute.cancel" => serde_json::from_value::<KernelComputeHandleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "compute.release" => serde_json::from_value::<KernelComputeHandleParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "compute.grammar.register" => {
+            serde_json::from_value::<KernelComputeGrammarParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         _ => Ok(()),
     }
 }

@@ -1,11 +1,77 @@
 import { describe, expect, it, vi } from "vitest";
-import { createHarnessSearchService } from "./search-service.js";
-import type { WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
+import { createHarnessSearchService, type HarnessSearchDeps } from "./search-service.js";
+import type { WorkspaceContentSearchOptions, WorkspaceContentSearchResult, WorkspaceSearchHit } from "../search/content.js";
 import type { AgentInputContext, HarnessActorContext } from "@piarium/protocol";
+import type { WorkingBranchQuerySnapshot } from "./working-state/working-branch-query.js";
 
-function makeHit(path: string, line: number, preview: string): WorkspaceSearchHit {
-  return { resource: { resourceId: path, workspaceId: "ws-1" }, line, column: 1, preview };
+function makeHit(
+  path: string,
+  line: number,
+  preview: string,
+  extra: Pick<WorkspaceSearchHit, "before" | "after" | "revision"> = {},
+): WorkspaceSearchHit {
+  return { resource: { resourceId: path, workspaceId: "ws-1" }, line, column: 1, preview, ...extra };
 }
+
+const nativeLikeSearch = (diskHits: WorkspaceSearchHit[] = []) => vi.fn(async (
+  request: Parameters<HarnessSearchDeps["search"]>[0],
+  options: WorkspaceContentSearchOptions,
+): Promise<WorkspaceContentSearchResult> => {
+  const excluded = new Set(request.excludeResourceIds ?? []);
+  const overlays = options.overlays ?? [];
+  const overlayPaths = new Set(overlays.map((overlay) => overlay.path));
+  const hits = diskHits.filter((hit) => !excluded.has(hit.resource.resourceId) && !overlayPaths.has(hit.resource.resourceId));
+  const flags = request.ignoreCase ? "i" : "";
+  let matcher: RegExp;
+  try {
+    matcher = request.fixedStrings
+      ? new RegExp(String(request.query).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), flags)
+      : new RegExp(String(request.query), flags);
+  } catch {
+    return { status: "failure", generation: options.generation, message: "invalid regex" };
+  }
+  const normalized = (value: string) => value.replace(/\\/g, "/");
+  const glob = request.glob ?? [];
+  const positives = glob.filter((item) => !item.startsWith("!"));
+  const negatives = glob.filter((item) => item.startsWith("!")).map((item) => item.slice(1));
+  const globMatch = (pattern: string, resourceId: string) => {
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/\*\*/g, "__DOUBLE_STAR__")
+      .replace(/\*/g, "[^/]*")
+      .replace(/__DOUBLE_STAR__/g, ".*");
+    return new RegExp(`^${escaped}$`, process.platform === "win32" ? "i" : "").test(resourceId);
+  };
+  const allowedByGlob = (resourceId: string) => (
+    (positives.length === 0 || positives.some((pattern) => globMatch(pattern, resourceId)))
+    && !negatives.some((pattern) => globMatch(pattern, resourceId))
+  );
+  for (const overlay of overlays) {
+    if (overlay.missing || !overlay.text || !allowedByGlob(normalized(overlay.path))) continue;
+    const lines = overlay.text.split(/\r\n|\n|\r/u);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index] ?? "";
+      matcher.lastIndex = 0;
+      const match = matcher.exec(line);
+      if (!match) continue;
+      const before = Math.max(0, request.before ?? 0);
+      const after = Math.max(0, request.after ?? 0);
+      hits.push({
+        resource: { workspaceId: request.workspaceId, resourceId: overlay.path },
+        line: index + 1,
+        column: (match.index ?? 0) + 1,
+        preview: line,
+        revision: overlay.revision,
+        before: lines.slice(Math.max(0, index - before), index),
+        after: lines.slice(index + 1, index + 1 + after),
+      });
+    }
+  }
+  const limited = request.maxResults === undefined ? hits : hits.slice(0, request.maxResults);
+  return limited.length
+    ? { status: "ready", generation: options.generation, hits: limited, ...(limited.length < hits.length ? { incomplete: true as const } : {}) }
+    : { status: "empty", generation: options.generation };
+});
 
 const actor: HarnessActorContext = {
   authorityInstanceId: "authority-1",
@@ -167,11 +233,7 @@ describe("harness search service", () => {
   });
 
   it("replaces dirty disk hits with the fixed editor snapshot and keeps draft-only hits", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [makeHit("draft.ts", 1, "old disk value")],
-    }));
+    const search = nativeLikeSearch([makeHit("draft.ts", 1, "old disk value")]);
     const readFile = vi.fn(async (_actor, path: string) => {
       if (path !== "draft.ts") throw new Error(`unexpected read ${path}`);
       return { status: "ready" as const, content: "new draft value\r\nsecond\rthird", revision: "surface-draft:1", source: "surface-draft" as const };
@@ -189,8 +251,10 @@ describe("harness search service", () => {
     expect(search).toHaveBeenCalledWith(expect.objectContaining({ query: "draft" }), expect.anything());
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).toMatchObject({
       maxResults: 30,
-      excludeResourceIds: ["draft.ts"],
     });
+    expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).not.toHaveProperty("excludeResourceIds");
+    expect((search.mock.calls as unknown as Array<[Record<string, unknown>, WorkspaceContentSearchOptions]>)[0]?.[1].overlays)
+      .toEqual([expect.objectContaining({ path: "draft.ts", revision: "surface-draft:1", text: expect.stringContaining("new draft value") })]);
   });
 
   it("searches a written path on disk again instead of hiding it behind the older draft", async () => {
@@ -220,7 +284,7 @@ describe("harness search service", () => {
   });
 
   it("matches draft lines with regex semantics and reports CRLF, LF, and CR line numbers", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "empty", generation: 1 }));
+    const search = nativeLikeSearch();
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "one\r\ntwo-2\nthree-3\rfour-4",
@@ -239,7 +303,7 @@ describe("harness search service", () => {
   });
 
   it("uses literal and case-insensitive draft matching when requested", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({ status: "empty", generation: 1 }));
+    const search = nativeLikeSearch();
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "value [A-Z]\nVALUE a-z",
@@ -308,15 +372,11 @@ describe("harness search service", () => {
   });
 
   it("applies include and exclude globs to both disk and draft hits", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [
-        makeHit("src/a.ts", 1, "match"),
-        makeHit("src/a.test.ts", 1, "test match"),
-        makeHit("src/a.js", 1, "js match"),
-      ],
-    }));
+    const search = nativeLikeSearch([
+      makeHit("src/a.ts", 1, "match"),
+      makeHit("src/a.test.ts", 1, "test match"),
+      makeHit("src/a.js", 1, "js match"),
+    ]);
     const readFile = vi.fn(async (_actor, path: string) => ({
       status: "ready" as const,
       content: path === "src/a.ts" ? "match" : "test match",
@@ -339,11 +399,9 @@ describe("harness search service", () => {
   });
 
   it("returns real neighboring lines for content context in disk and draft files", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [makeHit("disk.ts", 2, "disk match")],
-    }));
+    const search = nativeLikeSearch([
+      makeHit("disk.ts", 2, "disk match", { before: ["disk before"], after: ["disk after"], revision: "disk:1" }),
+    ]);
     const readFile = vi.fn(async (_actor, path: string) => ({
       status: "ready" as const,
       content: path === "draft.ts" ? "draft before\ndraft match\ndraft after" : "disk before\ndisk match\ndisk after",
@@ -361,11 +419,10 @@ describe("harness search service", () => {
   });
 
   it("computes context independently for multiple hits in one disk file", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [makeHit("disk.ts", 2, "first match"), makeHit("disk.ts", 5, "second match")],
-    }));
+    const search = nativeLikeSearch([
+      makeHit("disk.ts", 2, "first match", { before: ["before first"], after: ["after first"], revision: "disk:1" }),
+      makeHit("disk.ts", 5, "second match", { before: ["before second"], after: ["after second"], revision: "disk:1" }),
+    ]);
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "before first\nfirst match\nafter first\nbefore second\nsecond match\nafter second",
@@ -384,15 +441,13 @@ describe("harness search service", () => {
       { line: 2, text: "first match", before: ["before first"], after: ["after first"] },
       { line: 5, text: "second match", before: ["before second"], after: ["after second"] },
     ]);
-    expect(readFile).toHaveBeenCalledTimes(1);
+    expect(readFile).not.toHaveBeenCalled();
   });
 
-  it("does not attach neighboring lines from a newer disk revision", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [makeHit("disk.ts", 2, "matched old revision")],
-    }));
+  it("uses context already bound to the native hit revision without rereading newer disk text", async () => {
+    const search = nativeLikeSearch([
+      makeHit("disk.ts", 2, "matched old revision", { before: ["old before"], after: ["old after"], revision: "disk:1" }),
+    ]);
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "new before\nchanged after search\nnew after",
@@ -407,16 +462,13 @@ describe("harness search service", () => {
       signal: new AbortController().signal,
     });
 
-    expect(result).toMatchObject({ status: "ready", partial: true });
-    expect(result.files[0]?.hits[0]).toMatchObject({ before: [], after: [] });
+    expect(result).toMatchObject({ status: "ready", partial: false });
+    expect(result.files[0]?.hits[0]).toMatchObject({ before: ["old before"], after: ["old after"] });
+    expect(readFile).not.toHaveBeenCalled();
   });
 
   it("merges all disk and draft hits before sorting and applying the limit", async () => {
-    const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      hits: [makeHit("z-disk.ts", 1, "match")],
-    }));
+    const search = nativeLikeSearch([makeHit("z-disk.ts", 1, "match")]);
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "match",
@@ -432,21 +484,16 @@ describe("harness search service", () => {
     expect(result.files[0]?.path).toBe("a-draft.ts");
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).toMatchObject({
       maxResults: 3,
-      excludeResourceIds: ["a-draft.ts"],
     });
+    expect((search.mock.calls as unknown as Array<[Record<string, unknown>, WorkspaceContentSearchOptions]>)[0]?.[1].overlays)
+      .toEqual([expect.objectContaining({ path: "a-draft.ts" })]);
   });
 
   it("keeps the disk over-fetch bounded while excluding dirty hits before the cap", async () => {
-    const search = vi.fn(async (request: { maxResults?: number; excludeResourceIds?: string[] }): Promise<WorkspaceContentSearchResult> => ({
-      status: "ready",
-      generation: 1,
-      // This fake backend intentionally returns the excluded hit too; the
-      // production backend removes it before its maxResults counter.
-      hits: [
-        ...Array.from({ length: 12 }, (_, index) => makeHit("dirty.ts", index + 1, "old disk match")),
-        ...Array.from({ length: request.maxResults ?? 0 }, (_, index) => makeHit(`disk-${index}.ts`, 1, "disk match")),
-      ],
-    }));
+    const search = nativeLikeSearch([
+      ...Array.from({ length: 12 }, (_, index) => makeHit("dirty.ts", index + 1, "old disk match")),
+      ...Array.from({ length: 6 }, (_, index) => makeHit(`disk-${index}.ts`, 1, "disk match")),
+    ]);
     const readFile = vi.fn(async () => ({
       status: "ready" as const,
       content: "draft match",
@@ -459,10 +506,10 @@ describe("harness search service", () => {
 
     expect(result.status).toBe("ready");
     expect(result.files.flatMap((file) => file.hits).every((hit) => hit.text !== "old disk match")).toBe(true);
-    expect(result.totalHits).toBe(7);
+    expect(result.totalHits).toBe(6);
+    expect(result.partial).toBe(true);
     expect((search.mock.calls as unknown as Array<[Record<string, unknown>]>)[0]?.[0]).toMatchObject({
       maxResults: 6,
-      excludeResourceIds: ["dirty.ts"],
     });
   });
 
@@ -483,7 +530,7 @@ describe("harness search service", () => {
     expect(result.status).toBe("ready");
     expect(result.files[0]?.path).toBe("disk.ts");
     expect(readFile).not.toHaveBeenCalled();
-    expect(search).toHaveBeenCalledWith({ query: "match", workspaceId: "ws-1", maxResults: 6 }, expect.anything());
+    expect(search).toHaveBeenCalledWith({ query: "match", workspaceId: "ws-1", maxResults: 6, before: 0, after: 0 }, expect.anything());
   });
 
   it("propagates abort while reading a surface snapshot", async () => {
@@ -499,7 +546,7 @@ describe("harness search service", () => {
     });
     parent.abort();
 
-    await expect(pending).resolves.toMatchObject({ status: "unavailable" });
+    await expect(pending).resolves.toMatchObject({ status: "empty", partial: true });
     expect(search).not.toHaveBeenCalled();
   });
 
@@ -637,22 +684,53 @@ describe("harness search service", () => {
     expect(called).toBe(false);
   });
 
-  it("searches a bound working-branch corpus without calling the disk backend", async () => {
+  it("searches a bound working-branch query without calling the disk backend", async () => {
     const search = vi.fn(async (): Promise<WorkspaceContentSearchResult> => {
       throw new Error("disk search must not run");
     });
+    const documents = [
+      { path: "kept.txt", text: "fixed kept\nparent must not match" },
+      { path: "src/nested.ts", text: "nested baseline\n" },
+    ];
+    const pinned: WorkingBranchQuerySnapshot = {
+      sessionId: "session-1",
+      workspaceId: "ws-1",
+      branchId: "branch-1",
+      writeRevision: 2,
+      revision: 1,
+      root: "root-1",
+      pinId: "pin-1",
+      async search(request) {
+        const query = request.query ?? "";
+        const hits = documents.flatMap((document) => document.text.includes(query)
+          ? [makeHit(document.path, 1, document.text.split("\n").find((line) => line.includes(query)) ?? query)]
+          : []);
+        return hits.length ? { status: "ready", generation: 1, hits } : { status: "empty", generation: 1 };
+      },
+      async compute() {
+        throw new Error("raw fixed-view compute is not used by this search test");
+      },
+      async listFiles() {
+        return documents.map((document) => ({ path: document.path, revision: "root-1" }));
+      },
+      async readFile(resourceId) {
+        const document = documents.find((item) => item.path === resourceId);
+        return document
+          ? { status: "ready", content: document.text, revision: "root-1", source: "working-branch" }
+          : { status: "unavailable", message: "missing" };
+      },
+      release: vi.fn(async () => undefined),
+    };
     const service = createHarnessSearchService({
       search,
       resolveWorkspaceRoot: async () => "/workspace",
-      branchCorpus: async () => [
-        { path: "kept.txt", text: "fixed kept\nparent must not match" },
-        { path: "src/nested.ts", text: "nested baseline\n" },
-      ],
+      pinWorkingBranchQuery: async () => pinned,
     });
     const hit = await service.search({ pattern: "fixed kept" }, searchContext({ source: "disk" }));
     expect(hit).toMatchObject({ status: "ready", totalHits: 1, files: [{ path: "kept.txt" }] });
     const missed = await service.search({ pattern: "parent live" }, searchContext({ source: "disk" }));
     expect(missed.status).toBe("empty");
     expect(search).not.toHaveBeenCalled();
+    expect(pinned.release).toHaveBeenCalledTimes(2);
   });
 });

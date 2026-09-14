@@ -1,4 +1,5 @@
 import type { AgentInputContext } from "@piarium/protocol";
+import type { KernelComputeInput, KernelComputeOptions, KernelComputeResult } from "../kernel/compute-runner.js";
 
 export type StructureProviderId = "lsp" | "tree-sitter";
 
@@ -51,6 +52,44 @@ export interface StructureOutlineRequest {
    * must return `unavailable` instead (D-099).
    */
   warmOnly?: boolean;
+  /** Native scheduling lane; index ingestion never occupies foreground workers. */
+  lane?: "foreground" | "background";
+}
+
+/**
+ * A disk-backed structure request. Unlike StructureOutlineRequest, file bytes
+ * remain inside the native compute authority; only revision-bound structure
+ * records or structural units cross back into the Host.
+ */
+export interface StructureFileRequest {
+  workspaceId: string;
+  root: string;
+  path: string;
+  languageId: string | null;
+  signal?: AbortSignal;
+  lane?: "foreground" | "background";
+  /** Hit lines for a single native parse/classification pass. */
+  lines?: number[];
+}
+
+export type StructureFixedComputeInput = Omit<KernelComputeInput, "workspaceId" | "pinId" | "rootId" | "objects" | "operation"> & {
+  operation: "structure" | "chunks";
+};
+export type StructureFixedCompute = (
+  input: StructureFixedComputeInput,
+  options?: KernelComputeOptions,
+) => Promise<KernelComputeResult>;
+
+/** Immutable WorkingState input. The provider supplies only grammar/query
+ * metadata; bytes stay behind the pinned native compute boundary. */
+export interface StructureFixedFileRequest {
+  workspaceId: string;
+  path: string;
+  languageId: string | null;
+  compute: StructureFixedCompute;
+  signal?: AbortSignal;
+  lane?: "foreground" | "background";
+  lines?: number[];
 }
 
 export interface StructureOutlineResult {
@@ -104,6 +143,11 @@ export interface StructureImportsResult {
 }
 
 export interface StructureProvider {
+  analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
+  analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
+  units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;
+  unitsFile?(request: StructureFileRequest): Promise<StructureUnitsResult>;
+  unitsFixed?(request: StructureFixedFileRequest): Promise<StructureUnitsResult>;
   readonly id: StructureProviderId;
   capabilities(languageId: string | null): StructureCapabilities;
   outline(request: StructureOutlineRequest): Promise<StructureOutlineResult>;
@@ -113,6 +157,11 @@ export interface StructureProvider {
 }
 
 export interface StructureSource {
+  analyze?(request: StructureClassifyRequest): Promise<StructureAnalysis>;
+  analyzeFile?(request: StructureFileRequest): Promise<StructureAnalysis>;
+  units?(request: StructureOutlineRequest): Promise<StructureUnitsResult>;
+  unitsFile?(request: StructureFileRequest): Promise<StructureUnitsResult>;
+  unitsFixed?(request: StructureFixedFileRequest): Promise<StructureUnitsResult>;
   outline(request: StructureOutlineRequest): Promise<StructureOutlineResult>;
   classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult>;
   literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult>;
@@ -132,4 +181,32 @@ export function unsupportedResult(
   message: string,
 ): StructureOutlineResult {
   return { status: "unsupported", provider, revision, symbols: [], message };
+}
+
+/** One native parse supplies every model-neutral structure category. */
+export interface StructureAnalysis {
+  outline: StructureOutlineResult;
+  classify: StructureClassifyResult;
+  literalCalls: StructureLiteralCallsResult;
+  imports: StructureImportsResult;
+  recipeId?: string;
+  /** UTF-16 line lengths produced by the same native parse input. */
+  lineLengths?: number[];
+}
+export interface StructureUnit {
+  startLine: number;
+  endLine: number;
+  parentName: string;
+  parentKind: string;
+  parentSignature: string;
+  docComments: string;
+  text: string;
+  fallback: boolean;
+}
+export interface StructureUnitsResult {
+  status: StructureStatus;
+  revision: string;
+  units: StructureUnit[];
+  recipeId?: string;
+  message?: string;
 }

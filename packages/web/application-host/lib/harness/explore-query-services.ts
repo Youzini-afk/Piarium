@@ -129,7 +129,7 @@ export function createExploreDeps(
           candidateBudget: options.candidateBudget ?? DEFAULT_CANDIDATE_BUDGET,
           hitsPerFile: options.hitsPerFile ?? DEFAULT_HITS_PER_FILE,
           ...(ctx.actor.workspaceScope !== undefined ? { workspaceScope: ctx.actor.workspaceScope } : {}),
-          ...(snapshot ? { pinnedBranchCorpus: snapshot.files.map((file) => ({ path: file.path, text: file.text })) } : {}),
+          ...(snapshot ? { pinnedBranchQuery: snapshot } : {}),
           signal,
         });
         signal.throwIfAborted();
@@ -193,15 +193,7 @@ export function createExploreDeps(
             sessionId: ctx.sessionId,
             inputContext,
             ...(roots ? { roots } : {}),
-            ...(snapshot
-              ? {
-                threadDocuments: snapshot.files.map((file) => ({
-                  path: file.path,
-                  content: file.text,
-                  revision: file.revision,
-                })),
-              }
-              : {}),
+            ...(snapshot ? { threadQuery: snapshot } : {}),
           });
         },
       },

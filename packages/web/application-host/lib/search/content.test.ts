@@ -1,426 +1,241 @@
-import { EventEmitter } from 'node:events';
-import fs from 'node:fs';
-import { PassThrough } from 'node:stream';
-import path from 'node:path';
-import { describe, expect, it } from 'vitest';
-import {
-  createWorkspaceContentSearch,
-  type SearchChild,
-  type WorkspaceSearchHit,
-} from './content.js';
-import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
+import path from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
+import type { KernelComputeResult } from "../kernel/compute-runner.js";
+import type { KernelComputeService } from "../kernel/compute-service.js";
+import type { KernelComputeRecord } from "../kernel/protocol.generated.js";
+import { createWorkspaceContentSearch, type WorkspaceSearchHit } from "./content.js";
 
-class FakeSearchChild extends EventEmitter implements SearchChild {
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  readonly stdin = new PassThrough();
-  killed = false;
+const nativeResult = (
+  records: KernelComputeRecord[],
+  status: KernelComputeResult["status"] = records.length ? "ready" : "empty",
+  message: string | null = null,
+): KernelComputeResult => ({
+  kernelEpoch: "epoch",
+  workspaceId: "workspace",
+  jobId: "job",
+  status,
+  root: null,
+  records,
+  nextCursor: records.length,
+  endCursor: records.length,
+  scannedFiles: records.length,
+  message,
+});
 
-  kill(): boolean {
-    this.killed = true;
-    this.emit('close', null);
-    return true;
-  }
-}
-
-const createFakeChild = (): FakeSearchChild => new FakeSearchChild();
-
-const finishWithOutput = (child: FakeSearchChild, output: string, code = 0): void => {
-  child.stdout.once('end', () => child.emit('close', code));
-  child.stdout.end(output);
-};
-
-const matchLine = (absolutePath: string, preview: string, start = 0): string => JSON.stringify({
-  type: 'match',
+const hit = (resourceId: string, preview: string, input: {
+  line?: number;
+  column?: number;
+  revision?: string;
+  before?: string[];
+  after?: string[];
+} = {}): KernelComputeRecord => ({
+  kind: "hit",
+  path: resourceId,
+  revision: input.revision ?? `sha256-${resourceId}`,
   data: {
-    path: { text: absolutePath },
-    line_number: 2,
-    lines: { text: `${preview}\n` },
-    submatches: [{ start, end: start + 4 }],
+    line: input.line ?? 2,
+    column: input.column ?? 1,
+    preview,
+    before: input.before ?? [],
+    after: input.after ?? [],
   },
 });
 
-describe('workspace content search', () => {
-  it('passes only canonical workspace-contained search roots to ripgrep', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const sourceRoot = path.join(workspace.root, 'src');
-      await fs.promises.mkdir(sourceRoot, { recursive: true });
-      let spawnArgs: string[] = [];
-      let spawnCalls = 0;
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: (_command, args) => {
-          spawnCalls += 1;
-          spawnArgs = args;
-          const child = createFakeChild();
-          queueMicrotask(() => child.emit('close', 1));
-          return child;
-        },
-      });
+const searchWith = async (
+  directory: KernelComputeService["directory"],
+) => {
+  const harness = await createDocumentAuthorityHarness();
+  return {
+    harness,
+    search: createWorkspaceContentSearch({
+      documents: harness.authority,
+      compute: { directory },
+      pathModule: path,
+    }),
+  };
+};
 
+describe("workspace content search over native compute", () => {
+  it("admits only workspace-contained roots and forwards native search options", async () => {
+    const directory = vi.fn(async (_root, _input, _options) => nativeResult([]));
+    const { harness, search } = await searchWith(directory);
+    try {
+      const root = (await harness.authority.inspectWorkspace(harness.identity.workspaceId)).root;
       const scoped = await search.searchContent({
         workspaceId: harness.identity.workspaceId,
-        query: 'needle',
-        paths: ['src'],
-      });
-      expect(scoped.status, scoped.status === 'failure' ? scoped.message : undefined).toBe('empty');
-      expect(spawnArgs[spawnArgs.length - 1]).toBe(await fs.promises.realpath(sourceRoot));
-
-      spawnCalls = 0;
-      await expect(search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'needle',
-        paths: ['../outside'],
-      })).resolves.toMatchObject({ status: 'failure' });
-      expect(spawnCalls).toBe(0);
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('passes fixed, case-insensitive, and ordered glob filters to ripgrep', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      let spawnArgs: string[] = [];
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: (_command, args) => {
-          spawnArgs = args;
-          const child = createFakeChild();
-          queueMicrotask(() => child.emit('close', 1));
-          return child;
-        },
-      });
-
-      await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'literal [value]',
+        query: "literal [value]",
+        paths: ["src"],
         fixedStrings: true,
         ignoreCase: true,
-        glob: ['**/*.ts', '!**/*.test.ts'],
+        glob: ["**/*.ts", "!**/*.test.ts"],
+        before: 2,
+        after: 3,
+      });
+      expect(scoped).toEqual({ status: "empty", generation: undefined });
+      expect(directory).toHaveBeenCalledTimes(1);
+      expect(directory.mock.calls[0]?.[0]).toBe(root);
+      expect(directory.mock.calls[0]?.[1]).toMatchObject({
+        operation: "search",
+        lane: "foreground",
+        query: "literal [value]",
+        paths: ["src"],
+        fixedStrings: true,
+        ignoreCase: true,
+        globs: ["**/*.ts", "!**/*.test.ts"],
+        before: 2,
+        after: 3,
       });
 
-      expect(spawnArgs).toContain('--fixed-strings');
-      expect(spawnArgs).toContain('--ignore-case');
-      const include = spawnArgs.lastIndexOf('**/*.ts');
-      const exclude = spawnArgs.lastIndexOf('!**/*.test.ts');
-      expect(include).toBeGreaterThan(-1);
-      expect(exclude).toBeGreaterThan(include);
+      const outside = await search.searchContent({
+        workspaceId: harness.identity.workspaceId,
+        query: "needle",
+        paths: ["../outside"],
+      });
+      expect(outside.status).toBe("failure");
+      expect(directory).toHaveBeenCalledTimes(1);
     } finally {
       await harness.cleanup();
     }
   });
 
-  it('returns ready hits, empty success, and failure without mapping errors to empty', async () => {
-    const harness = await createDocumentAuthorityHarness();
+  it("decodes revision-bound hits and keeps ready, empty and failure distinct", async () => {
+    let mode: "ready" | "empty" | "failed" | "throw" = "ready";
+    const directory = vi.fn(async (_root, _input, options) => {
+      if (mode === "throw") throw new Error("native search unavailable");
+      const records = mode === "ready"
+        ? [hit("note.txt", "todo item", { revision: "sha256-note", before: ["before"], after: ["after"] })]
+        : [];
+      await options?.onRecords?.(records);
+      return nativeResult(records, mode === "failed" ? "failed" : mode === "ready" ? "ready" : "empty", mode === "failed" ? "native search failed" : null);
+    });
+    const { harness, search } = await searchWith(directory);
     try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const notePath = path.join(workspace.root, 'note.txt');
-      let mode: 'ready' | 'empty' | 'throw' | 'fail' = 'ready';
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          if (mode === 'throw') {
-            throw Object.assign(new Error('missing ripgrep'), { code: 'ENOENT' });
-          }
-          const child = createFakeChild();
-          queueMicrotask(() => {
-            if (mode === 'ready') {
-              finishWithOutput(child, `${matchLine(notePath, 'todo item')}\n`);
-              return;
-            }
-            if (mode === 'empty') {
-              child.emit('close', 1);
-              return;
-            }
-            child.emit('close', 2);
-          });
-          return child;
-        },
-      });
-
-      const ready = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 3 });
+      const ready = await search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 });
       expect(ready).toMatchObject({
-        status: 'ready',
+        status: "ready",
         generation: 3,
         hits: [{
-          resource: { workspaceId: harness.identity.workspaceId, resourceId: 'note.txt' },
+          resource: { workspaceId: harness.identity.workspaceId, resourceId: "note.txt" },
           line: 2,
-          preview: 'todo item',
+          preview: "todo item",
+          revision: "sha256-note",
+          before: ["before"],
+          after: ["after"],
         }],
       });
-
-      mode = 'empty';
-      const empty = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 3 });
-      expect(empty).toEqual({ status: 'empty', generation: 3 });
-
-      mode = 'throw';
-      const missing = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 3 });
-      expect(missing.status).toBe('failure');
-      expect(missing).not.toMatchObject({ status: 'empty' });
-      if (missing.status !== 'failure') throw new Error('Expected search failure');
-      expect(missing.message).toMatch(/ripgrep/i);
-
-      mode = 'fail';
-      const failed = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 3 });
-      expect(failed).toEqual({ status: 'failure', generation: 3, message: 'Content search failed' });
+      mode = "empty";
+      await expect(search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 }))
+        .resolves.toEqual({ status: "empty", generation: 3 });
+      mode = "failed";
+      await expect(search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 }))
+        .resolves.toEqual({ status: "failure", generation: 3, message: "native search failed" });
+      mode = "throw";
+      const thrown = await search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 3 });
+      expect(thrown).toMatchObject({ status: "failure", generation: 3 });
+      if (thrown.status === "failure") expect(thrown.message).toMatch(/native search unavailable/);
     } finally {
       await harness.cleanup();
     }
   });
 
-  /**
-   * ripgrep exits 2 when it finished but could not read something. Discarding
-   * the matches it had already produced turned one unreadable file into a
-   * failed search, and the harness search service then failed a whole
-   * `explore.search` call over it (D-142).
-   */
-  it('keeps matches ripgrep produced before a non-fatal error and marks them incomplete', async () => {
-    const harness = await createDocumentAuthorityHarness();
+  it("keeps partial native matches and marks them incomplete, but fails a partial search with no evidence", async () => {
+    let withHit = true;
+    const directory = vi.fn(async (_root, _input, options) => {
+      const records = withHit ? [hit("note.txt", "todo item")] : [];
+      await options?.onRecords?.(records);
+      return nativeResult(records, "partial", "one candidate could not be read");
+    });
+    const { harness, search } = await searchWith(directory);
     try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const notePath = path.join(workspace.root, 'note.txt');
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          const child = createFakeChild();
-          queueMicrotask(() => {
-            child.stderr.write('rg: /some/locked/file: I/O error (os error 29)\n');
-            finishWithOutput(child, `${matchLine(notePath, 'todo item')}\n`, 2);
-          });
-          return child;
-        },
-      });
+      const partial = await search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 5 });
+      expect(partial).toMatchObject({ status: "ready", generation: 5, incomplete: true, hits: [{ preview: "todo item" }] });
+      withHit = false;
+      const failed = await search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, { generation: 6 });
+      expect(failed).toEqual({ status: "failure", generation: 6, message: "one candidate could not be read" });
+    } finally {
+      await harness.cleanup();
+    }
+  });
 
+  it("forwards the global result cap and dirty-path exclusion to native admission", async () => {
+    const directory = vi.fn(async (_root, input, options) => {
+      expect(input.maxResults).toBe(2);
+      expect(input.excludePaths).toEqual(["dirty.ts"]);
+      const records = [hit("first.ts", "first"), hit("second.ts", "second")];
+      await options?.onRecords?.(records);
+      return nativeResult(records);
+    });
+    const { harness, search } = await searchWith(directory);
+    try {
       const result = await search.searchContent({
         workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 5 });
-
-      expect(result).toMatchObject({
-        status: 'ready',
-        generation: 5,
-        incomplete: true,
-        hits: [{ resource: { resourceId: 'note.txt' }, preview: 'todo item' }],
-      });
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('still fails when ripgrep errors without producing any match', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          const child = createFakeChild();
-          // Nothing matched and something went wrong: "no matches" and "could
-          // not search" are indistinguishable here, so this fails closed.
-          queueMicrotask(() => child.emit('close', 2));
-          return child;
-        },
-      });
-
-      await expect(search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 6 })).resolves.toEqual({
-        status: 'failure',
-        generation: 6,
-        message: 'Content search failed',
-      });
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('cancels an in-flight search by killing the child process', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      let child: FakeSearchChild | undefined;
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          child = createFakeChild();
-          return child;
-        },
-      });
-      const controller = new AbortController();
-      const pending = search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'todo',
-      }, { generation: 4, signal: controller.signal });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      controller.abort();
-      await expect(pending).resolves.toEqual({ status: 'cancelled', generation: 4 });
-      expect(child?.killed).toBe(true);
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('converts ripgrep UTF-8 byte offsets to Monaco UTF-16 columns', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const notePath = path.join(workspace.root, 'unicode.txt');
-      const prefix = '中文🙂';
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          const child = createFakeChild();
-          queueMicrotask(() => {
-            finishWithOutput(child, `${matchLine(notePath, `${prefix}match`, Buffer.byteLength(prefix, 'utf8'))}\n`);
-          });
-          return child;
-        },
-      });
-
-      const result = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'match',
-      }, { generation: 4 });
-
-      expect(result).toMatchObject({
-        status: 'ready',
-        hits: [{ column: prefix.length + 1, line: 2, preview: `${prefix}match` }],
-      });
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('streams results and stops ripgrep at the requested global result count', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const firstPath = path.join(workspace.root, 'first.txt');
-      const secondPath = path.join(workspace.root, 'second.txt');
-      let child: FakeSearchChild | undefined;
-      let args: string[] | undefined;
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: (_command, nextArgs) => {
-          args = nextArgs;
-          const nextChild = createFakeChild();
-          child = nextChild;
-          queueMicrotask(() => {
-            const output = `${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`;
-            nextChild.stdout.write(output.slice(0, 17));
-            finishWithOutput(nextChild, output.slice(17));
-          });
-          return nextChild;
-        },
-      });
-
-      const result = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'match',
-        maxResults: 1,
-      }, { generation: 5 });
-
-      expect(result).toMatchObject({ status: 'ready', generation: 5, hits: [{ preview: 'first' }] });
-      if (result.status !== 'ready') throw new Error('Expected ready search result');
-      expect(result.hits).toHaveLength(1);
-      expect(child?.killed).toBe(true);
-      expect(args).not.toContain('--max-count');
-    } finally {
-      await harness.cleanup();
-    }
-  });
-
-  it('excludes normalized dirty resource IDs before applying the result cap', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const dirtyPath = path.join(workspace.root, 'dirty.ts');
-      const firstPath = path.join(workspace.root, 'first.ts');
-      const secondPath = path.join(workspace.root, 'second.ts');
-      let child: FakeSearchChild | undefined;
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: (_command, _args) => {
-          child = createFakeChild();
-          queueMicrotask(() => {
-            const output = [
-              matchLine(dirtyPath, 'dirty'),
-              matchLine(firstPath, 'first'),
-              matchLine(secondPath, 'second'),
-            ].join('\n') + '\n';
-            finishWithOutput(child!, output);
-          });
-          return child!;
-        },
-      });
-
-      const result = await search.searchContent({
-        workspaceId: harness.identity.workspaceId,
-        query: 'match',
+        query: "match",
         maxResults: 2,
-        excludeResourceIds: ['dirty.ts'],
+        excludeResourceIds: ["dirty.ts"],
       });
-
-      expect(result).toMatchObject({ status: 'ready', hits: [{ preview: 'first' }, { preview: 'second' }] });
-      expect(child?.killed).toBe(true);
+      expect(result).toMatchObject({ status: "ready", hits: [{ preview: "first" }, { preview: "second" }] });
     } finally {
       await harness.cleanup();
     }
   });
 
-  it('emits natural stream batches without applying an implicit global result cap', async () => {
-    const harness = await createDocumentAuthorityHarness();
+  it("streams native batches without collecting them when the caller owns backpressure", async () => {
+    const directory = vi.fn(async (_root, _input, options) => {
+      await options?.onRecords?.([hit("first.txt", "first")]);
+      await options?.onRecords?.([hit("second.txt", "second")]);
+      return nativeResult([], "ready");
+    });
+    const { harness, search } = await searchWith(directory);
+    const batches: WorkspaceSearchHit[][] = [];
     try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const firstPath = path.join(workspace.root, 'first.txt');
-      const secondPath = path.join(workspace.root, 'second.txt');
-      const batches: WorkspaceSearchHit[][] = [];
-      const search = createWorkspaceContentSearch({
-        documents: harness.authority,
-        pathModule: path,
-        spawn: () => {
-          const child = createFakeChild();
-          queueMicrotask(() => {
-            finishWithOutput(child, `${matchLine(firstPath, 'first')}\n${matchLine(secondPath, 'second')}\n`);
-          });
-          return child;
-        },
-      });
-
       const result = await search.searchContent({
         workspaceId: harness.identity.workspaceId,
-        query: 'match',
+        query: "match",
       }, {
         collect: false,
         generation: 6,
         onBatch: (hits) => { batches.push(hits); },
       });
+      expect(result).toEqual({ status: "ready", generation: 6, hits: [] });
+      expect(batches.flat().map((item) => item.preview)).toEqual(["first", "second"]);
+    } finally {
+      await harness.cleanup();
+    }
+  });
 
-      expect(result).toEqual({ status: 'ready', generation: 6, hits: [] });
-      expect(batches.flat().map((hit) => hit.preview)).toEqual(['first', 'second']);
+  it("propagates cancellation to the native job instead of converting it to empty", async () => {
+    const controller = new AbortController();
+    const directory = vi.fn(async (_root, _input, options) => {
+      await new Promise<void>((resolve) => {
+        if (options?.signal?.aborted) { resolve(); return; }
+        options?.signal?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      return nativeResult([], "cancelled");
+    });
+    const { harness, search } = await searchWith(directory);
+    try {
+      const pending = search.searchContent({ workspaceId: harness.identity.workspaceId, query: "todo" }, {
+        generation: 4,
+        signal: controller.signal,
+      });
+      controller.abort();
+      await expect(pending).resolves.toEqual({ status: "cancelled", generation: 4 });
+    } finally {
+      await harness.cleanup();
+    }
+  });
+
+  it("rejects malformed native hit identity instead of trusting a traversal-looking record", async () => {
+    const directory = vi.fn(async (_root, _input, options) => {
+      const records = [hit("../outside.txt", "bad")];
+      await options?.onRecords?.(records);
+      return nativeResult(records);
+    });
+    const { harness, search } = await searchWith(directory);
+    try {
+      const result = await search.searchContent({ workspaceId: harness.identity.workspaceId, query: "bad" });
+      expect(result.status).toBe("failure");
     } finally {
       await harness.cleanup();
     }

@@ -123,6 +123,7 @@ export interface WorkingStatePin extends WorkingStatePinnedRoot {
  * Implementations must not retain an expanded workspace tree between operations.
  */
 export interface WorkingStateRootStore {
+  queryFiles(pin: WorkingStatePinnedRoot, request: import("./query-contract.js").WorkingStateFileQuery, options?: import("./query-contract.js").WorkingStateQueryOptions): Promise<import("./query-contract.js").WorkingStateQueryResult>;
   getBranchRoot(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingBranchRoot | null>;
   /** Read a published result by its immutable branch/revision identity. The returned state maps are
    * restricted to changedPaths; callers must use readStateSlice for any additional paths. */

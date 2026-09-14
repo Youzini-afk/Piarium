@@ -1,3 +1,5 @@
+import { queryTestFiles } from "./file-query.test-helper.js";
+import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "./query-contract.js";
 import { createHash, randomUUID } from "node:crypto";
 import { sameState } from "../../recovery/journal-files.js";
 import type {
@@ -82,6 +84,11 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
   private readonly pins = new Map<string, { branchId: string; revision: number; root: string; states: Record<string, RecoveryState> }>();
 
   constructor(private readonly store: WorkingStateStore, private readonly context?: WorkspaceRecoveryStorageContext) {}
+
+  async queryFiles(pin: import("./types.js").WorkingStatePinnedRoot, request: WorkingStateFileQuery, options?: WorkingStateQueryOptions): Promise<WorkingStateQueryResult> {
+    const state=this.pins.get(pin.pinId);if(!state||state.root!==pin.root)throw new Error("Query pin was released or changed");
+    return queryTestFiles(pin,state.states,hash=>this.store.getObject(hash),request,options);
+  }
 
   async getBranchRoot(branchId: string): Promise<WorkingBranchRoot | null> {
     const branch = this.store.getBranch(branchId);

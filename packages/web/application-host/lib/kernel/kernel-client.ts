@@ -24,6 +24,7 @@ import {
   type KernelResponse,
   type KernelWriteResult,
   type KernelProcessSnapshot,
+  type KernelComputeReadResult,
   type KernelProcessListResult,
   type KernelProcessReadResult,
   type KernelProcessWriteResult,
@@ -103,6 +104,26 @@ export class KernelScopedClient {
 
   constructor(private readonly owner: KernelClient, grant: KernelGrantHandle) {
     this.grant = owner.assertGrantForScope(grant);
+  }
+
+  computeStart(params: KernelMethodParams["compute.start"], signal?: AbortSignal): Promise<KernelComputeReadResult> {
+    return this.owner.computeStart(params, this.grant, signal);
+  }
+
+  computeRead(params: KernelMethodParams["compute.read"], signal?: AbortSignal): Promise<KernelComputeReadResult> {
+    return this.owner.computeRead(params, this.grant, signal);
+  }
+
+  computeCancel(params: KernelMethodParams["compute.cancel"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.computeCancel(params, this.grant, signal);
+  }
+
+  computeRelease(params: KernelMethodParams["compute.release"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.computeRelease(params, this.grant, signal);
+  }
+
+  computeGrammarRegister(params: KernelMethodParams["compute.grammar.register"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.computeGrammarRegister(params, this.grant, signal);
   }
 
   processSpawn(params: KernelMethodParams["process.spawn"], signal?: AbortSignal): Promise<KernelProcessSnapshot> {
@@ -862,6 +883,26 @@ export class KernelClient {
 
   async fileMeasure(params: KernelMethodParams["file.measure"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.measure", params, { signal, grant });
+  }
+
+  computeStart(params: KernelMethodParams["compute.start"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelComputeReadResult> {
+    return this.requestRaw<KernelComputeReadResult>("compute.start", params, { signal, grant });
+  }
+
+  computeRead(params: KernelMethodParams["compute.read"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelComputeReadResult> {
+    return this.requestRaw<KernelComputeReadResult>("compute.read", params, { signal, grant });
+  }
+
+  computeCancel(params: KernelMethodParams["compute.cancel"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("compute.cancel", params, { signal, grant });
+  }
+
+  computeRelease(params: KernelMethodParams["compute.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("compute.release", params, { signal, grant });
+  }
+
+  computeGrammarRegister(params: KernelMethodParams["compute.grammar.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("compute.grammar.register", params, { signal, grant });
   }
 
   async processSpawn(params: KernelMethodParams["process.spawn"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelProcessSnapshot> {

@@ -1,3 +1,5 @@
+import { runKernelCompute } from "./compute-runner.js";
+import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
 import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
@@ -743,6 +745,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   ownerIdForObject(hash: string): string | undefined { return this.ownerByHash.get(hash); }
+
+  async queryFiles(pin: WorkingStatePinnedRoot, request: WorkingStateFileQuery, options?: WorkingStateQueryOptions): Promise<WorkingStateQueryResult> {
+    if (pin.workspaceId !== this.context.identity.workspaceId) throw new Error("Query pin belongs to another workspace");
+    const result = await runKernelCompute(this.context.client, { ...request, workspaceId: pin.workspaceId, pinId: pin.pinId }, options);
+    if (result.root !== pin.root) throw new Error("Query result changed its fixed source root");
+    return result;
+  }
 
   async pinBranch(branchId: string, options?: { revision?: number; signal?: AbortSignal }): Promise<WorkingStatePin> {
     const branch = await this.getBranchRoot(branchId, options?.signal ? { signal: options.signal } : undefined);

@@ -1,16 +1,9 @@
-/**
- * Structure-recursive chunking for the local semantic index.
- *
- * Small containers stay whole. Large ones split on child containers, then on
- * overlapping line windows. Every source line is covered by at least one chunk.
- * Token limits come from the supplied tokenizer, not a character estimate.
- */
-
-import { isStructureContainerKind, structureContainerPredicate } from "../../structure/kinds.js";
-import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "../../structure/types.js";
+/** Tokenizer-aware packing of native structural units. Syntax discovery,
+ * container selection and source coverage belong to Rust; model decoration
+ * and exact tokenizer budgets remain in this model adapter. */
+import type { StructureLineRange, StructureUnit } from "../../structure/types.js";
 import { buildEmbedText, splitSourceLines, textOfLines, type TokenCounter } from "./embed-text.js";
 import { blockIdentity, contentHashOf, parentUnitIdentity } from "./identity.js";
-
 export type SemanticChunk = {
   blockId: string;
   parentUnitId: string;
@@ -26,63 +19,6 @@ export type SemanticChunk = {
   fallback: boolean;
   /** Offset of `body` inside the original line-range text when a range was continue-split. */
   bodyOffset?: number;
-};
-
-export type ChunkDocumentInput = {
-  documentId: string;
-  text: string;
-  languageId: string | null;
-  outline: Pick<StructureOutlineResult, "status" | "symbols">;
-  maxTokens: number;
-  countTokens: TokenCounter;
-};
-
-const commentLine = /^\s*(\/\/|\/\*|\*|#)/u;
-
-const flattenContainers = (
-  symbols: readonly StructureSymbol[],
-  isContainer: (kind: string) => boolean,
-): StructureSymbol[] => {
-  const result: StructureSymbol[] = [];
-  const visit = (symbol: StructureSymbol): void => {
-    if (isContainer(symbol.kind)) result.push(symbol);
-    for (const child of symbol.children ?? []) visit(child);
-  };
-  for (const symbol of symbols) visit(symbol);
-  return result;
-};
-
-const childContainers = (
-  symbol: StructureSymbol,
-  isContainer: (kind: string) => boolean,
-): StructureSymbol[] => (symbol.children ?? []).filter((child) => isContainer(child.kind));
-
-const signatureText = (lines: readonly string[], symbol: StructureSymbol): string => (
-  textOfLines(lines, symbol.signature.startLine, symbol.signature.endLine)
-);
-
-const docCommentsBefore = (lines: readonly string[], startLine: number): string => {
-  const collected: string[] = [];
-  for (let line = startLine - 1; line >= 1; line -= 1) {
-    const text = lines[line - 1] ?? "";
-    if (!commentLine.test(text)) break;
-    collected.unshift(text);
-  }
-  return collected.join("\n");
-};
-
-const gapsInside = (bounds: StructureLineRange, occupied: readonly StructureLineRange[]): StructureLineRange[] => {
-  const ordered = [...occupied]
-    .filter((range) => range.endLine >= range.startLine)
-    .sort((left, right) => left.startLine - right.startLine);
-  const gaps: StructureLineRange[] = [];
-  let cursor = bounds.startLine;
-  for (const range of ordered) {
-    if (range.startLine > cursor) gaps.push({ startLine: cursor, endLine: range.startLine - 1 });
-    cursor = Math.max(cursor, range.endLine + 1);
-  }
-  if (cursor <= bounds.endLine) gaps.push({ startLine: cursor, endLine: bounds.endLine });
-  return gaps;
 };
 
 const prefixThatFits = (text: string, maxTokens: number, countTokens: TokenCounter): number => {
@@ -217,84 +153,32 @@ const emitRange = (
   return overlappingChunks(documentId, lines, range, parent, docs, maxTokens, countTokens);
 };
 
-const chunkSymbol = (
-  documentId: string,
-  lines: readonly string[],
-  symbol: StructureSymbol,
-  isContainer: (kind: string) => boolean,
-  maxTokens: number,
-  countTokens: TokenCounter,
-): SemanticChunk[] => {
-  const parent = {
-    name: symbol.name,
-    kind: symbol.kind,
-    signature: signatureText(lines, symbol),
-  };
-  const docs = docCommentsBefore(lines, symbol.range.startLine);
-  if (windowFits(lines, symbol.range, maxTokens, countTokens)) {
-    return makeChunks(documentId, lines, symbol.range, parent, docs, maxTokens, countTokens, false);
-  }
-  const children = childContainers(symbol, isContainer);
-  if (children.length === 0) {
-    return overlappingChunks(documentId, lines, symbol.range, parent, docs, maxTokens, countTokens);
-  }
-  const chunks: SemanticChunk[] = [];
-  for (const child of children) chunks.push(...chunkSymbol(documentId, lines, child, isContainer, maxTokens, countTokens));
-  for (const gap of gapsInside(symbol.range, children.map((child) => child.range))) {
-    chunks.push(...emitRange(documentId, lines, gap, parent, docs, maxTokens, countTokens, false));
-  }
-  return chunks;
-};
 
-const markCovered = (covered: boolean[], range: StructureLineRange): void => {
-  for (let line = range.startLine; line <= range.endLine; line += 1) covered[line] = true;
-};
-
-export function chunkDocument(input: ChunkDocumentInput): SemanticChunk[] {
-  const lines = splitSourceLines(input.text);
-  const lineCount = lines.length;
-  if (lineCount === 0) return [];
-  const isContainer = input.languageId ? structureContainerPredicate(input.languageId) : isStructureContainerKind;
-  const outlineReady = input.outline.status === "ready" || input.outline.status === "empty";
-  const units = outlineReady ? flattenContainers(input.outline.symbols, isContainer) : [];
-  const topLevel = units.filter((symbol) => (
-    !units.some((other) => (
-      other !== symbol
-      && other.range.startLine <= symbol.range.startLine
-      && other.range.endLine >= symbol.range.endLine
-      && (other.range.endLine - other.range.startLine) > (symbol.range.endLine - symbol.range.startLine)
-    ))
-  ));
-  const chunks: SemanticChunk[] = [];
-  for (const symbol of topLevel) {
-    chunks.push(...chunkSymbol(input.documentId, lines, symbol, isContainer, input.maxTokens, input.countTokens));
-  }
-  const covered = Array.from({ length: lineCount + 1 }, () => false);
-  for (const chunk of chunks) markCovered(covered, { startLine: chunk.startLine, endLine: chunk.endLine });
-  const fileParent = { name: "", kind: "file", signature: "" };
-  const missing: StructureLineRange[] = [];
-  let start: number | null = null;
-  for (let line = 1; line <= lineCount; line += 1) {
-    if (!covered[line]) {
-      if (start === null) start = line;
-    } else if (start !== null) {
-      missing.push({ startLine: start, endLine: line - 1 });
-      start = null;
-    }
-  }
-  if (start !== null) missing.push({ startLine: start, endLine: lineCount });
-  const fallback = !outlineReady || topLevel.length === 0;
-  for (const gap of missing) {
-    chunks.push(...emitRange(
-      input.documentId,
-      lines,
-      gap,
-      fileParent,
-      "",
-      input.maxTokens,
-      input.countTokens,
-      fallback,
-    ));
-  }
-  return chunks;
+export interface PackStructuralUnitsInput {
+  documentId:string;
+  units:readonly StructureUnit[];
+  maxTokens:number;
+  countTokens:TokenCounter;
 }
+export function packStructuralUnits(input:PackStructuralUnitsInput):SemanticChunk[] {
+  if(!Number.isSafeInteger(input.maxTokens)||input.maxTokens<1)throw new Error("The embedding token window must be positive");
+  return input.units.flatMap(unit=>{
+    const lines=splitSourceLines(unit.text);
+    if(!Number.isSafeInteger(unit.startLine)||unit.startLine<1||unit.endLine<unit.startLine
+      ||lines.length!==unit.endLine-unit.startLine+1)throw new Error("Native unit source range does not match its captured body");
+    const packed=emitRange(input.documentId,lines,{startLine:1,endLine:lines.length},
+      {name:unit.parentName,kind:unit.parentKind,signature:unit.parentSignature},unit.docComments,
+      input.maxTokens,input.countTokens,unit.fallback);
+    return packed.map(chunk=>{
+      const startLine=chunk.startLine+unit.startLine-1,endLine=chunk.endLine+unit.startLine-1;
+      const continuation=chunk.blockId.match(/#p\d+$/)?.[0]??"";
+      return {...chunk,startLine,endLine,blockId:blockIdentity(input.documentId,startLine,endLine)+continuation};
+    });
+  });
+}
+
+/** Logical knowledge records have no filesystem syntax. Their authority supplies
+ * a plain unit, and this same tokenizer packer enforces the model window. */
+export const packPlainText = (input: { documentId:string; text:string; maxTokens:number; countTokens:TokenCounter }): SemanticChunk[] =>
+  packStructuralUnits({...input,units:input.text ? [{startLine:1,endLine:splitSourceLines(input.text).length,
+    parentName:"",parentKind:"file",parentSignature:"",docComments:"",text:input.text,fallback:true}] : []});

@@ -166,6 +166,7 @@ impl Storage {
                 "grant belongs to another Host".to_string(),
             ));
         }
+        self.computations.revoke(grant_id);
         let mut revoked = grant;
         revoked.revoked = true;
         self.conn.execute_batch("BEGIN IMMEDIATE")?;
@@ -460,6 +461,9 @@ impl Storage {
             "draftBasePaths",
             "captureScopes",
         ] {
+            // Compute traversal intersects requested roots with the grant before
+            // candidate selection; a broad root is not itself a file read.
+            if method == "compute.start" && field == "paths" { continue; }
             if let Some(values) = params.get(field).and_then(Value::as_array) {
                 for value in values {
                     let path = value

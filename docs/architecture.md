@@ -1,8 +1,8 @@
 # Piarium architecture
 
-Status: Pi-native workbench/harness in production; R1–R4 complete through D-280; R0 and R5–R6 retain separate acceptance.
+Status: Pi-native workbench/harness in production; R1–R5 complete through D-281; R0 and R6 retain separate acceptance.
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## 1. Context
 
@@ -1219,3 +1219,34 @@ silently cleared. See [the consumer map](../packages/web/application-host/lib/pr
 Pi broker processes, short Git semantic commands and bootstrap/discovery adapters retain their
 existing ownership; unused native-addon distribution dependencies and full package/performance
 acceptance remain R6/R0 work, not a competing process backend.
+
+## D-281 native file and structure compute
+
+R5 adds one read-only compute authority inside the same kernel rather than a second Host scanner.
+`compute.start/read/cancel/release` admits either an immutable WorkingState pin, a Host-authorized
+canonical live root, or explicit fixed text objects. Immutable queries hold their own short-lived
+reader pin, so caller unpin, branch deletion, and concurrent GC cannot change the source mid-job.
+Live-root records carry the content revision actually read; source drift is partial/failure evidence,
+not an invented immutable snapshot. Path scopes and overlay tombstones are applied before candidate
+selection and result limits.
+
+Two foreground workers and a dedicated background worker separate interactive read/search/explore
+from catalog/index work. Output is bounded and cursor-acknowledged; cancellation reaches the actual
+worker and terminal state is observed before reader references are released. The native search path
+uses the Rust grep/ignore ecosystem and Git inventory semantics; native tree-sitter owns workspace
+structure/classification/import/call/chunk computation. Application Host adapters only validate and
+project records. Surface drafts remain Registry-owned fixed text overlays rather than a disk fallback.
+
+Production `search.content`, file find, Harness grep/explore, language catalog, symbol graph and
+semantic disk ingestion all use this boundary. Virtual Thread semantic recall enumerates path/revision
+from the existing WorkingState pin and invokes native `unitsFixed` on that same pin; it no longer
+copies the branch corpus into TypeScript before parsing. Tokenizer-aware packing, embeddings and vector
+storage remain their existing TS/model-domain responsibilities, TriviumDB remains the graph authority,
+and LSP remains a protocol/navigation/diagnostic service. Host `web-tree-sitter` is retained only for
+grammar-install ABI admission and does not parse workspace source. Generic Files UI reads are not
+reclassified as R5 compute; their mutation/resource authority remains the R2 boundary.
+
+The removed production paths include Host ripgrep child management, recursive file-search scanning,
+WorkingBranch corpus/body mirrors and Host AST/chunker discovery. R5 is therefore Complete under
+D-281. R0 package/process acceptance and R6 full release/performance closeout remain independent, so
+Stage R as a whole is not yet Complete.

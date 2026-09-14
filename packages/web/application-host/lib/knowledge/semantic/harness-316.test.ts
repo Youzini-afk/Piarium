@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import { createStructureSource } from "../../structure/source.js";
-import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { createHashEmbedder, hashEmbed } from "./embedder.js";
 import { createEmbedScheduler } from "./embed-scheduler.js";
 import { createSemanticBackend } from "./backend.js";

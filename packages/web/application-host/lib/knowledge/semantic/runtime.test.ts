@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
+import type { WorkingBranchQuerySnapshot } from "../../harness/working-state/working-branch-query.js";
 import { createStructureSource } from "../../structure/source.js";
-import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { createHashEmbedder } from "./embedder.js";
 import { workspaceScope, remoteEmbeddingSpaceId } from "./identity.js";
 import { createSemanticIndexRuntime } from "./runtime.js";
@@ -25,6 +26,77 @@ const gate = () => {
 };
 
 describe("semantic index runtime", () => {
+  it("builds a virtual-thread semantic overlay from native fixed-view units without reading whole file bodies", async () => {
+    const documents = await createDocumentAuthorityHarness();
+    disposes.push(() => documents.cleanup());
+    const native = parsingSource();
+    let fixedCalls = 0;
+    let bodyReads = 0;
+    const structureSource = {
+      ...native,
+      unitsFixed: async (request: Parameters<NonNullable<typeof native.unitsFixed>>[0]) => {
+        fixedCalls += 1;
+        expect(request.path).toBe("src/thread.ts");
+        expect(request.languageId).toBe("typescript");
+        expect(request.compute).toBe(threadQuery.compute);
+        return {
+          status: "ready" as const,
+          revision: "rev-thread",
+          units: [{
+            startLine: 1,
+            endLine: 1,
+            parentName: "threadValue",
+            parentKind: "function",
+            parentSignature: "export function threadValue()",
+            docComments: "",
+            text: "export function threadValue() { return 'fixed thread token'; }",
+            fallback: false,
+          }],
+        };
+      },
+    };
+    const threadQuery: WorkingBranchQuerySnapshot = {
+      sessionId: "thread-session",
+      workspaceId: documents.identity.workspaceId,
+      branchId: "thread-branch",
+      writeRevision: 1,
+      revision: 0,
+      root: "sha256-thread-root",
+      pinId: "thread-pin",
+      async compute() { throw new Error("custom unitsFixed owns the compute assertion"); },
+      async listFiles() { return [{ path: "src/thread.ts", revision: "rev-thread" }]; },
+      async search() { return { status: "empty", generation: undefined }; },
+      async readFile() { bodyReads += 1; throw new Error("semantic fixed-view ingestion must not read full bodies"); },
+      async release() { /* caller owns this query pin */ },
+    };
+    const runtime = createSemanticIndexRuntime({
+      dataDir: documents.dataDir,
+      hostId: "fixed-thread-overlay",
+      documents: documents.authority,
+      structureSource,
+      embedder: createHashEmbedder(),
+    });
+    disposes.push(() => runtime.dispose());
+    const scope = workspaceScope(documents.identity.workspaceId);
+
+    const first = await runtime.search(scope, "fixed thread token", 5, {
+      threadQuery,
+      view: "working-state",
+      waitForFirstPublish: false,
+    });
+    expect(first.gaps).toEqual([{ path: "src/thread.ts", reason: "thread-vector-pending" }]);
+    await runtime.drain();
+    const second = await runtime.search(scope, "fixed thread token", 5, {
+      threadQuery,
+      view: "working-state",
+      waitForFirstPublish: false,
+    });
+    expect(second.hits[0]?.documentId).toBe("src/thread.ts");
+    expect(second.hits[0]?.body).toContain("fixed thread token");
+    expect(bodyReads).toBe(0);
+    expect(fixedCalls).toBeGreaterThanOrEqual(2);
+  });
+
   it("indexes a workspace on disk and stays unavailable when the model pack is missing", async () => {
     const documents = await createDocumentAuthorityHarness();
     disposes.push(() => documents.cleanup());
@@ -227,12 +299,15 @@ describe("semantic index runtime", () => {
     const file = join(documents.workspaceRoot, "read.ts");
     writeFileSync(file, 'export const secret = "old current body";');
     let fail = false;
+    const nativeStructure = parsingSource();
     const runtime = createSemanticIndexRuntime({
-      dataDir: documents.dataDir, hostId: "read-failure", structureSource: parsingSource(), embedder: createHashEmbedder(),
-      documents: { inspectWorkspace: documents.authority.inspectWorkspace, read: async (input) => {
-        if (fail) throw new Error("read failed");
-        return documents.authority.read(input);
-      } },
+      dataDir: documents.dataDir, hostId: "read-failure", embedder: createHashEmbedder(), documents: documents.authority,
+      structureSource: {
+        ...nativeStructure,
+        unitsFile: async (input) => fail
+          ? { status: "failed", revision: "", units: [], message: "native read failed" }
+          : nativeStructure.unitsFile!(input),
+      },
       searchFilesystemFiles: async () => [{ name: "read.ts", path: file, relativePath: "read.ts" }],
     });
     disposes.push(() => runtime.dispose());
@@ -324,9 +399,11 @@ describe("semantic index runtime", () => {
     disposes.push(() => documents.cleanup());
     const base = createHashEmbedder();
     const sent: string[] = [];
-    let reads = 0;
-    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "eligible", structureSource: parsingSource(),
-      documents: { inspectWorkspace: documents.authority.inspectWorkspace, read: async (input) => { reads++; return documents.authority.read(input); } },
+    let nativeReads = 0;
+    const nativeStructure = parsingSource();
+    const runtime = createSemanticIndexRuntime({ dataDir: documents.dataDir, hostId: "eligible",
+      documents: documents.authority,
+      structureSource: { ...nativeStructure, unitsFile: async (input) => { nativeReads++; return nativeStructure.unitsFile!(input); } },
       isIndexablePath: async () => false,
       embedder: { ...base, embed: async (texts, request) => { sent.push(...texts); return base.embed(texts, request); } },
     });
@@ -334,7 +411,7 @@ describe("semantic index runtime", () => {
     const scope = workspaceScope(documents.identity.workspaceId);
     runtime.observeDocumentMutation({ workspaceId: scope.scopeId, resourceId: "ignored.ts", kind: "modified", owner: { kind: "web-route", id: "editor" } });
     await runtime.drain();
-    expect(reads).toBe(0); expect(sent).toEqual([]);
+    expect(nativeReads).toBe(0); expect(sent).toEqual([]);
     await runtime.search(scope, "question", 5, { roots: ["src"], overlays: [{ path: "outside.ts", content: "do not embed", revision: "1", origin: "surface-draft" }] });
     await runtime.drain();
     expect(sent).toEqual(["question"]);

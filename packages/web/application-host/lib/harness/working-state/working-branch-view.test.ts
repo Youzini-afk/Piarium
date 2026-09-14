@@ -125,7 +125,7 @@ async function fixture() {
       throw new Error("parent disk search must not run for a bound branch");
     },
     resolveWorkspaceRoot: async () => workspace,
-    branchCorpus: (sessionId) => lookups.searchCorpus(sessionId),
+    pinWorkingBranchQuery: (sessionId, options) => lookups.pinQuery(sessionId, options),
     readFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => lookups.exploreFile(sessionId, resourceId)),
   });
   router.register("search.content", createSearchContentService(search));
@@ -262,8 +262,8 @@ describe("WorkingState Host branch view production chain", () => {
         throw new Error("parent disk search must not run for a pinned branch query");
       },
       resolveWorkspaceRoot: async () => f.workspace,
-      branchCorpus: async () => {
-        throw new Error("live branch corpus must not run after explore.query.start pin");
+      pinWorkingBranchQuery: async () => {
+        throw new Error("a second working-branch pin must not be acquired after explore.query.start");
       },
     });
     let semanticDocs: Array<{ path: string; content: string; revision: string }> | undefined;
@@ -281,9 +281,13 @@ describe("WorkingState Host branch view production chain", () => {
         _workspaceId: string,
         _question: string,
         _limit: number,
-        options?: { threadDocuments?: Array<{ path: string; content: string; revision: string }> },
+        options?: { threadQuery?: WorkingBranchQuerySnapshot },
       ) => {
-        semanticDocs = options?.threadDocuments;
+        semanticDocs = [];
+        for (const file of await options?.threadQuery?.listFiles() ?? []) {
+          const document = await options!.threadQuery!.readFile(file.path);
+          if (document.status === "ready") semanticDocs.push({ path: file.path, content: document.content, revision: document.revision });
+        }
         return [];
       },
     };
@@ -313,7 +317,7 @@ describe("WorkingState Host branch view production chain", () => {
     expect(original).toMatchObject({
       status: "ready",
       content: "export const needle = \"pinned-pineapple\";\n",
-      revision: "working-branch:thread-child@1:delta",
+      revision: "working-branch:thread-child@1:base",
     });
     await deps.semantic?.search("pinned-pineapple");
     expect(semanticDocs?.some((file) => file.content.includes("pinned-pineapple"))).toBe(true);
@@ -339,8 +343,9 @@ describe("WorkingState Host branch view production chain", () => {
       signal: controller.signal,
       deadlineAt: Date.now() + 10_000,
     });
-    expect(scoped?.files.map((file) => file.path)).toEqual(["src/nested.ts"]);
+    expect((await scoped?.listFiles())?.map((file) => file.path)).toEqual(["src/nested.ts"]);
     expect(scoped).not.toHaveProperty("states");
+    expect(scoped).not.toHaveProperty("files");
     expect(fullClone).not.toHaveBeenCalled();
     controller.abort();
     await expect(f.lookups.pinQuery(f.actor.sessionId, {

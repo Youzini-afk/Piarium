@@ -1,15 +1,15 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1–R4 production cutover complete through D-280; R0 and R5–R6 remain separate.
+Status: accepted architecture; R1–R5 production cutover complete through D-281; R0 and R6 remain separate.
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 本文规定 Piarium Rust 系统内核的最终职责和跨进程契约。实施顺序见
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 随后把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust，同一 Host 内 terminal/shell/setup/LSP/DAP/任务/测试共用该后端。当前 R1–R4 均按各自可执行契约完成；[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust。D-281 再把固定 WorkingState pin、live revision-bound file search/inventory、native tree-sitter structure/chunks 以及 symbol/semantic 索引输入接入同一 kernel compute boundary，并删除生产 TS ripgrep/branch-corpus/Host AST 扫描路径。当前 R1–R5 均按各自可执行契约完成；R0 与 R6 仍独立验收。[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
 
 ## 1. 产品与阶段目标
 
@@ -281,3 +281,27 @@ Windows ConPTY 先关闭 master 并排完最后输出，再清理 Job 残余成�
 这些是管理进程生命周期，不构成恶意进程 sandbox。跨平台实际结果交由 native CI，本文不以
 Windows 用例外推所有平台。完整消费者图和测试边界见
 [process module](../packages/web/application-host/lib/process/DOCUMENTATION.md)。
+
+## D-281 原生文件与结构计算的实际交付边界
+
+R5 的 `compute.*` 是既有 root/file authority 上的 read-only job，不是新的持久 store。Storage 在 admission
+阶段验证 grant、workspace、path scopes 与 source identity；immutable WorkingState pin 会复制 reader pin，live
+workspace 使用 Host-admitted root，Registry draft 则以 fixed object/tombstone overlay 进入。worker 只读已准入的
+tree/object/file handle，不能自行扩大 scope 或回写 workspace/catalog。
+
+两个 foreground worker 与独立 background worker 分开交互式 read/search/explore 和目录/索引建设；bounded record
+queue + cursor ack 提供背压。取消会到实际 job，caller 观察 terminal 后才 release reader。native grep/ignore + Git
+inventory 负责文件候选和文本 search；native tree-sitter 接受已注册 grammar/query recipe，输出 revision-bound
+symbols/hits/imports/calls/structural units。live source 若在读取窗口变化，结果只能 partial/failed；只有 immutable pin
+可称固定视图。
+
+生产消费者已经统一：workspace content search、file find、Harness grep/explore、language catalog、symbol graph 和
+semantic disk index 使用 `KernelComputeService`；virtual Thread semantic 在同一 WorkingState pin 上先列 path/revision，
+再调用 `unitsFixed`，不把整分支正文搬到 TS。surface draft 仍由 Registry 捕获并作为固定 text object，因为未保存
+正文的 authority 不属于 Rust。tokenizer、embedding/vector store、TriviumDB、Pi inference 与 LSP 协议仍保持原职责。
+Host 的 `web-tree-sitter` 只用于 grammar 安装 ABI admission，不解析 workspace source。
+
+生产旧路径已退出：Host ripgrep child、递归 file-search scanner、WorkingBranch corpus/body mirror、Host JSON outline/
+chunk discovery 无生产 caller。Windows release kernel 的 R5 native suite 10/10 以及 focused consumer 13 files / 118
+tests 验证 pin/live drift、scope、draft/tombstone、Git ignore、前后台 backpressure/cancel、disk/pin structure/chunks 与
+semantic/symbol consumer。R5 因此 Complete；R0/R6 仍分别负责 package/process 和完整发行/性能收口。

@@ -37,8 +37,9 @@ export interface SymbolGraphRuntimeOptions {
   structureSource?: StructureSource;
   searchFilesystemFiles?: (
     rootPath: string,
-    options: { query: string; respectGitignore?: boolean; signal?: AbortSignal },
+    options: { query: string; respectGitignore?: boolean; includeRevisions?: boolean; signal?: AbortSignal },
   ) => Promise<FileSearchItems>;
+  isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
   onError?: (error: unknown) => void;
 }
 
@@ -162,27 +163,51 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     signal?: AbortSignal,
   ): Promise<CollectedSymbols | null> => {
     if (!options.structureSource) return loadSymbolsFromLsp(workspaceId, path, languageId, signal);
-    let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
-    try {
-      snapshot = await options.documents.read({ workspaceId, resourceId: path });
-    } catch {
-      return null;
+    let analysis;
+    let lineLengths: number[];
+    if (options.structureSource.analyzeFile && options.documents.inspectWorkspace) {
+      let root: string;
+      try { root = (await options.documents.inspectWorkspace(workspaceId)).root; }
+      catch { return null; }
+      analysis = await options.structureSource.analyzeFile({
+        workspaceId,
+        root,
+        path,
+        languageId,
+        lane: "background",
+        lines: [],
+        ...(signal ? { signal } : {}),
+      });
+      lineLengths = analysis.lineLengths ?? [];
+    } else {
+      let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
+      try { snapshot = await options.documents.read({ workspaceId, resourceId: path }); }
+      catch { return null; }
+      if (snapshot.status !== "ready") return null;
+      if (signal?.aborted) return null;
+      const request = {
+        path,
+        languageId,
+        text: snapshot.content,
+        revision: snapshot.revision,
+        workspaceId,
+        lane: "background" as const,
+        ...(signal ? { signal } : {}),
+      };
+      analysis = options.structureSource.analyze
+        ? await options.structureSource.analyze({ ...request, lines: [] })
+        : undefined;
+      if (!analysis) {
+        const [outline, imports, literalCalls] = await Promise.all([
+          options.structureSource.outline(request),
+          options.structureSource.imports(request),
+          options.structureSource.literalCalls(request),
+        ]);
+        analysis = { outline, imports, literalCalls, classify: { status: "unsupported", provider: null, revision: snapshot.revision, hits: [] } };
+      }
+      lineLengths = snapshot.content.split("\n").map((line) => line.replace(/\r$/u, "").length);
     }
-    if (snapshot.status !== "ready") return null;
-    if (signal?.aborted) return null;
-    const request = {
-      path,
-      languageId,
-      text: snapshot.content,
-      revision: snapshot.revision,
-      workspaceId,
-      ...(signal ? { signal } : {}),
-    };
-    const [outline, importsResult, callsResult] = await Promise.all([
-      options.structureSource.outline(request),
-      options.structureSource.imports(request),
-      options.structureSource.literalCalls(request),
-    ]);
+    const { outline, imports: importsResult, literalCalls: callsResult } = analysis;
     if (signal?.aborted) return null;
     if (outline.status === "cancelled" || importsResult.status === "cancelled" || callsResult.status === "cancelled") {
       return null;
@@ -199,7 +224,6 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
     }
     const answered = (status: string): boolean => status === "ready" || status === "empty" || status === "unsupported";
     const linksIncomplete = !answered(importsResult.status) || !answered(callsResult.status);
-    const lineLengths = snapshot.content.split("\n").map((line) => line.replace(/\r$/u, "").length);
     const links: SymbolGraphLinkInput[] = [];
     const associationCandidates: SymbolGraphLinkInput[] = [];
     if (importsResult.status === "ready") {
@@ -248,7 +272,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
       links,
       ...(associationCandidates.length > 0 ? { associationCandidates } : {}),
       ...(linksIncomplete ? { linksIncomplete: true } : {}),
-      documentRevision: snapshot.revision,
+      documentRevision: outline.revision,
     };
   };
 
@@ -316,6 +340,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
         const files = await options.searchFilesystemFiles!(root, {
           query: "",
           respectGitignore: true,
+          includeRevisions: true,
           signal,
         });
         if (signal.aborted) return;
@@ -329,19 +354,12 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
           const batch = catalogFiles.slice(offset, offset + CATALOG_SCAN_BATCH);
           for (const file of batch) {
             if (disposed || signal.aborted) return;
-            let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
-            try {
-              snapshot = await options.documents.read({ workspaceId, resourceId: file.relativePath });
-            } catch {
-              continue;
-            }
-            if (snapshot.status !== "ready") {
-              continue;
-            }
             const existing = await store.getFileRelations(file.relativePath);
             // Current only if both the source and the extractor that read it are
             // unchanged; rows from an older extractor are recomputed (D-143).
-            if (existing?.documentRevision === snapshot.revision && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
+            if (file.revision
+              && existing?.documentRevision === file.revision
+              && existing.extractor === CATALOG_EXTRACTOR_VERSION) continue;
             collector.observe({ path: file.relativePath, kind: "modified", signal });
           }
           await collector.drain();
@@ -360,40 +378,29 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
           for (const stalePath of existingPaths) {
             if (inventoryPaths.has(stalePath)) continue;
             if (disposed || signal.aborted) return;
-            let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
-            try {
-              snapshot = await options.documents.read({ workspaceId, resourceId: stalePath });
-            } catch {
-              continue;
-            }
-            if (signal.aborted || disposed) return;
-            if (snapshot.status === "ready") {
-              const existing = await store.getFileRelations(stalePath);
-              if (
-                existing
-                && (existing.documentRevision !== snapshot.revision || existing.extractor !== CATALOG_EXTRACTOR_VERSION)
-              ) {
-                collector.observe({ path: stalePath, kind: "modified", signal });
-              }
-              continue;
-            }
-            if (snapshot.status !== "missing") continue;
             const existing = await store.getFileRelations(stalePath);
             if (!existing) continue;
-            // Confirm a second time after the store read. This keeps a newly
-            // created path visible when its mutation reaches us during the
-            // inventory reconciliation window.
-            let confirmation: Awaited<ReturnType<DocumentAuthority["read"]>>;
-            try {
-              confirmation = await options.documents.read({ workspaceId, resourceId: stalePath });
-            } catch {
-              continue;
+            if (options.isIndexablePath) {
+              let present: boolean;
+              try { present = await options.isIndexablePath(workspaceId, stalePath, signal); }
+              catch { continue; }
+              if (signal.aborted || disposed) return;
+              if (present) {
+                collector.observe({ path: stalePath, kind: "modified", signal });
+                continue;
+              }
+            } else {
+              // Explicit unit-test seam. Production uses native membership
+              // above and never reads file bodies to reconcile the catalog.
+              let confirmation: Awaited<ReturnType<DocumentAuthority["read"]>>;
+              try { confirmation = await options.documents.read({ workspaceId, resourceId: stalePath }); }
+              catch { continue; }
+              if (confirmation.status === "ready") {
+                collector.observe({ path: stalePath, kind: "modified", signal });
+                continue;
+              }
+              if (confirmation.status !== "missing") continue;
             }
-            if (confirmation.status === "ready") {
-              collector.observe({ path: stalePath, kind: "modified", signal });
-              continue;
-            }
-            if (confirmation.status !== "missing") continue;
             if (signal.aborted || disposed) return;
             await store.removeFileSymbols(stalePath, {
               expectedDocumentRevision: existing.documentRevision,

@@ -6178,3 +6178,28 @@ Host 注入同一 native service 到用户终端、Harness shell、Thread setup�
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-280 | accepted / implemented / R4 complete | — | plan/status R4；architecture；rust-kernel-design；kernel/process/terminal/LSP/run/Harness documentation；native acceptance |
+
+### D-281 · 2026-09-15 · R5 原生文件/结构计算：固定视图、生产消费者与索引输入收口
+
+类型：R5 production file/structure compute authority closure；只追加，不改写 D-280 及更早历史事实
+
+背景：R1–R4 已完成状态/文件/物化/进程权威接管，但 R5 原型最初仍有两个不能用“native helper 已存在”替代的生产缺口。第一，search/file-find/catalog 的旧测试与部分入口仍围绕 Host `spawn`/ripgrep、递归 filesystem scan 和 WorkingBranch corpus/body mirror；如果保留兼容路径，Rust compute 只是旁路。第二，semantic/symbol 索引虽然开始调用 native tree-sitter，但 disk 和 virtual Thread 仍可能先把完整正文读到 TS，再传回 kernel 解析，无法满足固定 pin 与跨边界只传必要记录的目标。
+
+决定：
+
+1. `compute.start/read/cancel/release` 是同一 kernel 内的 read-only job boundary。source 必须是 immutable WorkingState pin、Host-admitted live root 或显式 fixed objects 之一。pin admission 复制短生命周期 reader pin；caller unpin、branch delete、GC 不能改变正在执行的 source。live root 不冒充 immutable snapshot：正文/结构记录绑定实际 native revision，读取窗口漂移只允许 partial/failed。Registry draft 作为 fixed object/tombstone overlay，并在候选预算前遮蔽 parent source。
+2. Rust compute 使用两个 foreground worker 和一个独立 background worker；bounded record queue/cursor 提供背压。取消请求到达实际 worker，caller 必须观察 terminal 再 release reader。scope、requested roots/files、exclude/tombstone 在 candidate matching 与 maxResults 前应用。Git ignore/tracked membership 使用固定 `git ls-files` inventory adapter；文本匹配使用 Rust grep/ignore ecosystem，不保留 Host ripgrep process fallback。
+3. workspace `search.content`、file find、Harness grep/explore、language catalog、project-icon candidate search、symbol graph 和 semantic disk scan 统一复用 `KernelComputeService`/native file inventory。目录枚举携带 revision，使 catalog/index 可在不先读正文的情况下跳过当前文件。旧 `SearchChild`、`branchCorpus/searchCorpus`、Host recursive file-search path 已从生产契约删除；对应测试也迁到 native contract，而不是重新加兼容参数。
+4. tree-sitter parser/query/structure/chunk computation归 Rust。Host 只注册 grammar/query recipe、验证 bounded DTO 并做产品投影。disk graph 通过 `analyzeFile` 直接得到同一 revision 的 outline/import/call/line-length；semantic disk scan 通过 `unitsFile` 获取结构 unit。virtual Thread query 不再暴露 bulk `visitDocuments/files[]`：pin 只提供 path/revision + pin-bound `compute`，semantic 通过 `unitsFixed` 在同一 immutable root 上产生结构 unit，再由 TS tokenizer/embedder 处理。surface draft 仍可传 text，因为未保存正文的权威就是 Registry。
+5. R5 不迁移不属于该领域的权威。TriviumDB/图写入、semantic vector store、tokenizer/embedder、remote inference/Pi 保持现有 TS/Pi owner；LSP 保留导航/诊断/协议职责。Host `web-tree-sitter` 只用于 grammar 安装 ABI admission，不解析 workspace source，因此不是第二套 R5 parser。generic Files UI 读接口也不因 R5 被重分类为 compute authority；其受控 mutation/resource 边界仍由 R2 定义。
+6. 删除零调用方 Host JSON outline parser，并移除生产 TS ripgrep/recursive scan、WorkingBranch corpus/body mirror、Host AST/chunker discovery。内部没有用户兼容要求，不为这些路径保留默认关闭、失败回退或 shadow 双实现。
+
+证据：正式 Windows release kernel build 通过。`kernel-compute.test.ts` 10/10，覆盖 immutable pin 对 parent live drift、draft/tombstone、scope、UTF-16 column、reader+GC、foreground/background backpressure、实际 cancel、Git ignore + force-tracked、native tree-sitter fixed text/live disk/fixed pin chunks 和 root replacement failure。R5 focused consumer 回归 13 files / 118 tests 全绿。完整 `bun run test:kernel` 90/90（Node transport/storage 25 + native Vitest authority/adapter/recovery/process/R5 65），证明 R1–R4 既有 native contract 未退化。Application Host source/test TypeScript 通过；protocol generation `--check` 通过；Windows VS Build Tools 环境下 `cargo check` 通过，Rust unit tests 4/4；51 个改动 source/test TS/TSX 的 ESLint 通过（generated protocol 由 generator/type-check/drift gate 验证）；docs tests 19/19，docs validation 378 pages / 323 local links；`git diff --check` 通过。普通 PowerShell 未加载 MSVC 时 `kernel:check` 会因缺 `cl.exe` 失败，显式加载仓库已安装的 VS Build Tools 后相同 cargo check 成功，这是本机环境差异，不是代码失败。
+
+结果：R5 按 native compute / production consumer / index-input / cancellation-scheduling 契约标记为 Complete。R1–R4 保持 Complete。R0 仍为 Partial，R6 仍未完成，因此阶段 R 整体仍未完成；packaged/跨平台发行与端到端性能定标留给 R0/R6，不反向制造 R5 blocker。
+
+## D-281 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-281 | accepted / implemented / R5 complete | — | plan/status R5；architecture；rust-kernel-design；kernel/Harness/search/structure/semantic documentation；native acceptance |

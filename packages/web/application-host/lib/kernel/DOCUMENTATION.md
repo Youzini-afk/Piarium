@@ -11,7 +11,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 
 ## Responsibility table
 
-| Resource | Current authority | Kernel boundary through R4 |
+| Resource | Current authority | Kernel boundary through R5 |
 | --- | --- | --- |
 | Thread/Run product catalog | TS `ThreadRegistry` | remains TS; kernel receives an actor/grant and operation IDs |
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
@@ -22,6 +22,7 @@ an explicit Host failure; it never selects the old backend as a fallback.
 | Recovery checkpoint/turn/mutation records | Rust kernel typed recovery tables and references | Production checkpoint/turn/mutation use `KernelRecoveryStore` directly |
 | Combined Recovery/Integration/agent-mutation journal | Rust kernel typed recovery operations/files | Production consumers await Rust phase/terminal CAS; TS coordinates Registry receipts but does not persist a second journal |
 | Canonical workspace file resources and controlled disk mutation | Rust kernel `fileResources` | Documents-authorized roots, exact/subtree leases, typed capture, conditional apply, mkdir/remove/rename and restart reconciliation; Documents/Files/Recovery/Integration and production `fs.lock` share this authority |
+| Workspace file/structure computation | Rust kernel `compute` + `storage::compute_resources` | Immutable pin/live-root/fixed-object admission; native list/read/bytes/search/tree-sitter structure/chunks, foreground/background scheduling, bounded cursor/backpressure and actual cancellation. TS owns request policy/presentation, tokenizer/embedder/vector store and LSP protocol; no production Host ripgrep/AST corpus fallback |
 | Public API and policy | TS Application Host | adapter only; no generic SQL or arbitrary disk method |
 
 Session-facing root/path calls use an immutable `KernelGrantHandle` obtained for the exact session/Thread/Run. Cross-Thread Host lifecycle work uses an explicit workspace `storage.maintenance` grant; it never borrows an arbitrary live session. The
@@ -104,20 +105,44 @@ metadata. `file.measure` reports actual block allocation on Unix; Windows leaves
 verified physical-allocation backend exists. Legacy TS materializer/switch/snapshot code remains only as an
 injectable test seam.
 
+## Native file and structure compute
+
+R5 is a read-only compute domain over the already admitted R1/R2 resource identities. `compute.start` accepts
+exactly one source class: an immutable WorkingState `pinId`, a Host-registered live `rootId`, or explicit fixed
+objects. Pin admission clones a short-lived reader pin before dispatch, so caller unpin, branch deletion, and GC
+cannot invalidate a running job. Live-root reads revalidate the canonical root and bind every content-bearing
+record to the revision actually read; source drift becomes partial/failure evidence rather than a fabricated fixed
+snapshot. Registry drafts enter as fixed object overlays, including subtree tombstones, and are applied before
+candidate limits.
+
+`compute-runner.ts` acknowledges bounded record cursors and only releases terminal jobs. Rust has two foreground
+workers and a separate background worker; output backpressure cannot let catalog/index work occupy interactive
+slots. Abort sends `compute.cancel`, waits for the actual worker terminal state, then releases its reader reference.
+Grant path scopes and requested roots constrain candidates before search/parse work. Native search uses the Rust
+grep/ignore ecosystem plus the fixed Git inventory command for tracked/ignored membership. Native tree-sitter
+loads Host-admitted grammar/query recipes and emits bounded symbol/hit/import/call batches or structural units;
+there is no Host parse-tree/source cache.
+
+Production `search.content`, file find, Harness grep/explore, language catalog, symbol graph and semantic disk
+index use the same `KernelComputeService`. A virtual Thread query exposes path/revision plus a pin-bound compute
+function; semantic recall invokes `unitsFixed` directly on that pin, so whole branch bodies do not transit through
+TypeScript before parsing. Surface drafts still cross as Registry-owned fixed text because Registry is their source
+authority. Tokenizer-aware packing, embeddings, vector storage, TriviumDB and Pi inference remain outside the
+kernel. LSP remains the language protocol/navigation/diagnostic authority. Host `web-tree-sitter` is retained only
+for install-time grammar ABI admission; it is not a workspace source parser. The dead Host JSON outline parser,
+TS ripgrep child path, recursive file-search scanner and branch corpus/body mirror have no production consumer.
+
 ## Rust source ownership
 
 The executable `main.rs` only invokes the library runtime. `lib.rs` owns crate assembly and `runtime.rs`
 owns framed transport, handshake, request admission, cancellation, and authorized dispatch. A single
 `storage::Storage` owns the SQLite connection, object root, process lock, cancellation state, and active
 builders. Its implementation is divided into `core`, `operations`, `authority_store`, `objects`,
-`state_tree`, `branches`, `recovery`, `file_resources`, `records`, `gc`, `maintenance`, and `dispatch` modules. These are
-one transaction owner with bounded source visibility, not independent stores. Storage domains do not
-open their own catalog connections or bypass dispatch identity checks.
+`state_tree`, `branches`, `recovery`, `file_resources`, `compute_resources`, `records`, `gc`, `maintenance`, and `dispatch` modules. Read-only compute workers live in crate `compute/{source,inventory,query,structure}` and receive admitted source handles/recipes from the Storage owner; they do not open a writable catalog or bypass grant checks. These are
+one transaction/authority boundary with bounded source visibility, not independent stores. Storage domains do not
+open their own writable catalog connections or bypass dispatch identity checks.
 
-The Windows release child-process acceptance path is `packages/web/application-host/lib/kernel/kernel-client.test.ts`;
-the current run covers the original R0/R1 invariants, R2 file root/lease and conditional filesystem apply,
-and R3 filesystem scan/measurement, immutable-root materialization, managed-directory lifecycle, and restart
-reconciliation across the live-backup-before-promote failure window.
+The Windows release child-process acceptance paths include `packages/web/application-host/lib/kernel/kernel-client.test.ts` and `kernel-compute.test.ts`; the current native authority suite covers the original R0/R1 invariants, R2 file root/lease and conditional filesystem apply, R3 filesystem scan/materialization/restart reconciliation, R4 process authority, and R5 immutable-pin/live-root search, scheduling/cancellation, Git inventory and native structure/chunk computation.
 The production adapter longitudinal path is assembled in `application-host/index.ts`; actor-bound recovery calls
 derive session identity from the persisted turn and use an explicit maintenance grant only for startup/list/GC
 operations, never the Host-management grant for domain calls. `KernelRecoveryContentStore` is explicitly bound after adapter construction;

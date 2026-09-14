@@ -191,22 +191,22 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     const sessionId = searchOptions?.sessionId;
     const inputContext = searchOptions?.inputContext ?? { source: 'disk' as const };
     const execution = sessionId ? options.executionViews.get(sessionId) : undefined;
-    const threadSnapshot = searchOptions?.threadDocuments || execution?.mode !== 'virtual' || !sessionId
+    const threadSnapshot = searchOptions?.threadDocuments || searchOptions?.threadQuery || execution?.mode !== 'virtual' || !sessionId
       ? undefined
       : await options.workingBranches.pinQuery(sessionId, {
           ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
           ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
         });
     try {
-      const threadDocuments = searchOptions?.threadDocuments
-        ?? threadSnapshot?.files.map((file) => ({ path: file.path, content: file.text, revision: file.revision }));
-      if (execution?.mode === 'virtual' && !threadDocuments) throw new Error('Working-branch query view is unavailable');
+      const threadDocuments = searchOptions?.threadDocuments;
+      const threadQuery = searchOptions?.threadQuery ?? threadSnapshot ?? undefined;
+      if (execution?.mode === 'virtual' && !threadDocuments && !threadQuery) throw new Error('Working-branch query view is unavailable');
       const draftPaths = sessionId ? options.documents.agentInputDraftPaths(sessionId, inputContext)
         : inputContext.source === 'surface' ? inputContext.dirtyPaths : undefined;
       const view = await pinSemanticQueryView({
         inputContext,
         ...(draftPaths === undefined ? {} : { draftPaths }),
-        ...(threadDocuments ? { threadDocuments } : sessionId ? {
+        ...(threadQuery ? { threadDocuments: [] } : threadDocuments ? { threadDocuments } : sessionId ? {
           readDraft: (resourceId: string) => options.documents.readAgentInputSnapshot(sessionId, inputContext, resourceId),
         } : {}),
       });
@@ -214,6 +214,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
         ...(searchOptions?.signal ? { signal: searchOptions.signal } : {}),
         ...(searchOptions?.roots ? { roots: searchOptions.roots } : {}),
         overlays: view.overlays, view: view.view,
+        ...(threadQuery ? { threadQuery } : {}),
       });
       return {
         status: result.status.status, coverage: result.status.coverage,

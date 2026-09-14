@@ -14,16 +14,14 @@ const asRecord = (value: unknown): Record<string, unknown> => (
 );
 
 export const registerProjectIconRoutes = (app: Express, dependencies: {
-  createFsSearchRuntime: typeof import('../fs/search.js').createFsSearchRuntime;
+  fileSearch: Pick<ReturnType<typeof import('../fs/search.js').createFsSearchRuntime>, 'searchFilesystemFiles'>;
   crypto: typeof import('node:crypto');
   fsPromises: unknown;
   path: typeof path;
   persistSettings(input: Settings): Promise<Settings>;
   piariumDataDir: string;
   readSettingsFromDisk(): Promise<Settings>;
-  resolveGitBinaryForSpawn(): string;
   sanitizeProjects(input: unknown): NormalizedProject[] | undefined;
-  spawn: unknown;
 }): void => {
   const {
     fsPromises: rawFsPromises,
@@ -33,9 +31,7 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
     sanitizeProjects,
     readSettingsFromDisk,
     persistSettings,
-    createFsSearchRuntime,
-    spawn,
-    resolveGitBinaryForSpawn,
+    fileSearch: fsSearchRuntime,
   } = dependencies;
   const fsPromises = rawFsPromises as typeof import('node:fs/promises');
 
@@ -202,12 +198,6 @@ export const registerProjectIconRoutes = (app: Express, dependencies: {
     return { projects, index, project: projects[index] };
   };
 
-  const fsSearchRuntime = createFsSearchRuntime({
-    fsPromises,
-    path,
-    spawn,
-    resolveGitBinaryForSpawn,
-  });
 
   app.get('/api/projects/:projectId/icon', async (req, res) => {
     const projectId = typeof req.params.projectId === 'string' ? req.params.projectId.trim() : '';

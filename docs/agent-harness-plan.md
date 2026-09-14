@@ -703,7 +703,7 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 | R2 | **Complete**：单一 Rust file authority + Host-visible pending-operation disposition | Registry 保持 buffer authority；low-level operationId/path/reason/disposition 可列举并可安全 reconcile，证据不足保留 needs-attention；不恢复 TS writer |
 | R3 | **Complete**：fixed baseline + kernel materialization + durable Host/Git/Registry handoff | native operationId/root/writeRevision、persistent handoff pin、Git executionBaseline、Registry/binding 使用同一可重入 intent/receipt；setup timeout/abort 等真实 child close 后才结束；旧 seam 仍仅为测试夹具 |
 | R4 | **Complete（D-280）**：统一 Rust PTY/pipe、process tree/raw output/writer authority | 用户终端、Harness shell、Thread setup、LSP/DAP、任务/测试均经实际 native backend；未确认退出/失联保留 writer，控制不依赖输出排空；Host 保留协议与启动取消编排。Pi broker 仍拥有 Pi worker；Git 短命令和 shell 发现留作领域适配，不另建通用进程 authority |
-| R5 | 固定视图文件检索、遍历/哈希、结构解析/切块的原生计算 | read/grep/find/ls/explore、目录/语义建设的文件与结构输入；移除被替代的扫描/解析实现和重复正文缓存 |
+| R5 | **Complete（D-281）**：固定 pin/live revision-bound 文件检索、遍历/哈希、native tree-sitter 结构解析/切块，前后台 lane + 实际取消 | read/grep/find/ls/explore、file find、语言/符号/语义目录建设均复用 kernel compute；virtual WorkingBranch semantic 直接在 pin 上 `unitsFixed`，不跨 Host 搬整分支正文。旧 TS ripgrep/recursive scan、branch corpus/body mirror、Host AST/chunker discovery 已退出生产链；Registry draft、TriviumDB/vector/embedder/Pi/LSP 仍按原领域权威 |
 | R6 | 完整生产与故障验收、性能定标、发行更新、遗留实现清理 | Desktop/Web/远程和既有 surface，实际 packaged binary；状态/模块文档指向唯一实现 |
 
 ### R0. 契约、运行时与发行基础
@@ -796,6 +796,8 @@ R4 不声称新增恶意代码 OS sandbox，也不要求用户本地其他平台
 生产消费必须覆盖 read/grep/find/ls/explore 及索引输入，不只给新工具加一个旁路。
 验证父 live 漂移、草稿覆盖、嵌套 view、scope、查询取消/partial/终态、结构批量传输与后台负载下前台响应。
 删除对应旧扫描/解析/缓存路径；跨边界只传需要的记录/范围，不传整库。
+
+D-281 完成本节：`compute.start/read/cancel/release` 使用 bounded cursor 和 2 foreground + 1 background worker；immutable WorkingState query 复制短生命周期 reader pin，caller unpin/branch delete/GC 不改变正在读取的 root。live workspace 通过 Host-admitted canonical root 读取并给正文/结构结果绑定实际 content revision，读取窗口漂移只能 partial/failed，不被宣传为 immutable snapshot。surface draft 是 Registry 捕获后上传的固定 object overlay，ancestor tombstone 在候选预算前遮蔽。`search.content`、file find、Harness grep/explore、language catalog、symbol graph 与 semantic disk scan 统一走该 native boundary；virtual Thread semantic 只枚举 pin 内 path/revision，tree-sitter `unitsFixed` 在 pin 上直接产生结构 unit，再由 TS tokenizer/embedder 装饰，不再复制整分支正文到 Host。Host 保留 grammar 安装 ABI 校验与 LSP 协议，不把它们当第二套 workspace parser；TriviumDB/vector store/remote inference/Pi 归属不变。R5 因此 Complete，R0/R6 状态不变。
 
 ### R6. 完整验收与发行收口
 

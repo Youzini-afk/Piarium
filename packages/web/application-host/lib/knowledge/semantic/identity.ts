@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { remoteEmbeddingSpaceParts } from "@piarium/protocol";
 import { CATALOG_EXTRACTOR_VERSION } from "../symbols.js";
 
-export const SEMANTIC_CHUNKER_VERSION = 2;
+export const SEMANTIC_CHUNKER_VERSION = 3;
 export const SEMANTIC_TEXT_DECORATION_VERSION = 1;
 
 /** Effective word-piece window written into the space id (D-166). */

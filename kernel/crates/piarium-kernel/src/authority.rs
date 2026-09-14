@@ -3,6 +3,8 @@ use crate::model::Grant;
 
 pub(crate) fn required_capability(method: &str) -> &'static str {
     match method {
+        "compute.grammar.register" => "compute.grammar",
+        method if method.starts_with("compute.") => "storage.read",
         method if method.starts_with("process.") => "process",
         "storage.health"
         | "storage.snapshot"

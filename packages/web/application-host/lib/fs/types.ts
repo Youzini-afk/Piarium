@@ -63,6 +63,8 @@ export interface FileSearchItem {
   name: string;
   path: string;
   relativePath: string;
+  /** Native content/state identity observed by the same directory enumeration. */
+  revision?: string;
 }
 
 export type FileSearchEnumerationStatus = "complete" | "incomplete" | "failed" | "cancelled";

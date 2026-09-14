@@ -7,10 +7,10 @@ import type { DocumentAuthority, DocumentMutationObservation } from "../../docum
 import type { FileSearchItem } from "../../fs/types.js";
 import { languageIdForPath } from "../../harness/language-id.js";
 import { TREE_SITTER_LANGUAGE_SPECS } from "../../structure/languages.js";
-import type { StructureSource } from "../../structure/types.js";
+import type { StructureSource, StructureUnitsResult } from "../../structure/types.js";
 import { pathInRoots } from "../../workspace/path-scope.js";
 import { CATALOG_SCAN_BATCH } from "../symbol-runtime.js";
-import { chunkDocument } from "./chunker.js";
+import { packStructuralUnits } from "./chunker.js";
 import type { SemanticEmbedder } from "./embedder.js";
 import { createEmbedScheduler, type EmbedScheduler } from "./embed-scheduler.js";
 import { workspaceScope, spaceIdOf, type SemanticScopeKey } from "./identity.js";
@@ -57,6 +57,7 @@ export type SemanticQueryOverlay = {
 };
 
 export type SemanticSearchRequest = {
+  threadQuery?: import("../../harness/working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
   signal?: AbortSignal;
   roots?: readonly string[];
   overlays?: readonly SemanticQueryOverlay[];
@@ -77,11 +78,11 @@ const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
 export interface SemanticIndexRuntimeOptions {
   dataDir: string;
   hostId: string;
-  documents: Pick<DocumentAuthority, "read" | "inspectWorkspace">;
+  documents: Pick<DocumentAuthority, "inspectWorkspace">;
   structureSource: StructureSource;
   searchFilesystemFiles?: (
     rootPath: string,
-    options: { query: string; respectGitignore?: boolean; signal?: AbortSignal },
+    options: { query: string; respectGitignore?: boolean; includeRevisions?: boolean; signal?: AbortSignal },
   ) => Promise<FileSearchItem[]>;
   isIndexablePath?: (workspaceId: string, path: string, signal: AbortSignal) => Promise<boolean>;
   embedder: SemanticEmbedder;
@@ -205,48 +206,77 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     return documentTokens.get(key) === token;
   };
 
+  const packUnits = (documentId: string, units: StructureUnitsResult, embedder: SemanticEmbedder) => ({
+    chunks: packStructuralUnits({
+      documentId,
+      units: units.units,
+      maxTokens: embedder.space.maxTokens,
+      countTokens: (value) => embedder.countTokens(value),
+    }),
+    sourceRecipeId: units.recipeId ?? "native-structure-v1",
+  });
+
+  const chunksFor = async (documentId: string, text: string, revision: string, embedder: SemanticEmbedder,
+    signal: AbortSignal | undefined, lane: "foreground" | "background", workspaceId?: string) => {
+    if (!options.structureSource.units) throw new Error("Native structural unit service is unavailable");
+    const units = await options.structureSource.units({path:documentId,text,revision,languageId:languageIdForPath(documentId),lane,
+      ...(workspaceId ? {workspaceId} : {}), ...(signal ? {signal} : {})});
+    signal?.throwIfAborted();
+    if (units.status !== "ready" && units.status !== "empty") throw new Error(units.message ?? "Native structural units did not complete");
+    if (units.revision !== revision) throw new Error("Native structural units changed their input revision");
+    return packUnits(documentId, units, embedder);
+  };
+
+  const diskChunksFor = async (
+    workspaceId: string,
+    root: string,
+    documentId: string,
+    embedder: SemanticEmbedder,
+    signal?: AbortSignal,
+  ) => {
+    if (!options.structureSource.unitsFile) throw new Error("Native disk structural unit service is unavailable");
+    const units = await options.structureSource.unitsFile({
+      workspaceId,
+      root,
+      path: documentId,
+      languageId: languageIdForPath(documentId),
+      lane: "background",
+      ...(signal ? { signal } : {}),
+    });
+    signal?.throwIfAborted();
+    if (units.status !== "ready" && units.status !== "empty") {
+      throw new Error(units.message ?? "Native disk structural units did not complete");
+    }
+    if (!units.revision) throw new Error("Native disk structural units returned no source revision");
+    return { revision: units.revision, ...packUnits(documentId, units, embedder) };
+  };
+
   const prepareDocument = async (
     scope: SemanticScopeKey,
     store: SemanticGenerationStore,
+    root: string,
     documentId: string,
     token: number,
     embedder: SemanticEmbedder = embedderOf(),
     signal?: AbortSignal,
+    expectedRevision?: string,
   ): Promise<SemanticDocumentPublication | { kind: "unchanged-current" } | { kind: "superseded" } | { kind: "read-failed" }> => {
     if (scope.scopeKind !== "workspace") return { kind: "read-failed" };
     signal?.throwIfAborted();
     if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
-    let snapshot: Awaited<ReturnType<DocumentAuthority["read"]>>;
-    try {
-      snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: documentId });
-    } catch {
-      return { kind: "read-failed" };
-    }
-    if (snapshot.status !== "ready") return { kind: "read-failed" };
-    if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
-    signal?.throwIfAborted();
     const published = await store.publishedRevision(documentId);
-    if (published?.revision === snapshot.revision && published.recipeId === store.recipeId) return { kind: "unchanged-current" };
-    const languageId = languageIdForPath(documentId) ?? null;
-    const outline = languageId
-      ? await options.structureSource.outline({
-        path: documentId,
-        languageId,
-        text: snapshot.content,
-        revision: snapshot.revision,
-      })
-      : { status: "unsupported" as const, symbols: [] };
-    if (!isCurrentToken(scope, documentId, token)) return { kind: "superseded" };
-    signal?.throwIfAborted();
-    const chunks = chunkDocument({
-      documentId,
-      text: snapshot.content,
-      languageId,
-      outline,
-      maxTokens: embedder.space.maxTokens,
-      countTokens: (text) => embedder.countTokens(text),
-    });
-    return { documentId, revision: snapshot.revision, chunks, publishToken: token };
+    if (expectedRevision && published?.revision === expectedRevision && published.recipeId === store.recipeId) {
+      return { kind: "unchanged-current" };
+    }
+    let prepared;
+    try { prepared = await diskChunksFor(scope.scopeId, root, documentId, embedder, signal); }
+    catch { signal?.throwIfAborted(); return {kind:"read-failed"}; }
+    if (!isCurrentToken(scope, documentId, token)) return {kind:"superseded"};
+    if (expectedRevision && prepared.revision !== expectedRevision) return { kind: "superseded" };
+    if (published?.revision === prepared.revision && published.recipeId === store.recipeId) {
+      return { kind: "unchanged-current" };
+    }
+    return { documentId, revision: prepared.revision, chunks: prepared.chunks, publishToken: token };
   };
 
   const indexDocument = async (scope: SemanticScopeKey, documentId: string, kind: "modified" | "deleted"): Promise<void> => {
@@ -265,22 +295,17 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       mutationPending.get(scopeIdentity(scope))?.delete(documentId);
       return;
     }
+    const root = (await options.documents.inspectWorkspace(scope.scopeId)).root;
     if (embedder.status === "ready" && embedder.space.dim <= 0) {
-      const snapshot = await options.documents.read({ workspaceId: scope.scopeId, resourceId: documentId });
-      if (snapshot.status !== "ready") return;
       await embedder.prepare();
-      const first = chunkDocument({
-        documentId, text: snapshot.content, languageId: languageIdForPath(documentId) ?? null,
-        outline: { status: "unsupported", symbols: [] },
-        maxTokens: embedder.space.maxTokens, countTokens: (text) => embedder.countTokens(text),
-      })[0];
+      const first = (await diskChunksFor(scope.scopeId, root, documentId, embedder, signal)).chunks[0];
       if (!first) return;
       await ensureEmbedderSpace(embedder, signal, first.embedText);
     }
     if (disposed || embedder.status !== "ready") return;
     const store = storeFor(scope, embedder);
     await embedder.prepare();
-    const publication = await prepareDocument(scope, store, documentId, token, embedder, signal);
+    const publication = await prepareDocument(scope, store, root, documentId, token, embedder, signal);
     const resolvedKey = scopeKey(scope, spaceIdOf(embedder.space));
     if (!("kind" in publication) && isCurrentToken(scope, documentId, token)) {
       await store.publishDocument(publication, signal);
@@ -343,6 +368,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         const files = await options.searchFilesystemFiles!(root, {
           query: "",
           respectGitignore: true,
+          includeRevisions: true,
           signal,
         });
         signal.throwIfAborted();
@@ -361,26 +387,13 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         let bootstrapText = catalog[0]?.relativePath ?? ".";
         if (initialEmbedder.space.dim <= 0 && catalog[0]) {
           try {
-            const first = await options.documents.read({ workspaceId: scope.scopeId, resourceId: catalog[0].relativePath });
-            if (first.status === "ready") {
-              const languageId = languageIdForPath(catalog[0].relativePath) ?? null;
-              const outline = languageId
-                ? await options.structureSource.outline({
-                    path: catalog[0].relativePath,
-                    languageId,
-                    text: first.content,
-                    revision: first.revision,
-                  })
-                : { status: "unsupported" as const, symbols: [] };
-              bootstrapText = chunkDocument({
-                documentId: catalog[0].relativePath,
-                text: first.content,
-                languageId,
-                outline,
-                maxTokens: initialEmbedder.space.maxTokens,
-                countTokens: (text) => initialEmbedder.countTokens(text),
-              })[0]?.embedText ?? bootstrapText;
-            }
+            bootstrapText = (await diskChunksFor(
+              scope.scopeId,
+              root,
+              catalog[0].relativePath,
+              initialEmbedder,
+              signal,
+            )).chunks[0]?.embedText ?? bootstrapText;
           } catch { /* prepareDocument below records the read failure */ }
         }
         const embedder = await ensureEmbedderSpace(initialEmbedder, signal, bootstrapText);
@@ -409,7 +422,16 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
           signal.throwIfAborted();
           const batch = catalog.slice(offset, offset + CATALOG_SCAN_BATCH);
           const prepared = await Promise.all(batch.map((file) => (
-            prepareDocument(scope, store!, file.relativePath, scanTokenFor(scope, file.relativePath, scanToken), embedder, signal)
+            prepareDocument(
+              scope,
+              store!,
+              root,
+              file.relativePath,
+              scanTokenFor(scope, file.relativePath, scanToken),
+              embedder,
+              signal,
+              file.revision,
+            )
           )));
           signal.throwIfAborted();
           const accepted = prepared.filter((publication): publication is SemanticDocumentPublication => !("kind" in publication));
@@ -502,6 +524,77 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     statusForEmbedder(scope, embedderOf())
   );
 
+  const overlayChunks = async (
+    path: string,
+    revision: string,
+    origin: SemanticQueryOverlay["origin"],
+    chunks: ReturnType<typeof packStructuralUnits>,
+    signal: AbortSignal | undefined,
+    embedder: SemanticEmbedder,
+  ): Promise<{ extras: SemanticOverlayBlock[]; gaps: SemanticSearchResult["gaps"] }> => {
+    const vectors: number[][] = [];
+    const missing: Array<{ chunk: typeof chunks[number]; index: number }> = [];
+    for (const [index, chunk] of chunks.entries()) {
+      const cached = queryCache.get({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: chunk.embedText });
+      if (cached) vectors[index] = cached;
+      else missing.push({ chunk, index });
+    }
+    if (missing.length > 0) {
+      signal?.throwIfAborted();
+      const owners = missing.map((item) => ({
+        text: item.chunk.embedText,
+        claim: queryCache.claim({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.chunk.embedText }),
+      })).filter((item) => item.claim.owner);
+      if (owners.length > 0) {
+        // Captured fixed text becomes workspace-owned background vector work.
+        // Returning/finishing a query does not cancel a claimed embedding.
+        const backgroundSignal = lifecycleController.signal;
+        const work = scheduler.enqueue("background", async () => {
+          try {
+            backgroundSignal.throwIfAborted();
+            await embedder.prepare();
+            backgroundSignal.throwIfAborted();
+            const fresh = await embedder.embed(owners.map((item) => item.text), { purpose: "document", signal: backgroundSignal });
+            backgroundSignal.throwIfAborted();
+            if (fresh.length !== owners.length || fresh.some((vector) => vector.length !== embedder.space.dim)) {
+              throw new Error("Fixed-view embedding returned an incomplete batch");
+            }
+            for (const [offset, item] of owners.entries()) {
+              const vector = fresh[offset]!;
+              queryCache.set({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.text }, vector);
+              item.claim.resolve(vector);
+            }
+          } catch (error) {
+            for (const item of owners) item.claim.reject(error);
+            throw error;
+          }
+        });
+        track(waitWithSignal(work, backgroundSignal));
+      }
+      return { extras: [], gaps: [{ path, reason: origin === "thread" ? "thread-vector-pending" : "draft-vector-pending" }] };
+    }
+    if (vectors.some((vector) => !vector)) {
+      return { extras: [], gaps: [{ path, reason: origin === "thread" ? "thread-vector-pending" : "draft-vector-pending" }] };
+    }
+    return {
+      extras: chunks.map((chunk, index) => ({
+        documentId: path,
+        revision,
+        blockId: chunk.blockId,
+        parentUnitId: chunk.parentUnitId,
+        parentName: chunk.parentName,
+        parentKind: chunk.parentKind,
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        contentHash: chunk.contentHash,
+        fallback: chunk.fallback,
+        body: chunk.body,
+        vector: vectors[index]!,
+      })),
+      gaps: [],
+    };
+  };
+
   const overlayBlocks = async (
     overlays: readonly SemanticQueryOverlay[],
     signal?: AbortSignal,
@@ -514,91 +607,9 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
         if (overlay.gap) gaps.push({ path: overlay.path, reason: overlay.gap });
         continue;
       }
-      const languageId = languageIdForPath(overlay.path) ?? null;
-      const outline = languageId
-        ? await options.structureSource.outline({
-          path: overlay.path,
-          languageId,
-          text: overlay.content,
-          revision: overlay.revision,
-        })
-        : { status: "unsupported" as const, symbols: [] };
-      const chunks = chunkDocument({
-        documentId: overlay.path,
-        text: overlay.content,
-        languageId,
-        outline,
-        maxTokens: embedder.space.maxTokens,
-        countTokens: (text) => embedder.countTokens(text),
-      });
-      const vectors: number[][] = [];
-      const missing: Array<{ chunk: typeof chunks[number]; index: number }> = [];
-      for (const [index, chunk] of chunks.entries()) {
-        const cached = queryCache.get({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: chunk.embedText });
-        if (cached) vectors[index] = cached;
-        else missing.push({ chunk, index });
-      }
-      if (missing.length > 0) {
-        signal?.throwIfAborted();
-        const owners = missing.map((item) => ({
-          text: item.chunk.embedText,
-          claim: queryCache.claim({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.chunk.embedText }),
-        })).filter((item) => item.claim.owner);
-        if (owners.length > 0) {
-          // Captured draft text becomes workspace-owned background index work,
-          // like the disk scan. Returning/finishing a query does not cancel it.
-          const backgroundSignal = lifecycleController.signal;
-          const work = scheduler.enqueue("background", async () => {
-            try {
-              backgroundSignal.throwIfAborted();
-              await embedder.prepare();
-              backgroundSignal.throwIfAborted();
-              const fresh = await embedder.embed(owners.map((item) => item.text), { purpose: "document", signal: backgroundSignal });
-              backgroundSignal.throwIfAborted();
-              if (fresh.length !== owners.length || fresh.some((vector) => vector.length !== embedder.space.dim)) {
-                throw new Error("Draft embedding returned an incomplete batch");
-              }
-              for (const [offset, item] of owners.entries()) {
-                const vector = fresh[offset]!;
-                queryCache.set({ spaceId: spaceIdOf(embedder.space), purpose: "document", embedText: item.text }, vector);
-                item.claim.resolve(vector);
-              }
-            } catch (error) {
-              for (const item of owners) item.claim.reject(error);
-              throw error;
-            }
-          });
-          track(waitWithSignal(work, backgroundSignal));
-        }
-        gaps.push({
-          path: overlay.path,
-          reason: overlay.origin === "thread" ? "thread-vector-pending" : "draft-vector-pending",
-        });
-        continue;
-      }
-      if (vectors.some((vector) => !vector)) {
-        gaps.push({
-          path: overlay.path,
-          reason: overlay.origin === "thread" ? "thread-vector-pending" : "draft-vector-pending",
-        });
-        continue;
-      }
-      for (const [index, chunk] of chunks.entries()) {
-        extras.push({
-          documentId: overlay.path,
-          revision: overlay.revision,
-          blockId: chunk.blockId,
-          parentUnitId: chunk.parentUnitId,
-          parentName: chunk.parentName,
-          parentKind: chunk.parentKind,
-          startLine: chunk.startLine,
-          endLine: chunk.endLine,
-          contentHash: chunk.contentHash,
-          fallback: chunk.fallback,
-          body: chunk.body,
-          vector: vectors[index]!,
-        });
-      }
+      const {chunks} = await chunksFor(overlay.path,overlay.content,overlay.revision,embedder,signal,"foreground");
+      const material = await overlayChunks(overlay.path, overlay.revision, overlay.origin, chunks, signal, embedder);
+      extras.push(...material.extras);gaps.push(...material.gaps);
     }
     return { extras, gaps };
   };
@@ -651,6 +662,31 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
       const overlay = overlays.length > 0
         ? await overlayBlocks(overlays, signal, embedder)
         : { extras: [] as SemanticOverlayBlock[], gaps: [] as SemanticSearchResult["gaps"] };
+      if (searchOptions?.threadQuery) {
+        if (!options.structureSource.unitsFixed) throw new Error("Native fixed-view structural units are unavailable");
+        const files = await searchOptions.threadQuery.listFiles(signal);
+        for (const file of files) {
+          signal.throwIfAborted();
+          if (!pathInRoots(file.path, searchOptions.roots)) continue;
+          const languageId = languageIdForPath(file.path);
+          if (!languageId || !SEMANTIC_SCAN_LANGUAGES.has(languageId)) continue;
+          const units = await options.structureSource.unitsFixed({
+            workspaceId: scope.scopeId,
+            path: file.path,
+            languageId,
+            compute: searchOptions.threadQuery.compute,
+            lane: "foreground",
+            signal,
+          });
+          if (units.status !== "ready" && units.status !== "empty") {
+            throw new Error(units.message ?? "Native fixed-view structural units did not complete");
+          }
+          if (units.revision !== file.revision) throw new Error("Fixed-view semantic source revision changed inside one pin");
+          const chunks = packUnits(file.path, units, embedder).chunks;
+          const material = await overlayChunks(file.path, units.revision, "thread", chunks, signal, embedder);
+          overlay.extras.push(...material.extras);overlay.gaps.push(...material.gaps);
+        }
+      }
       const indexGaps: SemanticSearchResult["gaps"] = [...(indexReadFailures.get(key) ?? [])]
         .filter((path) => pathInRoots(path, searchOptions?.roots))
         .map((path) => ({ path, reason: "index-read-failed" as const }));

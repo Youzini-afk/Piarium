@@ -1,374 +1,98 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { assertAbsolutePathInWorkspace } from '../workspace/path-safety.js';
+import path from "node:path";
+import type { KernelComputeService } from "../kernel/compute-service.js";
+import type { KernelComputeRecord } from "../kernel/protocol.generated.js";
 
-const CONTENT_SEARCH_EXCLUDED_GLOBS = [
-  '!**/node_modules/**',
-  '!**/.git/**',
-  '!**/dist/**',
-  '!**/build/**',
-  '!**/.next/**',
-  '!**/.turbo/**',
-  '!**/.cache/**',
-  '!**/coverage/**',
-];
-
-type PathModule = typeof path;
-
+export const CONTENT_SEARCH_EXCLUDED_DIRS = ["node_modules", ".git", "dist", "build", ".next", ".turbo", ".cache", "coverage"];
 export interface WorkspaceSearchHit {
   after?: string[];
   before?: string[];
   column: number;
   line: number;
   preview: string;
+  revision?: string;
   resource: { resourceId: string; workspaceId: string };
 }
-
-/**
- * `incomplete` means ripgrep produced these matches and then reported a
- * non-fatal error, so the hits are valid while coverage is not guaranteed.
- * Exit code 2 is ripgrep's "an error occurred" and is routine in a live
- * workspace: one file being written, deleted mid-walk or briefly locked is
- * enough, and rg still returns everything else it matched (D-142).
- */
 export type WorkspaceContentSearchResult =
-  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: 'ready'; incomplete?: true }
-  | { generation: number | undefined; status: 'empty' | 'cancelled' }
-  | { generation: number | undefined; message: string; status: 'failure' };
-
+  | { generation: number | undefined; hits: WorkspaceSearchHit[]; status: "ready"; incomplete?: true }
+  | { generation: number | undefined; status: "empty" | "cancelled" }
+  | { generation: number | undefined; message: string; status: "failure" };
 export interface WorkspaceContentSearchRequest {
-  /** Additional ripgrep include/exclude globs supplied by the caller. */
-  glob?: string[] | undefined;
-  includeHidden?: boolean | undefined;
+  glob?: string[];
+  includeHidden?: boolean;
   maxResults?: number | undefined;
-  ignoreCase?: boolean | undefined;
-  fixedStrings?: boolean | undefined;
-  /** Workspace-relative resource IDs to remove before maxResults is counted. */
-  excludeResourceIds?: string[] | undefined;
-  /** Optional workspace-contained files/directories to search instead of the whole root. */
-  paths?: string[] | undefined;
-  query?: string | undefined;
-  workspaceId?: string | undefined;
+  ignoreCase?: boolean;
+  fixedStrings?: boolean;
+  excludeResourceIds?: string[];
+  paths?: string[];
+  query?: string;
+  workspaceId?: string;
+  before?: number;
+  after?: number;
 }
-
 export interface WorkspaceContentSearchOptions {
-  collect?: boolean | undefined;
-  generation?: number | undefined;
-  onBatch?: ((hits: WorkspaceSearchHit[]) => boolean | void) | undefined;
-  onDrain?: (() => Promise<void>) | undefined;
-  signal?: AbortSignal | undefined;
+  /** Host-captured immutable inputs; never accepted from an HTTP body. */
+  overlays?: readonly import("../kernel/compute-service.js").KernelComputeText[];
+  collect?: boolean;
+  generation?: number;
+  onBatch?: (hits: WorkspaceSearchHit[]) => boolean | void;
+  onDrain?: () => Promise<void>;
+  signal?: AbortSignal;
 }
-
-export interface SearchReadable {
-  on(event: 'data', listener: (chunk: string) => void): unknown;
-  pause(): void;
-  resume(): void;
-  setEncoding(encoding: BufferEncoding): void;
-}
-
-export interface SearchDiagnosticsReadable {
-  on(event: 'data', listener: (chunk: unknown) => void): unknown;
-}
-
-export interface SearchChild {
-  kill(): unknown;
-  on(event: 'error', listener: (error: unknown) => void): unknown;
-  on(event: 'close', listener: (code: number | null) => void): unknown;
-  stderr: SearchDiagnosticsReadable;
-  stdout: SearchReadable;
-}
-
 export interface WorkspaceContentSearchDependencies {
   documents: { inspectWorkspace(workspaceId: string): Promise<{ root: string }> };
-  env?: NodeJS.ProcessEnv | undefined;
-  fsPromises?: Pick<typeof fs.promises, 'realpath' | 'stat'> | undefined;
-  pathModule: PathModule;
-  spawn(command: string, args: string[], options: {
-    cwd: string;
-    env: NodeJS.ProcessEnv;
-    stdio: ['ignore', 'pipe', 'pipe'];
-    windowsHide: true;
-  }): SearchChild;
+  compute: Pick<KernelComputeService, "directory">;
+  pathModule?: typeof path;
 }
-
-const toResourceId = (root: string, absolutePath: string, pathModule: PathModule): string | null => {
-  const relative = pathModule.relative(root, absolutePath);
-  if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) {
-    return null;
-  }
-  return relative.split(pathModule.sep).join('/');
-};
-
-const parseRipgrepMatch = (
-  line: string,
-  workspaceId: string,
-  root: string,
-  pathModule: PathModule,
-): WorkspaceSearchHit | null => {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(line);
-  } catch {
-    return null;
-  }
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
-  const record = payload as Record<string, unknown>;
-  if (record.type !== 'match' || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) return null;
-  const data = record.data as Record<string, unknown>;
-  const pathValue = data.path && typeof data.path === 'object' && !Array.isArray(data.path)
-    ? data.path as Record<string, unknown>
-    : {};
-  const absolutePath = typeof pathValue.text === 'string' ? pathValue.text : '';
-  if (!absolutePath) return null;
-  const resourceId = toResourceId(root, absolutePath, pathModule);
-  if (!resourceId) return null;
-  const lineNumber = Number(data.line_number);
-  const lines = data.lines && typeof data.lines === 'object' && !Array.isArray(data.lines)
-    ? data.lines as Record<string, unknown>
-    : {};
-  const lineText = typeof lines.text === 'string' ? lines.text : '';
-  const preview = lineText.replace(/\r?\n$/, '');
-  const firstSubmatch = Array.isArray(data.submatches) && data.submatches[0]
-    && typeof data.submatches[0] === 'object' && !Array.isArray(data.submatches[0])
-    ? data.submatches[0] as Record<string, unknown>
-    : null;
-  const byteOffset = firstSubmatch
-    ? Number(firstSubmatch.start)
-    : 0;
-  // ripgrep reports UTF-8 byte offsets while Monaco columns are UTF-16 code
-  // units. Decode the matched line prefix so non-ASCII text lands on the exact
-  // result instead of drifting right by its additional UTF-8 bytes.
-  const column = Number.isFinite(byteOffset) && byteOffset > 0
-    ? Buffer.from(lineText, 'utf8').subarray(0, byteOffset).toString('utf8').length + 1
-    : 1;
-  if (!Number.isFinite(lineNumber) || lineNumber < 1) return null;
+export function decodeNativeSearchHit(record: KernelComputeRecord, workspaceId: string): WorkspaceSearchHit | null {
+  if (record.kind !== "hit") return null;
+  const d = record.data as Record<string, unknown>;
+  const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(v=>typeof v==="string");
+  if (!d || typeof d !== "object" || !Number.isSafeInteger(d.line) || Number(d.line) < 1
+    || !Number.isSafeInteger(d.column) || Number(d.column) < 1 || typeof d.preview !== "string"
+    || !strings(d.before) || !strings(d.after) || !record.revision
+    || record.path.startsWith("/") || record.path.split("/").includes("..")) throw new Error("Invalid native search result");
+  return {resource:{workspaceId,resourceId:record.path},line:Number(d.line),column:Number(d.column),
+    preview:d.preview,before:d.before,after:d.after,revision:record.revision};
+}
+/** Search execution is entirely native. This adapter only admits the workspace,
+ * validates records, and delivers HTTP/NDJSON backpressure and presentation. */
+export function createWorkspaceContentSearch({ documents, compute, pathModule = path }: WorkspaceContentSearchDependencies) {
   return {
-    resource: { workspaceId, resourceId },
-    line: lineNumber,
-    column: Number.isFinite(column) && column > 0 ? column : 1,
-    preview,
-  };
-};
-
-export const createWorkspaceContentSearch = ({
-  documents,
-  spawn,
-  pathModule,
-  env = process.env,
-  fsPromises = fs.promises,
-}: WorkspaceContentSearchDependencies) => {
-  const searchContent = async (
-    request: WorkspaceContentSearchRequest,
-    options: WorkspaceContentSearchOptions = {},
-  ): Promise<WorkspaceContentSearchResult> => {
-    const generation = options.generation;
-    const signal = options.signal;
-    const query = typeof request?.query === 'string' ? request.query : '';
-    const workspaceId = typeof request?.workspaceId === 'string' ? request.workspaceId : '';
-    if (!workspaceId) {
-      return { status: 'failure', generation, message: 'workspaceId is required' };
-    }
-    if (!query.trim()) {
-      return { status: 'empty', generation };
-    }
-    if (signal?.aborted) {
-      return { status: 'cancelled', generation };
-    }
-
-    let workspace;
-    try {
-      workspace = await documents.inspectWorkspace(workspaceId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Workspace search failed';
-      return { status: 'failure', generation, message };
-    }
-
-    let searchPaths = [workspace.root];
-    if (request.paths !== undefined) {
-      if (!Array.isArray(request.paths) || request.paths.length === 0 || !request.paths.every((entry) => typeof entry === 'string' && entry.trim())) {
-        return { status: 'failure', generation, message: 'Search paths must be a non-empty string array' };
-      }
+    async searchContent(request: WorkspaceContentSearchRequest, options: WorkspaceContentSearchOptions = {}): Promise<WorkspaceContentSearchResult> {
+      const generation = options.generation;
+      if (options.signal?.aborted) return {status:"cancelled",generation};
+      const workspaceId=request.workspaceId;
+      if(!workspaceId)return {status:"failure",generation,message:"workspaceId is required"};
+      if(typeof request.query!=="string"||!request.query.trim())return {status:"empty",generation};
       try {
-        searchPaths = await Promise.all(request.paths.map(async (entry) => {
-          const resolved = await assertAbsolutePathInWorkspace(
-            pathModule.isAbsolute(entry) ? entry : pathModule.resolve(workspace.root, entry),
-            { root: workspace.root, fsPromises, pathModule, allowMissing: false },
-          );
-          return resolved.realPath;
-        }));
-      } catch (error) {
-        return {
-          status: 'failure',
-          generation,
-          message: error instanceof Error ? error.message : 'Search path is outside the workspace',
+        const {root}=await documents.inspectWorkspace(workspaceId);
+        const relative=(input:string):string=>{
+          const value=pathModule.isAbsolute(input)?pathModule.relative(root,input):input;
+          const result=value.replaceAll("\\","/");
+          if(pathModule.isAbsolute(value)||result.split("/").includes(".."))throw new Error("Search path is outside the workspace");
+          return result.split("/").filter(s=>s&&s!==".").join("/");
         };
-      }
-    }
-
-    const maxResults = typeof request.maxResults === 'number'
-      && Number.isFinite(request.maxResults) && request.maxResults > 0
-      ? Math.floor(request.maxResults)
-      : null;
-    const args = [
-      '--json',
-      '--line-number',
-      '--no-heading',
-      '--color',
-      'never',
-      ...CONTENT_SEARCH_EXCLUDED_GLOBS.flatMap((glob) => ['--glob', glob]),
-    ];
-    if (request?.includeHidden) args.push('--hidden');
-    if (request?.ignoreCase) args.push('--ignore-case');
-    if (request?.fixedStrings) args.push('--fixed-strings');
-    for (const glob of request?.glob ?? []) {
-      if (typeof glob === 'string' && glob.trim()) args.push('--glob', glob);
-    }
-    args.push('--', query.trim(), ...searchPaths);
-
-    return await new Promise<WorkspaceContentSearchResult>((resolve) => {
-      let child: SearchChild;
-      try {
-        child = spawn('rg', args, {
-          cwd: workspace.root,
-          env,
-          windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-      } catch (error) {
-        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-        const message = code === 'ENOENT'
-          ? 'Workspace content search is unavailable because ripgrep is not installed on this host'
-          : (error instanceof Error ? error.message : 'Failed to start content search');
-        resolve({ status: 'failure', generation, message });
-        return;
-      }
-
-      let settled = false;
-      let stdoutBuffer = '';
-      const hits: WorkspaceSearchHit[] | null = options.collect === false ? null : [];
-      let hitCount = 0;
-      const excludeKey = (resourceId: string): string => {
-        const normalized = resourceId.replace(/\\/g, '/');
-        return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
-      };
-      const excludedResourceIds = new Set((request.excludeResourceIds ?? []).map(excludeKey));
-      const publish = (batch: WorkspaceSearchHit[]): boolean => {
-        const eligible = batch.filter((hit) => !excludedResourceIds.has(excludeKey(hit.resource.resourceId)));
-        if (eligible.length === 0) return false;
-        const remaining = maxResults === null ? eligible.length : Math.max(0, maxResults - hitCount);
-        const accepted = remaining >= eligible.length ? eligible : eligible.slice(0, remaining);
-        if (accepted.length === 0) return maxResults !== null && hitCount >= maxResults;
-        hitCount += accepted.length;
-        hits?.push(...accepted);
-        const writable = options.onBatch?.(accepted);
-        if (writable === false && typeof options.onDrain === 'function') {
-          child.stdout.pause();
-          void options.onDrain().then(() => {
-            if (!settled && !signal?.aborted) child.stdout.resume();
-          }).catch(onAbort);
-        }
-        return maxResults !== null && hitCount >= maxResults;
-      };
-      const ready = (incomplete = false): WorkspaceContentSearchResult => ({
-        status: 'ready',
-        generation,
-        hits: hits ?? [],
-        ...(incomplete ? { incomplete: true as const } : {}),
-      });
-      const finish = (result: WorkspaceContentSearchResult): void => {
-        if (settled) return;
-        settled = true;
-        signal?.removeEventListener('abort', onAbort);
-        resolve(result);
-      };
-      const onAbort = (): void => {
-        try {
-          child.kill();
-        } catch {
-          // Process may already have exited.
-        }
-        finish({ status: 'cancelled', generation });
-      };
-
-      child.on('error', (error) => {
-        const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-        const message = code === 'ENOENT'
-          ? 'Workspace content search is unavailable because ripgrep is not installed on this host'
-          : (error instanceof Error ? error.message : 'Content search failed');
-        finish({ status: 'failure', generation, message });
-      });
-      child.stdout.setEncoding('utf8');
-      child.stdout.on('data', (chunk) => {
-        if (settled) return;
-        stdoutBuffer += chunk;
-        const batch = [];
-        let newline = stdoutBuffer.indexOf('\n');
-        while (newline >= 0) {
-          const line = stdoutBuffer.slice(0, newline);
-          stdoutBuffer = stdoutBuffer.slice(newline + 1);
-          const hit = line ? parseRipgrepMatch(line, workspaceId, workspace.root, pathModule) : null;
-          if (hit) batch.push(hit);
-          newline = stdoutBuffer.indexOf('\n');
-        }
-        if (publish(batch)) {
-          finish(ready());
-          try {
-            child.kill();
-          } catch {
-            // Process may have exited after emitting the final requested result.
-          }
-        }
-      });
-      // Search diagnostics stay on the host and file bodies are never logged,
-      // but the first line of ripgrep's own error output is the only way to
-      // learn *which* path made it exit 2, so one bounded line is kept.
-      let firstStderrLine = '';
-      child.stderr.on('data', (chunk) => {
-        if (firstStderrLine) return;
-        const line = String(chunk).split('\n').map((entry) => entry.trim()).find(Boolean);
-        if (line) firstStderrLine = line.slice(0, 200);
-      });
-      child.on('close', (code) => {
-        if (settled) return;
-        if (signal?.aborted) {
-          finish({ status: 'cancelled', generation });
-          return;
-        }
-        if (stdoutBuffer) {
-          const hit = parseRipgrepMatch(stdoutBuffer, workspaceId, workspace.root, pathModule);
-          if (hit) publish([hit]);
-        }
-        // 0 = matched, 1 = no match, 2 = finished with a non-fatal error. Exit
-        // 2 with matches in hand is a partial sweep: one path could not be read
-        // — a file being written, deleted mid-walk or briefly locked is enough —
-        // and every other match is valid. Discarding those matches failed a
-        // whole `explore.search` over one unrelated file (D-142). Exit 2 with
-        // nothing in hand stays a failure, because "matched nothing" and
-        // "could not search" are then indistinguishable.
-        const partialSweep = code === 2 && hitCount > 0;
-        if (code !== 0 && code !== 1 && !partialSweep) {
-          finish({ status: 'failure', generation, message: 'Content search failed' });
-          return;
-        }
-        if (partialSweep) {
-          console.warn(
-            '[WorkspaceSearch] ripgrep reported a non-fatal error; coverage is incomplete:',
-            firstStderrLine || 'no diagnostic output',
-          );
-        }
-        if (hitCount === 0) {
-          finish({ status: 'empty', generation });
-          return;
-        }
-        finish(ready(partialSweep));
-      });
-
-      if (signal) {
-        if (signal.aborted) onAbort();
-        else signal.addEventListener('abort', onAbort, { once: true });
-      }
-    });
+        if(request.paths!==undefined&&(!Array.isArray(request.paths)||!request.paths.length||!request.paths.every(p=>typeof p==="string"&&p.trim())))throw new Error("Search paths must be a non-empty string array");
+        const hits:WorkspaceSearchHit[]=[];let count=0;
+        const result=await compute.directory(root,{operation:"search",lane:"foreground",query:request.query.trim(),
+          excludeDirectories:CONTENT_SEARCH_EXCLUDED_DIRS,excludePaths:(request.excludeResourceIds??[]).map(relative),
+          ...(request.paths?{paths:request.paths.map(relative)}:{}),...(request.glob?{globs:request.glob}:{}),
+          ...(request.includeHidden===undefined?{}:{includeHidden:request.includeHidden}),
+          ...(request.ignoreCase===undefined?{}:{ignoreCase:request.ignoreCase}),
+          ...(request.fixedStrings===undefined?{}:{fixedStrings:request.fixedStrings}),
+          ...(request.maxResults===undefined?{}:{maxResults:request.maxResults}),
+          ...(request.before===undefined?{}:{before:request.before}),...(request.after===undefined?{}:{after:request.after}),
+        },{signal:options.signal,collect:false,onRecords:async records=>{
+          const batch=records.map(record=>decodeNativeSearchHit(record,workspaceId)).filter((hit):hit is WorkspaceSearchHit=>hit!==null);
+          if(!batch.length)return;
+          count+=batch.length;if(options.collect!==false)hits.push(...batch);
+          if(options.onBatch?.(batch)===false&&options.onDrain)await options.onDrain();
+        }},options.overlays);
+        if(result.status==="cancelled")return {status:"cancelled",generation};
+        if(result.status==="failed"||(result.status==="partial"&&count===0))return {status:"failure",generation,message:result.message??"Content search coverage is incomplete"};
+        if(count===0)return {status:"empty",generation};
+        return {status:"ready",generation,hits,...(result.status==="partial"?{incomplete:true as const}:{})};
+      }catch(error){return options.signal?.aborted?{status:"cancelled",generation}:{status:"failure",generation,message:error instanceof Error?error.message:String(error)};}
+    },
   };
-
-  return { searchContent };
-};
+}

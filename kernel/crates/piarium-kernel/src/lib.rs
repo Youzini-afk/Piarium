@@ -1,5 +1,6 @@
 //! Piarium's private system kernel library. The binary target only starts this runtime.
 mod authority;
+mod compute;
 mod error;
 mod model;
 mod process;

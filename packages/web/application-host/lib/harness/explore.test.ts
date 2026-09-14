@@ -18,7 +18,7 @@ import {
 } from "./explore.js";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { createStructureSource } from "../structure/source.js";
-import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../structure/native-provider.test-helper.js";
 import type { StructureOutlineResult, StructureProvider, StructureSource } from "../structure/types.js";
 
 const ready = (content: string, revision = "rev-1"): ExploreFileSnapshot => ({ status: "ready", content, revision, source: "disk" });

@@ -11,7 +11,7 @@ import type { EmbedScheduler } from "../semantic/embed-scheduler.js";
 import { spaceIdOf } from "../semantic/identity.js";
 import type { SemanticVectorCache } from "../semantic/vector-cache.js";
 import { waitWithSignal } from "../semantic/cancellation.js";
-import { chunkDocument } from "../semantic/chunker.js";
+import { packPlainText } from "../semantic/chunker.js";
 import type { Knowledge, KnowledgeScope, KnowledgeStore, NodeId } from "../store.js";
 import {
   createKnowledgeVectorStore,
@@ -260,11 +260,9 @@ export function createKnowledgeVectorRuntime(options: {
 
   const chunksFor = (item: Knowledge, embedder: SemanticEmbedder) => {
     const embedText = knowledgeEmbedText(item.content, item.trigger);
-    return chunkDocument({
+    return packPlainText({
       documentId: knowledgeDocumentId(item.id),
       text: embedText,
-      languageId: null,
-      outline: { status: "unsupported", symbols: [] },
       maxTokens: embedder.space.maxTokens,
       countTokens: (text) => embedder.countTokens(text),
     });

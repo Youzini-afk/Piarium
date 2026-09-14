@@ -195,6 +195,7 @@ export interface HarnessServiceHost {
       sessionId?: string;
       inputContext?: import("@piarium/protocol").AgentInputContext;
       threadDocuments?: Array<{ path: string; content: string; revision: string }>;
+      threadQuery?: import("./working-state/working-branch-query.js").WorkingBranchQuerySnapshot;
     },
   ) => Promise<import("./explore.js").ExploreSemanticSearch>) | null;
   pinWorkingBranchQuery?: (
@@ -333,7 +334,6 @@ export interface HarnessServiceHostOptions {
   /** Production injects the Rust-kernel lease authority; tests may use the local helper. */
   pathLockService?: PathLockService;
   readExploreFile?: ExploreFileReader;
-  branchCorpus?: HarnessSearchDeps["branchCorpus"];
   agentInputDraftPaths?: HarnessServiceHost["agentInputDraftPaths"];
   agentInputSurfaceOwner?: HarnessServiceHost["agentInputSurfaceOwner"];
   commitAgentInputContext?: HarnessServiceHost["commitAgentInputContext"];
@@ -423,7 +423,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     search: options.search,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     ...(options.readExploreFile ? { readFile: options.readExploreFile } : {}),
-    ...(options.branchCorpus ? { branchCorpus: options.branchCorpus } : {}),
+    ...(options.pinWorkingBranchQuery ? { pinWorkingBranchQuery: options.pinWorkingBranchQuery } : {}),
     ...(options.agentInputDraftPaths ? { draftPaths: options.agentInputDraftPaths } : {}),
   });
   const diagnosticsProvider = options.diagnosticsProvider ?? null;

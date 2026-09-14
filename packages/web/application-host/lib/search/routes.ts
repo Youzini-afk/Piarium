@@ -1,13 +1,9 @@
 import { isDocumentAuthorityError } from '../documents/errors.js';
-import { createFsSearchRuntime } from '../fs/search.js';
+import type { createFsSearchRuntime } from '../fs/search.js';
 import type { Express, Request, RequestHandler, Response } from 'express';
-import type fs from 'node:fs';
 import type os from 'node:os';
 import type path from 'node:path';
-import {
-  createWorkspaceContentSearch,
-  type WorkspaceContentSearchDependencies,
-} from './content.js';
+import type { createWorkspaceContentSearch } from './content.js';
 
 const sendError = (res: Response, error: unknown): Response => {
   if (isDocumentAuthorityError(error)) {
@@ -73,44 +69,18 @@ const resolveSearchDirectory = async ({
 };
 
 export interface WorkspaceSearchRouteOptions {
-  documents: WorkspaceContentSearchDependencies['documents'];
-  env?: NodeJS.ProcessEnv | undefined;
-  fsPromises: typeof fs.promises;
-  normalizeDirectoryPath?: ((value: string) => string) | undefined;
-  os: Pick<typeof os, 'homedir'>;
+  contentSearch: ReturnType<typeof createWorkspaceContentSearch>;
+  fileSearch: Pick<ReturnType<typeof createFsSearchRuntime>, "searchFilesystemFiles">;
+  normalizeDirectoryPath?: (value: string) => string;
+  os: Pick<typeof os, "homedir">;
   path: typeof path;
-  resolveGitBinaryForSpawn(...args: string[]): string;
   resolveProjectDirectory(req: Request): Promise<ResolvedProjectDirectory | null>;
-  spawn: WorkspaceContentSearchDependencies['spawn'];
-  uiAuthController?: { requireAuth?: RequestHandler | undefined } | undefined;
+  uiAuthController?: { requireAuth?: RequestHandler };
 }
-
 export const registerWorkspaceSearchRoutes = (app: Express, {
-  documents,
-  uiAuthController,
-  fsPromises,
-  path,
-  os,
-  spawn,
-  resolveGitBinaryForSpawn,
-  normalizeDirectoryPath,
-  resolveProjectDirectory,
-  env = process.env,
+  contentSearch, fileSearch, uiAuthController, path, os, normalizeDirectoryPath, resolveProjectDirectory,
 }: WorkspaceSearchRouteOptions) => {
-  const requireAuth = uiAuthController?.requireAuth
-    ?? ((_req, _res, next) => next());
-  const fileSearch = createFsSearchRuntime({
-    fsPromises,
-    path,
-    spawn,
-    resolveGitBinaryForSpawn,
-  });
-  const contentSearch = createWorkspaceContentSearch({
-    documents,
-    spawn,
-    pathModule: path,
-    env,
-  });
+  const requireAuth = uiAuthController?.requireAuth ?? ((_req, _res, next) => next());
 
   app.get('/api/find/file', requireAuth, async (req, res) => {
     const controller = new AbortController();
@@ -179,7 +149,7 @@ export const registerWorkspaceSearchRoutes = (app: Express, {
         });
         if (!res.writableEnded) {
           const finalResult = result.status === 'ready'
-            ? { status: 'ready', generation: result.generation }
+            ? { status: 'ready', generation: result.generation, ...(result.incomplete ? { incomplete: true } : {}) }
             : result;
           res.end(`${JSON.stringify({ type: 'result', result: finalResult })}\n`);
         }

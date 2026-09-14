@@ -1,17 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { createStructureSource } from "../../structure/source.js";
-import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
-import { chunkDocument } from "./chunker.js";
+import type { StructureUnit } from "../../structure/types.js";
+import { packStructuralUnits } from "./chunker.js";
 import { LOCAL_MINILM_MAX_TOKENS } from "./identity.js";
-
-const parsingSource = () => createStructureSource([
-  createTreeSitterStructureProvider({ parseBudgetMs: 30_000 }),
-]);
 
 const wordCount = (text: string): number => Math.max(1, text.split(/\s+/u).filter(Boolean).length);
 
-describe("chunkDocument", () => {
-  it("covers every line of a large function and keeps each embed text at the tokenizer limit", async () => {
+const unit = (
+  text: string,
+  input: Partial<Omit<StructureUnit, "text" | "startLine" | "endLine">> & { startLine?: number } = {},
+): StructureUnit => {
+  const startLine = input.startLine ?? 1;
+  const endLine = startLine + text.split("\n").length - 1;
+  return {
+    startLine,
+    endLine,
+    parentName: input.parentName ?? "",
+    parentKind: input.parentKind ?? "file",
+    parentSignature: input.parentSignature ?? "",
+    docComments: input.docComments ?? "",
+    text,
+    fallback: input.fallback ?? true,
+  };
+};
+
+describe("packStructuralUnits", () => {
+  it("covers every line of a large structural unit and keeps each embed text at the tokenizer limit", () => {
     const bodyLines = Array.from({ length: 80 }, (_, index) => `  const marker_${index + 1} = ${index + 1};`);
     const text = [
       "export function processRequest(input: string) {",
@@ -19,20 +32,15 @@ describe("chunkDocument", () => {
       "  return input;",
       "}",
     ].join("\n");
-    const source = parsingSource();
-    const outline = await source.outline({
-      path: "mail:abc123",
-      languageId: "typescript",
-      text,
-      revision: "r1",
-    });
-    expect(outline.status).toBe("ready");
     const maxTokens = 24;
-    const chunks = chunkDocument({
+    const chunks = packStructuralUnits({
       documentId: "mail:abc123",
-      text,
-      languageId: "typescript",
-      outline,
+      units: [unit(text, {
+        parentName: "processRequest",
+        parentKind: "function",
+        parentSignature: "export function processRequest(input: string)",
+        fallback: false,
+      })],
       maxTokens,
       countTokens: wordCount,
     });
@@ -45,23 +53,20 @@ describe("chunkDocument", () => {
       expect(wordCount(chunk.embedText)).toBeLessThanOrEqual(maxTokens);
       expect(chunk.documentId).toBe("mail:abc123");
       expect(chunk.blockId).toContain(encodeURIComponent("mail:abc123"));
+      expect(chunk.parentName).toBe("processRequest");
     }
-    expect(chunks.some((chunk) => chunk.parentName === "processRequest")).toBe(true);
   });
 
-  it("uses overlapping fallback windows when structure is missing", () => {
+  it("uses overlapping fallback windows for a native fallback unit", () => {
     const text = Array.from({ length: 40 }, (_, index) => `line_${index + 1} token token token token`).join("\n");
-    const chunks = chunkDocument({
+    const chunks = packStructuralUnits({
       documentId: "plain.txt",
-      text,
-      languageId: null,
-      outline: { status: "unsupported", symbols: [] },
+      units: [unit(text)],
       maxTokens: 12,
       countTokens: wordCount,
     });
     expect(chunks.every((chunk) => chunk.fallback)).toBe(true);
-    const lineCount = 40;
-    for (let line = 1; line <= lineCount; line += 1) {
+    for (let line = 1; line <= 40; line += 1) {
       expect(chunks.some((chunk) => chunk.startLine <= line && chunk.endLine >= line)).toBe(true);
     }
     expect(chunks.length).toBeGreaterThan(1);
@@ -70,26 +75,17 @@ describe("chunkDocument", () => {
     )))).toBe(true);
   });
 
-  it("does not treat a character budget as the tokenizer window", async () => {
+  it("does not treat a character budget as the tokenizer window", () => {
     const text = [
       "export function keep() {",
       "  const alphabet = \"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\";",
       "  return alphabet;",
       "}",
     ].join("\n");
-    const source = parsingSource();
-    const outline = await source.outline({
-      path: "keep.ts",
-      languageId: "typescript",
-      text,
-      revision: "r1",
-    });
     const countTokens = (value: string) => value.split(/\s+/u).filter(Boolean).length;
-    const chunks = chunkDocument({
+    const chunks = packStructuralUnits({
       documentId: "keep.ts",
-      text,
-      languageId: "typescript",
-      outline,
+      units: [unit(text, { parentName: "keep", parentKind: "function", fallback: false })],
       maxTokens: LOCAL_MINILM_MAX_TOKENS,
       countTokens,
     });
@@ -100,11 +96,9 @@ describe("chunkDocument", () => {
   it("continue-splits an oversize single line so the original body has no gap", () => {
     const text = "abcdefghijklmnopqrstuvwxyz".repeat(8);
     const countCharacters = (value: string): number => value.length;
-    const chunks = chunkDocument({
+    const chunks = packStructuralUnits({
       documentId: "generated.ts",
-      text,
-      languageId: null,
-      outline: { status: "unsupported", symbols: [] },
+      units: [unit(text)],
       maxTokens: 32,
       countTokens: countCharacters,
     });
@@ -132,11 +126,9 @@ describe("chunkDocument", () => {
       }
       return count;
     };
-    const chunks = chunkDocument({
+    const chunks = packStructuralUnits({
       documentId: "many-lines.ts",
-      text,
-      languageId: null,
-      outline: { status: "unsupported", symbols: [] },
+      units: [unit(text)],
       maxTokens: 4_096,
       countTokens: countLines,
     });

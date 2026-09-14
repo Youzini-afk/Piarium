@@ -96,7 +96,12 @@
     "recovery.operation.release": "KernelRecoveryOperationReleaseParams",
     "operation.get": "KernelOperationGetParams",
     "operation.release": "KernelOperationReleaseParams",
-    "storage.gc": "KernelGcParams"
+    "storage.gc": "KernelGcParams",
+    "compute.start": "KernelComputeStartParams",
+    "compute.read": "KernelComputeReadParams",
+    "compute.cancel": "KernelComputeHandleParams",
+    "compute.release": "KernelComputeHandleParams",
+    "compute.grammar.register": "KernelComputeGrammarParams"
   },
   "dto": {
     "KernelProcessEnvironmentEntry": {"fields":{"name":{"type":"string"},"value":{"type":"string"}}},
@@ -459,7 +464,15 @@
         "corruptObjects": {"type": "string[]", "optional": true}
         ,"relationshipErrors": {"type": "string[]", "optional": true}
       }
-    }
+    },
+    "KernelComputeObject": {"fields":{"path":{"type":"string"},"revision":{"type":"string"},"objectHash":{"type":"string","optional":true},"ownerId":{"type":"string","optional":true},"missing":{"type":"boolean","optional":true}}},
+    "KernelComputeFile": {"fields":{"path":{"type":"string"},"recipeId":{"type":"string","optional":true},"revision":{"type":"string","optional":true},"lines":{"type":"number[]","optional":true}}},
+    "KernelComputeStartParams": {"fields":{"workspaceId":{"type":"string"},"jobId":{"type":"string"},"lane":{"type":"string"},"operation":{"type":"string"},"pinId":{"type":"string","optional":true},"rootId":{"type":"string","optional":true},"objects":{"type":"KernelComputeObject[]","optional":true},"paths":{"type":"string[]","optional":true},"globs":{"type":"string[]","optional":true},"excludePaths":{"type":"string[]","optional":true},"excludeDirectories":{"type":"string[]","optional":true},"respectGitignore":{"type":"boolean","optional":true},"includeHidden":{"type":"boolean","optional":true},"query":{"type":"string","optional":true},"ignoreCase":{"type":"boolean","optional":true},"fixedStrings":{"type":"boolean","optional":true},"maxResults":{"type":"number","optional":true},"before":{"type":"number","optional":true},"after":{"type":"number","optional":true},"startLine":{"type":"number","optional":true},"endLine":{"type":"number","optional":true},"byteOffset":{"type":"number","optional":true},"byteLength":{"type":"number","optional":true},"immediate":{"type":"boolean","optional":true},"files":{"type":"KernelComputeFile[]","optional":true},"parseBudgetMs":{"type":"number","optional":true},"chunkLines":{"type":"number","optional":true},"includeText":{"type":"boolean","optional":true},"includeTracked":{"type":"boolean","optional":true},"includeRevisions":{"type":"boolean","optional":true}}},
+    "KernelComputeReadParams": {"fields":{"workspaceId":{"type":"string"},"jobId":{"type":"string"},"cursor":{"type":"number"},"maxBytes":{"type":"number","optional":true}}},
+    "KernelComputeHandleParams": {"fields":{"workspaceId":{"type":"string"},"jobId":{"type":"string"}}},
+    "KernelComputeGrammarParams": {"fields":{"recipeId":{"type":"string"},"grammarPath":{"type":"string"},"grammarName":{"type":"string"},"style":{"type":"string"},"definitionQuery":{"type":"string"},"importQuery":{"type":"string","optional":true},"literalCallQuery":{"type":"string","optional":true},"maxDepth":{"type":"number","optional":true},"maxSymbols":{"type":"number","optional":true},"grammarHash":{"type":"string","optional":true}}},
+    "KernelComputeRecord": {"fields":{"kind":{"type":"string"},"path":{"type":"string"},"revision":{"type":"string"},"data":{"type":"unknown"}}},
+    "KernelComputeReadResult": {"fields":{"jobId":{"type":"string"},"kernelEpoch":{"type":"string"},"workspaceId":{"type":"string"},"status":{"type":"\"queued\" | \"running\" | \"ready\" | \"empty\" | \"partial\" | \"failed\" | \"cancelled\""},"root":{"type":"string | null"},"records":{"type":"KernelComputeRecord[]"},"nextCursor":{"type":"number"},"endCursor":{"type":"number"},"scannedFiles":{"type":"number"},"message":{"type":"string | null"}}}
   },
   "methods": {
     "process.spawn": "start a native PTY or piped process once with a durable writer identity",
@@ -549,6 +562,11 @@
     "recovery.operation.release": "release a terminal recovery operation and references",
     "operation.get": "read the durable state of a persistent operation",
     "operation.release": "release a completed operation after its product owner is gone",
-    "storage.gc": "collect unreferenced nodes and objects"
+    "storage.gc": "collect unreferenced nodes and objects",
+    "compute.start": "admit a cancellable fixed-view or scoped file computation on a native foreground/background lane",
+    "compute.read": "read bounded computation records using an acknowledged cursor",
+    "compute.cancel": "cancel the actual native computation and unblock output backpressure",
+    "compute.release": "release only a terminal native computation and its reader references",
+    "compute.grammar.register": "register a Host-admitted grammar recipe, never download or execute Host code"
   }
 }

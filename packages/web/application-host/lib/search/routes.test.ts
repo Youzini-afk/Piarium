@@ -1,146 +1,137 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
-import express from 'express';
-import request from 'supertest';
-import { describe, expect, it } from 'vitest';
-import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
-import type { SearchChild } from './content.js';
-import { registerWorkspaceSearchRoutes } from './routes.js';
+import os from "node:os";
+import path from "node:path";
+import express from "express";
+import request from "supertest";
+import { describe, expect, it, vi } from "vitest";
+import type { FileSearchItems } from "../fs/types.js";
+import type { WorkspaceContentSearchResult } from "./content.js";
+import { registerWorkspaceSearchRoutes } from "./routes.js";
 
-class FakeSearchChild extends EventEmitter implements SearchChild {
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  readonly stdin = new PassThrough();
+const files = (...relativePaths: string[]): FileSearchItems => relativePaths.map((relativePath) => ({
+  name: path.basename(relativePath),
+  relativePath,
+  path: path.join("/workspace", relativePath),
+}));
 
-  kill(): boolean {
-    this.emit('close', null);
-    return true;
-  }
-}
+describe("workspace search routes", () => {
+  it("serves file-name search and keeps content failure distinct from empty", async () => {
+    const fileSearch = { searchFilesystemFiles: vi.fn(async () => files("alpha.ts")) };
+    const contentSearch = {
+      searchContent: vi.fn(async (_body, options): Promise<WorkspaceContentSearchResult> => ({
+        status: "failure",
+        generation: options.generation,
+        message: "native search failed",
+      })),
+    };
+    const app = express();
+    app.use(express.json());
+    registerWorkspaceSearchRoutes(app, {
+      contentSearch: contentSearch as never,
+      fileSearch: fileSearch as never,
+      path,
+      os,
+      resolveProjectDirectory: async () => ({ resolved: "/workspace" }),
+    });
 
-const createFakeChild = (): FakeSearchChild => new FakeSearchChild();
+    const found = await request(app)
+      .get("/api/find/file")
+      .query({ query: "alpha", directory: "/workspace", respectGitignore: "false" })
+      .expect(200);
+    expect(found.body).toEqual(["alpha.ts"]);
+    expect(fileSearch.searchFilesystemFiles).toHaveBeenCalledWith("/workspace", expect.objectContaining({
+      query: "alpha",
+      respectGitignore: false,
+      signal: expect.any(AbortSignal),
+    }));
 
-const finishWithOutput = (child: FakeSearchChild, output: string, code = 0): void => {
-  child.stdout.once('end', () => child.emit('close', code));
-  child.stdout.end(output);
-};
-
-const matchLine = (absolutePath: string, preview: string): string => JSON.stringify({
-  type: 'match',
-  data: {
-    path: { text: absolutePath },
-    line_number: 2,
-    lines: { text: `${preview}\n` },
-    submatches: [{ start: 0, end: 4 }],
-  },
-});
-
-describe('workspace search routes', () => {
-  it('serves file-name search and keeps content failure distinct from empty', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      await fs.promises.writeFile(path.join(harness.workspaceRoot, 'alpha.ts'), 'export const alpha = 1;\n');
-      const app = express();
-      app.use(express.json());
-      registerWorkspaceSearchRoutes(app, {
-        documents: harness.authority,
-        fsPromises: fs.promises,
-        path,
-        os,
-        spawn: () => {
-          const child = createFakeChild();
-          queueMicrotask(() => child.emit('close', 2));
-          return child;
-        },
-        resolveGitBinaryForSpawn: () => 'git',
-        resolveProjectDirectory: async () => ({ resolved: harness.workspaceRoot }),
-      });
-
-      const files = await request(app)
-        .get('/api/find/file')
-        .query({ query: 'alpha', directory: harness.workspaceRoot, respectGitignore: 'false' })
-        .expect(200);
-      expect(files.body).toEqual(['alpha.ts']);
-
-      const failed = await request(app)
-        .post('/api/workspace/search/content')
-        .set('x-piarium-generation', '7')
-        .send({ workspaceId: harness.identity.workspaceId, query: 'alpha' })
-        .expect(200);
-      expect(failed.body.status).toBe('failure');
-      expect(failed.body.generation).toBe(7);
-      expect(Array.isArray(failed.body.hits)).toBe(false);
-    } finally {
-      await harness.cleanup();
-    }
+    const failed = await request(app)
+      .post("/api/workspace/search/content")
+      .set("x-piarium-generation", "7")
+      .send({ workspaceId: "ws", query: "alpha" })
+      .expect(200);
+    expect(failed.body).toEqual({ status: "failure", generation: 7, message: "native search failed" });
   });
 
-  it('streams content batches and a terminal result over NDJSON', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      const workspace = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
-      const app = express();
-      app.use(express.json());
-      registerWorkspaceSearchRoutes(app, {
-        documents: harness.authority,
-        fsPromises: fs.promises,
-        path,
-        os,
-        spawn: () => {
-          const child = createFakeChild();
-          queueMicrotask(() => {
-            finishWithOutput(child, `${matchLine(path.join(workspace.root, 'alpha.ts'), 'alpha')}\n`);
-          });
-          return child;
-        },
-        resolveGitBinaryForSpawn: () => 'git',
-        resolveProjectDirectory: async () => ({ resolved: harness.workspaceRoot }),
-      });
+  it("streams content batches and a terminal result over NDJSON", async () => {
+    const contentSearch = {
+      async searchContent(_body: unknown, options: {
+        generation?: number;
+        onBatch?: (hits: unknown[]) => boolean | void;
+        onDrain?: () => Promise<void>;
+      }): Promise<WorkspaceContentSearchResult> {
+        options.onBatch?.([{
+          resource: { workspaceId: "ws", resourceId: "alpha.ts" },
+          line: 1,
+          column: 1,
+          preview: "alpha",
+          revision: "sha256-alpha",
+        }]);
+        return { status: "ready", generation: options.generation, hits: [], incomplete: true };
+      },
+    };
+    const app = express();
+    app.use(express.json());
+    registerWorkspaceSearchRoutes(app, {
+      contentSearch: contentSearch as never,
+      fileSearch: { searchFilesystemFiles: async () => files() } as never,
+      path,
+      os,
+      resolveProjectDirectory: async () => ({ resolved: "/workspace" }),
+    });
 
-      const streamed = await request(app)
-        .post('/api/workspace/search/content')
-        .set('accept', 'application/x-ndjson')
-        .set('x-piarium-generation', '8')
-        .send({ workspaceId: harness.identity.workspaceId, query: 'alpha' })
-        .expect(200);
-      const frames = streamed.text.trim().split('\n').map((line) => JSON.parse(line));
-      expect(frames).toEqual([
-        { type: 'batch', hits: [expect.objectContaining({ preview: 'alpha' })] },
-        { type: 'result', result: { status: 'ready', generation: 8 } },
-      ]);
-    } finally {
-      await harness.cleanup();
-    }
+    const streamed = await request(app)
+      .post("/api/workspace/search/content")
+      .set("accept", "application/x-ndjson")
+      .set("x-piarium-generation", "8")
+      .send({ workspaceId: "ws", query: "alpha" })
+      .expect(200);
+    const frames = streamed.text.trim().split("\n").map((line) => JSON.parse(line));
+    expect(frames).toEqual([
+      { type: "batch", hits: [expect.objectContaining({ preview: "alpha", revision: "sha256-alpha" })] },
+      { type: "result", result: { status: "ready", generation: 8, incomplete: true } },
+    ]);
   });
 
-  it('does not silently truncate file-name search when no caller limit is requested', async () => {
-    const harness = await createDocumentAuthorityHarness();
-    try {
-      await Promise.all(Array.from({ length: 81 }, (_, index) => (
-        fs.promises.writeFile(path.join(harness.workspaceRoot, `match-${index}.ts`), '')
-      )));
-      const app = express();
-      app.use(express.json());
-      registerWorkspaceSearchRoutes(app, {
-        documents: harness.authority,
-        fsPromises: fs.promises,
-        path,
-        os,
-        spawn: () => createFakeChild(),
-        resolveGitBinaryForSpawn: () => 'git',
-        resolveProjectDirectory: async () => ({ resolved: harness.workspaceRoot }),
-      });
+  it("does not silently add a file-name limit when the caller did not request one", async () => {
+    const fileSearch = {
+      searchFilesystemFiles: vi.fn(async (_root: string, _options: { query: string; limit?: number }) => (
+        files(...Array.from({ length: 81 }, (_, index) => `match-${index}.ts`))
+      )),
+    };
+    const app = express();
+    app.use(express.json());
+    registerWorkspaceSearchRoutes(app, {
+      contentSearch: { searchContent: async () => ({ status: "empty", generation: 0 }) } as never,
+      fileSearch: fileSearch as never,
+      path,
+      os,
+      resolveProjectDirectory: async () => ({ resolved: "/workspace" }),
+    });
 
-      const files = await request(app)
-        .get('/api/find/file')
-        .query({ query: 'match', directory: harness.workspaceRoot, respectGitignore: 'false' })
-        .expect(200);
-      expect(files.body).toHaveLength(81);
-    } finally {
-      await harness.cleanup();
-    }
+    const found = await request(app)
+      .get("/api/find/file")
+      .query({ query: "match", directory: "/workspace", respectGitignore: "false" })
+      .expect(200);
+    expect(found.body).toHaveLength(81);
+    expect(fileSearch.searchFilesystemFiles.mock.calls[0]?.[1]).not.toHaveProperty("limit");
+  });
+
+  it("rejects a directory outside the resolved workspace before native file search", async () => {
+    const fileSearch = { searchFilesystemFiles: vi.fn(async () => files("should-not-run.ts")) };
+    const app = express();
+    app.use(express.json());
+    registerWorkspaceSearchRoutes(app, {
+      contentSearch: { searchContent: async () => ({ status: "empty", generation: 0 }) } as never,
+      fileSearch: fileSearch as never,
+      path,
+      os,
+      resolveProjectDirectory: async () => ({ resolved: path.resolve("/workspace") }),
+    });
+
+    await request(app)
+      .get("/api/find/file")
+      .query({ query: "x", directory: path.resolve("/outside") })
+      .expect(403);
+    expect(fileSearch.searchFilesystemFiles).not.toHaveBeenCalled();
   });
 });

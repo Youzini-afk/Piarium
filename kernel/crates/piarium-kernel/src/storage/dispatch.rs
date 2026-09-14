@@ -38,8 +38,10 @@ impl Storage {
         grant_id: Option<&str>,
         authorized_grant: &Grant,
     ) -> Result<Value, KernelError> {
+        self.sweep_compute_readers()?;
         let storage = self;
         match method {
+            method if method.starts_with("compute.") => storage.dispatch_compute(method, authorized_params, authorized_grant),
             method if method.starts_with("process.") => {
                 storage.dispatch_process(method, authorized_params, authorized_grant)
             }

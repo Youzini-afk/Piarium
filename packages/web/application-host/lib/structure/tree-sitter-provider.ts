@@ -1,539 +1,426 @@
-import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { languageIdForPath } from "@piarium/protocol";
-import { LANGUAGE_VERSION, Language, MIN_COMPATIBLE_VERSION, Parser, Query, type Node } from "web-tree-sitter";
+import type { KernelComputeService } from "../kernel/compute-service.js";
+import type { KernelComputeResult } from "../kernel/compute-runner.js";
 import { STRUCTURE_PARSE_BUDGET_MS } from "./constants.js";
-import { collectJsonOutline } from "./json-outline.js";
 import {
   capabilitiesFromSpec,
-  tagsDefinitionKind,
   treeSitterLanguageSpec,
   treeSitterTagsSpec,
-  type StructureTypeMatcher,
   type TreeSitterLanguageSpec,
 } from "./languages.js";
 import { resolveStructureRuntimeFile } from "./runtime-path.js";
-import {
-  type StructureClassifyRequest,
-  type StructureClassifyResult,
-  type StructureHitClass,
-  type StructureImport,
-  type StructureImportsResult,
-  type StructureLiteralCall,
-  type StructureLiteralCallsResult,
-  type StructureOutlineRequest,
-  type StructureOutlineResult,
-  type StructureProvider,
-  type StructureSymbol,
+import type {
+  StructureAnalysis,
+  StructureClassifyRequest,
+  StructureFileRequest,
+  StructureFixedFileRequest,
+  StructureHitClass,
+  StructureImport,
+  StructureLiteralCall,
+  StructureOutlineRequest,
+  StructureProvider,
+  StructureStatus,
+  StructureSymbol,
+  StructureUnit,
+  StructureUnitsResult,
 } from "./types.js";
 
 export interface TreeSitterStructureProviderOptions {
+  compute?: Pick<KernelComputeService, "directory" | "text" | "registerGrammar">;
   runtimeFromUrl?: string;
   parseBudgetMs?: number;
   pathExists?: (candidate: string) => boolean;
-  /** Demand signal for installable-but-missing grammars. Host never downloads from here. */
   onLanguageRequest?: (languageId: string, workspaceId?: string) => void;
-  /** Second-level lookup after the bundled runtime directory (D-126). */
   resolveInstalled?: (fileName: string) => string | null;
-  /**
-   * Wiring for a language that is installed rather than bundled. The caller
-   * owns the memo and clears it on install/remove, so this provider never
-   * caches a "not installed" answer past the install that fixes it (D-129).
-   */
   resolveInstalledLanguage?: (languageId: string) => { grammarFile: string; tagsQuery: string } | null;
 }
 
-const FUNCTION_LIKE_TYPES = new Set([
-  "arrow_function",
-  "function",
-  "function_expression",
-  "generator_function",
-  "class",
-]);
-
-const CONTAINER_UNIT_TYPES = new Set([
-  "function_declaration",
-  "generator_function_declaration",
-  "class_declaration",
-  "class",
-  "abstract_class_declaration",
-  "interface_declaration",
-  "type_alias_declaration",
-  "enum_declaration",
-  "method_definition",
-  "function_signature",
-  "internal_module",
-  "module",
-]);
-
-const kindForType = (type: string, initializerType?: string): string => {
-  if (initializerType === "class") return "class";
-  if (initializerType && FUNCTION_LIKE_TYPES.has(initializerType)) return "function";
-  if (type === "method_definition" || type === "function_signature") return "function";
-  if (type.includes("function")) return "function";
-  if (type.includes("class")) return "class";
-  if (type.includes("interface")) return "interface";
-  if (type.includes("enum")) return "enum";
-  if (type.includes("type_alias")) return "type";
-  if (type === "internal_module" || type === "module") return "module";
-  return "variable";
+const recordOf = (value: unknown): Record<string, unknown> => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid native structure record");
+  return value as Record<string, unknown>;
 };
 
-const initializerOf = (node: Node): Node | null => {
-  if (node.type === "lexical_declaration" || node.type === "variable_declaration") {
-    const declarator = node.descendantsOfType("variable_declarator")[0];
-    return declarator?.childForFieldName("value") ?? null;
+const positiveInteger = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
+    throw new Error("Invalid native structure line");
   }
-  if (node.type === "public_field_definition" || node.type === "field_definition") {
-    return node.childForFieldName("value");
+  return value;
+};
+
+const nonnegativeInteger = (value: unknown): number => {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error("Invalid native structure offset");
   }
-  return null;
+  return value;
 };
 
-const isSliceUnit = (node: Node, spec: TreeSitterLanguageSpec): boolean => {
-  if (CONTAINER_UNIT_TYPES.has(node.type)) return true;
-  if (!spec.bindingTypes.has(node.type)) return false;
-  const initializer = initializerOf(node);
-  return initializer !== null && FUNCTION_LIKE_TYPES.has(initializer.type);
+const string = (value: unknown): string => {
+  if (typeof value !== "string") throw new Error("Invalid native structure string");
+  return value;
 };
 
-/**
- * A value binding at module or class level is a name the symbol catalog has to
- * know — `export const DEFAULT_BYTE_BUDGET = 24576` is findable in the LSP
- * outline and must not disappear because the slice query only wants containers
- * (D-098 / D-113). Function-local bindings stay out: they are not what
- * `searchSymbols` answers, and LSP's `documentSymbol` omits them too.
- */
-const isModuleLevelBinding = (node: Node, spec: TreeSitterLanguageSpec): boolean => {
-  if (!spec.bindingTypes.has(node.type)) return false;
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.type === "statement_block" || FUNCTION_LIKE_TYPES.has(parent.type)) return false;
-  }
-  return true;
+const range = (value: unknown) => {
+  const record = recordOf(value);
+  const startLine = positiveInteger(record.startLine);
+  const endLine = positiveInteger(record.endLine);
+  if (endLine < startLine) throw new Error("Reversed native structure range");
+  return { startLine, endLine };
 };
 
-/** Emitted into the outline. Slicing narrows this again by kind (D-098). */
-const isOutlineUnit = (node: Node, spec: TreeSitterLanguageSpec): boolean => (
-  isSliceUnit(node, spec) || isModuleLevelBinding(node, spec)
-);
-
-const nameOfUnit = (unit: Node, name: Node | undefined): string => {
-  if (name?.text) return name.text;
-  const identifier = unit.childForFieldName("name");
-  if (identifier?.text) return identifier.text;
-  return "default";
+const symbol = (value: unknown): StructureSymbol => {
+  const record = recordOf(value);
+  return {
+    name: string(record.name),
+    kind: string(record.kind),
+    range: range(record.range),
+    signature: range(record.signature),
+  };
 };
 
-const contentHash = (text: string): string => createHash("sha256").update(text).digest("hex");
-
-const pointToLines = (start: { row: number; column: number }, end: { row: number; column: number }) => {
-  const startLine = start.row + 1;
-  const endLine = end.column === 0 && end.row > start.row ? end.row : end.row + 1;
-  return { startLine, endLine: Math.max(startLine, endLine) };
+const empty = (revision: string, status: StructureStatus, message: string): StructureAnalysis => {
+  const common = { status, provider: "tree-sitter" as const, revision, message };
+  return {
+    outline: { ...common, symbols: [] },
+    classify: { ...common, hits: [] },
+    literalCalls: { ...common, calls: [] },
+    imports: { ...common, imports: [] },
+  };
 };
 
-/**
- * Outline from an upstream `tags.scm`. Those queries pair a `@definition.*`
- * capture on the whole declaration with `@name` on its identifier, which is
- * exactly the unit/name split the slicer wants — so one adapter serves every
- * language we can install instead of a hand-written query per language.
- */
-function collectTagsOutline(
-  language: Language,
-  tagsQuery: string,
-  root: Node,
-): { symbols: StructureSymbol[]; nameLines: Set<number> } {
-  const symbols: StructureSymbol[] = [];
-  const nameLines = new Set<number>();
-  const query = new Query(language, tagsQuery);
-  try {
-    const seen = new Set<string>();
-    for (const match of query.matches(root)) {
-      const name = match.captures.find((capture) => capture.name === "name")?.node;
-      if (name) nameLines.add(name.startPosition.row + 1);
-      const definition = match.captures.find((capture) => tagsDefinitionKind(capture.name) !== null);
-      if (!definition) continue;
-      const unit = definition.node;
-      const named = name ?? unit.childForFieldName("name");
-      if (!named) continue;
-      const unitName = named.text.trim();
-      if (!unitName) continue;
-      const range = pointToLines(unit.startPosition, unit.endPosition);
-      const signature = pointToLines(named.startPosition, named.endPosition);
-      const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      symbols.push({
-        name: unitName,
-        kind: tagsDefinitionKind(definition.name) ?? "unknown",
-        range,
-        signature: {
-          startLine: Math.max(range.startLine, signature.startLine),
-          endLine: Math.min(range.endLine, signature.endLine),
-        },
-      });
+const observedRevision = (
+  path: string,
+  expectedRevision: string | undefined,
+  result: KernelComputeResult,
+): string => {
+  const revisions = new Set(result.records.filter((record) => record.path === path).map((record) => record.revision));
+  if (expectedRevision !== undefined) {
+    if ([...revisions].some((revision) => revision !== expectedRevision)) {
+      throw new Error("Native structure source identity changed");
     }
-  } finally {
-    query.delete();
+    return expectedRevision;
   }
-  return { symbols, nameLines };
-}
+  if (revisions.size > 1) throw new Error("Native disk structure mixed source revisions");
+  return revisions.values().next().value ?? "";
+};
 
-interface ParsedCache {
-  hash: string;
-  languageId: string;
-  tree: import("web-tree-sitter").Tree;
-  language: Language;
-  symbols: StructureSymbol[];
-  nameLines: Set<number>;
-}
-
-export function createTreeSitterStructureProvider(
-  options: TreeSitterStructureProviderOptions = {},
-): StructureProvider {
-  const parseBudgetMs = options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS;
-  const pathExists = options.pathExists ?? existsSync;
-  const fromUrl = options.runtimeFromUrl;
-  const cache = new Map<string, ParsedCache>();
-  const pins = new Map<string, number>();
-  let initPromise: Promise<void> | null = null;
-  const languages = new Map<string, Promise<Language>>();
-
-  const pin = (key: string): void => {
-    pins.set(key, (pins.get(key) ?? 0) + 1);
-  };
-
-  const unpin = (key: string): void => {
-    const next = (pins.get(key) ?? 1) - 1;
-    if (next <= 0) pins.delete(key);
-    else pins.set(key, next);
-  };
-
-  /**
-   * Drop idle cache entries only. A caller may still hold `entry.tree` after
-   * `parseDocument` resolves; deleting that tree is use-after-free. Pin the
-   * key for the whole outline/classify/calls/imports call, including any
-   * await after parse.
-   */
-  const evictIdle = (keepKey: string): void => {
-    if (cache.size <= 32) return;
-    for (const key of cache.keys()) {
-      if (key === keepKey || (pins.get(key) ?? 0) > 0) continue;
-      cache.get(key)?.tree.delete();
-      cache.delete(key);
-      if (cache.size <= 32) return;
-    }
-  };
-
-  const runtimeFile = (name: string): string => (
-    resolveStructureRuntimeFile(name, fromUrl ?? import.meta.url, pathExists, options.resolveInstalled)
-  );
-
-  /**
-   * Bundled table first, then an installed grammar with its upstream tags
-   * query. Nothing is memoized here — the caller's lookup is the memo, so an
-   * install takes effect on the next request instead of the next restart.
-   */
-  const specFor = (languageId: string): TreeSitterLanguageSpec | undefined => {
-    const bundled = treeSitterLanguageSpec(languageId);
+/** Only shapes and small grammar recipes live here. Text/AST parsing and the
+ * cancellable query run in the shared kernel, never a Host parser fallback. */
+export function createTreeSitterStructureProvider(options: TreeSitterStructureProviderOptions = {}): StructureProvider {
+  const exists = options.pathExists ?? existsSync;
+  const specFor = (id: string): TreeSitterLanguageSpec | undefined => {
+    const bundled = treeSitterLanguageSpec(id);
     if (bundled) return bundled;
-    const installed = options.resolveInstalledLanguage?.(languageId);
+    const installed = options.resolveInstalledLanguage?.(id);
     return installed ? treeSitterTagsSpec(installed.grammarFile, installed.tagsQuery) : undefined;
   };
 
-  const ensureRuntime = (): { status: "ok" } | { status: "unavailable"; message: string } => {
-    const runtime = runtimeFile("web-tree-sitter.wasm");
-    if (!pathExists(runtime)) {
-      return { status: "unavailable", message: "tree-sitter runtime wasm is not readable." };
-    }
-    return { status: "ok" };
-  };
-
-  const initParser = async (): Promise<void> => {
-    if (!initPromise) {
-      initPromise = Parser.init({
-        locateFile: (scriptName: string) => runtimeFile(scriptName.endsWith(".wasm") ? scriptName : "web-tree-sitter.wasm"),
-      }).catch((error: unknown) => {
-        initPromise = null;
-        throw error;
-      });
-    }
-    await initPromise;
-  };
-
-  /**
-   * Keyed by resolved path, not language id: an on-demand grammar lives at a
-   * content-addressed path, so reinstalling different bytes must not reuse the
-   * `Language` loaded from the old ones.
-   */
-  const loadLanguage = (grammarPath: string): Promise<Language> => {
-    const existing = languages.get(grammarPath);
-    if (existing) return existing;
-    const loading = (async () => {
-      if (!pathExists(grammarPath)) {
-        throw new Error(`Grammar wasm is not readable: ${grammarPath}`);
-      }
-      const language = await Language.load(grammarPath);
-      if (language.abiVersion < MIN_COMPATIBLE_VERSION || language.abiVersion > LANGUAGE_VERSION) {
-        throw new Error(
-          `Grammar ABI ${language.abiVersion} is locked out of this application (compatible ${MIN_COMPATIBLE_VERSION}-${LANGUAGE_VERSION}).`,
-        );
-      }
-      return language;
-    })();
-    languages.set(grammarPath, loading);
-    void loading.catch(() => {
-      if (languages.get(grammarPath) === loading) languages.delete(grammarPath);
+  const recipeFor = async (request: Pick<StructureOutlineRequest, "languageId" | "path" | "workspaceId">): Promise<string | undefined> => {
+    const id = request.languageId ?? languageIdForPath(request.path);
+    if (id) options.onLanguageRequest?.(id, request.workspaceId);
+    const spec = id ? specFor(id) : undefined;
+    if (!spec) return undefined;
+    const grammarPath = resolveStructureRuntimeFile(
+      spec.grammarFile,
+      options.runtimeFromUrl ?? import.meta.url,
+      exists,
+      options.resolveInstalled,
+    );
+    if (!exists(grammarPath)) throw new Error(`Grammar wasm is not readable: ${grammarPath}`);
+    if (!options.compute) throw new Error("Native structure computation is unavailable");
+    // Registration hashes the actual installed bytes. Neither grammar updates
+    // nor query recipe changes may reuse a stale compiled language identity.
+    return options.compute.registerGrammar({
+      recipeId: "",
+      grammarPath,
+      grammarName: "",
+      style: spec.jsonOutline ? "json" : spec.tagsOutline ? "tags" : "code",
+      definitionQuery: spec.definitionQuery,
+      ...(spec.importQuery ? { importQuery: spec.importQuery } : {}),
+      ...(spec.literalCallQuery ? { literalCallQuery: spec.literalCallQuery } : {}),
+      ...(spec.jsonOutline ? { maxDepth: spec.jsonOutline.maxDepth, maxSymbols: spec.jsonOutline.maxSymbols } : {}),
     });
-    return loading;
   };
 
-  const parseDocument = async (
+  const computeText = async (
     request: StructureOutlineRequest,
-    languageId: string,
-    spec: TreeSitterLanguageSpec,
-  ): Promise<
-    | { status: "ready"; entry: ParsedCache; cacheKey: string }
-    | { status: "cancelled" | "failed" | "unavailable"; message: string }
-  > => {
-    if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
+    operation: "structure" | "chunks",
+    lines: number[] = [],
+  ) => {
+    request.signal?.throwIfAborted();
+    const recipeId = await recipeFor(request);
+    if (!options.compute) throw new Error("Native structure computation is unavailable");
+    if (operation === "structure" && !recipeId) return null;
+    const result = await options.compute.text(
+      request.workspaceId ?? "structure-input",
+      [{ path: "input", revision: request.revision, text: request.text }],
+      {
+        lane: request.lane ?? "foreground",
+        operation,
+        includeHidden: true,
+        parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
+        files: [{ path: "input", revision: request.revision, lines, ...(recipeId ? { recipeId } : {}) }],
+      },
+      { signal: request.signal },
+    );
+    return {
+      result: {
+        ...result,
+        records: result.records.map((record) => {
+          if (record.path !== "input") throw new Error("Native text computation changed its opaque input identity");
+          return { ...record, path: request.path };
+        }),
+      },
+      ...(recipeId ? { recipeId } : {}),
+    };
+  };
+
+  const computeFile = async (
+    request: StructureFileRequest,
+    operation: "structure" | "chunks",
+  ) => {
+    request.signal?.throwIfAborted();
+    const recipeId = await recipeFor(request);
+    if (!options.compute) throw new Error("Native structure computation is unavailable");
+    if (operation === "structure" && !recipeId) return null;
+    const result = await options.compute.directory(
+      request.root,
+      {
+        lane: request.lane ?? "background",
+        operation,
+        includeHidden: true,
+        paths: [request.path],
+        parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
+        files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}) }],
+      },
+      { signal: request.signal },
+    );
+    return { result, ...(recipeId ? { recipeId } : {}) };
+  };
+
+  const computeFixed = async (
+    request: StructureFixedFileRequest,
+    operation: "structure" | "chunks",
+  ) => {
+    request.signal?.throwIfAborted();
+    const recipeId = await recipeFor(request);
+    if (operation === "structure" && !recipeId) return null;
+    const result = await request.compute({
+      lane: request.lane ?? "foreground",
+      operation,
+      includeHidden: true,
+      paths: [request.path],
+      parseBudgetMs: options.parseBudgetMs ?? STRUCTURE_PARSE_BUDGET_MS,
+      files: [{ path: request.path, lines: request.lines ?? [], ...(recipeId ? { recipeId } : {}) }],
+    }, { signal: request.signal });
+    return { result, ...(recipeId ? { recipeId } : {}) };
+  };
+
+  const decode = (
+    path: string,
+    expectedRevision: string | undefined,
+    result: KernelComputeResult,
+    recipeId?: string,
+  ): StructureAnalysis => {
+    const revision = observedRevision(path, expectedRevision, result);
+    const parts: Record<"symbols" | "hits" | "calls" | "imports", unknown[]> = {
+      symbols: [],
+      hits: [],
+      calls: [],
+      imports: [],
+    };
+    const lineLengths: number[] = [];
+    let summary: Record<string, unknown> | undefined;
+    for (const nativeRecord of result.records) {
+      if (nativeRecord.path !== path) continue;
+      if (nativeRecord.revision !== revision) throw new Error("Native structure source identity changed");
+      const data = recordOf(nativeRecord.data);
+      if (nativeRecord.kind === "structure-part") {
+        if (typeof data.category !== "string" || !Array.isArray(data.items)) {
+          throw new Error("Invalid native structure batch");
+        }
+        if (data.category === "lineLengths") {
+          const offset = nonnegativeInteger(data.offset);
+          if (offset !== lineLengths.length) throw new Error("Native line-length batch is not contiguous");
+          for (const item of data.items) lineLengths.push(nonnegativeInteger(item));
+        } else if (data.category in parts) {
+          parts[data.category as keyof typeof parts].push(...data.items);
+        }
+      } else if (nativeRecord.kind === "structure") {
+        summary = data;
+      }
+    }
+    if (!summary) {
+      return empty(
+        revision,
+        result.status === "cancelled" ? "cancelled" : "failed",
+        result.message ?? "Native structure did not complete",
+      );
+    }
+    const status = summary.status;
+    if (status !== "ready" && status !== "empty") {
+      const failure: StructureStatus = ["stale", "failed", "unavailable", "unsupported", "cancelled"].includes(String(status))
+        ? status as StructureStatus
+        : "failed";
+      return empty(
+        revision,
+        failure,
+        typeof summary.message === "string" ? summary.message : "Native structure failed",
+      );
+    }
+    const common = { provider: "tree-sitter" as const, revision };
+    const symbols = parts.symbols.map(symbol);
+    const hits = parts.hits.map((value) => {
+      const hit = recordOf(value);
+      if (!["name", "body", "comment", "string"].includes(String(hit.class))) {
+        throw new Error("Invalid native hit class");
+      }
+      return { line: positiveInteger(hit.line), class: hit.class as StructureHitClass };
+    });
+    const calls: StructureLiteralCall[] = parts.calls.map((value) => {
+      const call = recordOf(value);
+      return { name: string(call.name), literal: string(call.literal), line: positiveInteger(call.line) };
+    });
+    const imports: StructureImport[] = parts.imports.map((value) => {
+      const item = recordOf(value);
+      return { source: string(item.source), line: positiveInteger(item.line) };
+    });
+    return {
+      outline: { ...common, status: symbols.length ? "ready" : "empty", symbols },
+      classify: { ...common, status: "ready", hits },
+      literalCalls: { ...common, status: summary.callsStatus === "unsupported" ? "unsupported" : "ready", calls },
+      imports: { ...common, status: summary.importsStatus === "unsupported" ? "unsupported" : "ready", imports },
+      lineLengths,
+      ...(recipeId ? { recipeId } : {}),
+    };
+  };
+
+  const decodeUnits = (
+    path: string,
+    expectedRevision: string | undefined,
+    run: { result: KernelComputeResult; recipeId?: string },
+  ): StructureUnitsResult => {
+    const revision = observedRevision(path, expectedRevision, run.result);
+    const units: StructureUnit[] = [];
+    let pending: StructureUnit | undefined;
+    let offset = 0;
+    for (const nativeRecord of run.result.records) {
+      if (nativeRecord.kind !== "unit" || nativeRecord.path !== path) continue;
+      if (nativeRecord.revision !== revision) throw new Error("Native chunk source identity changed");
+      const data = recordOf(nativeRecord.data);
+      if (data.offset === 0) {
+        if (pending) throw new Error("Incomplete native unit");
+        pending = {
+          ...range(data),
+          parentName: string(data.parentName),
+          parentKind: string(data.parentKind),
+          parentSignature: string(data.parentSignature),
+          docComments: string(data.docComments),
+          text: "",
+          fallback: data.fallback === true,
+        };
+        offset = 0;
+      }
+      if (!pending || data.offset !== offset) throw new Error("Native unit byte continuation mismatch");
+      const text = string(data.text);
+      pending.text += text;
+      offset += Buffer.byteLength(text, "utf8");
+      if (data.final === true) {
+        units.push(pending);
+        pending = undefined;
+      }
+    }
+    if (pending) throw new Error("Native unit ended before its final frame");
+    if (["failed", "partial", "cancelled"].includes(run.result.status) || run.result.message) {
+      throw new Error(run.result.message ?? "Native unit production failed");
+    }
+    return {
+      status: units.length ? "ready" : "empty",
+      revision,
+      units,
+      ...(run.recipeId ? { recipeId: run.recipeId } : {}),
+    };
+  };
+
+  const analyze = async (request: StructureClassifyRequest): Promise<StructureAnalysis> => {
     try {
-    const runtime = ensureRuntime();
-    if (runtime.status !== "ok") return runtime;
-    const grammarPath = runtimeFile(spec.grammarFile);
-    const hash = contentHash(request.text);
-    const cacheKey = `${languageId}:${grammarPath}:${hash}`;
-    const cached = cache.get(cacheKey);
-    if (cached && cached.languageId === languageId) {
-      if (!pathExists(runtimeFile("web-tree-sitter.wasm")) || !pathExists(grammarPath)) {
-        return { status: "unavailable", message: "Grammar wasm is not readable." };
-      }
-      pin(cacheKey);
-      return { status: "ready", entry: cached, cacheKey };
-    }
-      await initParser();
-      if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
-      const language = await loadLanguage(grammarPath);
-      if (request.signal?.aborted) return { status: "cancelled", message: "Structure request was cancelled." };
-      const started = performance.now();
-      const parser = new Parser();
-      parser.setLanguage(language);
-      let stopReason: "cancelled" | "budget" | undefined;
-      const tree = parser.parse(request.text, undefined, {
-        progressCallback: () => {
-          if (request.signal?.aborted) {
-            stopReason = "cancelled";
-            return true;
-          }
-          if (performance.now() - started > parseBudgetMs) {
-            stopReason = "budget";
-            return true;
-          }
-          return false;
-        },
-      });
-      parser.delete();
-      if (!tree) {
-        if (stopReason === "cancelled" || request.signal?.aborted) {
-          return { status: "cancelled", message: "Structure request was cancelled." };
-        }
-        if (stopReason === "budget") {
-          return { status: "failed", message: "Parse budget exhausted before the file was finished." };
-        }
-        return { status: "failed", message: "tree-sitter returned no tree." };
-      }
-      if (request.signal?.aborted) {
-        tree.delete();
-        return { status: "cancelled", message: "Structure request was cancelled." };
-      }
-      if (performance.now() - started > parseBudgetMs) {
-        tree.delete();
-        return { status: "failed", message: "Parse budget exhausted before the file was finished." };
-      }
-      let symbols: StructureSymbol[] = [];
-      let nameLines = new Set<number>();
-      if (spec.jsonOutline) {
-        const collected = collectJsonOutline(tree.rootNode, spec.jsonOutline);
-        symbols = collected.symbols;
-        nameLines = collected.nameLines;
-      } else if (spec.tagsOutline) {
-        const collected = collectTagsOutline(language, spec.definitionQuery, tree.rootNode);
-        symbols = collected.symbols;
-        nameLines = collected.nameLines;
-      } else {
-        const definitionQuery = new Query(language, spec.definitionQuery);
-        const matches = definitionQuery.matches(tree.rootNode);
-        definitionQuery.delete();
-        const seen = new Set<string>();
-        for (const match of matches) {
-          const unit = match.captures.find((capture) => capture.name === "unit")?.node;
-          const name = match.captures.find((capture) => capture.name === "name")?.node;
-          if (name) nameLines.add(name.startPosition.row + 1);
-          if (!unit || !isOutlineUnit(unit, spec)) continue;
-          const unitName = nameOfUnit(unit, name);
-          const initializer = initializerOf(unit);
-          const range = pointToLines(unit.startPosition, unit.endPosition);
-          const signature = name
-            ? pointToLines(name.startPosition, name.endPosition)
-            : { startLine: range.startLine, endLine: range.startLine };
-          const key = `${unitName}:${range.startLine}:${range.endLine}:${unit.type}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          symbols.push({
-            name: unitName,
-            kind: kindForType(unit.type, initializer?.type),
-            range,
-            signature: {
-              startLine: Math.max(range.startLine, signature.startLine),
-              endLine: Math.min(range.endLine, signature.endLine),
-            },
-          });
-        }
-      }
-      const entry: ParsedCache = { hash, languageId, tree, language, symbols, nameLines };
-      cache.set(cacheKey, entry);
-      pin(cacheKey);
-      evictIdle(cacheKey);
-      return { status: "ready", entry, cacheKey };
+      const run = await computeText(request, "structure", request.lines);
+      return run
+        ? decode(request.path, request.revision, run.result, run.recipeId)
+        : empty(request.revision, "unsupported", "tree-sitter has no grammar spec for this language.");
     } catch (error) {
-      const message = error instanceof Error && error.message
-        ? error.message
-        : error instanceof Error
-          ? (error.stack ?? "tree-sitter failed to load.")
-          : String(error);
-      if (message === "cancelled" || request.signal?.aborted) {
-        return { status: "cancelled", message: "Structure request was cancelled." };
-      }
-      if (message === "budget" || message.includes("budget")) {
-        return { status: "failed", message: "Parse budget exhausted before the file was finished." };
-      }
-      return { status: "unavailable", message: message || "tree-sitter failed to load." };
+      return empty(
+        request.revision,
+        request.signal?.aborted ? "cancelled" : "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
     }
   };
 
-  const nodeTouchesLine = (node: Node, zeroLine: number): boolean => (
-    node.startPosition.row <= zeroLine && node.endPosition.row >= zeroLine
-  );
-
-  const lineHasType = (node: Node, zeroLine: number, matches: StructureTypeMatcher): boolean => {
-    if (!nodeTouchesLine(node, zeroLine)) return false;
-    if (matches(node.type)) return true;
-    return node.children.some((child) => lineHasType(child, zeroLine, matches));
-  };
-
-  const classifyLine = (entry: ParsedCache, spec: TreeSitterLanguageSpec, line: number): StructureHitClass => {
-    const zeroLine = line - 1;
-    const root = entry.tree.rootNode;
-    if (lineHasType(root, zeroLine, spec.commentTypes)) return "comment";
-    if (entry.nameLines.has(line)) return "name";
-    if (lineHasType(root, zeroLine, spec.stringTypes)) return "string";
-    return "body";
-  };
-
-  const resolveSpec = (request: StructureOutlineRequest): { languageId: string; spec: TreeSitterLanguageSpec } | null => {
-    const languageId = request.languageId ?? languageIdForPath(request.path);
-    if (languageId) options.onLanguageRequest?.(languageId, request.workspaceId);
-    if (!languageId) return null;
-    const spec = specFor(languageId);
-    return spec ? { languageId, spec } : null;
+  const analyzeFile = async (request: StructureFileRequest): Promise<StructureAnalysis> => {
+    try {
+      const run = await computeFile(request, "structure");
+      return run
+        ? decode(request.path, undefined, run.result, run.recipeId)
+        : empty("", "unsupported", "tree-sitter has no grammar spec for this language.");
+    } catch (error) {
+      return empty(
+        "",
+        request.signal?.aborted ? "cancelled" : "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
   };
 
   return {
     id: "tree-sitter",
-    capabilities(languageId) {
-      return capabilitiesFromSpec(languageId ? specFor(languageId) : undefined);
-    },
-    async outline(request): Promise<StructureOutlineResult> {
-      const resolved = resolveSpec(request);
-      if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, symbols: [], message: "tree-sitter has no grammar spec for this language." };
-      }
-      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
-      if (parsed.status !== "ready") {
-        return { status: parsed.status, provider: "tree-sitter", revision: request.revision, symbols: [], message: parsed.message };
-      }
+    capabilities: (id) => capabilitiesFromSpec(id ? specFor(id) : undefined),
+    analyze,
+    analyzeFile,
+    outline: async (request) => (await analyze({ ...request, lines: request.hitLines ?? [] })).outline,
+    classifyHits: async (request) => (await analyze(request)).classify,
+    literalCalls: async (request) => (await analyze({ ...request, lines: [] })).literalCalls,
+    imports: async (request) => (await analyze({ ...request, lines: [] })).imports,
+    async units(request): Promise<StructureUnitsResult> {
       try {
+        const run = await computeText(request, "chunks");
+        if (!run) throw new Error("Native structural units unavailable");
+        return decodeUnits(request.path, request.revision, run);
+      } catch (error) {
         return {
-          status: parsed.entry.symbols.length > 0 ? "ready" : "empty",
-          provider: "tree-sitter",
+          status: request.signal?.aborted ? "cancelled" : "failed",
           revision: request.revision,
-          symbols: parsed.entry.symbols,
+          units: [],
+          message: error instanceof Error ? error.message : String(error),
         };
-      } finally {
-        unpin(parsed.cacheKey);
       }
     },
-    async classifyHits(request: StructureClassifyRequest): Promise<StructureClassifyResult> {
-      const resolved = resolveSpec(request);
-      if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, hits: [], message: "Hit classification has no grammar spec for this language." };
-      }
-      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
-      if (parsed.status !== "ready") {
-        return { status: parsed.status, provider: "tree-sitter", revision: request.revision, hits: [], message: parsed.message };
-      }
+    async unitsFile(request): Promise<StructureUnitsResult> {
       try {
+        const run = await computeFile(request, "chunks");
+        if (!run) throw new Error("Native structural units unavailable");
+        return decodeUnits(request.path, undefined, run);
+      } catch (error) {
         return {
-          status: "ready",
-          provider: "tree-sitter",
-          revision: request.revision,
-          hits: request.lines.map((line) => ({ line, class: classifyLine(parsed.entry, resolved.spec, line) })),
+          status: request.signal?.aborted ? "cancelled" : "failed",
+          revision: "",
+          units: [],
+          message: error instanceof Error ? error.message : String(error),
         };
-      } finally {
-        unpin(parsed.cacheKey);
       }
     },
-    async literalCalls(request: StructureOutlineRequest): Promise<StructureLiteralCallsResult> {
-      const resolved = resolveSpec(request);
-      if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction has no grammar spec for this language." };
-      }
-      if (!resolved.spec.literalCallQuery) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, calls: [], message: "Literal-call extraction is not available for this language." };
-      }
-      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
-      if (parsed.status !== "ready") {
-        return { status: parsed.status, provider: "tree-sitter", revision: request.revision, calls: [], message: parsed.message };
-      }
+    async unitsFixed(request): Promise<StructureUnitsResult> {
       try {
-        const query = new Query(parsed.entry.language, resolved.spec.literalCallQuery);
-        const calls: StructureLiteralCall[] = [];
-        for (const match of query.matches(parsed.entry.tree.rootNode)) {
-          const fn = match.captures.find((capture) => capture.name === "fn")?.node;
-          const literal = match.captures.find((capture) => capture.name === "literal")?.node;
-          if (!fn || !literal) continue;
-          calls.push({ name: fn.text, literal: literal.text.slice(1, -1), line: literal.startPosition.row + 1 });
-        }
-        query.delete();
-        return { status: "ready", provider: "tree-sitter", revision: request.revision, calls };
-      } finally {
-        unpin(parsed.cacheKey);
-      }
-    },
-    async imports(request: StructureOutlineRequest): Promise<StructureImportsResult> {
-      const resolved = resolveSpec(request);
-      if (!resolved) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction has no grammar spec for this language." };
-      }
-      if (!resolved.spec.importQuery) {
-        return { status: "unsupported", provider: "tree-sitter", revision: request.revision, imports: [], message: "Import extraction is not available for this language." };
-      }
-      const parsed = await parseDocument(request, resolved.languageId, resolved.spec);
-      if (parsed.status !== "ready") {
-        return { status: parsed.status, provider: "tree-sitter", revision: request.revision, imports: [], message: parsed.message };
-      }
-      try {
-        const query = new Query(parsed.entry.language, resolved.spec.importQuery);
-        const imports: StructureImport[] = [];
-        for (const match of query.matches(parsed.entry.tree.rootNode)) {
-          const source = match.captures.find((capture) => capture.name === "source")?.node;
-          if (!source) continue;
-          imports.push({ source: source.text.slice(1, -1), line: source.startPosition.row + 1 });
-        }
-        query.delete();
-        return { status: "ready", provider: "tree-sitter", revision: request.revision, imports };
-      } finally {
-        unpin(parsed.cacheKey);
+        const run = await computeFixed(request, "chunks");
+        if (!run) throw new Error("Native fixed-view structural units unavailable");
+        return decodeUnits(request.path, undefined, run);
+      } catch (error) {
+        return {
+          status: request.signal?.aborted ? "cancelled" : "failed",
+          revision: "",
+          units: [],
+          message: error instanceof Error ? error.message : String(error),
+        };
       }
     },
   };

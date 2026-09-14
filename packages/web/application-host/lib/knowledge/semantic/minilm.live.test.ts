@@ -10,7 +10,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createDocumentAuthorityHarness } from "../../documents/contract-fixtures.js";
 import { createStructureSource } from "../../structure/source.js";
-import { createTreeSitterStructureProvider } from "../../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../../structure/native-provider.test-helper.js";
 import { createLocalMinilmEmbedder } from "./minilm.js";
 import { resolveInstalledModelPack } from "./model-store.js";
 import { LOCAL_MINILM_SPACE, workspaceScope } from "./identity.js";

@@ -69,9 +69,7 @@ describe('workspace search capability', () => {
     try {
       const search = createWorkspaceContentSearch({
         documents: harness.authority,
-        spawn: () => {
-          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
-        },
+        compute: { directory: async () => { throw new Error('native compute unavailable'); } },
         pathModule: await import('node:path').then((module) => module.default),
       });
       const call = createWorkspaceSearchCapabilityHandler(search);

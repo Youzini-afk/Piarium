@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createWorkspaceContentSearch } from "../search/content.js";
+import { createNativeComputeTestHarness } from "../kernel/compute.test-helper.js";
 import { createHarnessPathAuthority } from "./path-authority.js";
 import { createExploreFileReader } from "./explore-file-reader.js";
 import { createExploreSearchService } from "./explore-service.js";
@@ -31,7 +31,8 @@ async function fixture(
     workspaceId, grantedCapabilities: ["read.search"], ...(scope ? { workspaceScope: scope } : {}),
   };
   const paths = createHarnessPathAuthority({ authorityId: "test-host", documents });
-  const search = createWorkspaceContentSearch({ documents, pathModule: path, spawn });
+  const compute = createNativeComputeTestHarness();
+  const search = createWorkspaceContentSearch({ documents, pathModule: path, compute });
   const host = createHarnessServiceHost({
     search: (request, options) => search.searchContent(request, options),
     resolveWorkspaceRoot: async () => workspace,
@@ -50,6 +51,7 @@ async function fixture(
   disposes.push(async () => {
     router.dispose();
     await host.dispose();
+    await compute.dispose();
     await documents.dispose();
     expect(path.dirname(path.resolve(root))).toBe(path.resolve(tmpdir()));
     await fs.rm(root, { recursive: true, force: true });

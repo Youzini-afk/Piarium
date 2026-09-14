@@ -12,7 +12,7 @@ import {
   treeSitterLanguageSpec,
   treeSitterTagsSpec,
 } from "./languages.js";
-import { createTreeSitterStructureProvider } from "./tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "./native-provider.test-helper.js";
 import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
 
 const request = (text: string, path = "sample.ts") => ({

@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -18,9 +18,9 @@ Last updated: 2026-09-14
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-280 完成 R4 原生进程接管：R1–R4 现按各自可执行契约为 Complete。PTY、command/process tree、原始输出与 writer 生命周期归唯一 Rust process authority；Host 保留终端和 LSP/DAP/任务/测试的产品协议。D-279 的 R2/R3 恢复/物化 handoff 保持。R0 仍为 Partial，R5/R6 未完成，阶段 R 整体仍未完成。**
+**D-281 完成 R5 原生文件/结构计算接管：R1–R5 现按各自可执行契约为 Complete。固定 WorkingState pin 的 read/search/list/structure/chunks、live workspace 的 revision-bound native search/inventory、native tree-sitter 与 semantic/symbol 索引输入共用 Rust compute authority；前台/后台 lane、bounded records、实际取消与 scope admission 均在同一路径。D-280 的 R4 进程权威和 D-279 的 R2/R3 handoff 保持。R0 仍为 Partial，R6 未完成，阶段 R 整体仍未完成。**
 目标与完整范围见 [rust-kernel-design.md](rust-kernel-design.md)，执行顺序为 plan R0–R6。当前仍运行 TS/Node Host 与 Pi worker；
-R0 的 process/package 验收与 R5/R6 仍需分别完成；不以 R1–R4 完成代替阶段 R 的其余工作。
+R0 的 process/package 验收与 R6 仍需分别完成；不以 R1–R5 完成代替阶段 R 的其余工作。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
 
 **P0 integrity、T1 线程核心与 T2 权限纵切（2026-09-04）已完成**：broker Actor、Host 静态授权、versioned
@@ -173,11 +173,11 @@ D-277 接入了 R3 filesystem capture、immutable-root materialization、目录�
 | R2 文件与恢复 | **Complete**（production authority / pending-operation disposition / restart reconciliation） | Documents/Files/Recovery/Integration 与 fs.lock 共用 Rust file authority；D-278 的物理互斥、coverage、owner、重试和真实 Documents 装配修复保持。D-279 新增 `file.operation.list/reconcile`：Host 注册 root 后保留 operationId/kind/path/disposition/reason，可显式重试可证明的安全对账；证据不足的目录 rename 保持 `needs-attention`/retained，不强制重放或猜成功。Registry 仍是 buffer 权威 |
 | R3 基线与物化 | **Complete**（fixed baseline / durable materialization handoff / managed lifecycle） | Rust scan/capture/materialize/measure/remove、Git execution metadata 与 writeback 已接入；D-278 的真实 owning/execution、managed-root admission、分页、未收集内容和 readonly 修复保持。D-279 将固定 source root/revision/writeRevision、kernel operationId、persistent handoff pin、Git executionBaseline receipt、Thread Registry 与 execution view 串成可重入 handoff；pin release 成功后才清 intent，失败保留 receipt 供重启重试。setup timeout/abort 只有收到 child `close` 才结束。Windows 只证明实际 copy；未测平台不虚报 CoW |
 | R4 进程与终端 | **Complete**（native process authority / production consumers / failure evidence，D-280） | format v10 增加同一 Storage 下的 process records；真实 PTY/pipe、原字节 cursor、stdin sequence/ack、process tree 与 writer 归 Rust。用户 terminal、Harness shell、Thread setup、LSP/DAP、任务、内置 Node 测试与测试 provider 均接同一后端；Host/kernel loss、kill refusal、权限撤销与未确认退出保留 handle/writer，不猜 code 0 或盲重放。Host 产品 startup owner 等异步 spawn/close，不是另一套 PID authority。现有 native CI 执行真实测试；本地只声明 Windows 验证，完整发行/旧分发依赖清理和性能对照仍归 R0/R6 |
-| R5 文件与结构计算 | 未实现 | 固定视图检索和结构输入、scope/取消、前台与后台负载；保留 TriviumDB/Pi 原归属 |
+| R5 文件与结构计算 | **Complete**（native compute / production consumers / index inputs，D-281） | WorkingState 查询持有 immutable pin，read/search/list/structure/chunks 直接在该 root 上执行；live workspace search/inventory 使用 Host-admitted canonical root，并给每条正文/结构结果绑定 native revision，漂移只返回 partial/failed，不伪造 fixed snapshot。`search.content`、file find、Harness grep/explore、目录/语言目录、symbol graph 与 semantic disk scan 均复用唯一 native compute/file inventory；virtual Thread semantic 只列 pin 内文件并让 native `unitsFixed` 直接切块，不再把整分支正文搬进 TS。2 个 foreground worker + 独立 background lane、bounded record cursor/backpressure、实际 cancel→terminal→release 已验证。surface draft 仍由 Registry 捕获为固定 object overlay；TriviumDB/vector store/embedder/Pi/LSP 产品协议保持原权威。Host `web-tree-sitter` 只保留 grammar 安装 ABI admission，不解析 workspace source；旧 TS ripgrep/recursive scan、branch corpus/body mirror、Host AST/chunker discovery 已从生产链删除 |
 | R6 完整收口 | 未实施验收 | 所有里程碑、性能/资源对照、真实发行 smoke、旧写入实现清理 |
 
-D-246–D-251 已由 D-254 完成独立验收与重要错误收口；R0/R1 的本机 Rust 纵切现已补入，下一步是按 R1 consumer map 继续切换而非再建 TS 过渡内核。
-当前没有 Rust 端到端性能对照；绝对性能目标仍在 R6 实施时定标，不预填提升倍数。macOS/Linux packaged smoke 由现有 native release CI 承担并归 R0/发行证据；当前产品允许 unsigned Windows/macOS artifact，因此签名不属于 R1。物理断电测试可作为后续发行耐久 QA，但 R1 已用明确落盘顺序、事务故障注入和重启对账覆盖可执行的耐久边界。
+**D-281 R5 收口证据（2026-09-15）**：Windows release kernel 的 `kernel-compute.test.ts` **10/10** 通过，覆盖 immutable pin 对父 live 漂移、draft/tombstone、scope、UTF-16 column、reader+GC、前台/后台隔离与真实取消、Git ignore + force-tracked、native tree-sitter fixed text / live disk / fixed pin chunks，以及 root replacement 失败；R5 focused consumer 回归 **13 files / 118 tests** 全绿，覆盖 search/routes、Harness grep/explore、WorkingBranch、catalog、symbol graph、semantic disk/thread view。完整 `bun run test:kernel` 为 **90/90**（Node 25 + native Vitest 65）；Application Host source+test TypeScript、protocol generation `--check`、Windows VS 环境下 `cargo check`、Rust unit **4/4**、51 个改动 source/test TS/TSX 的 ESLint、docs tests **19/19** 与 docs validation（378 pages / 323 local links）均通过。generated protocol 文件不单独跑 ESLint；其结构由生成器和 protocol drift/type-check 负责。
+当前没有 Rust 端到端性能对照；绝对性能目标仍在 R6 实施时定标，不预填提升倍数。macOS/Linux packaged smoke 由现有 native release CI 承担并归 R0/发行证据；当前产品允许 unsigned Windows/macOS artifact，因此签名不属于 R5。物理断电仍是存储发行 QA，而非 read-only R5 compute gate。下一主线是 R0/R6 收口，不再建立 TS 文件扫描/解析过渡内核。
 
 **R0/R1 返工证据（2026-09-13，D-256）**：`packages/web/application-host/lib/kernel/kernel-client.test.ts` 通过真实
 release `piarium-kernel` 子进程覆盖固定 revision 不漂移、pin 保留到显式 unpin、GC、finish 失败回滚/同 operationId 重试、

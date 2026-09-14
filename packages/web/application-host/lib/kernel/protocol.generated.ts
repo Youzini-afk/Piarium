@@ -94,7 +94,12 @@ export type KernelMethod =
   | "recovery.operation.release"
   | "operation.get"
   | "operation.release"
-  | "storage.gc";
+  | "storage.gc"
+  | "compute.start"
+  | "compute.read"
+  | "compute.cancel"
+  | "compute.release"
+  | "compute.grammar.register";
 
 export interface KernelProcessEnvironmentEntry {
   name: string;
@@ -1096,6 +1101,99 @@ export interface KernelHealthResult {
   relationshipErrors?: string[];
 }
 
+export interface KernelComputeObject {
+  path: string;
+  revision: string;
+  objectHash?: string;
+  ownerId?: string;
+  missing?: boolean;
+}
+
+export interface KernelComputeFile {
+  path: string;
+  recipeId?: string;
+  revision?: string;
+  lines?: number[];
+}
+
+export interface KernelComputeStartParams {
+  workspaceId: string;
+  jobId: string;
+  lane: string;
+  operation: string;
+  pinId?: string;
+  rootId?: string;
+  objects?: KernelComputeObject[];
+  paths?: string[];
+  globs?: string[];
+  excludePaths?: string[];
+  excludeDirectories?: string[];
+  respectGitignore?: boolean;
+  includeHidden?: boolean;
+  query?: string;
+  ignoreCase?: boolean;
+  fixedStrings?: boolean;
+  maxResults?: number;
+  before?: number;
+  after?: number;
+  startLine?: number;
+  endLine?: number;
+  byteOffset?: number;
+  byteLength?: number;
+  immediate?: boolean;
+  files?: KernelComputeFile[];
+  parseBudgetMs?: number;
+  chunkLines?: number;
+  includeText?: boolean;
+  includeTracked?: boolean;
+  includeRevisions?: boolean;
+}
+
+export interface KernelComputeReadParams {
+  workspaceId: string;
+  jobId: string;
+  cursor: number;
+  maxBytes?: number;
+}
+
+export interface KernelComputeHandleParams {
+  workspaceId: string;
+  jobId: string;
+}
+
+export interface KernelComputeGrammarParams {
+  recipeId: string;
+  grammarPath: string;
+  grammarName: string;
+  style: string;
+  definitionQuery: string;
+  importQuery?: string;
+  literalCallQuery?: string;
+  maxDepth?: number;
+  maxSymbols?: number;
+  grammarHash?: string;
+}
+
+export interface KernelComputeRecord {
+  kind: string;
+  path: string;
+  revision: string;
+  data: unknown;
+}
+
+export interface KernelComputeReadResult {
+  jobId: string;
+  kernelEpoch: string;
+  workspaceId: string;
+  status: "queued" | "running" | "ready" | "empty" | "partial" | "failed" | "cancelled";
+  root: string | null;
+  records: KernelComputeRecord[];
+  nextCursor: number;
+  endCursor: number;
+  scannedFiles: number;
+  message: string | null;
+}
+
 export type KernelMethodParams = {
   "process.spawn": KernelProcessSpawnParams;
   "process.read": KernelProcessReadParams;
@@ -1185,6 +1283,11 @@ export type KernelMethodParams = {
   "operation.get": KernelOperationGetParams;
   "operation.release": KernelOperationReleaseParams;
   "storage.gc": KernelGcParams;
+  "compute.start": KernelComputeStartParams;
+  "compute.read": KernelComputeReadParams;
+  "compute.cancel": KernelComputeHandleParams;
+  "compute.release": KernelComputeHandleParams;
+  "compute.grammar.register": KernelComputeGrammarParams;
 };
 
 export type KernelRequest =
@@ -1977,6 +2080,51 @@ export type KernelRequest =
       id: string;
       method: "storage.gc";
       params: KernelGcParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "compute.start";
+      params: KernelComputeStartParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "compute.read";
+      params: KernelComputeReadParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "compute.cancel";
+      params: KernelComputeHandleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "compute.release";
+      params: KernelComputeHandleParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "compute.grammar.register";
+      params: KernelComputeGrammarParams;
       epoch?: string;
       grantId?: string;
     }

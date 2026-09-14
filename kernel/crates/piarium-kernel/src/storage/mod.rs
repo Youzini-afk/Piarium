@@ -30,6 +30,7 @@ use crate::storage_schema::{
 mod authority_store;
 mod branches;
 mod core;
+mod compute_resources;
 mod dispatch;
 mod file_resource_leases;
 mod file_resources;
@@ -178,12 +179,14 @@ pub(crate) struct Storage {
     file_roots: HashMap<String, FileRoot>,
     file_leases: HashMap<String, FileLease>,
     processes: crate::process::ProcessManager,
+    computations: crate::compute::ComputeManager,
 }
 
 impl Drop for Storage {
     fn drop(&mut self) {
         // Keep the catalog and storage lock alive through process drainage.
         // Field drop order alone would unlock before native children stop.
+        self.computations.shutdown();
         let _ = self.shutdown_processes();
     }
 }

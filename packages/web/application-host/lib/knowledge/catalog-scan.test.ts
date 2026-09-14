@@ -1,16 +1,19 @@
-import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync, promises as fsPromises } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import path, { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createDocumentAuthorityHarness } from "../documents/contract-fixtures.js";
+import { revisionFromBytes } from "../documents/inspect.js";
 import { createFsSearchRuntime } from "../fs/search.js";
+import { createNativeComputeTestHarness } from "../kernel/compute.test-helper.js";
 import { createStructureSource } from "../structure/source.js";
-import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
+import { createTreeSitterStructureProvider } from "../structure/native-provider.test-helper.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createSymbolGraphRuntime } from "./symbol-runtime.js";
 import { CATALOG_EXTRACTOR_VERSION } from "./symbols.js";
 
 const disposes: Array<() => Promise<void>> = [];
+const nativeCompute = createNativeComputeTestHarness();
+afterAll(() => nativeCompute.dispose());
 afterEach(async () => {
   for (const dispose of disposes.splice(0).reverse()) await dispose();
 });
@@ -84,13 +87,10 @@ describe("cold workspace catalog scan", () => {
       workspaceId: documents.identity.workspaceId,
     });
 
+    const readDiskBody = vi.spyOn(documents.authority, "read");
+    readDiskBody.mockClear();
     const readAgentInputSnapshot = vi.spyOn(documents.authority, "readAgentInputSnapshot");
-    const search = createFsSearchRuntime({
-      fsPromises,
-      path,
-      spawn,
-      resolveGitBinaryForSpawn: () => "git",
-    });
+    const search = createFsSearchRuntime({ compute: nativeCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,
@@ -107,6 +107,7 @@ describe("cold workspace catalog scan", () => {
     const duplicateScan = runtime.scanWorkspace(documents.identity.workspaceId);
     expect(duplicateScan).toBe(firstScan);
     await firstScan;
+    expect(readDiskBody).not.toHaveBeenCalled();
     expect(readAgentInputSnapshot).not.toHaveBeenCalled();
     expect((await store.searchSymbols("coldSymbol", 5)).map((entry) => entry.name)).toEqual(["coldSymbol"]);
     expect((await store.searchSymbols("dirtySymbol", 5))).toEqual([]);
@@ -172,16 +173,28 @@ describe("cold workspace catalog scan", () => {
         return baseSource.literalCalls(request);
       },
     };
+    let consumerRevision = revisionFromBytes(Buffer.from([
+      "export function consumer() {",
+      "  console.log(\"late.channel\");",
+      "}",
+    ].join("\n")));
+    const producerRevision = revisionFromBytes(Buffer.from([
+      "export function producer() {",
+      "  router.register(\"late.channel\");",
+      "}",
+    ].join("\n")));
     const searchFilesystemFiles = vi.fn(async () => [
       {
         name: "a-consumer.ts",
         path: join(documents.workspaceRoot, "a-consumer.ts"),
         relativePath: "a-consumer.ts",
+        revision: consumerRevision,
       },
       {
         name: "z-producer.ts",
         path: join(documents.workspaceRoot, "z-producer.ts"),
         relativePath: "z-producer.ts",
+        revision: producerRevision,
       },
     ]);
     const read = vi.spyOn(documents.authority, "read");
@@ -211,10 +224,10 @@ describe("cold workspace catalog scan", () => {
     // unresolved candidate metadata is part of the file row, not a placeholder
     // graph node.
     expect(await store.catalogStats()).toMatchObject({ linkCount: 2, nodeCount: 6 });
-    // Each file is read once for the scan revision check and once for actual
-    // extraction. Association resolution does not add another read or source
-    // call. A concurrent duplicate scan shares the in-flight task.
-    expect(read).toHaveBeenCalledTimes(4);
+    // This explicit legacy provider seam still needs one body read per actual
+    // extraction. Catalog revision checks no longer add a Documents read;
+    // production receives native inventory revisions instead.
+    expect(read).toHaveBeenCalledTimes(2);
     expect(sourceCalls).toEqual({ outline: 2, imports: 2, literalCalls: 2 });
 
     // An external disk write does not emit Documents' mutation callback. An
@@ -225,9 +238,14 @@ describe("cold workspace catalog scan", () => {
       "  console.log(\"late.channel\");",
       "}",
     ].join("\n"), "utf8");
+    consumerRevision = revisionFromBytes(Buffer.from([
+      "export function consumerRenamed() {",
+      "  console.log(\"late.channel\");",
+      "}",
+    ].join("\n")));
     await runtime.scanWorkspace(documents.identity.workspaceId);
     expect(searchFilesystemFiles).toHaveBeenCalledTimes(2);
-    expect(read).toHaveBeenCalledTimes(7);
+    expect(read).toHaveBeenCalledTimes(3);
     expect(sourceCalls).toEqual({ outline: 3, imports: 3, literalCalls: 3 });
     expect((await store.searchSymbols("consumer", 5)).map((entry) => entry.name)).not.toContain("consumer");
     expect(await store.searchSymbols("consumerRenamed", 5)).toHaveLength(1);
@@ -265,7 +283,7 @@ describe("cold workspace catalog scan", () => {
     expect((await store.getFileRelations("a-consumer.ts"))?.associations).toEqual([
       expect.objectContaining({ callee: "log", literal: "late.channel" }),
     ]);
-    expect(read).toHaveBeenCalledTimes(9);
+    expect(read).toHaveBeenCalledTimes(5);
     expect(sourceCalls).toEqual({ outline: 5, imports: 5, literalCalls: 5 });
   });
 
@@ -354,7 +372,7 @@ describe("cold workspace catalog scan", () => {
     const producerPath = join(documents.workspaceRoot, "producer.ts");
     writeFileSync(consumerPath, "export function consumer() { console.log(\"external.event\"); }\n", "utf8");
     writeFileSync(producerPath, "export function producer() { router.register(\"external.event\"); }\n", "utf8");
-    const search = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+    const search = createFsSearchRuntime({ compute: nativeCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,
@@ -467,25 +485,25 @@ describe("cold workspace catalog scan", () => {
     rmSync(racePath, { force: true });
 
     let recreated = false;
-    const read = async (request: Parameters<typeof documents.authority.read>[0]) => {
-      const result = await documents.authority.read(request);
-      if (request.resourceId === "race.ts" && result.status === "missing" && !recreated) {
-        recreated = true;
-        writeFileSync(racePath, "export function newRace() {}\n", "utf8");
-      }
-      return result;
-    };
     const inventory = [] as Array<never> & { enumerationStatus: "complete" };
     Object.defineProperty(inventory, "enumerationStatus", { value: "complete", enumerable: false });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
-      documents: { ...documents.authority, read } as never,
+      documents: documents.authority,
       supervisor: {
         syncDocument: async () => ({ status: "synced", documentVersion: 1 }),
         documentSymbols: async () => ({ status: "failed", message: "catalog scan must not start a language server" }),
       } as never,
       structureSource: parsingSource(),
       searchFilesystemFiles: async () => inventory,
+      isIndexablePath: async (_workspaceId, resourceId) => {
+        if (resourceId !== "race.ts") return false;
+        if (!recreated) {
+          recreated = true;
+          writeFileSync(racePath, "export function newRace() {}\n", "utf8");
+        }
+        return true;
+      },
     });
     disposes.push(() => runtime.dispose());
 
@@ -580,7 +598,7 @@ describe("cold workspace catalog scan", () => {
     ], freshDisk.revision, [], { extractor: CATALOG_EXTRACTOR_VERSION });
     const freshBefore = await store.getFileRelations("fresh.ts");
 
-    const search = createFsSearchRuntime({ fsPromises, path, spawn, resolveGitBinaryForSpawn: () => "git" });
+    const search = createFsSearchRuntime({ compute: nativeCompute, path });
     const runtime = createSymbolGraphRuntime({
       getStore: async () => store,
       documents: documents.authority,

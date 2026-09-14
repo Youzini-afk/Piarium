@@ -17,6 +17,13 @@ thiserror.workspace = true
 uuid.workspace = true
 
 portable-pty.workspace = true
+grep-regex.workspace = true
+grep-matcher.workspace = true
+ignore.workspace = true
+globset.workspace = true
+tree-sitter.workspace = true
+streaming-iterator.workspace = true
+wasmparser.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

@@ -2,35 +2,18 @@ import type { WorkingBranchReadProvenance } from "@piarium/protocol";
 import type { SurfaceSnapshotOverlayEntry } from "../../documents/surface-snapshot-store.js";
 import type { ExploreFileSnapshot } from "../explore-file-reader.js";
 import type { HarnessDocumentPathOverlayLookup, HarnessDocumentReadLookup } from "../service-host.js";
-import { listBranchTextFiles, listBranchViewFromStore, readBranchFile } from "./branch-view.js";
+import { readBranchFile } from "./branch-view.js";
 import type { ThreadExecutionViewRegistry } from "./execution-view.js";
 import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./types.js";
+
+import { createWorkingBranchQuery, type WorkingBranchPinOptions, type WorkingBranchQuerySnapshot } from "./working-branch-query.js";
+export type { WorkingBranchPinOptions, WorkingBranchQuerySnapshot } from "./working-branch-query.js";
 
 export interface WorkingBranchLookups {
   readSource(sessionId: string, resourceId: string): Promise<HarnessDocumentReadLookup | null>;
   pathOverlay(sessionId: string, resourceId: string): Promise<HarnessDocumentPathOverlayLookup | null>;
-  searchCorpus(sessionId: string): Promise<Array<{ path: string; text: string }> | null>;
   exploreFile(sessionId: string, resourceId: string): Promise<ExploreFileSnapshot | null>;
   pinQuery(sessionId: string, options?: WorkingBranchPinOptions): Promise<WorkingBranchQuerySnapshot | null>;
-}
-
-export interface WorkingBranchPinOptions {
-  roots?: readonly string[];
-  signal?: AbortSignal;
-  deadlineAt?: number;
-}
-
-export interface WorkingBranchQuerySnapshot {
-  sessionId: string;
-  workspaceId: string;
-  branchId: string;
-  writeRevision: number;
-  revision: number;
-  root: string;
-  pinId: string;
-  files: Array<{ path: string; text: string; revision: string }>;
-  readFile(resourceId: string): Promise<ExploreFileSnapshot>;
-  release(): Promise<void>;
 }
 
 const provenanceFor = (
@@ -96,26 +79,21 @@ export function createWorkingBranchLookups(options: {
 
     async pathOverlay(sessionId, resourceId) {
       return withView(sessionId, async (view, store) => {
-        const listed = await listBranchViewFromStore(store, view.branchId, resourceId);
-        if (!listed) {
-          return {
-            status: "unavailable" as const,
-            message: `Working branch ${view.branchId} is unavailable`,
-          };
-        }
-        const entries: SurfaceSnapshotOverlayEntry[] = listed.map((entry) => ({
-          path: entry.path,
-          kind: entry.kind,
-          ...(entry.revision === undefined ? {} : { revision: entry.revision }),
-        }));
+        const pin = await store.pinBranch(view.branchId);
+        try {
+          const result = await store.queryFiles(pin, { lane: "foreground", operation: "list", paths: [resourceId], includeHidden: true });
+          if (result.status === "failed" || result.status === "partial" || result.status === "cancelled") {
+            return { status: "unavailable" as const, message: result.message ?? "Working-branch path query did not complete" };
+          }
+          const root = resourceId.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+          const entries: SurfaceSnapshotOverlayEntry[] = result.records.filter(record => record.kind === "entry").map(record => ({
+            path: record.path === root || !record.path ? "." : root ? record.path.slice(root.length + 1) : record.path,
+            kind: (record.data as {kind:string}).kind === "directory" ? "directory" : "file",
+            revision: "working-branch:" + pin.branchId + "@" + pin.writeRevision + ":" + (record.revision || pin.root),
+          }));
+          entries.sort((left,right) => left.path.localeCompare(right.path));
         return { status: "ready" as const, authority: "working-branch" as const, entries };
-      });
-    },
-
-    async searchCorpus(sessionId) {
-      return withView(sessionId, async (view, store) => {
-        const files = await listBranchTextFiles(store, view.branchId, [""]);
-        return files.map((file) => ({ path: file.path, text: file.text }));
+        } finally { await pin.release(); }
       });
     },
 
@@ -146,70 +124,10 @@ export function createWorkingBranchLookups(options: {
         if (options?.deadlineAt !== undefined && Date.now() >= options.deadlineAt) {
           throw new DOMException("Explore query deadline exceeded", "AbortError");
         }
-        const branch = await store.getBranchRoot(view.branchId, options?.signal ? { signal: options.signal } : undefined);
-        if (!branch) return null;
         const pin = await store.pinBranch(view.branchId, options?.signal ? { signal: options.signal } : undefined);
-        let releasePromise: Promise<void> | undefined;
-        const release = async (): Promise<void> => {
-          releasePromise ??= pin.release().finally(() => {
-            options?.signal?.removeEventListener("abort", onAbort);
-          });
-          await releasePromise;
-        };
-        const onAbort = (): void => { void release(); };
-        if (options?.signal?.aborted) {
-          await release();
-          options.signal.throwIfAborted();
-        }
-        options?.signal?.addEventListener("abort", onAbort, { once: true });
-        const roots = options?.roots?.length ? [...options.roots] : [""];
-        const fixedRead = {
-          pinId: pin.pinId,
-          branchId: pin.branchId,
-          workspaceId: pin.workspaceId,
-          view: pin.view,
-          revision: pin.revision,
-          writeRevision: pin.writeRevision,
-          root: pin.root,
-          branch: pin.branch,
-        };
-        try {
-          const files = await listBranchTextFiles(
-            store,
-            view.branchId,
-            roots,
-            undefined,
-            {
-              pin: fixedRead,
-              ...(options?.signal ? { signal: options.signal } : {}),
-              ...(options?.deadlineAt === undefined ? {} : { deadlineAt: options.deadlineAt }),
-            },
-          );
-          options?.signal?.throwIfAborted();
-          return {
-            sessionId,
-            workspaceId: view.workspaceId,
-            branchId: view.branchId,
-            writeRevision: pin.writeRevision,
-            revision: pin.revision,
-            root: pin.root,
-            pinId: pin.pinId,
-            files: files.map((file) => ({ path: file.path, text: file.text, revision: file.revision })),
-            readFile: async (resourceId: string): Promise<ExploreFileSnapshot> => {
-              const result = await readBranchFile(store, view.branchId, resourceId, undefined, {
-                read: { pin: fixedRead, ...(options?.signal ? { signal: options.signal } : {}) },
-              });
-              if ("unavailable" in result) return { status: "unavailable", message: result.unavailable };
-              if ("missing" in result) return { status: "unavailable", message: `${result.path} is not present in this working branch` };
-              if (result.bytes.includes(0)) return { status: "unavailable", message: `${result.path} is not a text file in this working branch` };
-              return { status: "ready", content: result.bytes.toString("utf8"), revision: result.revision, source: "working-branch" };
-            },
-            release,
-          };
-        } catch (error) {
-          await release();
-          throw error;
-        }
+        try { return createWorkingBranchQuery(store, pin, sessionId, options); }
+        catch (error) { await pin.release(); throw error; }
+
       });
     },
   };

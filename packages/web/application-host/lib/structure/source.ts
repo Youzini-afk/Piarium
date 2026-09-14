@@ -5,6 +5,8 @@ import type {
   StructureCapabilities,
   StructureClassifyRequest,
   StructureClassifyResult,
+  StructureFileRequest,
+  StructureFixedFileRequest,
   StructureImportsResult,
   StructureLiteralCallsResult,
   StructureOutlineRequest,
@@ -67,7 +69,13 @@ async function fanOutReadyFirst<Result extends { status: StructureStatus }>(
  * (D-106).
  */
 export function createStructureSource(providers: readonly StructureProvider[]): StructureSource {
+  const native = providers.find((provider) => provider.analyze && provider.units);
   return {
+    ...(native?.analyze ? { analyze: (request: StructureClassifyRequest) => native.analyze!(request) } : {}),
+    ...(native?.analyzeFile ? { analyzeFile: (request: StructureFileRequest) => native.analyzeFile!(request) } : {}),
+    ...(native?.units ? { units: (request: StructureOutlineRequest) => native.units!(request) } : {}),
+    ...(native?.unitsFile ? { unitsFile: (request: StructureFileRequest) => native.unitsFile!(request) } : {}),
+    ...(native?.unitsFixed ? { unitsFixed: (request: StructureFixedFileRequest) => native.unitsFixed!(request) } : {}),
     async outline(request: StructureOutlineRequest): Promise<StructureOutlineResult> {
       const languageId = request.languageId ?? languageIdForPath(request.path);
       const nextRequest = { ...request, languageId };
