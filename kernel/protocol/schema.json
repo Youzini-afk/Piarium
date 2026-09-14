@@ -21,6 +21,15 @@
     "storage.putBlob.abort": "KernelPutBlobAbortParams",
     "storage.blob.release": "KernelBlobReleaseParams",
     "storage.getBlob": "KernelGetBlobParams",
+    "storage.object.rebindOwner": "KernelObjectOwnerRebindParams",
+    "file.root.register": "KernelFileRootRegisterParams",
+    "file.lease.acquire": "KernelFileLeaseAcquireParams",
+    "file.lease.release": "KernelFileLeaseReleaseParams",
+    "file.capture": "KernelFileCaptureParams",
+    "file.apply": "KernelFileApplyParams",
+    "file.mkdir": "KernelFileMkdirParams",
+    "file.remove": "KernelFileRemoveParams",
+    "file.rename": "KernelFileRenameParams",
     "storage.record.put": "KernelRecordPutParams",
     "storage.record.get": "KernelRecordGetParams",
     "storage.record.list": "KernelRecordListParams",
@@ -117,10 +126,38 @@
     "KernelBlobReleaseParams": {"fields": {
       "ownerId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}
     }},
+    "KernelObjectOwnerRebindParams": {"fields": {
+      "workspaceId": {"type": "string"}, "ownerId": {"type": "string"}
+    }},
     "KernelGetBlobParams": {"fields": {
       "hash": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true},
       "pinId": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "recordId": {"type": "string", "optional": true}, "slot": {"type": "string", "optional": true}, "path": {"type": "string", "optional": true},
       "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
+    }},
+    "KernelFileRootRegisterParams": {"fields": {
+      "workspaceId": {"type": "string"}, "executionWorkspaceId": {"type": "string"}, "canonicalRoot": {"type": "string"}
+    }},
+    "KernelFileLeaseResource": {"fields": {"path": {"type": "string"}, "scope": {"type": "string"}}},
+    "KernelFileLeaseAcquireParams": {"fields": {
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "leaseId": {"type": "string"}, "resources": {"type": "KernelFileLeaseResource[]"}
+    }},
+    "KernelFileLeaseReleaseParams": {"fields": {
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "leaseId": {"type": "string"}
+    }},
+    "KernelFileCaptureParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "store": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileApplyParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileMkdirParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "recursive": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileRemoveParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "recursive": {"type": "boolean"}, "force": {"type": "boolean"}, "leaseId": {"type": "string", "optional": true}
+    }},
+    "KernelFileRenameParams": {"fields": {
+      "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "fromPath": {"type": "string"}, "toPath": {"type": "string"}, "targetMustBeMissing": {"type": "boolean", "optional": true}, "expectedFromJson": {"type": "string", "optional": true}, "expectedToJson": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelRecordReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}}},
     "KernelRecordPutParams": {"fields": {
@@ -395,6 +432,15 @@
     "storage.putBlob.abort": "discard a content upload stream",
     "storage.blob.release": "release a temporary content owner",
     "storage.getBlob": "read a content object or byte range",
+    "storage.object.rebindOwner": "rebind one temporary workspace object owner to the current authorized grant",
+    "file.root.register": "register one Documents-authorized canonical filesystem root for this kernel epoch",
+    "file.lease.acquire": "acquire an overlapping-path resource lease without holding a database transaction",
+    "file.lease.release": "release a filesystem resource lease",
+    "file.capture": "capture one filesystem path and optionally install its bytes into the content store",
+    "file.apply": "conditionally apply one typed filesystem path state from kernel-owned content",
+    "file.mkdir": "create a workspace directory through the kernel resource authority",
+    "file.remove": "remove a workspace path through the kernel resource authority",
+    "file.rename": "rename a workspace path through the kernel resource authority",
     "storage.record.put": "publish a typed durable product record and its object references",
     "storage.record.get": "read a durable product record by identity",
     "storage.record.list": "page durable product records by workspace and owner identity",

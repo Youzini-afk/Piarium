@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { createApplyPatchTool } from "../../src/harness/apply-patch-tool.js";
 import type { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 
-function createFakeBridge(lockBatches?: string[][]): Pick<HostServicesBridge, "request"> {
+function createFakeBridge(root?: string, lockBatches?: string[][]): Pick<HostServicesBridge, "request"> {
   return {
     request: async (method: string, params: Record<string, unknown>) => {
       if (method === "fs.lock" && params.action === "acquire") {
@@ -17,7 +17,22 @@ function createFakeBridge(lockBatches?: string[][]): Pick<HostServicesBridge, "r
       if (method === "fs.lock" && params.action === "release") return { held: false, released: true };
       if (method === "lsp.diagnostics") return { status: "ready", diagnostics: [] };
       if (method === "document.branchWrite") return { status: "disk" };
-      if (method === "document.surfaceWrite") return { status: "disk" };
+      if (method === "document.surfaceWrite") {
+        if (!root) return { status: "disk" };
+        const changes = params.changes as Array<{ path: string; action: "write" | "delete"; content?: string }>;
+        for (const change of changes) {
+          const target = join(root, change.path);
+          if (change.action === "delete") rmSync(target, { force: true });
+          else {
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, change.content ?? "", "utf8");
+          }
+        }
+        return {
+          status: "applied",
+          results: changes.map((change) => ({ path: change.path, target: "disk", status: "applied" })),
+        };
+      }
       if (method === "document.readSource") return { source: "disk" };
       throw new Error(`unexpected method: ${method}`);
     },
@@ -42,8 +57,8 @@ describe("apply_patch (Codex syntax)", () => {
 
   it("applies a simple update patch", async () => {
     writeFileSync(join(tmpDir, "test.txt"), "line1\nline2\nline3\n");
-    const bridge = createFakeBridge();
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
 
     const patch = `*** Begin Patch
 *** Update File: test.txt
@@ -58,8 +73,8 @@ describe("apply_patch (Codex syntax)", () => {
   });
 
   it("adds a new file", async () => {
-    const bridge = createFakeBridge();
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
 
     const patch = `*** Begin Patch
 *** Add File: new.txt
@@ -74,8 +89,8 @@ line2
 
   it("deletes a file", async () => {
     writeFileSync(join(tmpDir, "delete-me.txt"), "content");
-    const bridge = createFakeBridge();
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
 
     const patch = `*** Begin Patch
 *** Delete File: delete-me.txt
@@ -89,8 +104,8 @@ line2
     writeFileSync(join(tmpDir, "a.txt"), "aaa\n");
     writeFileSync(join(tmpDir, "b.txt"), "bbb\n");
     const lockBatches: string[][] = [];
-    const bridge = createFakeBridge(lockBatches);
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir, lockBatches);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
 
     const patch = `*** Begin Patch
 *** Update File: a.txt
@@ -109,13 +124,12 @@ ccc
     assert.equal(readFileSync(join(tmpDir, "a.txt"), "utf8"), "AAA\n");
     assert.equal(readFileSync(join(tmpDir, "b.txt"), "utf8"), "BBB\n");
     assert.equal(readFileSync(join(tmpDir, "c.txt"), "utf8"), "ccc");
-    assert.equal(lockBatches.length, 1, "a multi-file patch must acquire one ordered Host lease batch");
-    assert.equal(lockBatches[0]!.length, 3);
+    assert.equal(lockBatches.length, 0, "Host surface mutations own the kernel gate and must not nest fs.lock");
   });
 
   it("reports error on missing *** Begin Patch", async () => {
-    const bridge = createFakeBridge();
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
     const text = await executePatch(tool, "just some text");
     assert.match(text, /parse error/);
     assert.match(text, /Begin Patch/);
@@ -123,8 +137,8 @@ ccc
 
   it("reports error when context not found", async () => {
     writeFileSync(join(tmpDir, "test.txt"), "line1\nline2\nline3\n");
-    const bridge = createFakeBridge();
-    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir);
+    const bridge = createFakeBridge(tmpDir);
+    const tool = createApplyPatchTool(bridge as HostServicesBridge, "s1", tmpDir, undefined, { surfaceWrite: true });
 
     const patch = `*** Begin Patch
 *** Update File: test.txt

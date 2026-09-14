@@ -19,7 +19,8 @@ use uuid::Uuid;
 use crate::authority::{path_allowed, path_allowed_scopes, require_capability};
 use crate::error::KernelError;
 use crate::model::{
-    BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, Grant, PathState, TrieNode,
+    BlobStream, BranchBuilder, BranchRow, BranchWriteBuilder, BuildTree, FileLease,
+    FileLeaseResource, FileRoot, Grant, PathState, TrieNode,
 };
 use crate::protocol::*;
 use crate::storage_schema::{
@@ -30,6 +31,7 @@ mod authority_store;
 mod branches;
 mod core;
 mod dispatch;
+mod file_resources;
 mod gc;
 mod maintenance;
 mod objects;
@@ -171,4 +173,6 @@ pub(crate) struct Storage {
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: BTreeSet<String>,
+    file_roots: HashMap<String, FileRoot>,
+    file_leases: HashMap<String, FileLease>,
 }

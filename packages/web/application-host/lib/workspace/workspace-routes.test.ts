@@ -172,6 +172,7 @@ describe('workspace routes', () => {
     const harness = await createDocumentAuthorityHarness();
     workspaceRoot = harness.workspaceRoot;
     try {
+      const runMutationForScope = vi.spyOn(harness.authority, 'runMutationForScope');
       const app = await createApp({}, { documents: harness.authority });
       const before = await harness.authority.inspectMutation(harness.identity.workspaceId);
 
@@ -181,6 +182,14 @@ describe('workspace routes', () => {
         .expect(200);
       const after = await harness.authority.inspectMutation(harness.identity.workspaceId);
       expect(after.mutationRevision).toBeGreaterThan(before.mutationRevision);
+      expect(runMutationForScope).toHaveBeenCalledWith(
+        workspaceRoot,
+        { kind: 'web-route', id: 'workspace.file' },
+        expect.any(Function),
+        expect.objectContaining({
+          resourceOperations: [{ resourceId: '', scope: 'subtree' }],
+        }),
+      );
 
       await harness.authority.setMaintenance(harness.identity.workspaceId, true);
       await request(app)

@@ -56,11 +56,24 @@ impl Storage {
                 authorized_params.get("workspaceId").and_then(Value::as_str),
                 grant_id.unwrap_or(""),
             ),
+            "storage.object.rebindOwner" => storage.rebind_object_owner(
+                authorized_params,
+                authorized_params.get("workspaceId").and_then(Value::as_str),
+                grant_id.unwrap_or(""),
+            ),
             "storage.getBlob" => storage.get_blob(
                 authorized_params,
                 grant_id.unwrap_or(""),
                 authorized_grant.capabilities.contains("storage.admin"),
             ),
+            "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
+            "file.lease.acquire" => storage.file_lease_acquire(authorized_params, authorized_grant),
+            "file.lease.release" => storage.file_lease_release(authorized_params, authorized_grant),
+            "file.capture" => storage.file_capture(authorized_params, authorized_grant),
+            "file.apply" => storage.file_apply(authorized_params, authorized_grant),
+            "file.mkdir" => storage.file_mkdir(authorized_params, authorized_grant),
+            "file.remove" => storage.file_remove(authorized_params, authorized_grant),
+            "file.rename" => storage.file_rename(authorized_params, authorized_grant),
             "storage.record.put" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_put(authorized_params, grant_id.unwrap_or(""))
             }),

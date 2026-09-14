@@ -4,6 +4,8 @@ export interface PathLockResource {
   authorityId: string;
   workspaceId: string;
   canonicalResourceId: string;
+  /** Documents-authorized path relative to the execution workspace root. */
+  resourceId?: string;
 }
 
 interface LockHolder {
@@ -34,9 +36,9 @@ const resourceKey = (resource: PathLockResource): string => (
 
 export interface PathLockService {
   acquire(ownerId: string, resource: PathLockResource, timeoutMs?: number): Promise<string>;
-  release(ownerId: string, leaseId: string): boolean;
-  dropSession(ownerId: string): void;
-  dispose(): void;
+  release(ownerId: string, leaseId: string): boolean | Promise<boolean>;
+  dropSession(ownerId: string): void | Promise<void>;
+  dispose(): void | Promise<void>;
 }
 
 /**

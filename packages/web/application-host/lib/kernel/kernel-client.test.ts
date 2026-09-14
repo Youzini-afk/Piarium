@@ -6,6 +6,7 @@ import path from "node:path";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
+import { KernelPathLockService } from "./file-resource-lock-service.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
@@ -1167,4 +1168,254 @@ test("typed recovery create fault injection rolls back operation intent and perm
   const retry = retryHost.scoped(await issueSessionActor(retryHost, "typed-recovery-fault-retry", "typed-recovery-fault-workspace", "typed-recovery-fault-session"));
   const result = await retry.recoveryOperationCreate({ operationId: "typed-recovery-fault-operation", workspaceId: "typed-recovery-fault-workspace", sessionId: "typed-recovery-fault-session", kind: "combined", state: "planned", dataJson: JSON.stringify({}), files: [] });
   assert.equal(result.operationId, "typed-recovery-fault-operation");
+});
+
+test("R2 kernel file authority gates paths and applies conditional filesystem state", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-authority-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-workspace-"));
+  const alternateRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-alternate-"));
+  roots.push(storageRoot, workspace, alternateRoot);
+  await fs.writeFile(path.join(workspace, "note.txt"), "before\n");
+
+  const host = createKernelClient({
+    hostId: "file-authority-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(host);
+  await host.start();
+  const first = host.scoped(await issueActor(host, "file-authority-first", "file-workspace"));
+  const second = host.scoped(await issueActor(host, "file-authority-second", "file-workspace"));
+  const registered = await first.fileRootRegister({
+    workspaceId: "file-workspace",
+    executionWorkspaceId: "file-workspace",
+    canonicalRoot: workspace,
+  });
+  assert.equal(typeof registered.rootId, "string");
+  const rootId = String(registered.rootId);
+  await assert.rejects(
+    first.fileRootRegister({
+      workspaceId: "file-workspace",
+      executionWorkspaceId: "file-workspace",
+      canonicalRoot: alternateRoot,
+    }),
+    /root changed|workspace root changed|authorization/i,
+  );
+
+  const before = await first.fileCapture({
+    operationId: "file-capture-before",
+    workspaceId: "file-workspace",
+    rootId,
+    path: "note.txt",
+    store: true,
+  });
+  const beforeState = JSON.parse(String(before.stateJson)) as Record<string, unknown>;
+  assert.equal(beforeState.kind, "regular-file");
+  assert.equal(typeof before.ownerId, "string");
+
+  const lease = await first.fileLeaseAcquire({
+    workspaceId: "file-workspace",
+    rootId,
+    leaseId: "file-lease-one",
+    resources: [{ path: "note.txt", scope: "exact" }],
+  });
+  assert.equal(lease.status, "acquired");
+  await assert.rejects(
+    second.fileCapture({
+      operationId: "file-capture-blocked",
+      workspaceId: "file-workspace",
+      rootId,
+      path: "note.txt",
+      store: false,
+    }),
+    /busy|lease/i,
+  );
+  assert.equal((await first.fileLeaseRelease({
+    workspaceId: "file-workspace",
+    rootId,
+    leaseId: "file-lease-one",
+  })).released, true);
+
+  const afterObject = await first.putBlob(Buffer.from("after\n"), "file-object-after");
+  const target = {
+    kind: "regular-file",
+    objectHash: afterObject.hash,
+    byteLength: afterObject.byteLength,
+    mode: beforeState.mode,
+  };
+  const applied = await first.fileApply({
+    operationId: "file-apply-after",
+    workspaceId: "file-workspace",
+    rootId,
+    path: "note.txt",
+    expectedJson: JSON.stringify(beforeState),
+    targetJson: JSON.stringify(target),
+    ownerId: afterObject.ownerId,
+  });
+  assert.equal(applied.status, "applied");
+  assert.equal(await fs.readFile(path.join(workspace, "note.txt"), "utf8"), "after\n");
+
+  const thirdObject = await first.putBlob(Buffer.from("third\n"), "file-object-third");
+  const conflict = await first.fileApply({
+    operationId: "file-apply-stale",
+    workspaceId: "file-workspace",
+    rootId,
+    path: "note.txt",
+    expectedJson: JSON.stringify(beforeState),
+    targetJson: JSON.stringify({
+      kind: "regular-file",
+      objectHash: thirdObject.hash,
+      byteLength: thirdObject.byteLength,
+      mode: beforeState.mode,
+    }),
+    ownerId: thirdObject.ownerId,
+  });
+  assert.equal(conflict.status, "conflict");
+  assert.equal(await fs.readFile(path.join(workspace, "note.txt"), "utf8"), "after\n");
+
+  await assert.rejects(
+    first.fileCapture({
+      operationId: "file-capture-escape",
+      workspaceId: "file-workspace",
+      rootId,
+      path: "../escape.txt",
+      store: false,
+    }),
+    /normalized|outside|path/i,
+  );
+});
+
+test("R2 file apply reconciles a committed disk side effect after kernel restart", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-reconcile-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-file-reconcile-workspace-"));
+  roots.push(storageRoot, workspace);
+
+  const faultedHost = createKernelClient({
+    hostId: "file-reconcile-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+    env: { PIARIUM_KERNEL_FAIL_OPERATION_FINISH: "1" },
+  });
+  clients.push(faultedHost);
+  await faultedHost.start();
+  const faulted = faultedHost.scoped(await issueActor(faultedHost, "file-reconcile-faulted", "file-reconcile-workspace"));
+  const firstRegistration = await faulted.fileRootRegister({
+    workspaceId: "file-reconcile-workspace",
+    executionWorkspaceId: "file-reconcile-workspace",
+    canonicalRoot: workspace,
+  });
+  const rootId = String(firstRegistration.rootId);
+  await fs.writeFile(path.join(workspace, "seed.txt"), "durable\n");
+  const capturedTarget = await faulted.fileCapture({
+    operationId: "file-reconcile-object",
+    workspaceId: "file-reconcile-workspace",
+    rootId,
+    path: "seed.txt",
+    store: true,
+  });
+  const target = JSON.parse(String(capturedTarget.stateJson)) as Record<string, unknown>;
+  const targetOwnerId = String(capturedTarget.ownerId);
+  await assert.rejects(
+    faulted.fileApply({
+      operationId: "file-reconcile-apply",
+      workspaceId: "file-reconcile-workspace",
+      rootId,
+      path: "created.txt",
+      expectedJson: JSON.stringify({ kind: "missing" }),
+      targetJson: JSON.stringify(target),
+      ownerId: targetOwnerId,
+    }),
+    /injected operation finish failure/i,
+  );
+  assert.equal(await fs.readFile(path.join(workspace, "created.txt"), "utf8"), "durable\n");
+  await faultedHost.close();
+  clients.splice(clients.indexOf(faultedHost), 1);
+
+  const reopenedHost = createKernelClient({
+    hostId: "file-reconcile-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(reopenedHost);
+  await reopenedHost.start();
+  const reopened = reopenedHost.scoped(await issueActor(reopenedHost, "file-reconcile-reopened", "file-reconcile-workspace"));
+  const registration = await reopened.fileRootRegister({
+    workspaceId: "file-reconcile-workspace",
+    executionWorkspaceId: "file-reconcile-workspace",
+    canonicalRoot: workspace,
+  });
+  assert.equal(registration.rootId, rootId);
+  assert.equal(registration.reconciledOperations, 1);
+  assert.equal(registration.pendingOperations, 0);
+  const retried = await reopened.fileApply({
+    operationId: "file-reconcile-apply",
+    workspaceId: "file-reconcile-workspace",
+    rootId,
+    path: "created.txt",
+    expectedJson: JSON.stringify({ kind: "missing" }),
+    targetJson: JSON.stringify(target),
+    ownerId: targetOwnerId,
+  });
+  assert.equal(retried.status, "applied");
+  assert.equal(retried.reconciled, true);
+});
+
+test("R2 production fs.lock delegates overlap admission to the Rust file lease authority", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) {
+    t.skip("release kernel has not been built in this checkout");
+    return;
+  }
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-path-lock-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-path-lock-workspace-"));
+  roots.push(storageRoot, workspace);
+  const host = createKernelClient({
+    hostId: "path-lock-host",
+    storageRoot,
+    buildVersion,
+    kernelPath,
+    allowCargoDevRunner: false,
+  });
+  clients.push(host);
+  await host.start();
+  const adapter = new KernelStorageAdapter({
+    client: host,
+    hostId: "path-lock-host",
+    storageRoot,
+    resolveWorkspaceRoot: async () => workspace,
+  });
+  const locks = new KernelPathLockService(adapter, {
+    resolveOwningWorkspaceId: async (_sessionId, executionWorkspaceId) => executionWorkspaceId,
+    resolveWorkspaceRoot: async () => workspace,
+    retryDelayMs: 1,
+  });
+  const resource = {
+    authorityId: "path-lock-host",
+    workspaceId: "path-lock-workspace",
+    canonicalResourceId: path.join(workspace, "file.txt"),
+    resourceId: "file.txt",
+  };
+  const first = await locks.acquire("session-one", resource, 1_000);
+  await assert.rejects(
+    locks.acquire("session-two", resource, 25),
+    /Lock timeout/i,
+  );
+  assert.equal(await locks.release("session-one", first), true);
+  const second = await locks.acquire("session-two", resource, 1_000);
+  assert.equal(await locks.release("session-two", second), true);
+  await locks.dispose();
+  await adapter.dispose();
 });

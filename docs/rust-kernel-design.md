@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1 state/storage authority is complete. R0 and R2–R6 retain their own remaining delivery evidence
+Status: accepted architecture; R1 state/storage and R2 file/recovery authority are complete. R0 and R3–R6 retain their own remaining delivery evidence
 
 Last updated: 2026-09-14
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-14
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer；TS 继续编排 Documents/Registry 和真实文件副作用，这些资源后端属于 R2/R3。旧实现仅作测试 helper，不是运行时兼容路径。R1 的 storage location 产品语义已收口：内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，不独立迁移并声明 `storageManagement: false`；可替换 provider 仍可实现公开 v5 的可选位置管理。R1 的耐久验收以明确落盘顺序、事务故障注入和重启对账为证据；跨平台发行 smoke 由原生 CI 承担，签名按现有产品合同仍是可选发行能力，物理断电试验不是 R1 实现门槛。R1 完成不代表阶段 R 完成，R0 与 R2–R6 仍按各自状态验收。
+WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer。D-276 又完成 R2 file-resource authority：Documents-authorized canonical execution root、exact/subtree overlap lease、稳定 file-state capture、内容对象安装、conditional apply、mkdir/remove/rename 与 started-operation restart reconciliation 均由 Rust 持有；Documents/Files/Recovery/Integration 与生产 `fs.lock` 进入同一资源边界。Registry 仍是未保存 buffer/grouped undo 的唯一权威，Host 负责 surface receipt 协调，不把编辑器正文复制到 Rust。Piarium 模式下 Pi `write`/`edit`/`apply_patch` 不再退回 worker 本地磁盘 writer。旧 TS file/recovery helpers 仅作测试 seam，不是运行时兼容路径。R1 的 storage location 产品语义仍为：内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，不独立迁移并声明 `storageManagement: false`；可替换 provider 仍可实现公开 v5 的可选位置管理。R0 与 R3–R6 仍按各自状态验收；尤其 Git baseline/materialization/CoW/执行目录生命周期继续属于 R3。
 
 ## 1. 产品与阶段目标
 

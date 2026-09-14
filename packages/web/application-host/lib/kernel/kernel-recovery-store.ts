@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import type {
   WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryEntryBindingResult,
@@ -18,14 +16,14 @@ import type {
   RecoveryIdentity,
   RecoveryState,
 } from "../recovery/journal-files.js";
-import { createRecoveryFileStore, normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
-import { objectPath } from "../recovery/object-path.js";
+import { normalizeResourceId, parseRecoveryState, sameState } from "../recovery/journal-files.js";
 import type {
   DurableRecoveryChangeSelection,
   WorkspaceRecoveryEngine,
   WorkspaceRecoveryStorageContext,
 } from "../recovery/journal-engine.js";
 import type { HostResourceOperationGate, ResolveDirectoryApplyContext } from "../recovery/durable-file-operation.js";
+import { KernelFileResourceBackend } from "./file-resource-backend.js";
 import type { KernelStorageAdapter, KernelStorageReference } from "./storage-adapter.js";
 
 const asObject = (value: unknown): Record<string, unknown> => (
@@ -42,14 +40,21 @@ const recoveryIdentity = (workspaceId: string, canonicalRoot: string): RecoveryI
 });
 
 export class KernelRecoveryContentStore implements RecoveryFileStore {
-  private readonly delegate = createRecoveryFileStore();
   private readonly owners = new Map<string, Set<string>>();
   private readonly sources = new Map<string, Array<{ workspaceId: string; recordId: string; slot: string }>>();
+  readonly fileResources: KernelFileResourceBackend;
 
   constructor(
     private readonly adapter: KernelStorageAdapter,
-    private readonly cacheRoot: string,
-  ) {}
+    fileResourcesOrLegacyCacheRoot?: KernelFileResourceBackend | string,
+  ) {
+    this.fileResources = fileResourcesOrLegacyCacheRoot instanceof KernelFileResourceBackend
+      ? fileResourcesOrLegacyCacheRoot
+      : new KernelFileResourceBackend(adapter, {
+          authorityPurpose: "recovery-maintenance",
+          authorityCapabilities: ["recovery.maintenance"],
+        });
+  }
 
   private key(workspaceId: string, hash: string): string {
     return `${workspaceId}\0${hash}`;
@@ -107,76 +112,54 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     throw lastError ?? new Error(`Kernel recovery object source is unknown: ${hash}`);
   }
 
-  private async cache(workspaceId: string, state: RecoveryState, sessionId?: string): Promise<void> {
-    if (state.kind !== "regular-file") return;
-    const target = objectPath(this.cacheRoot, state.objectHash);
-    try {
-      const actual = await this.delegate.hashFile(target);
-      if (actual.objectHash === state.objectHash && actual.byteLength === state.byteLength) return;
-    } catch {
-      // Cache miss or corrupt cache: replace it from the authoritative kernel object.
-    }
-    const bytes = await this.objectBytes(workspaceId, state.objectHash, sessionId);
-    if (bytes.byteLength !== state.byteLength) {
-      throw new Error(`Kernel recovery object length mismatch: ${state.objectHash}`);
-    }
-    await fs.promises.mkdir(path.dirname(target), { recursive: true, mode: 0o700 });
-    const temporary = `${target}.tmp-${randomUUID()}`;
-    await fs.promises.writeFile(temporary, bytes, { mode: 0o600 });
-    try {
-      await fs.promises.rename(temporary, target);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      await fs.promises.rm(temporary, { force: true });
-      const actual = await this.delegate.hashFile(target);
-      if (actual.objectHash !== state.objectHash || actual.byteLength !== state.byteLength) throw error;
-    }
-  }
-
   async captureState(
     identity: RecoveryIdentity,
-    root: string,
+    _root: string,
     inputPath: string,
     options: CaptureStateOptions = {},
-    sessionId?: string,
+    _sessionId?: string,
   ): Promise<CapturedState> {
-    const captured = await this.delegate.captureState(identity, root, inputPath, { store: false });
-    if (options.store === false || captured.state.kind !== "regular-file") return captured;
-    const resolved = await this.delegate.relativePathFor(identity, inputPath);
-    const bytes = await fs.promises.readFile(resolved.absolute);
-    const context = await this.adapter.context(
-      identity.workspaceId,
-      sessionId ? "recovery-actor" : "recovery-maintenance",
-      sessionId
-        ? { owningWorkspace: identity.workspaceId, executionWorkspace: identity.workspaceId, sessionId, pathScopes: [""] }
-        : { owningWorkspace: identity.workspaceId, executionWorkspace: identity.workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"] },
+    const captured = await this.fileResources.captureDetailed(
+      identity,
+      inputPath,
+      options,
+      `recovery-capture:${identity.workspaceId}:${randomUUID()}`,
     );
-    const stored = await context.client.putBlob(
-      bytes,
-      `recovery-object:${identity.workspaceId}:${captured.state.objectHash}:${randomUUID()}`,
-    );
-    if (stored.hash !== captured.state.objectHash || stored.byteLength !== bytes.byteLength) {
-      throw new Error(`Kernel recovery object identity mismatch: ${captured.state.objectHash}`);
+    if (captured.ownerId && captured.state.kind === "regular-file") {
+      if (_sessionId) {
+        const actor = await this.adapter.context(identity.workspaceId, "recovery-actor", {
+          owningWorkspace: identity.workspaceId,
+          executionWorkspace: identity.workspaceId,
+          sessionId: _sessionId,
+          pathScopes: [""],
+        });
+        await actor.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
+      }
+      const key = this.key(identity.workspaceId, captured.state.objectHash);
+      const owners = this.owners.get(key) ?? new Set<string>();
+      owners.add(captured.ownerId);
+      this.owners.set(key, owners);
     }
-    const key = this.key(identity.workspaceId, stored.hash);
-    const owners = this.owners.get(key) ?? new Set<string>();
-    owners.add(stored.ownerId);
-    this.owners.set(key, owners);
-    await this.cache(identity.workspaceId, captured.state, sessionId);
-    return captured;
+    return { path: captured.path, state: captured.state };
   }
 
   async applyState(identity: RecoveryIdentity, _root: string, relativePath: string, state: RecoveryState): Promise<void> {
-    await this.cache(identity.workspaceId, state);
-    await this.delegate.applyState(identity, this.cacheRoot, relativePath, state);
+    const result = await this.fileResources.applyStateDetailed(identity, relativePath, state);
+    if (result.status === "conflict") {
+      throw new Error(`Kernel file apply conflicted after resource admission: ${relativePath}`);
+    }
   }
 
   hashFile(filePath: string) {
-    return this.delegate.hashFile(filePath);
+    return this.fileResources.hashFile(filePath);
   }
 
   relativePathFor(identity: RecoveryIdentity, inputPath: string) {
-    return this.delegate.relativePathFor(identity, inputPath);
+    return this.fileResources.relativePathFor(identity, inputPath);
+  }
+
+  resourceOperationGate(identity: RecoveryIdentity): HostResourceOperationGate {
+    return this.fileResources.gateFor(identity);
   }
 
   async verifyObject(_root: string, state: RecoveryState): Promise<void> {
@@ -192,8 +175,10 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
     let lastError: unknown;
     for (const workspaceId of workspaces) {
       try {
-        await this.cache(workspaceId, state);
-        await this.delegate.verifyObject(this.cacheRoot, state);
+        const bytes = await this.objectBytes(workspaceId, state.objectHash);
+        if (bytes.byteLength !== state.byteLength) {
+          throw new Error(`Kernel recovery object length mismatch: ${state.objectHash}`);
+        }
         return;
       } catch (error) {
         lastError = error;
@@ -214,6 +199,7 @@ export interface KernelRecoveryContentStoreLike {
   registerRecord(workspaceId: string, recordId: string, reference: KernelStorageReference): void;
   ownerIdForHash(workspaceId: string, hash: string): string | undefined;
   consumeOwner(ownerId: string): void;
+  resourceOperationGate?(identity: RecoveryIdentity): HostResourceOperationGate;
 }
 
 export class KernelRecoveryStore {
@@ -710,7 +696,7 @@ export class KernelRecoveryStore {
     }
   }
 
-  async getOperation(workspaceId: string, operationId: string, sessionId?: string): Promise<Record<string, unknown> | null> {
+  async getOperation(workspaceId: string, operationId: string, _sessionId?: string): Promise<Record<string, unknown> | null> {
     const context = await this.context(workspaceId, undefined, true);
     const operation = await context.client.recoveryOperationGet({ workspaceId, operationId });
     if (operation) this.registerOperationSources(workspaceId, operation);
@@ -760,8 +746,13 @@ export class KernelRecoveryStore {
     });
     return {
       fileStore: context.fileStore,
+      ...(this.content instanceof KernelRecoveryContentStore
+        ? { fileResources: this.content.fileResources }
+        : {}),
       identity: context.identity,
-      resourceOperationGate: options.resourceOperationGate ?? context.resourceOperationGate,
+      resourceOperationGate: options.resourceOperationGate
+        ?? this.content.resourceOperationGate?.(context.identity)
+        ?? context.resourceOperationGate,
       root: context.root,
       ...(context.collectUnreachableObjects ? { collectUnreachableObjects: context.collectUnreachableObjects } : {}),
       durableRecoveryStore: this,

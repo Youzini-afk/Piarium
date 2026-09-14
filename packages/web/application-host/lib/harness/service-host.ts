@@ -330,6 +330,8 @@ export interface HarnessServiceHost {
 export interface HarnessServiceHostOptions {
   search: HarnessSearchDeps["search"];
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  /** Production injects the Rust-kernel lease authority; tests may use the local helper. */
+  pathLockService?: PathLockService;
   readExploreFile?: ExploreFileReader;
   branchCorpus?: HarnessSearchDeps["branchCorpus"];
   agentInputDraftPaths?: HarnessServiceHost["agentInputDraftPaths"];
@@ -415,7 +417,7 @@ export interface HarnessServiceHostOptions {
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
   const outputStore = createOutputStore();
   const observationCursors = createObservationCursorStore();
-  const pathLockService = createPathLockService();
+  const pathLockService = options.pathLockService ?? createPathLockService();
   const exploreQueryStore = createExploreQueryStore();
   const searchService = createHarnessSearchService({
     search: options.search,
@@ -577,7 +579,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     exploreQueryStore.dropSession(sessionId);
     observationCursors.clearObserver(sessionId);
     threadRegistry?.clearCursorsForSession(sessionId);
-    pathLockService.dropSession(sessionId);
+    void Promise.resolve(pathLockService.dropSession(sessionId)).catch((error: unknown) => {
+      console.error('[HarnessPathLock] Session lease release failed:', error);
+    });
     keeperCoverageStore.clear(sessionId);
     options.dropAgentInputContexts?.(sessionId);
     verification.revokeSessionActor(sessionId);
@@ -640,7 +644,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     exploreQueryStore.dispose();
     outputStore.dispose();
     observationCursors.dispose();
-    pathLockService.dispose();
+    await pathLockService.dispose();
     if (knowledgeStore) disposes.push(knowledgeStore.close());
     if (userKnowledgeStore) disposes.push(userKnowledgeStore.close());
     await Promise.all(disposes);

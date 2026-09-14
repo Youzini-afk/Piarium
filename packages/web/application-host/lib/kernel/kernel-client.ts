@@ -117,6 +117,38 @@ export class KernelScopedClient {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
 
+  fileRootRegister(params: KernelMethodParams["file.root.register"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileRootRegister(params, this.grant, signal);
+  }
+
+  fileLeaseAcquire(params: KernelMethodParams["file.lease.acquire"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileLeaseAcquire(params, this.grant, signal);
+  }
+
+  fileLeaseRelease(params: KernelMethodParams["file.lease.release"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileLeaseRelease(params, this.grant, signal);
+  }
+
+  fileCapture(params: KernelMethodParams["file.capture"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileCapture(params, this.grant, signal);
+  }
+
+  fileApply(params: KernelMethodParams["file.apply"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileApply(params, this.grant, signal);
+  }
+
+  fileMkdir(params: KernelMethodParams["file.mkdir"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileMkdir(params, this.grant, signal);
+  }
+
+  fileRemove(params: KernelMethodParams["file.remove"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileRemove(params, this.grant, signal);
+  }
+
+  fileRename(params: KernelMethodParams["file.rename"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileRename(params, this.grant, signal);
+  }
+
   createBranch(params: KernelCreateBranchInput, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.createBranch(params, this.grant, signal);
   }
@@ -231,6 +263,10 @@ export class KernelScopedClient {
 
   releaseBlob(ownerId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.releaseBlob(ownerId, this.grant, signal);
+  }
+
+  rebindObjectOwner(workspaceId: string, ownerId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.rebindObjectOwner(workspaceId, ownerId, this.grant, signal);
   }
 
   releaseOperation(operationId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
@@ -707,6 +743,38 @@ export class KernelClient {
     return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant });
   }
 
+  async fileRootRegister(params: KernelMethodParams["file.root.register"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.root.register", params, { signal, grant });
+  }
+
+  async fileLeaseAcquire(params: KernelMethodParams["file.lease.acquire"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.lease.acquire", params, { signal, grant });
+  }
+
+  async fileLeaseRelease(params: KernelMethodParams["file.lease.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.lease.release", params, { signal, grant });
+  }
+
+  async fileCapture(params: KernelMethodParams["file.capture"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.capture", params, { signal, grant });
+  }
+
+  async fileApply(params: KernelMethodParams["file.apply"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.apply", params, { signal, grant });
+  }
+
+  async fileMkdir(params: KernelMethodParams["file.mkdir"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.mkdir", params, { signal, grant });
+  }
+
+  async fileRemove(params: KernelMethodParams["file.remove"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.remove", params, { signal, grant });
+  }
+
+  async fileRename(params: KernelMethodParams["file.rename"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.rename", params, { signal, grant });
+  }
+
   async createBranch(params: KernelCreateBranchInput, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     const scoped = this.assertGrant(grant);
     const builderId = `branch-builder-${randomUUID()}`;
@@ -878,6 +946,10 @@ export class KernelClient {
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("storage.blob.release", { ownerId }, { signal, grant });
+  }
+
+  async rebindObjectOwner(workspaceId: string, ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("storage.object.rebindOwner", { workspaceId, ownerId }, { signal, grant });
   }
 
   async releaseOperation(operationId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

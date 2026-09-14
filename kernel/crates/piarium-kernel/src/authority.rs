@@ -36,6 +36,14 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "branch.unpin"
         | "branch.delete"
         | "operation.release"
+        | "file.root.register"
+        | "file.lease.acquire"
+        | "file.lease.release"
+        | "file.capture"
+        | "file.apply"
+        | "file.mkdir"
+        | "file.remove"
+        | "file.rename"
         | "storage.record.put"
         | "storage.record.release"
         | "working.result.put"
@@ -48,7 +56,8 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "working.review.release" => "storage.write",
         "branch.objects" => "storage.maintenance",
         "storage.gc" => "storage.gc",
-        "recovery.operation.get"
+        "storage.object.rebindOwner"
+        | "recovery.operation.get"
         | "recovery.turn.start"
         | "recovery.turn.get"
         | "recovery.turn.settle"

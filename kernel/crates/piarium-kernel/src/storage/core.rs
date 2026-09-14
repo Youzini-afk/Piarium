@@ -193,6 +193,8 @@ impl Storage {
             branch_builders: HashMap::new(),
             branch_write_builders: HashMap::new(),
             verified_objects: BTreeSet::new(),
+            file_roots: HashMap::new(),
+            file_leases: HashMap::new(),
         };
         // A process may have exited after the SQLite commit and before the
         // object unlink. Retry durable cleanup on the next owner start; a

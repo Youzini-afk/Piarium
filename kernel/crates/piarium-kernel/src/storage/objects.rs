@@ -82,6 +82,51 @@ impl Storage {
         Ok(json!({"ownerId": owner_id, "released": released > 0}))
     }
 
+    pub(super) fn rebind_object_owner(
+        &mut self,
+        params_value: &Value,
+        workspace_id: Option<&str>,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let owner_id = params_value
+            .get("ownerId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("ownerId is required".to_string()))?;
+        let requested_workspace = params_value
+            .get("workspaceId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| KernelError::Operation("workspaceId is required".to_string()))?;
+        if workspace_id != Some(requested_workspace) {
+            return Err(KernelError::Authorization(
+                "object owner workspace does not match the authorized workspace".to_string(),
+            ));
+        }
+        let source_grant_id: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT grant_id FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2",
+                params![owner_id, requested_workspace],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let source_grant_id = source_grant_id.ok_or_else(|| {
+            KernelError::Authorization(format!(
+                "temporary object owner is not available in workspace: {owner_id}"
+            ))
+        })?;
+        let source_grant = self.load_grant(&source_grant_id)?;
+        if !source_grant.capabilities.contains("recovery.maintenance") {
+            return Err(KernelError::Authorization(
+                "temporary object owner was not created by recovery maintenance".to_string(),
+            ));
+        }
+        self.conn.execute(
+            "UPDATE object_owners SET grant_id = ?3 WHERE owner_id = ?1 AND workspace_id = ?2 AND grant_id = ?4",
+            params![owner_id, requested_workspace, grant_id, source_grant_id],
+        )?;
+        Ok(json!({"ownerId": owner_id, "workspaceId": requested_workspace, "rebound": true}))
+    }
+
     pub(super) fn validate_object_owners(
         &self,
         workspace_id: &str,

@@ -22,4 +22,10 @@ empty store.
 
 R1 storage commands are domain operations: durable content-object installation, immutable trie roots,
 write-revision CAS, published revisions, pins, idempotent operation IDs, recovery records, and GC.
+
+R2 adds a scoped file-resource domain rather than a generic filesystem escape hatch. The Host registers a
+Documents-authorized canonical root; the kernel owns exact/subtree overlap leases, typed file capture,
+conditional apply, mkdir/remove/rename, and restart reconciliation for started filesystem operations. Regular-file
+capture/apply reuses the kernel content-object store. Production Documents/Files/Recovery/Integration and Harness
+`fs.lock` share this authority. Registry buffers remain outside Rust, and R3 still owns baseline/materialization.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.

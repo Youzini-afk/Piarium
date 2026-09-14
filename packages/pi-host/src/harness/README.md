@@ -16,7 +16,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `read` | Pi-native paging/truncation/images with fixed editor-draft or working-branch source selection | `document.readSource` |
 | `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only or exclusive working-branch paths | `document.pathOverlay` |
 | `grep` | Bounded rg plus fixed editor-draft overlay, or exclusive working-branch corpus | `search.content` |
-| `apply_patch` | Codex-format multi-file patch (OpenAI only) | `fs.lock` + `lsp.diagnostics` |
+| `apply_patch` | Codex-format multi-file patch (OpenAI only); Piarium mutations go through Host branch/surface write authority | `document.branchWrite` + `document.surfaceWrite` |
 | `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
@@ -117,11 +117,12 @@ pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
 
 ## Path Locking
 
-`withPathLock(bridge, sessionId, paths, fn)` submits one path batch. The Host
-canonicalizes and orders it, returns owner-bound lease IDs, then the wrapper
-releases those IDs after `fn`. `apply_patch` therefore acquires every file
-before applying the first change and cannot deadlock with another reversed
-multi-file patch in the same Host.
+The Host still exposes `fs.lock` for callers that need an explicit critical section. Its production
+implementation delegates the already-authorized Documents resource to the Rust kernel `file.lease.*`
+authority; the Host does not keep a second in-memory production lock table. Piarium `write`, `edit`, and
+`apply_patch` do not wrap `document.surfaceWrite` in `fs.lock`, because Documents acquires the same kernel
+resource gate internally and nesting the two would self-deadlock. The `withPathLock` wrapper remains only
+for callers that perform work outside the Host Documents mutation path.
 
 ## Child Session Launch
 
@@ -144,14 +145,15 @@ unavailable or disabled.
 
 ## Mutation Journal Integration
 
-`createWorkspaceMutationJournalTools` accepts an optional
-`HostServicesBridge`. Isolated Runs try `document.branchWrite` first. Root
-sessions then call `document.surfaceWrite`: a snapshot-owned path edits the
-Document Registry buffer and never journals a disk checkpoint; `{ status: "disk" }`
-falls through to the existing `workspace.mutation.request` before/after loop.
-After a disk edit/write, the wrapper fetches `lsp.diagnostics` and appends a
-summary (unavailable, pending, or clean).
+`createWorkspaceMutationJournalTools` accepts an optional `HostServicesBridge`. Isolated Runs try
+`document.branchWrite` first. In Piarium mode, real workspace/surface mutations then call
+`document.surfaceWrite`: snapshot-owned paths edit the Document Registry buffer and disk-target paths are
+applied by Host Documents through the Rust file-resource backend. If the Host mutation backend cannot take
+the request, the worker fails explicitly; it does not fall through to Pi's local file writer or the legacy
+`workspace.mutation.request` loop. Host-confirmed disk writes still request post-write LSP diagnostics after
+the mutation gate has been released. The journal loop remains a standalone/no-Host helper path used by its own
+tests and is not Piarium's production disk authority.
 
-`apply_patch` uses the same shared plan. Mixed surface/disk batches return
-per-path applied/conflict/compensated/needs-attention instead of a generic
-failure after a partial write.
+`apply_patch` uses the same shared plan. Mixed surface/disk batches return per-path
+applied/conflict/compensated/needs-attention instead of a generic failure after a partial write, and the worker
+never performs a second direct-disk apply behind the Host.

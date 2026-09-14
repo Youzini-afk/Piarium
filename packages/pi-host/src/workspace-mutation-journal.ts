@@ -8,7 +8,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { HostEventData } from "@piarium/protocol";
 import type { HostServicesBridge } from "./harness/host-services-bridge.js";
-import { withPathLock } from "./harness/path-lock.js";
 
 type WorkspaceMutationRequest = HostEventData<"workspace.mutation.request">;
 type WorkspaceMutationToolName = WorkspaceMutationRequest["toolName"];
@@ -87,7 +86,6 @@ interface JournaledExecutionOptions<TResult> {
   inputPath: string;
   toolCallId: string;
   toolName: WorkspaceMutationToolName;
-  hostServicesBridge?: HostServicesBridge;
 }
 
 export function formatSurfaceWriteResult(
@@ -114,6 +112,32 @@ export function formatSurfaceWriteResult(
   return `${result.message ?? `surface mutation ${result.status}`}${lines.length > 0 ? `\n${lines.join("\n")}` : ""}`;
 }
 
+export async function fetchDiagnostics(
+  bridge: HostServicesBridge,
+  path: string,
+  waitMs = 5_000,
+): Promise<{ status: string; summary: string } | null> {
+  try {
+    const result = await bridge.request("lsp.diagnostics", { path, waitMs });
+    if (result.status === "unavailable") {
+      const reason = typeof (result as { reason?: string }).reason === "string"
+        ? (result as { reason: string }).reason
+        : "no language server";
+      return { status: "unavailable", summary: `unavailable — ${reason}` };
+    }
+    if (result.status === "pending") {
+      return { status: "pending", summary: `pending — call diagnostics("${path}")` };
+    }
+    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean" };
+    const errors = result.diagnostics.filter((entry: { severity: string }) => entry.severity === "error").length;
+    const warnings = result.diagnostics.filter((entry: { severity: string }) => entry.severity === "warning").length;
+    const summary = `${result.diagnostics.length} diagnostic(s)${errors > 0 ? `, ${errors} error(s)` : ""}${warnings > 0 ? `, ${warnings} warning(s)` : ""}`;
+    return { status: "ready", summary };
+  } catch {
+    return { status: "unavailable", summary: "unavailable — request failed" };
+  }
+}
+
 export async function trySurfaceWrite(
   bridge: HostServicesBridge,
   params: {
@@ -132,7 +156,11 @@ export async function trySurfaceWrite(
   },
   signal?: AbortSignal,
   label?: "write" | "edit" | "delete" | "apply_patch",
-): Promise<"disk" | { text: string; status: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["status"] }> {
+): Promise<"disk" | {
+  text: string;
+  status: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["status"];
+  results: Exclude<import("@piarium/protocol").DocumentSurfaceWriteResult, { status: "disk" }>["results"];
+}> {
   const result = await bridge.request(
     "document.surfaceWrite",
     {
@@ -147,30 +175,19 @@ export async function trySurfaceWrite(
   if (result.status === "disk") return "disk";
   const action = label ?? params.action ?? params.changes?.[0]?.action ?? "edit";
   const fallback = params.path ?? params.changes?.[0]?.path ?? "";
-  return { text: formatSurfaceWriteResult(result, fallback, action), status: result.status };
+  return { text: formatSurfaceWriteResult(result, fallback, action), status: result.status, results: result.results };
 }
 
-async function fetchDiagnostics(
+async function withDiskDiagnostics(
   bridge: HostServicesBridge,
   path: string,
-): Promise<{ status: string; summary: string } | null> {
-  try {
-    const result = await bridge.request("lsp.diagnostics", { path, waitMs: 5000 });
-    if (result.status === "unavailable") {
-      const reason = typeof (result as { reason?: string }).reason === "string" ? (result as { reason: string }).reason : "no language server";
-      return { status: "unavailable", summary: `unavailable — ${reason}` };
-    }
-    if (result.status === "pending") {
-      return { status: "pending", summary: `pending — call diagnostics("${path}")` };
-    }
-    if (result.diagnostics.length === 0) return { status: "clean", summary: "clean" };
-    const errors = result.diagnostics.filter((d: { severity: string }) => d.severity === "error").length;
-    const warnings = result.diagnostics.filter((d: { severity: string }) => d.severity === "warning").length;
-    const summary = `${result.diagnostics.length} diagnostic(s)${errors > 0 ? `, ${errors} error(s)` : ""}${warnings > 0 ? `, ${warnings} warning(s)` : ""}`;
-    return { status: "ready", summary };
-  } catch {
-    return { status: "unavailable", summary: "unavailable — request failed" };
+  planned: Exclude<Awaited<ReturnType<typeof trySurfaceWrite>>, "disk">,
+): Promise<string> {
+  if (!planned.results.some((entry) => entry.target === "disk" && entry.status === "applied")) {
+    return planned.text;
   }
+  const diagnostics = await fetchDiagnostics(bridge, path);
+  return diagnostics ? `${planned.text}\n\n[diagnostics: ${diagnostics.summary}]` : planned.text;
 }
 
 async function tryVirtualBranchWrite(
@@ -233,25 +250,7 @@ async function executeWithMutationJournal<TResult extends { content: Array<{ typ
     }
     return result!;
   };
-  const result = options.hostServicesBridge
-    ? await withPathLock(options.hostServicesBridge, [path], executeMutation)
-    : await executeMutation();
-  // Diagnostics can wait on a language server, so run them after releasing the
-  // mutation lease. They are feedback, not part of the write critical section.
-  if (options.hostServicesBridge) {
-    const diag = await fetchDiagnostics(options.hostServicesBridge, path);
-    if (diag) {
-      try {
-        const firstText = result.content.find((content) => content.type === "text");
-        if (firstText && typeof firstText.text === "string") {
-          firstText.text = `${firstText.text}\n\n[diagnostics: ${diag.summary}]`;
-        }
-      } catch {
-        // Result may be frozen; skip
-      }
-    }
-  }
-  return result;
+  return executeMutation();
 }
 
 export function createWorkspaceMutationJournalTools(
@@ -283,9 +282,10 @@ export function createWorkspaceMutationJournalTools(
             content: params.content,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: planned.text }], details: undefined };
+            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }], details: undefined };
           }
         }
+        throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");
       }
       return executeWithMutationJournal({
         bridge,
@@ -294,7 +294,6 @@ export function createWorkspaceMutationJournalTools(
         inputPath: params.path,
         toolCallId,
         toolName: "write",
-        ...(hostServicesBridge ? { hostServicesBridge } : {}),
       });
     },
   });
@@ -317,9 +316,10 @@ export function createWorkspaceMutationJournalTools(
             edits: params.edits,
           }, signal);
           if (planned !== "disk") {
-            return { content: [{ type: "text" as const, text: planned.text }], details: undefined };
+            return { content: [{ type: "text" as const, text: await withDiskDiagnostics(hostServicesBridge, params.path, planned) }], details: undefined };
           }
         }
+        throw new Error("Host document mutation backend is unavailable; refusing a parallel Pi-worker disk write");
       }
       return executeWithMutationJournal({
         bridge,
@@ -328,7 +328,6 @@ export function createWorkspaceMutationJournalTools(
         inputPath: params.path,
         toolCallId,
         toolName: "edit",
-        ...(hostServicesBridge ? { hostServicesBridge } : {}),
       });
     },
   });

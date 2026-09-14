@@ -182,7 +182,13 @@ const runWorkspaceMutation = <T,>(
     context.config.root,
     { kind: 'web-route', id: ownerId },
     operation,
-    options,
+    {
+      ...options,
+      // WorkspaceAPI includes bulk upload/archive/Git writers whose exact path
+      // set may be discovered during the operation. Register one conservative
+      // subtree writer with the kernel rather than maintaining another TS gate.
+      resourceOperations: [{ resourceId: '', scope: 'subtree' }],
+    },
   ) as Promise<T>;
 };
 

@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import type path from 'node:path';
 import type os from 'node:os';
 import type { DocumentAuthority } from '../documents/authority.js';
+import type { HostFileResourceBackend } from '../recovery/durable-file-operation.js';
 
 export type PathModule = typeof path;
 export type OsModule = Pick<typeof os, 'homedir'>;
@@ -45,6 +46,7 @@ export interface FsRouteDependencies {
   buildAugmentedPath(): string;
   crypto: { randomUUID(): string };
   documents?: DocumentAuthority;
+  fileResources?: HostFileResourceBackend;
   fsPromises: unknown;
   normalizeDirectoryPath<Value>(path: Value): Value | string;
   os: OsModule;

@@ -184,6 +184,8 @@ impl Storage {
         match outcome {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
+                self.file_leases
+                    .retain(|_, lease| lease.grant_id != grant_id);
                 Ok(json!({"grantId": grant_id, "revoked": true}))
             }
             Err(error) => {

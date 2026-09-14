@@ -487,13 +487,13 @@ export function createFsLockService(locks: PathLockService): HarnessService<"fs.
           return { held: true, leaseIds };
         } catch (error) {
           for (let index = leaseIds.length - 1; index >= 0; index -= 1) {
-            locks.release(ctx.sessionId, leaseIds[index]!);
+            await locks.release(ctx.sessionId, leaseIds[index]!);
           }
           throw error;
         }
       }
       if (params.action === "release") {
-        return { held: false, released: locks.release(ctx.sessionId, params.leaseId) };
+        return { held: false, released: await locks.release(ctx.sessionId, params.leaseId) };
       }
       throw new Error("Unknown fs.lock action");
     },

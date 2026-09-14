@@ -1,4 +1,4 @@
-import type { RecoveryFileStore, RecoveryIdentity, RecoveryState } from "./journal-files.js";
+import type { CapturedState, CaptureStateOptions, RecoveryFileStore, RecoveryIdentity, RecoveryState } from "./journal-files.js";
 import type { RecoveryDurableOperationPort } from "./journal-engine.js";
 import { parseRecoveryState, sameState } from "./journal-files.js";
 import type { WorkingStateRootStore } from "../harness/working-state/types.js";
@@ -70,13 +70,53 @@ export interface HostResourceOperationGate {
   run<Result>(resources: readonly HostResourceOperation[], operation: () => Promise<Result>): Promise<Result>;
 }
 
-export type ResolveDirectoryApplyContext = (directory: string) => Promise<{
+export interface HostFileResourceBackend {
+  gateFor(identity: RecoveryIdentity): HostResourceOperationGate;
+  captureDetailed(
+    identity: RecoveryIdentity,
+    inputPath: string,
+    options?: CaptureStateOptions,
+    operationId?: string,
+  ): Promise<CapturedState & { ownerId?: string }>;
+  applyStateDetailed(
+    identity: RecoveryIdentity,
+    relativePath: string,
+    state: RecoveryState,
+    options?: { expected?: RecoveryState; ownerId?: string; operationId?: string },
+  ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }>;
+  writeBytes(
+    identity: RecoveryIdentity,
+    relativePath: string,
+    bytes: Uint8Array,
+    options?: { expected?: RecoveryState; mode?: number; operationId?: string },
+  ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }>;
+  mkdir(identity: RecoveryIdentity, relativePath: string, recursive?: boolean): Promise<void>;
+  remove(
+    identity: RecoveryIdentity,
+    relativePath: string,
+    options?: { recursive?: boolean; force?: boolean },
+  ): Promise<void>;
+  rename(
+    identity: RecoveryIdentity,
+    fromPath: string,
+    toPath: string,
+    options?: {
+      targetMustBeMissing?: boolean;
+      expectedFrom?: RecoveryState;
+      expectedTo?: RecoveryState;
+      operationId?: string;
+    },
+  ): Promise<"renamed" | "target-exists" | "conflict">;
+}
+
+export type ResolveDirectoryApplyContext = (directory: string, owningWorkspaceId?: string) => Promise<{
   workspaceId: string;
   resourceOperationGate: HostResourceOperationGate;
 }>;
 
 export interface DurableFileOperationContext {
   fileStore: RecoveryFileStore;
+  fileResources?: HostFileResourceBackend;
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
   root: string;
@@ -213,7 +253,10 @@ const resolvePersistedApplyContext = async (
   if (typeof data.applyCanonicalRoot !== "string" || data.applyCanonicalRoot.length === 0) return context;
   if (!context.resolveDirectoryApplyContext) return "unresolved";
   try {
-    const resolved = await context.resolveDirectoryApplyContext(data.applyCanonicalRoot);
+    const resolved = await context.resolveDirectoryApplyContext(
+      data.applyCanonicalRoot,
+      context.identity.workspaceId,
+    );
     if (
       typeof data.applyExecutionWorkspaceId === "string"
       && data.applyExecutionWorkspaceId.length > 0

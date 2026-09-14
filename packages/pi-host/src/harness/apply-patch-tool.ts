@@ -1,12 +1,10 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync, rmSync } from "node:fs";
-import { resolve, dirname } from "node:path";
-import { mkdirSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import { trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
-import { withPathLock } from "./path-lock.js";
+import { fetchDiagnostics, trySurfaceWrite, type WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
 const editorBufferHash = (text: string): string => (
   `sha256-${createHash("sha256").update(text.replace(/\r\n/g, "\n").replace(/\r/g, "\n"), "utf8").digest("hex")}`
@@ -204,7 +202,7 @@ export function createApplyPatchTool(
   bridge: HostServicesBridge,
   _sessionId: string,
   cwd: string,
-  mutationJournal?: WorkspaceMutationJournalBridge,
+  _mutationJournal?: WorkspaceMutationJournalBridge,
   options: { surfaceWrite?: boolean } = {},
 ): ToolDefinition {
   return defineTool({
@@ -227,11 +225,7 @@ export function createApplyPatchTool(
         };
       }
 
-      const results: string[] = [];
-      let allOk = true;
-      let totalHunks = 0;
       const filePaths = parsed.operations.map((operation) => resolve(cwd, operation.path));
-      const diagnosticPaths: string[] = [];
 
       const decodeDraft = (source: { source: string; base64?: string }): string | null => {
         if ((source.source !== "working-branch" && source.source !== "surface-draft") || !source.base64) {
@@ -289,7 +283,7 @@ export function createApplyPatchTool(
           return { content: null };
         }
       };
-      const patchResult = await withPathLock(bridge, filePaths, async () => {
+      const patchResult = await (async () => {
         const prepared: Array<{
           op: (typeof parsed.operations)[number];
           filePath: string;
@@ -372,107 +366,32 @@ export function createApplyPatchTool(
             })),
           }, signal, "apply_patch");
           if (planned !== "disk") {
+            let text = planned.text;
+            const diagnostics: string[] = [];
+            for (const row of prepared) {
+              if (row.action !== "write") continue;
+              const appliedOnDisk = planned.results.some((entry) => (
+                entry.path === row.op.path && entry.target === "disk" && entry.status === "applied"
+              ));
+              if (!appliedOnDisk) continue;
+              const diagnostic = await fetchDiagnostics(bridge, row.op.path, 500);
+              if (diagnostic?.status === "ready" && diagnostic.summary !== "clean") {
+                diagnostics.push(`${row.op.path}: ${diagnostic.summary}`);
+              }
+            }
+            if (diagnostics.length > 0) text += `\n\n[diagnostics: ${diagnostics.join("; ")}]`;
             return {
-              content: [{ type: "text" as const, text: planned.text }],
+              content: [{ type: "text" as const, text }],
               details: { applied: planned.status === "applied", operations: parsed.operations.length },
             };
           }
         }
-        for (const [index, op] of parsed.operations.entries()) {
-          const filePath = filePaths[index]!;
-          const opResult = await (async () => {
-            if (op.kind === "delete") {
-              // before/after mutation journal
-              if (mutationJournal) {
-                await mutationJournal.request({ path: filePath, phase: "before", toolCallId, toolName: "apply_patch" });
-              }
-              try {
-                rmSync(filePath);
-                if (mutationJournal) {
-                  await mutationJournal.request({ path: filePath, phase: "after", succeeded: true, toolCallId, toolName: "apply_patch" });
-                }
-                return { ok: true, message: `deleted ${op.path}` };
-              } catch (error) {
-                if (mutationJournal) {
-                  await mutationJournal.request({ path: filePath, phase: "after", succeeded: false, toolCallId, toolName: "apply_patch" });
-                }
-                return { ok: false, message: `delete failed: ${(error as Error).message}` };
-              }
-            }
-
-            if (op.kind === "add") {
-              if (mutationJournal) {
-                await mutationJournal.request({ path: filePath, phase: "before", toolCallId, toolName: "apply_patch" });
-              }
-              try {
-                mkdirSync(dirname(filePath), { recursive: true });
-                writeFileSync(filePath, op.content, "utf8");
-                if (mutationJournal) {
-                  await mutationJournal.request({ path: filePath, phase: "after", succeeded: true, toolCallId, toolName: "apply_patch" });
-                }
-                return { ok: true, message: `added ${op.path} (${op.content.length} bytes)` };
-              } catch (error) {
-                if (mutationJournal) {
-                  await mutationJournal.request({ path: filePath, phase: "after", succeeded: false, toolCallId, toolName: "apply_patch" });
-                }
-                return { ok: false, message: `add failed: ${(error as Error).message}` };
-              }
-            }
-
-            // Update
-            if (!existsSync(filePath)) {
-              return { ok: false, message: `file not found: ${op.path}` };
-            }
-            const oldContent = readFileSync(filePath, "utf8");
-
-            if (mutationJournal) {
-              await mutationJournal.request({ path: filePath, phase: "before", toolCallId, toolName: "apply_patch" });
-            }
-
-            const applyResult = applyCodexHunks(oldContent, op.hunks);
-            if ("error" in applyResult) {
-              if (mutationJournal) {
-                await mutationJournal.request({ path: filePath, phase: "after", succeeded: false, toolCallId, toolName: "apply_patch" });
-              }
-              return { ok: false, message: `patch error in ${op.path}: ${applyResult.error}` };
-            }
-
-            writeFileSync(filePath, applyResult.result, "utf8");
-            if (mutationJournal) {
-              await mutationJournal.request({ path: filePath, phase: "after", succeeded: true, toolCallId, toolName: "apply_patch" });
-            }
-
-            diagnosticPaths.push(filePath);
-            return { ok: true, message: `updated ${op.path}: ${applyResult.applied} hunk(s)`, hunks: applyResult.applied };
-          })();
-
-          if (opResult.ok) {
-            results.push(`  ✓ ${opResult.message}`);
-            totalHunks += opResult.hunks ?? 0;
-          } else {
-            results.push(`  ✗ ${opResult.message}`);
-            allOk = false;
-          }
-        }
-
-        const summary = allOk
-          ? `patch applied successfully (${parsed.operations.length} file(s), ${totalHunks} hunk(s))`
-          : `patch partially applied (${results.join("\n")})`;
+        const message = "Host document mutation backend is unavailable; refusing a parallel pi-host disk apply";
         return {
-          content: [{ type: "text" as const, text: allOk ? summary : `${summary}\n${results.join("\n")}` }],
-          details: { applied: allOk, operations: parsed.operations.length, hunks: totalHunks },
+          content: [{ type: "text" as const, text: message }],
+          details: { applied: false, error: message, operations: parsed.operations.length },
         };
-      });
-      const diagnostics: string[] = [];
-      for (const filePath of diagnosticPaths) {
-        try {
-          const result = await bridge.request("lsp.diagnostics", { path: filePath, waitMs: 500 });
-          if (result.diagnostics.length > 0) diagnostics.push(`${filePath}: ${result.diagnostics.length}`);
-        } catch { /* Best-effort feedback runs outside the mutation leases. */ }
-      }
-      if (diagnostics.length > 0) {
-        patchResult.content[0]!.text += `\n\n[diagnostics: ${diagnostics.join("; ")}]`;
-      }
+      })();
       return patchResult;
     },
   });

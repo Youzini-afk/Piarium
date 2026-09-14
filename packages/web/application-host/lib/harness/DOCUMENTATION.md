@@ -21,7 +21,7 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── explore.search → same query engine, algorithm-only facade
                            ├── explore.query.* → Host-owned short-lived query (start/plan/views/select/followup/finish/cancel/release)
                            ├── related.query → already-open KnowledgeStore (file-level topology; not lsp.references)
-                           ├── fs.lock      → PathLockService + Documents identity
+                           ├── fs.lock      → Rust kernel file-resource lease + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
                            ├── memory.blocks.* → KnowledgeStore block validator
@@ -37,7 +37,7 @@ broker event stream ──→ HarnessRouter.processEvent()
 Global singleton that owns:
 - `OutputStore` — large output storage with per-session isolation
 - `ObservationCursorStore` — per-observer shell/diagnostics/thread baselines with prepare/commit delivery CAS, reset by compaction
-- `PathLockService` — owner-bound canonical-resource leases
+- `PathLockService` contract — production injects `KernelPathLockService`, which maps the already-authorized Documents resource to Rust `file.lease.*`; the in-process implementation remains a unit-test helper only
 - `HarnessSearchService` — wraps `createWorkspaceContentSearch`
 - `DiagnosticsProvider` — LSP diagnostics (optional)
 - Per-session `ShellSupervisor` registry
@@ -221,10 +221,9 @@ for these tools: `read` / `grep` / `find` / `ls` / `explore` consume
 `effectiveState = base ∪ delta` with tombstones hidden, and provenance names
 the branch, revision, and origin. Missing branch content stays unavailable.
 
-The fixed draft is one turn's input, not a standing authority. A disk write —
-a Documents write or the Pi mutation journal's successful `after` phase, awaited
-before the tool is acknowledged — supersedes that path so later read/search/
-enumeration/navigation/dispatch return to disk (D-088). A root-session write
+The fixed draft is one turn's input, not a standing authority. A confirmed Host-backed disk write
+supersedes that path so later read/search/enumeration/navigation/dispatch return to disk (D-088).
+Piarium-mode Pi mutation tools do not maintain a second worker-local disk journal/writer. A root-session write
 whose path is still owned by this turn's snapshot goes through `document.surfaceWrite`
 instead: matching uses the fixed text, the live Registry buffer is updated in
 place, and later read/edit in the same turn see the new buffer (D-225). A later
@@ -237,19 +236,18 @@ boundary the recovery journal reports.
 ### Native surface write (`document.surfaceWrite`)
 
 `write` / `edit` / `apply_patch` share one Host plan after `document.branchWrite`
-returns the disk sentinel. Snapshot-owned paths write the Document Registry
-buffer through `requestSurfaceOperation` and never create a disk checkpoint.
-Unowned paths return `{ status: "disk" }` so the existing mutation journal
-writes the file. Mixed `apply_patch` batches classify each path, persist
-`targetKinds`, and within one Documents resource gate validate every disk byte
-identity before dispatching any surface write. The WAL records external dispatch,
-compensation intent, observed receipts, and target-after state; it then applies
-surface and disk and compensates with CAS receipts (`applied` / `conflict` /
-`compensated` / `needs-attention`). An explicit failed surface receipt proves that
-path was not applied; a dispatched request without a valid receipt is uncertain.
-A crash after a disk write but before target-after capture remains visible through
-Recovery status/UI. Delete, NUL bytes, and other states a text buffer cannot express
-are `unavailable`.
+returns the disk sentinel. Snapshot-owned paths write the Document Registry buffer through
+`requestSurfaceOperation`; unowned disk targets stay in the same Host plan and are applied by
+Documents through the Rust file-resource backend. Piarium does not hand those targets back to a
+worker-local writer. Mixed `apply_patch` batches classify each path, persist `targetKinds`, and under
+one Rust resource lease validate every disk identity before dispatching a surface write. The typed
+recovery operation records external dispatch, compensation intent and observed Registry receipts;
+Rust file operations separately persist filesystem intent before their side effects and reconcile a
+started operation after kernel restart. Compensation remains conditional (`applied` / `conflict` /
+`compensated` / `needs-attention`) and never overwrites a later user edit. An explicit failed surface
+receipt proves that path was not applied; a dispatched request without a valid receipt is uncertain.
+Delete, NUL bytes, and other states a text buffer cannot express are `unavailable` to the Registry
+surface path, while supported disk states remain kernel file-resource operations.
 
 ### Native find/ls path overlay (`document.pathOverlay`)
 

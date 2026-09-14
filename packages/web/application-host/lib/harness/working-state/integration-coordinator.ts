@@ -79,7 +79,7 @@ export interface IntegrationCoordinatorOptions {
     signal?: AbortSignal,
   ) => Promise<{ status: "disk" } | { status: "virtual"; release(): void }>;
   resolveParentSessionId?: (workspaceId: string, branchId: string) => string | undefined;
-  resolveDirectoryApplyContext?: (directory: string) => Promise<{
+  resolveDirectoryApplyContext?: (directory: string, owningWorkspaceId?: string) => Promise<{
     workspaceId: string;
     resourceOperationGate: HostResourceOperationGate;
   }>;
@@ -332,7 +332,10 @@ export class IntegrationCoordinator {
       throw new DirectoryApplyUnresolvedError(parentAuthority.directory);
     }
     try {
-      const resolved = await this.resolveDirectoryApplyContext(parentAuthority.directory);
+      const resolved = await this.resolveDirectoryApplyContext(
+        parentAuthority.directory,
+        context.identity.workspaceId,
+      );
       return {
         executionWorkspaceId: resolved.workspaceId,
         context: {

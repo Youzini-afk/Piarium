@@ -599,11 +599,16 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
     if (resolved?.root?.source !== 'workspace' || typeof documents?.runMutationForScope !== 'function') {
       return operation();
     }
+    const scope = options.resourceScope === 'subtree' ? 'subtree' : 'exact';
+    const { resourceScope: _resourceScope, ...writerOptions } = options;
     return documents.runMutationForScope(
       resolved.root.realPath,
       { kind: 'web-route', id: ownerId },
       operation,
-      options,
+      {
+        ...writerOptions,
+        resourceOperations: [{ resourceId: resolved.relativePath, scope }],
+      },
     );
   };
 
@@ -803,7 +808,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
           relativePath: req.body?.path || '.',
           mustExist: true,
         });
-      }, { mode: 'external', purpose: 'external-fs-folder' });
+      }, { mode: 'external', purpose: 'external-fs-folder', resourceScope: 'subtree' });
       return res.json({
         success: true,
         root: canonical.root.id,
@@ -834,7 +839,7 @@ export const registerExternalAccessRoutes = (app: Express, dependencies: Externa
         resolved,
         'external.fs.delete',
         () => fsPromises.rm(resolved.absolutePath, { recursive, force: false }),
-        { mode: 'external', purpose: 'external-fs-delete' },
+        { mode: 'external', purpose: 'external-fs-delete', resourceScope: 'subtree' },
       );
       return res.json({
         success: true,

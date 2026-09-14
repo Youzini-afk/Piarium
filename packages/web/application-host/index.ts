@@ -73,6 +73,8 @@ import { createThreadRuntime } from './lib/harness/thread-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
+import { KernelFileResourceBackend } from './lib/kernel/file-resource-backend.js';
+import { KernelPathLockService } from './lib/kernel/file-resource-lock-service.js';
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './lib/kernel/kernel-recovery-store.js';
 import { createRetrievalArtifactAccess } from './lib/harness/retrieval-artifacts.js';
 import { ThreadExecutionViewRegistry } from './lib/harness/working-state/execution-view.js';
@@ -1050,9 +1052,29 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
     },
   });
+  const resolveKernelExecutionRoot = async (canonicalRoot: string) => {
+    const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot });
+    const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId);
+    return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root };
+  };
+  const kernelFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
+    resolveExecutionRoot: resolveKernelExecutionRoot,
+  });
+  const kernelRecoveryFileResources = new KernelFileResourceBackend(kernelStorageAdapter, {
+    resolveExecutionRoot: resolveKernelExecutionRoot,
+    authorityPurpose: 'recovery-maintenance',
+    authorityCapabilities: ['recovery.maintenance'],
+  });
+  const kernelPathLockService = new KernelPathLockService(kernelStorageAdapter, {
+    resolveOwningWorkspaceId: async (sessionId, executionWorkspaceId) => {
+      const binding = await threadRegistry.getSessionBinding(sessionId).catch(() => null);
+      return binding?.owningWorkspaceId ?? executionWorkspaceId;
+    },
+    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+  });
   const kernelRecoveryContentStore = new KernelRecoveryContentStore(
     kernelStorageAdapter,
-    path.join(PIARIUM_DATA_DIR, 'kernel', extensionRuntime.services.hostId, 'recovery-cache'),
+    kernelRecoveryFileResources,
   );
   kernelStorageAdapter.bindFileStore(kernelRecoveryContentStore);
   const kernelRecoveryStore = new KernelRecoveryStore(kernelStorageAdapter, kernelRecoveryContentStore);
@@ -1151,15 +1173,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       );
     },
   };
-  const resolveDirectoryApplyContext = async (directory: string) => {
+  const resolveDirectoryApplyContext = async (directory: string, owningWorkspaceId?: string) => {
     const resolved = await documentsAuthority.resolveWorkspace({ path: directory });
     return {
       workspaceId: resolved.workspaceId,
-      resourceOperationGate: {
-        run: <Result>(resources: Parameters<DocumentAuthority['runResourceOperation']>[1], operation: () => Promise<Result>) => (
-          documentsAuthority.runResourceOperation(resolved.workspaceId, resources, operation)
-        ),
-      },
+      resourceOperationGate: kernelRecoveryFileResources.gateFor({
+        authorityId: extensionRuntime.services.hostId,
+        canonicalRoot: directory,
+        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
+        workspaceId: owningWorkspaceId ?? resolved.workspaceId,
+      }),
     };
   };
   const recoveryEngineForOwner = (context: {
@@ -1183,9 +1206,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       engine = createKernelRecoveryDirectFacade(engine, kernelRecoveryStore, {
         authorityId: extensionRuntime.services.hostId,
         listWorkspaceRegistrations: () => documentsAuthority.listWorkspaceRegistrations(),
-        resourceOperationGateFor: (workspaceId) => ({
-          run: (resources, operation) => documentsAuthority.runResourceOperation(workspaceId, resources, operation),
-        }),
         resolveDirectoryApplyContext,
       });
       workspaceRecoveryEngines.set(storageOwnerId, engine);
@@ -2099,6 +2119,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const discoveredShells = discoverShells();
   const harnessServiceHost = createHarnessServiceHost({
     discoveredShells,
+    pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
     readExploreFile: createExploreFileReader(
       documentsAuthority,
@@ -2666,6 +2687,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     extensionRuntime,
     uiAuthController,
     documents: documentsAuthority,
+    fileResources: kernelFileResources,
     onGitStatus: observeKnowledgeGitStatus,
     languageSupervisor,
     languageSupport: languageSupportRuntime,

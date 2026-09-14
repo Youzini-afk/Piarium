@@ -19,6 +19,15 @@ export type KernelMethod =
   | "storage.putBlob.abort"
   | "storage.blob.release"
   | "storage.getBlob"
+  | "storage.object.rebindOwner"
+  | "file.root.register"
+  | "file.lease.acquire"
+  | "file.lease.release"
+  | "file.capture"
+  | "file.apply"
+  | "file.mkdir"
+  | "file.remove"
+  | "file.rename"
   | "storage.record.put"
   | "storage.record.get"
   | "storage.record.list"
@@ -140,6 +149,11 @@ export interface KernelBlobReleaseParams {
   workspaceId?: string;
 }
 
+export interface KernelObjectOwnerRebindParams {
+  workspaceId: string;
+  ownerId: string;
+}
+
 export interface KernelGetBlobParams {
   hash: string;
   branchId?: string;
@@ -151,6 +165,81 @@ export interface KernelGetBlobParams {
   path?: string;
   offset?: number;
   length?: number;
+}
+
+export interface KernelFileRootRegisterParams {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  canonicalRoot: string;
+}
+
+export interface KernelFileLeaseResource {
+  path: string;
+  scope: string;
+}
+
+export interface KernelFileLeaseAcquireParams {
+  workspaceId: string;
+  rootId: string;
+  leaseId: string;
+  resources: KernelFileLeaseResource[];
+}
+
+export interface KernelFileLeaseReleaseParams {
+  workspaceId: string;
+  rootId: string;
+  leaseId: string;
+}
+
+export interface KernelFileCaptureParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  store: boolean;
+  leaseId?: string;
+}
+
+export interface KernelFileApplyParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  targetJson: string;
+  expectedJson?: string;
+  ownerId?: string;
+  leaseId?: string;
+}
+
+export interface KernelFileMkdirParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  recursive: boolean;
+  leaseId?: string;
+}
+
+export interface KernelFileRemoveParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  recursive: boolean;
+  force: boolean;
+  leaseId?: string;
+}
+
+export interface KernelFileRenameParams {
+  operationId: string;
+  workspaceId: string;
+  rootId: string;
+  fromPath: string;
+  toPath: string;
+  targetMustBeMissing?: boolean;
+  expectedFromJson?: string;
+  expectedToJson?: string;
+  leaseId?: string;
 }
 
 export interface KernelRecordReference {
@@ -869,6 +958,15 @@ export type KernelMethodParams = {
   "storage.putBlob.abort": KernelPutBlobAbortParams;
   "storage.blob.release": KernelBlobReleaseParams;
   "storage.getBlob": KernelGetBlobParams;
+  "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
+  "file.root.register": KernelFileRootRegisterParams;
+  "file.lease.acquire": KernelFileLeaseAcquireParams;
+  "file.lease.release": KernelFileLeaseReleaseParams;
+  "file.capture": KernelFileCaptureParams;
+  "file.apply": KernelFileApplyParams;
+  "file.mkdir": KernelFileMkdirParams;
+  "file.remove": KernelFileRemoveParams;
+  "file.rename": KernelFileRenameParams;
   "storage.record.put": KernelRecordPutParams;
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
@@ -1030,6 +1128,87 @@ export type KernelRequest =
       id: string;
       method: "storage.getBlob";
       params: KernelGetBlobParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.object.rebindOwner";
+      params: KernelObjectOwnerRebindParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.root.register";
+      params: KernelFileRootRegisterParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.lease.acquire";
+      params: KernelFileLeaseAcquireParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.lease.release";
+      params: KernelFileLeaseReleaseParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.capture";
+      params: KernelFileCaptureParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.apply";
+      params: KernelFileApplyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.mkdir";
+      params: KernelFileMkdirParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.remove";
+      params: KernelFileRemoveParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.rename";
+      params: KernelFileRenameParams;
       epoch?: string;
       grantId?: string;
     }

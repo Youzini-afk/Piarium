@@ -51,8 +51,8 @@ export class HostServicesBridge {
 
   /**
    * The input source accepted for the current turn. Surface-aware mutations
-   * still ask Host `document.surfaceWrite`; a disk-sourced context returns the
-   * journaled-disk sentinel without touching an editor buffer.
+   * still ask Host `document.surfaceWrite`; in Piarium production, disk-sourced
+   * targets are applied by Host Documents through the Rust file-resource backend.
    */
   inputContext(): AgentInputContext | undefined {
     return this.#getInputContext?.();

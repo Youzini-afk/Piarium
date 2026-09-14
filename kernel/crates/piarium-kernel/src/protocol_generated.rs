@@ -111,6 +111,99 @@ pub(crate) struct KernelGetBlobParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelObjectOwnerRebindParams {
+    pub(crate) workspace_id: String,
+    pub(crate) owner_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileRootRegisterParams {
+    pub(crate) workspace_id: String,
+    pub(crate) execution_workspace_id: String,
+    pub(crate) canonical_root: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileLeaseAcquireParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) lease_id: String,
+    pub(crate) resources: Vec<KernelFileLeaseResource>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileLeaseReleaseParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileCaptureParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+    pub(crate) store: bool,
+    pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileApplyParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+    pub(crate) target_json: String,
+    pub(crate) expected_json: Option<String>,
+    pub(crate) owner_id: Option<String>,
+    pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileMkdirParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+    pub(crate) recursive: bool,
+    pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileRemoveParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+    pub(crate) recursive: bool,
+    pub(crate) force: bool,
+    pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileRenameParams {
+    pub(crate) operation_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) from_path: String,
+    pub(crate) to_path: String,
+    pub(crate) target_must_be_missing: Option<bool>,
+    pub(crate) expected_from_json: Option<String>,
+    pub(crate) expected_to_json: Option<String>,
+    pub(crate) lease_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecordPutParams {
     pub(crate) operation_id: String,
     pub(crate) record_id: String,
@@ -645,6 +738,13 @@ pub(crate) struct KernelGcParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileLeaseResource {
+    pub(crate) path: String,
+    pub(crate) scope: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecordReference {
     pub(crate) slot: String,
     pub(crate) object_hash: String,
@@ -869,6 +969,41 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "storage.getBlob" => serde_json::from_value::<KernelGetBlobParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "storage.object.rebindOwner" => {
+            serde_json::from_value::<KernelObjectOwnerRebindParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.root.register" => {
+            serde_json::from_value::<KernelFileRootRegisterParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.lease.acquire" => {
+            serde_json::from_value::<KernelFileLeaseAcquireParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.lease.release" => {
+            serde_json::from_value::<KernelFileLeaseReleaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.capture" => serde_json::from_value::<KernelFileCaptureParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "file.apply" => serde_json::from_value::<KernelFileApplyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "file.mkdir" => serde_json::from_value::<KernelFileMkdirParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "file.remove" => serde_json::from_value::<KernelFileRemoveParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "file.rename" => serde_json::from_value::<KernelFileRenameParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "storage.record.put" => serde_json::from_value::<KernelRecordPutParams>(params.clone())

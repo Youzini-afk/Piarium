@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile } from "node:fs/promises";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import {
   createEditToolDefinition,
@@ -65,25 +66,53 @@ function isMutationEvent(envelope: WireEnvelope): envelope is EventEnvelope<"wor
   return envelope.kind === "event" && envelope.event === "workspace.mutation.request";
 }
 
-function serveHarnessRequest(host: SessionHost, event: HostEvent, data: HostEventData<HostEvent>): void {
+function serveHarnessRequest(
+  host: SessionHost,
+  event: HostEvent,
+  data: HostEventData<HostEvent>,
+  workspaceRoot?: string,
+): void {
   if (event !== "harness.request") return;
   const request = data as HostEventData<"harness.request">;
   const sessionId = host.sessionId;
   if (!sessionId) return;
-  const result = request.method === "fs.lock"
-    ? (request.params as { action?: string }).action === "acquire"
+  if (request.method === "fs.lock") {
+    const result = (request.params as { action?: string }).action === "acquire"
       ? { held: true, leaseIds: ["lease-test"] }
-      : { held: false, released: true }
-    : request.method === "lsp.diagnostics"
-      ? { status: "ready", diagnostics: [] }
-      : request.method === "document.branchWrite" || request.method === "document.surfaceWrite"
-        ? { status: "disk" }
-        : null;
-  if (result !== null) host.respondHarness(sessionId, request.requestId, { ok: true, result });
+      : { held: false, released: true };
+    host.respondHarness(sessionId, request.requestId, { ok: true, result });
+    return;
+  }
+  if (request.method === "lsp.diagnostics") {
+    host.respondHarness(sessionId, request.requestId, { ok: true, result: { status: "ready", diagnostics: [] } });
+    return;
+  }
+  if (request.method === "document.branchWrite") {
+    host.respondHarness(sessionId, request.requestId, { ok: true, result: { status: "disk" } });
+    return;
+  }
+  if (request.method === "document.surfaceWrite" && workspaceRoot) {
+    const params = request.params as { path?: string; action?: "write" | "edit" | "delete"; content?: string; edits?: Array<{ oldText: string; newText: string }> };
+    const relative = params.path ?? "";
+    const target = join(workspaceRoot, relative);
+    mkdirSync(dirname(target), { recursive: true });
+    if (params.action === "delete") rmSync(target, { force: true });
+    else if (params.action === "edit") {
+      let content = readFileSync(target, "utf8");
+      for (const edit of params.edits ?? []) content = content.replace(edit.oldText, edit.newText);
+      writeFileSync(target, content, "utf8");
+    } else {
+      writeFileSync(target, params.content ?? "", "utf8");
+    }
+    host.respondHarness(sessionId, request.requestId, {
+      ok: true,
+      result: { status: "applied", operationId: `op-${request.requestId}`, results: [{ path: relative, target: "disk", status: "applied" }] },
+    });
+  }
 }
 
 describe("workspace mutation journal", () => {
-  it("blocks write and edit around the original Pi tools when explicitly enabled", async () => {
+  it("routes enabled write and edit through the Host document mutation backend", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-tools-"));
     const cwd = join(root, "workspace");
     await mkdir(cwd, { recursive: true });
@@ -92,111 +121,33 @@ describe("workspace mutation journal", () => {
       agentDir: join(root, "agent"),
       emit: (event, data) => {
         events.emit(event, data);
-        serveHarnessRequest(host, event, data);
+        serveHarnessRequest(host, event, data, cwd);
       },
       projectTrustOverride: true,
     });
     host.setWorkspaceMutationJournalEnabled(true);
+    host.setHarnessDocumentReadEnabled(true);
     await host.openCatalogContext(cwd);
     try {
-      const sessionId = host.sessionId;
-      assert.ok(sessionId);
-      assert.equal(
-        host.session.getAllTools().find((tool) => tool.name === "write")?.sourceInfo.source,
-        "sdk",
-      );
-      const write = host.session.getToolDefinition("write") as ReturnType<
-        typeof createWriteToolDefinition
-      >;
-      const writePath = join(cwd, "created.txt");
-      let writeSettled = false;
-      const writeRun = write.execute(
-        "write-call",
-        { content: "created", path: "created.txt" },
-        undefined,
-        undefined,
-        undefined as never,
-      ).finally(() => {
-        writeSettled = true;
-      });
+      const write = host.session.getToolDefinition("write") as ReturnType<typeof createWriteToolDefinition>;
+      const writeResult = await write.execute("write-call", { content: "created", path: "created.txt" }, undefined, undefined, undefined as never);
+      assert.equal(await readFile(join(cwd, "created.txt"), "utf8"), "created");
+      assert.match((writeResult.content[0] as { text: string }).text, /diagnostics: clean/);
 
-      const writeBefore = await events.next();
-      assert.deepEqual(writeBefore, {
-        path: resolve(cwd, "created.txt"),
-        phase: "before",
-        requestId: writeBefore.requestId,
-        sessionId,
-        toolCallId: "write-call",
-        toolName: "write",
-      });
-      await assert.rejects(readFile(writePath), { code: "ENOENT" });
-      assert.equal(writeSettled, false);
-      assert.equal(host.respondWorkspaceMutation(sessionId, writeBefore.requestId, false), true);
-
-      const writeAfter = await events.next();
-      assert.equal(await readFile(writePath, "utf8"), "created");
-      assert.equal(writeAfter.phase, "after");
-      assert.equal(writeAfter.succeeded, true);
-      assert.equal(writeAfter.toolCallId, "write-call");
-      assert.equal(writeSettled, false);
-      assert.equal(host.respondWorkspaceMutation("wrong-session", writeAfter.requestId, true), false);
-      assert.equal(host.respondWorkspaceMutation(sessionId, writeAfter.requestId, false), true);
-      await writeRun;
-
-      const edit = host.session.getToolDefinition("edit") as ReturnType<
-        typeof createEditToolDefinition
-      >;
-      let editSettled = false;
-      const editRun = edit.execute(
+      const edit = host.session.getToolDefinition("edit") as ReturnType<typeof createEditToolDefinition>;
+      await edit.execute(
         "edit-call",
         { edits: [{ newText: "updated", oldText: "created" }], path: "created.txt" },
         undefined,
         undefined,
         undefined as never,
-      ).finally(() => {
-        editSettled = true;
-      });
-
-      const editBefore = await events.next();
-      assert.equal(editBefore.phase, "before");
-      assert.equal(editBefore.toolName, "edit");
-      assert.equal(await readFile(writePath, "utf8"), "created");
-      assert.equal(host.respondWorkspaceMutation(sessionId, editBefore.requestId, true), true);
-
-      const editAfter = await events.next();
-      assert.equal(await readFile(writePath, "utf8"), "updated");
-      assert.equal(editAfter.phase, "after");
-      assert.equal(editAfter.succeeded, true);
-      assert.equal(editSettled, false);
-      assert.equal(host.respondWorkspaceMutation(sessionId, editAfter.requestId, true), true);
-      await editRun;
-
-      let failedEditSettled = false;
-      const failedEditRun = edit.execute(
-        "failed-edit-call",
-        { edits: [{ newText: "unused", oldText: "missing text" }], path: "created.txt" },
-        undefined,
-        undefined,
-        undefined as never,
-      ).finally(() => {
-        failedEditSettled = true;
-      });
-      const failedEditBefore = await events.next();
-      assert.equal(host.respondWorkspaceMutation(sessionId, failedEditBefore.requestId, true), true);
-      const failedEditAfter = await events.next();
-      assert.equal(failedEditAfter.phase, "after");
-      assert.equal(failedEditAfter.succeeded, false);
-      assert.equal(failedEditSettled, false);
-      assert.equal(
-        host.respondWorkspaceMutation(sessionId, failedEditAfter.requestId, true),
-        true,
       );
-      await assert.rejects(failedEditRun, /Could not find the exact text/);
+      assert.equal(await readFile(join(cwd, "created.txt"), "utf8"), "updated");
+      assert.equal(events.seen.length, 0, "Host-backed document mutations must not enter the legacy pi-host disk journal");
     } finally {
       await host.dispose();
     }
   });
-
   it("does not override Pi's built-ins when the capability is disabled", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-disabled-"));
     const cwd = join(root, "workspace");
@@ -230,7 +181,7 @@ describe("workspace mutation journal", () => {
     }
   });
 
-  it("writes a fixed surface draft through document.surfaceWrite and journals ordinary disk paths", async () => {
+  it("routes both fixed drafts and ordinary disk paths through document.surfaceWrite", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-write-guard-"));
     const events = new MutationEventCollector();
     const journal = new WorkspaceMutationJournalBridge({
@@ -263,15 +214,16 @@ describe("workspace mutation journal", () => {
         if (data.method === "document.surfaceWrite") {
           const path = (data.params as { path?: string }).path ?? "";
           surfaceWrites.push(path);
+          const params = data.params as { path?: string; content?: string };
+          const diskTarget = !path.endsWith("draft.txt");
+          if (diskTarget) writeFileSync(join(root, path), params.content ?? "", "utf8");
           hostServices.respond("session-guard", data.requestId, {
             ok: true,
-            result: path.endsWith("draft.txt")
-              ? {
-                  status: "applied",
-                  operationId: "op-surface",
-                  results: [{ path, target: "surface", status: "applied" }],
-                }
-              : { status: "disk" },
+            result: {
+              status: "applied",
+              operationId: diskTarget ? "op-disk" : "op-surface",
+              results: [{ path, target: diskTarget ? "disk" : "surface", status: "applied" }],
+            },
           });
           return;
         }
@@ -298,23 +250,16 @@ describe("workspace mutation journal", () => {
     assert.equal(events.seen.length, 0);
     assert.deepEqual(surfaceWrites, ["draft.txt"]);
 
-    // Another path in the same turn is an ordinary write.
-    const otherRun = write.execute("allowed", { content: "plain", path: "other.txt" }, undefined, undefined, undefined as never);
-    const before = await events.next();
-    assert.equal(journal.respond("session-guard", before.requestId, true), true);
-    const after = await events.next();
-    assert.equal(journal.respond("session-guard", after.requestId, true), true);
-    await otherRun;
+    // Disk-sourced paths are also applied by Host Documents; pi-host does not
+    // fall back to its own write implementation or mutation journal.
+    await write.execute("allowed", { content: "plain", path: "other.txt" }, undefined, undefined, undefined as never);
     assert.equal(await readFile(join(root, "other.txt"), "utf8"), "plain");
 
     inputContext = { source: "disk" };
-    const diskRun = write.execute("disk", { content: "disk turn", path: "disk.txt" }, undefined, undefined, undefined as never);
-    const diskBefore = await events.next();
-    assert.equal(journal.respond("session-guard", diskBefore.requestId, true), true);
-    const diskAfter = await events.next();
-    assert.equal(journal.respond("session-guard", diskAfter.requestId, true), true);
-    await diskRun;
+    await write.execute("disk", { content: "disk turn", path: "disk.txt" }, undefined, undefined, undefined as never);
     assert.equal(await readFile(join(root, "disk.txt"), "utf8"), "disk turn");
+    assert.equal(events.seen.length, 0);
+    assert.deepEqual(surfaceWrites, ["draft.txt", "other.txt", "disk.txt"]);
 
     journal.dispose();
     hostServices.dispose();
@@ -386,42 +331,16 @@ describe("workspace mutation journal", () => {
     bridge.dispose();
   });
 
-  it("releases pending waits on session replacement and disposal", async () => {
+  it("releases pending standalone journal waits on disposal", async () => {
     const root = await mkdtemp(join(tmpdir(), "piarium-mutation-dispose-"));
-    const firstCwd = join(root, "first");
-    const secondCwd = join(root, "second");
-    await mkdir(firstCwd, { recursive: true });
-    await mkdir(secondCwd, { recursive: true });
     const events = new MutationEventCollector();
-    const host = new SessionHost({
-      agentDir: join(root, "agent"),
-      emit: (event, data) => {
-        events.emit(event, data);
-        serveHarnessRequest(host, event, data);
-      },
-      projectTrustOverride: true,
+    const bridge = new WorkspaceMutationJournalBridge({
+      emit: (event, data) => events.emit(event, data),
+      sessionId: "session-dispose",
     });
-    host.setWorkspaceMutationJournalEnabled(true);
-    await host.openCatalogContext(firstCwd);
-
-    const firstWrite = host.session.getToolDefinition("write") as ReturnType<
-      typeof createWriteToolDefinition
-    >;
-    const replacementRun = firstWrite.execute(
-      "replacement-call",
-      { content: "replacement", path: "replacement.txt" },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-    await events.next();
-    await Promise.all([replacementRun, host.openCatalogContext(secondCwd)]);
-    assert.equal(await readFile(join(firstCwd, "replacement.txt"), "utf8"), "replacement");
-
-    const secondWrite = host.session.getToolDefinition("write") as ReturnType<
-      typeof createWriteToolDefinition
-    >;
-    const disposalRun = secondWrite.execute(
+    const write = createWorkspaceMutationJournalTools(root, bridge)
+      .find((tool) => tool.name === "write") as ReturnType<typeof createWriteToolDefinition>;
+    const run = write.execute(
       "disposal-call",
       { content: "disposal", path: "disposal.txt" },
       undefined,
@@ -429,8 +348,9 @@ describe("workspace mutation journal", () => {
       undefined as never,
     );
     await events.next();
-    await Promise.all([disposalRun, host.dispose()]);
-    assert.equal(await readFile(join(secondCwd, "disposal.txt"), "utf8"), "disposal");
+    bridge.dispose();
+    await run;
+    assert.equal(await readFile(join(root, "disposal.txt"), "utf8"), "disposal");
   });
 
   it("commits a virtual write through document.branchWrite without touching disk", async () => {

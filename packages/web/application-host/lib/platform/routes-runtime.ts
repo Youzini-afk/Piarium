@@ -56,6 +56,7 @@ export interface PlatformRouteDependencies {
   createFsSearchRuntime: ProjectIconDependencies['createFsSearchRuntime'];
   crypto: typeof cryptoModule;
   documents?: DocumentAuthority;
+  fileResources?: FsRouteDependencies['fileResources'];
   extensionCatalog: ExtensionRouteDependencies['extensionCatalog'];
   extensionPackages: ExtensionRouteDependencies['extensionPackages'];
   extensionRuntime: ExtensionRouteDependencies['extensionRuntime'];
@@ -178,6 +179,7 @@ export const createPlatformRoutesRuntime = ({
       extensionRuntime,
       uiAuthController,
       documents,
+      fileResources,
       languageSupervisor,
       languageSupport,
       runRuntime,
@@ -295,6 +297,7 @@ export const createPlatformRoutesRuntime = ({
       resolveGitBinaryForSpawn,
       piariumUserConfigRoot,
       ...(documents ? { documents } : {}),
+      ...(fileResources ? { fileResources } : {}),
     });
     if (documents) {
       registerDocumentRoutes(app, { documents, uiAuthController });

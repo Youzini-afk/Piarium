@@ -25,10 +25,11 @@ pub(crate) const STORAGE_FORMAT_VERSION: &str = "9";
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
 pub(crate) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
-pub(crate) const KERNEL_CAPABILITIES: [&str; 6] = [
+pub(crate) const KERNEL_CAPABILITIES: [&str; 7] = [
     "storage",
     "workingState",
     "recovery",
+    "fileResources",
     "branchCas",
     "pins",
     "gc",

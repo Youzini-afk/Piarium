@@ -376,6 +376,11 @@ const resourceKey = (
 
 const toIso = (mtimeMs: number): string => new Date(mtimeMs).toISOString();
 
+const revisionFromObjectHash = (objectHash: string): string | null => {
+  const match = /^sha256-([0-9a-f]{64})$/i.exec(objectHash);
+  return match ? `d1_${Buffer.from(match[1]!, 'hex').toString('base64url')}` : null;
+};
+
 const withoutContent = (result: SnapshotWithEpoch): WithoutContentResult => {
   if (result.status === 'ready') {
     const next: WithoutContentResult = {
@@ -556,6 +561,28 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     const held = activeResourceKeys.getStore();
     const nested = held && queueResources.every((resource) => held.has(resource.key));
     if (nested) return operation(resolved);
+
+    const workspaceId = requests[0]?.resource.workspaceId;
+    if (durableMutationStorage && workspaceId) {
+      const storage = durableMutationStorage;
+      if (requests.some((request) => request.resource.workspaceId !== workspaceId)) {
+        throw new DocumentAuthorityError('One resource operation cannot span Documents workspaces', {
+          code: 'failed',
+          statusCode: 400,
+        });
+      }
+      const keys = new Set(queueResources.map((resource) => resource.key));
+      return activeResourceKeys.run(keys, () => storage(workspaceId, (context) => context.resourceOperationGate.run(
+        requests.map((request, index) => {
+          const relative = pathModule.relative(resolved[index]!.workspace.root, canonicalPaths[index]!);
+          if (pathModule.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${pathModule.sep}`)) {
+            throw new DocumentPathError('Path is outside workspace');
+          }
+          return { resourceId: relative.split(pathModule.sep).join('/'), scope: request.scope };
+        }),
+        () => operation(resolved),
+      )));
+    }
     return queues.runResources(queueResources, () => activeResourceKeys.run(
       new Set(queueResources.map((resource) => resource.key)),
       () => operation(resolved),
@@ -571,7 +598,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       resource: { workspaceId, resourceId: resource.resourceId },
       scope: resource.scope,
     })),
-    operation,
+    () => operation(),
   );
 
   const assertTokenWorkspace = (token: MutationToken | undefined, workspaceId: string | undefined): void => {
@@ -748,8 +775,24 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     operation: () => Promise<Result>,
     options: Record<string, unknown> = {},
   ): Promise<Result> => {
-    const writer = await registerWriterForScope(scopeId, owner, options);
+    const resourceOperations = Array.isArray(options.resourceOperations)
+      ? options.resourceOperations.filter((value): value is DocumentResourceOperation => (
+          Boolean(value)
+          && typeof value === 'object'
+          && typeof (value as DocumentResourceOperation).resourceId === 'string'
+          && ((value as DocumentResourceOperation).scope === 'exact' || (value as DocumentResourceOperation).scope === 'subtree')
+        ))
+      : [];
+    const { resourceOperations: _resourceOperations, ...writerOptions } = options;
+    const workspaceId = await resolveScopeId(scopeId);
+    const writer = workspaceId
+      ? await registerWriterForScope(workspaceId, owner, writerOptions)
+      : null;
     try {
+      if (workspaceId && durableMutationStorage && resourceOperations.length > 0) {
+        const storage = durableMutationStorage;
+        return await storage(workspaceId, (context) => context.resourceOperationGate.run(resourceOperations, operation));
+      }
       return await operation();
     } finally {
       if (writer) {
@@ -803,7 +846,57 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       } catch {
         throw new DocumentAuthorityError('Unsupported document encoding', { code: 'failed', statusCode: 400 });
       }
-      await atomicReplace(resolved.absolutePath, bytes);
+      let writeConflict = false;
+      if (durableMutationStorage) {
+        writeConflict = await durableMutationStorage(request.resource.workspaceId, async (context) => {
+          if (!context.fileResources) {
+            await atomicReplace(resolved.absolutePath, bytes);
+            return false;
+          }
+          const captured = await context.fileStore.captureState(
+            context.identity,
+            context.root,
+            request.resource.resourceId,
+            { store: false },
+          );
+          const capturedRevision = captured.state.kind === 'regular-file'
+            ? revisionFromObjectHash(captured.state.objectHash)
+            : null;
+          if (
+            (current.status === 'missing' && captured.state.kind !== 'missing')
+            || (current.status !== 'missing' && (
+              captured.state.kind !== 'regular-file'
+              || capturedRevision !== current.revision
+            ))
+          ) {
+            return true;
+          }
+          const result = await context.fileResources.writeBytes(
+            context.identity,
+            request.resource.resourceId,
+            bytes,
+            {
+              expected: captured.state,
+              ...(captured.state.kind === 'regular-file' && captured.state.mode !== undefined
+                ? { mode: captured.state.mode }
+                : {}),
+              ...(request.operationId
+                ? { operationId: `document-write:${request.resource.workspaceId}:${request.resource.resourceId}:${request.operationId}` }
+                : {}),
+            },
+          );
+          return result.status === 'conflict';
+        });
+      } else {
+        await atomicReplace(resolved.absolutePath, bytes);
+      }
+      if (writeConflict) {
+        const latest = {
+          ...(await snapshotFile(request.resource, resolved.absolutePath)),
+          epoch: request.token.epoch,
+        } as SnapshotWithEpoch;
+        return { status: 'conflict', current: withoutContent(latest) };
+      }
       await writer.markMutated();
       const next = await snapshotFile(request.resource, resolved.absolutePath);
       if (next.status !== 'ready') {
@@ -860,8 +953,58 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }
       const targetCurrent = await snapshotFile(request.to, target.resolved.absolutePath);
       if (targetCurrent.status !== 'missing') return { status: 'target-exists', resource: request.to };
-      await fsPromises.mkdir(pathModule.dirname(target.resolved.absolutePath), { recursive: true });
-      await fsPromises.rename(source.resolved.absolutePath, target.resolved.absolutePath);
+      let moveStatus: 'moved' | 'target-exists' | 'conflict' = 'moved';
+      if (durableMutationStorage) {
+        moveStatus = await durableMutationStorage(request.from.workspaceId, async (context) => {
+          if (!context.fileResources) {
+            await fsPromises.mkdir(pathModule.dirname(target.resolved.absolutePath), { recursive: true });
+            await fsPromises.rename(source.resolved.absolutePath, target.resolved.absolutePath);
+            return 'moved';
+          }
+          const sourceState = await context.fileStore.captureState(
+            context.identity,
+            context.root,
+            request.from.resourceId,
+            { store: false },
+          );
+          const targetState = await context.fileStore.captureState(
+            context.identity,
+            context.root,
+            request.to.resourceId,
+            { store: false },
+          );
+          const sourceRevision = sourceState.state.kind === 'regular-file'
+            ? revisionFromObjectHash(sourceState.state.objectHash)
+            : null;
+          if (sourceState.state.kind !== 'regular-file' || sourceRevision !== current.revision) return 'conflict';
+          if (targetState.state.kind !== 'missing') return 'target-exists';
+          const renamed = await context.fileResources.rename(
+            context.identity,
+            request.from.resourceId,
+            request.to.resourceId,
+            {
+              targetMustBeMissing: true,
+              expectedFrom: sourceState.state,
+              expectedTo: targetState.state,
+              ...(request.operationId
+                ? { operationId: `document-move:${request.from.workspaceId}:${request.from.resourceId}:${request.to.resourceId}:${request.operationId}` }
+                : {}),
+            },
+          );
+          return renamed === 'renamed' ? 'moved' : renamed;
+        });
+      } else {
+        await fsPromises.mkdir(pathModule.dirname(target.resolved.absolutePath), { recursive: true });
+        await fsPromises.rename(source.resolved.absolutePath, target.resolved.absolutePath);
+      }
+      if (moveStatus === 'target-exists') return { status: 'target-exists', resource: request.to };
+      if (moveStatus === 'conflict') {
+        const latest = {
+          ...(await snapshotFile(request.from, source.resolved.absolutePath)),
+          epoch: request.token.epoch,
+        } as SnapshotWithEpoch;
+        return { status: 'conflict', current: withoutContent(latest) };
+      }
       await writer.markMutated();
       const next = await snapshotFile(request.to, target.resolved.absolutePath);
       const result: { status: 'moved'; resource: DocumentResource; revision: string; byteLength: number; modifiedAt?: string } = {
@@ -910,7 +1053,46 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       if ((current.status === 'ready' || current.status === 'binary' || current.status === 'unsupported-encoding') && current.revision !== request.expectedRevision) {
         return { status: 'conflict', current: withoutContent(current) };
       }
-      await fsPromises.unlink(resolved.absolutePath);
+      let deleteConflict = false;
+      if (durableMutationStorage) {
+        deleteConflict = await durableMutationStorage(request.resource.workspaceId, async (context) => {
+          if (!context.fileResources) {
+            await fsPromises.unlink(resolved.absolutePath);
+            return false;
+          }
+          const captured = await context.fileStore.captureState(
+            context.identity,
+            context.root,
+            request.resource.resourceId,
+            { store: false },
+          );
+          const capturedRevision = captured.state.kind === 'regular-file'
+            ? revisionFromObjectHash(captured.state.objectHash)
+            : null;
+          if (captured.state.kind !== 'regular-file' || capturedRevision !== current.revision) return true;
+          const applied = await context.fileResources.applyStateDetailed(
+            context.identity,
+            request.resource.resourceId,
+            { kind: 'missing' },
+            {
+              expected: captured.state,
+              ...(request.operationId
+                ? { operationId: `document-delete:${request.resource.workspaceId}:${request.resource.resourceId}:${request.operationId}` }
+                : {}),
+            },
+          );
+          return applied.status === 'conflict';
+        });
+      } else {
+        await fsPromises.unlink(resolved.absolutePath);
+      }
+      if (deleteConflict) {
+        const latest = {
+          ...(await snapshotFile(request.resource, resolved.absolutePath)),
+          epoch: request.token.epoch,
+        } as SnapshotWithEpoch;
+        return { status: 'conflict', current: withoutContent(latest) };
+      }
       await writer.markMutated();
       publishMutation({
         workspaceId: request.resource.workspaceId,

@@ -49,6 +49,14 @@ export interface KernelStorageReference {
   objectHash: string;
 }
 
+export interface KernelFileAuthorityContext {
+  client: KernelScopedClient;
+  rootId: string;
+  owningWorkspaceId: string;
+  executionWorkspaceId: string;
+  canonicalRoot: string;
+}
+
 export interface KernelStorageContext {
   client: KernelScopedClient;
   actor?: KernelActorIdentity;
@@ -1304,6 +1312,39 @@ export class KernelStorageAdapter {
     }
     this.boundFileStore = fileStore;
   }
+
+  async fileAuthorityContext(input: {
+    owningWorkspaceId: string;
+    executionWorkspaceId: string;
+    canonicalRoot: string;
+    purpose?: string;
+    capabilities?: string[];
+    actor?: KernelActorIdentity;
+  }): Promise<KernelFileAuthorityContext> {
+    const grant = await this.grantFor(input.owningWorkspaceId, input.purpose ?? "file-resource", input.actor ?? {
+      owningWorkspace: input.owningWorkspaceId,
+      executionWorkspace: input.executionWorkspaceId,
+      pathScopes: [""],
+      capabilities: input.capabilities ?? ["storage.maintenance"],
+    });
+    const client = this.client.scoped(grant);
+    const registered = await client.fileRootRegister({
+      workspaceId: input.owningWorkspaceId,
+      executionWorkspaceId: input.executionWorkspaceId,
+      canonicalRoot: input.canonicalRoot,
+    });
+    if (typeof registered.rootId !== "string" || typeof registered.canonicalRoot !== "string") {
+      throw new Error("Kernel returned an invalid file root registration");
+    }
+    return {
+      client,
+      rootId: registered.rootId,
+      owningWorkspaceId: input.owningWorkspaceId,
+      executionWorkspaceId: input.executionWorkspaceId,
+      canonicalRoot: registered.canonicalRoot,
+    };
+  }
+
   private async grantFor(workspaceId: string, purpose: string, actorOverride?: KernelActorIdentity): Promise<KernelGrantHandle> {
     const actor = this.options.resolveActor
       ? await this.options.resolveActor(workspaceId, purpose, actorOverride)

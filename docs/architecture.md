@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage authority is complete. R0 packaging/process evidence remains tracked separately, and R2–R6 retain their defined resource migrations.
+Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage and R2 file/recovery authority are complete. R0 packaging/process evidence remains tracked separately, and R3–R6 retain their defined resource migrations.
 
 Last updated: 2026-09-14
 
@@ -730,7 +730,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Conversation and file rollback | Pi session tree + selected `piarium.workspace-recovery@5` Host service | Pi owns branch navigation; the recovery provider journals only affected paths and coordinates the two operations |
 | Optional Pi recovery commands | User-installed `pi-workspace-history` / `pi-wtf` packages | Remain ordinary Pi CLI extensions and are not provisioned or treated as Piarium recovery authorities |
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
-| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval and all recovery/Integration/agent-mutation durable metadata; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry and disk side effects through the Rust operation stages until R2/R3 move those resource backends |
+| Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources and disk gate; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts while real controlled disk capture/apply uses the Rust R2 file-resource backend. R3 still owns baseline/materialization/CoW and execution-directory lifecycle |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
 | Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
@@ -1165,5 +1165,13 @@ while replacement recovery providers may still implement the optional v5 storage
 R1 durability is evidenced by explicit object-install ordering, filesystem flush/write-through behavior,
 SQLite transactions, injected failure windows, and restart reconciliation. Native multi-platform package
 smokes remain release-CI evidence, code signing remains optional under the current product contract, and a
-physical power-cut campaign is release QA rather than an R1 implementation gate. R2/R3 continue to own
-Documents/Registry coordination, real disk mutation backends, baseline capture, and materialization.
+physical power-cut campaign is release QA rather than an R1 implementation gate.
+
+D-276 closes R2. Rust `fileResources` owns canonical execution-root registration, exact/subtree overlap
+leases, typed file-state capture, content-backed conditional apply, mkdir/remove/rename, and restart
+reconciliation after an already-applied side effect loses its terminal response. Documents write/move/delete,
+workspace-scoped Files CRUD, Recovery/Integration disk apply and compensation, and production `fs.lock` use
+that authority. Registry remains the sole unsaved-buffer/grouped-undo authority; Host surface receipts advance
+the durable mixed operation without copying editor text into Rust. Piarium `write`/`edit`/`apply_patch` no
+longer fall back to direct pi-host disk mutation when the Host backend is unavailable. R3 still owns Git/non-Git
+baseline capture, materialization/CoW, shell settle/writeback, execution-directory reclaim and lifecycle.

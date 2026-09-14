@@ -6053,3 +6053,28 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-275 | accepted / implemented / R1 complete | — | status 阶段 R1；plan 阶段 R1；architecture；rust-kernel-design；recovery/kernel documentation；Recovery Settings |
+
+### D-276 · 2026-09-14 · R2 收口：一个 Rust file-resource authority，Registry 保持 buffer 权威
+
+类型：R2 production file authority closure；只追加，不改写 D-275 及更早历史事实
+
+问题：R1 已把 WorkingState 与 Recovery/Integration/agent-mutation 的耐久元数据统一到 Rust，但真实磁盘副作用仍可能经过 Documents、Files、RecoveryFileStore、Workspace/API adapter 与 pi-host 原生工具各自的路径锁/写盘实现。若只把 Recovery `applyState` 改写成 Rust 而保留 TS `PathLockService`、pi-host `writeFile/rm` fallback 或 adapter 自己决定“现在可写/可回收”，R2 会留下第二套资源权威，并且 mixed Registry/disk 操作仍无法可靠解释 terminal response loss。
+
+决定：
+
+1. Rust kernel `fileResources` 是 Piarium 生产的 canonical file-resource authority。Application Host 先用 Documents 授权后的 canonical execution root 注册 epoch-local root；Rust 再核验 grant owning/execution identity、path scope、ancestor canonicalization 与 symlink/reparse escape。exact/subtree overlap lease、稳定 typed file-state capture、内容对象安装、条件 apply、mkdir/remove/rename 与 started-operation restart reconciliation 都在该 authority 中执行。
+2. Documents write/move/delete、workspace-scoped Files CRUD、Recovery/Integration disk apply/compensation 和生产 `fs.lock` 共用该 Rust backend。TS Documents 继续拥有 workspace registration、公开 revisioned API、watch、surface orchestration 与 mutation token；它不再拥有独立生产磁盘 queue。测试或未装配环境可以注入本地 helper，但生产不得 fallback。
+3. Document Registry 继续是未保存正文、document instance 与 grouped undo 的唯一权威。Rust 持久化 mixed operation intent/file phase 和磁盘事实；Host 定向请求固定 Registry owner 做 CAS/apply/undo 并把回执推进耐久状态。等待 Registry 或其他外部回执时不持 SQLite transaction；无回执或状态不可证明时进入 conflict/needs-attention，而不是把 disk 当 surface 或猜成成功。
+4. Piarium 模式下，Pi `write` / `edit` / `apply_patch` 先尝试 `document.branchWrite`；需要真实 workspace/surface mutation 时统一调用 Host `document.surfaceWrite`。若 Host mutation backend 不可用，worker 明确失败，不再调用 Pi worker 的本地 `writeFile/rm` 作为平行生产 writer。无 Host bridge 的独立测试/standalone Pi helper 不属于 Piarium Application Host 权威，可继续验证其自身行为。
+5. 尚未迁移到 Rust 领域实现的 WorkspaceAPI/Git/bulk/external adapter，在执行副作用前向同一个 kernel gate 注册 exact/subtree writer；不保留另一套可写/可回收 gate。Git baseline、materialization staging/CoW、shell settle/writeback、执行目录回收与 Thread 目录生命周期仍属于 R3，不能因 R2 single-gate 收口提前宣称迁移。
+6. Recovery maintenance capture 创建的临时 object owner 只能在同 workspace 且源 grant 具备 `recovery.maintenance` 时 rebind 到精确 recovery actor；通用 storage writer 不能借该接口接管别人的临时对象。
+
+证据：Windows release `piarium-kernel` child-process suite 23/23，通过 file root/lease、scope/escape、conditional apply/stale CAS、finish-failure→restart reconcile 与生产 `fs.lock`→Rust lease；真实 `kernel-durable-engine.test.ts` 通过 combined Recovery + lost navigation response + kernel restart + undo。Documents/surface/Files/Workspace/external focused tests 106/106；pi-host mutation/apply_patch focused tests 18/18；Application Host type-check 与 pi-host source build 通过。`integration-coordinator.test.ts` 的 17 个旧 SQLite test-helper 失败在 R1 基线 `ad71ea78` 上同样为 17 fail / 20 pass，因此不是本次 R2 新回归，也不据此恢复生产 TS writer。
+
+结果：R2 文件与恢复标记为 Complete。R0 保留独立 process/package evidence；R3–R6 不因本决定提前完成。
+
+## D-276 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-276 | accepted / implemented / R2 complete | — | status 阶段 R2；plan 阶段 R2；architecture；rust-kernel-design；kernel/Documents/Harness/pi-host documentation |

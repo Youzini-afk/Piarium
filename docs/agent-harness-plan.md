@@ -699,8 +699,8 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
 | --- | --- | --- |
 | R0 | Partial（implemented + wired）Cargo workspace（`kernel/rust-toolchain.toml` 1.97.1）、私有 kernel 进程、同源 TS/Rust DTO、build/epoch/grant/generation 握手、request/cancel/data 分帧、blob/branch 流式输入与单 envelope 背压、取消/真实退出、Electron/Web staging | Host 已启动真实子进程；Windows release binary 正文/manifest identity 已核对，macOS/Linux 真机、完整 cross-target/签名产物仍需分别验收 |
-| R1 | **Complete**：format v9、typed path state、AVL immutable root/trie、revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped identity、分页 root read、typed recovery 与 GC | Application Host 的 WorkingState、result/draft/verification/review/retrieval/history/materialize/delete 和 combined Recovery/Integration/agent-mutation 元数据均走 Rust root/path/domain/recovery API；TS 不再有生产 compatibility projection 或 SQLite recovery writer。旧实现仅保留为测试 helper。内置 Recovery 固定共用 kernel application-data root，`storageManagement:false`；可替换 provider 的位置管理仍是公开 v5 可选能力。落盘顺序、事务故障注入与重启对账构成 R1 durability evidence。Documents/Registry 和实际文件副作用属于 R2 |
-| R2 | 磁盘资源 gate、Documents 后端、恢复/Integration/混合 surface 阶段机 | edit/write/apply_patch、保存/文件 CRUD、merge/undo/redo、内置 recovery provider；移除重复锁和文件 apply/补偿实现 |
+| R1 | **Complete**：format v9、typed path state、AVL immutable root/trie、revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped identity、分页 root read、typed recovery 与 GC | Application Host 的 WorkingState、result/draft/verification/review/retrieval/history/materialize/delete 和 combined Recovery/Integration/agent-mutation 元数据均走 Rust root/path/domain/recovery API；TS 不再有生产 compatibility projection 或 SQLite recovery writer。旧实现仅保留为测试 helper。内置 Recovery 固定共用 kernel application-data root，`storageManagement:false`；可替换 provider 的位置管理仍是公开 v5 可选能力。落盘顺序、事务故障注入与重启对账构成 R1 durability evidence |
+| R2 | **Complete**：canonical file root、exact/subtree Rust lease、typed capture、conditional apply、mkdir/remove/rename、restart reconcile、Registry receipt coordination | Documents write/move/delete、workspace-scoped Files CRUD、Recovery/Integration disk apply/compensation、生产 `fs.lock` 与 Piarium `write/edit/apply_patch` 进入同一 file-resource authority；Pi worker 不再保留 Host 可用时的直写 fallback。Workspace/Git/bulk/external adapter 登记同一 kernel writer gate；Registry 仍是 unsaved-buffer authority，baseline/materialization 留给 R3 |
 | R3 | Git/非 Git 基线、物化切换、执行结果收集、CoW、回收/空间、资源释放 | dispatch/queued/nested/settle/archive/restore/history release/delete；移除旧 thread-worktree 和 materializer 的对应实际操作 |
 | R4 | PTY/命令、外部语言/调试/任务进程和原始输出的统一资源后端 | 用户终端、bash/get_output/write/kill、LSP/DAP/任务/测试启动器；移除对同一进程的旧 provider/进程表 |
 | R5 | 固定视图文件检索、遍历/哈希、结构解析/切块的原生计算 | read/grep/find/ls/explore、目录/语义建设的文件与结构输入；移除被替代的扫描/解析实现和重复正文缓存 |
@@ -750,6 +750,10 @@ surface 权威留在 Registry，Rust 维护混合操作的 operationId/intent/�
 
 验证公开 Pi edit/write/apply_patch 与真实 Documents/Registry，磁盘/草稿混合、编码/BOM/换行、用户后写、
 缺回执/取消/进程重启、嵌套 branch/directory merge 和恢复导航；实际 Rust 子进程必须参与。
+
+D-276 已完成本阶段生产接管：kernel `fileResources` 注册 Documents-authorized canonical execution root，负责 exact/subtree lease、稳定 file state capture、内容对象安装、条件 apply、mkdir/remove/rename 以及 side-effect 后 terminal 丢失的 restart reconciliation。Documents write/move/delete、workspace-scoped Files CRUD、Recovery/Integration disk apply/compensation 和生产 `fs.lock` 使用该同一权威；Registry 仍拥有未保存正文和 grouped undo，Host 只在 kernel intent/file phase 已持久化后定向执行 surface 操作，等待 Registry 回执期间不持 SQLite transaction。
+
+Piarium 模式的 Pi `write` / `edit` / `apply_patch` 先走 virtual `document.branchWrite`，disk/surface target 统一由 `document.surfaceWrite` 进入 Host Documents；Host mutation backend 不可用时明确失败，不再退回 pi-host 本地 `writeFile/rm`。WorkspaceAPI/Git/bulk/external adapter 尚未迁移其领域实现，但在执行时向同一 kernel exact/subtree gate 登记 writer；这满足 R2 的单 gate 要求而不提前迁移 R3 的 Git baseline/materialization/CoW。R2 因此完成；R3–R6 不变。
 
 ### R3. 基线、物化与资源生命周期
 

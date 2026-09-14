@@ -127,3 +127,25 @@ pub(crate) struct BranchWriteBuilder {
     pub(crate) changes: Vec<Value>,
     pub(crate) grant_id: String,
 }
+
+#[derive(Clone, Debug)]
+pub(crate) struct FileRoot {
+    pub(crate) root_id: String,
+    pub(crate) execution_workspace_id: String,
+    pub(crate) canonical_root: PathBuf,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FileLeaseResource {
+    pub(crate) path: String,
+    pub(crate) subtree: bool,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct FileLease {
+    pub(crate) lease_id: String,
+    pub(crate) root_id: String,
+    pub(crate) workspace_id: String,
+    pub(crate) grant_id: String,
+    pub(crate) resources: Vec<FileLeaseResource>,
+}

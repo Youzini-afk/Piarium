@@ -427,6 +427,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
     resolveGitBinaryForSpawn,
     piariumUserConfigRoot,
     documents,
+    fileResources,
   } = dependencies;
   const fsPromises = rawFsPromises as FsPromises;
   const spawn = rawSpawn as typeof nodeSpawn;
@@ -449,6 +450,29 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       operation,
       options,
     );
+  };
+
+  const kernelFileContext = async (resolved: WorkspacePathResult | null) => {
+    if (!fileResources || !documents || !resolved?.ok || !resolved.workspaceRoot) return null;
+    const workspace = await documents.resolveWorkspace({ path: resolved.base });
+    const inspected = await documents.inspectWorkspace(workspace.workspaceId);
+    const canonicalRoot = await canonicalizePathIdentity(inspected.root, { fsPromises, pathModule: path });
+    const relativeFor = (absolutePath: string): string => {
+      const relative = path.relative(canonicalRoot, absolutePath);
+      if (path.isAbsolute(relative) || relative === '..' || relative.startsWith(`..${path.sep}`)) {
+        throw Object.assign(new Error('Access denied'), { code: 'EACCES' });
+      }
+      return relative.split(path.sep).join('/');
+    };
+    return {
+      identity: {
+        authorityId: workspace.hostId,
+        canonicalRoot,
+        filesystemProfile: process.platform === 'win32' ? 'windows-local' : `${process.platform}-local`,
+        workspaceId: workspace.workspaceId,
+      },
+      relativeFor,
+    };
   };
 
   const spawnDetached = (command: string, args: string[]): Promise<void> => new Promise((resolve, reject) => {
@@ -678,7 +702,18 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       await runWorkspaceMutation(
         resolvedContext,
         'fs.mkdir',
-        () => fsPromises.mkdir(resolvedPath, { recursive: true }),
+        async () => {
+          const kernel = await kernelFileContext(resolvedContext);
+          if (!kernel || !fileResources) {
+            await fsPromises.mkdir(resolvedPath, { recursive: true });
+            return;
+          }
+          const resourceId = kernel.relativeFor(resolvedPath);
+          await fileResources.gateFor(kernel.identity).run(
+            [{ resourceId, scope: 'subtree' }],
+            () => fileResources.mkdir(kernel.identity, resourceId, true),
+          );
+        },
       );
       return res.json({ success: true, path: resolvedPath });
     } catch (error) {
@@ -1008,13 +1043,40 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       }
 
       await runWorkspaceMutation(resolved, 'fs.write', async () => {
+        const kernel = await kernelFileContext(resolved);
+        if (kernel && fileResources) {
+          const resourceId = kernel.relativeFor(writePath);
+          await fileResources.gateFor(kernel.identity).run([{ resourceId, scope: 'exact' }], async () => {
+            const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
+            if (existing === content) return;
+            const captured = await fileResources.captureDetailed(
+              kernel.identity,
+              resourceId,
+              { store: false },
+              `fs-write-capture:${crypto.randomUUID()}`,
+            );
+            const result = await fileResources.writeBytes(
+              kernel.identity,
+              resourceId,
+              Buffer.from(content, 'utf8'),
+              {
+                expected: captured.state,
+                ...(captured.state.kind === 'regular-file' && captured.state.mode !== undefined
+                  ? { mode: captured.state.mode }
+                  : {}),
+                operationId: `fs-write:${crypto.randomUUID()}`,
+              },
+            );
+            if (result.status === 'conflict') {
+              throw Object.assign(new Error('File changed during write'), { code: 'ESTALE' });
+            }
+          });
+          return;
+        }
+
         const existing = await fsPromises.readFile(writePath, 'utf8').catch(() => null);
         if (existing === content) return;
-
         await fsPromises.mkdir(path.dirname(writePath), { recursive: true });
-
-        // Atomic write: write to temp then rename to avoid concurrent readers
-        // seeing an empty file during the O_TRUNC window of direct writeFile.
         const tmp = `${writePath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         try {
           await fsPromises.writeFile(tmp, content, 'utf8');
@@ -1029,6 +1091,9 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       const err = error;
       const authorityResponse = sendMutationAuthorityError(res, err);
       if (authorityResponse) return authorityResponse;
+      if (errorCode(err) === 'ESTALE') {
+        return res.status(409).json({ error: 'File changed during write' });
+      }
       if (errorCode(err) === 'EACCES') {
         return res.status(403).json({ error: 'Access denied' });
       }
@@ -1060,7 +1125,18 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       await runWorkspaceMutation(
         resolved,
         'fs.delete',
-        () => fsPromises.rm(resolved.resolved, { recursive: true, force: true }),
+        async () => {
+          const kernel = await kernelFileContext(resolved);
+          if (!kernel || !fileResources) {
+            await fsPromises.rm(resolved.resolved, { recursive: true, force: true });
+            return;
+          }
+          const resourceId = kernel.relativeFor(resolved.resolved);
+          await fileResources.gateFor(kernel.identity).run(
+            [{ resourceId, scope: 'subtree' }],
+            () => fileResources.remove(kernel.identity, resourceId, { recursive: true, force: true }),
+          );
+        },
       );
       return res.json({ success: true, path: resolved.resolved });
     } catch (error) {
@@ -1124,13 +1200,41 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       await runWorkspaceMutation(
         workspaceMutation,
         'fs.rename',
-        () => fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved),
+        async () => {
+          const kernel = await kernelFileContext(workspaceMutation);
+          if (!kernel || !fileResources) {
+            await fsPromises.rename(resolvedOld.resolved, resolvedNew.resolved);
+            return;
+          }
+          const fromId = kernel.relativeFor(resolvedOld.resolved);
+          const toId = kernel.relativeFor(resolvedNew.resolved);
+          await fileResources.gateFor(kernel.identity).run([
+            { resourceId: fromId, scope: 'subtree' },
+            { resourceId: toId, scope: 'subtree' },
+          ], async () => {
+            const [source, target] = await Promise.all([
+              fileResources.captureDetailed(kernel.identity, fromId, { store: false }, `fs-rename-source:${crypto.randomUUID()}`),
+              fileResources.captureDetailed(kernel.identity, toId, { store: false }, `fs-rename-target:${crypto.randomUUID()}`),
+            ]);
+            const renamed = await fileResources.rename(kernel.identity, fromId, toId, {
+              expectedFrom: source.state,
+              expectedTo: target.state,
+              operationId: `fs-rename:${crypto.randomUUID()}`,
+            });
+            if (renamed === 'conflict') {
+              throw Object.assign(new Error('Path changed during rename'), { code: 'ESTALE' });
+            }
+          });
+        },
       );
       return res.json({ success: true, path: resolvedNew.resolved });
     } catch (error) {
       const err = error;
       const authorityResponse = sendMutationAuthorityError(res, err);
       if (authorityResponse) return authorityResponse;
+      if (errorCode(err) === 'ESTALE') {
+        return res.status(409).json({ error: 'Path changed during rename' });
+      }
       if (errorCode(err) === 'ENOENT') {
         return res.status(404).json({ error: 'Source path not found' });
       }

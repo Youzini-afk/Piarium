@@ -1,8 +1,8 @@
 # Piarium native recovery journal
 
-Status: delivered; R1 per-path coverage implemented 2026-09-03; Rust kernel R0/R1 foundations are implemented and locally exercised, while the Application Host still has no recovery/WorkingState consumer cutover
+Status: delivered; Rust kernel R1 state/storage and R2 file/recovery authority are complete; R0 release-process evidence and R3–R6 retain their own remaining work
 
-Last updated: 2026-09-13
+Last updated: 2026-09-14
 
 ## Decision
 
@@ -15,12 +15,13 @@ package.
 The recovery unit is an affected-file change set. A message checkpoint is not a complete manifest of
 the workspace and does not schedule a background archive.
 
-D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the eventual implementation owner of the
-built-in provider's file resources, content/reference storage, and recovery operations. The current Host starts
-the real child process and the R1 kernel storage foundation owns immutable roots, objects, revisions, pins, CAS
-and durable operations, but recovery/WorkingState consumers have not switched to that adapter. The public
-recovery service and affected-path semantics remain; Document Registry remains the mutable buffer owner and Pi
-remains the conversation owner. The consumer-by-consumer cutover is recorded only in
+D-252 accepts the [Rust system-kernel stage](rust-kernel-design.md) as the implementation owner of the built-in
+provider's file resources, content/reference storage, and recovery operations. D-274/D-275 completed the R1
+metadata cutover: immutable roots/objects/revisions and typed Recovery/Integration/agent-mutation records have
+one Rust durable writer. D-276 completed the R2 file-resource cutover: affected-path capture, conditional
+apply/compensation, exact/subtree overlap leases and restart reconciliation use the Rust file authority.
+The public recovery service and affected-path semantics remain; Document Registry remains the mutable buffer
+owner and Pi remains the conversation owner. Current milestone evidence is recorded in
 [agent-harness-status.md](agent-harness-status.md) and [agent-harness-plan.md](agent-harness-plan.md).
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor

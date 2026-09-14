@@ -55,6 +55,7 @@ import {
 import {
   reconcileInterruptedIntegrationOperations,
   type DurableFileOperationContext,
+  type HostFileResourceBackend,
   type HostResourceOperation,
   type HostResourceOperationGate,
   type ResolveDirectoryApplyContext,
@@ -136,6 +137,7 @@ export interface CreateWorkspaceRecoveryEngineOptions {
 export interface WorkspaceRecoveryStorageContext {
   durableRecoveryStore: RecoveryDurableOperationPort;
   fileStore: RecoveryFileStore;
+  fileResources?: HostFileResourceBackend;
   identity: RecoveryIdentity;
   resourceOperationGate: HostResourceOperationGate;
   root: string;
