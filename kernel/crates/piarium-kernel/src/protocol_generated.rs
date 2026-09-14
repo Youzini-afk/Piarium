@@ -211,6 +211,7 @@ pub(crate) struct KernelFileScanParams {
     pub(crate) scopes: Option<Vec<String>>,
     pub(crate) cursor: Option<i64>,
     pub(crate) page_size: Option<i64>,
+    pub(crate) expected_fingerprint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1012,6 +1013,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "file.lease.acquire" => {
+            serde_json::from_value::<KernelFileLeaseAcquireParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.lease.check" => {
             serde_json::from_value::<KernelFileLeaseAcquireParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())

@@ -1453,16 +1453,20 @@ test("R3 kernel scans a fixed workspace view and materializes an immutable root 
   const sourceRootId = String(sourceRegistration.rootId);
   const scanned: string[] = [];
   let cursor: number | undefined;
+  let expectedFingerprint: string | undefined;
   do {
     const page = await client.fileScan({
       workspaceId: "r3-materialize-workspace",
       rootId: sourceRootId,
       path: "",
       pageSize: 2,
+      ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
       ...(cursor === undefined ? {} : { cursor }),
     });
     assert.ok(Array.isArray(page.paths));
     scanned.push(...page.paths as string[]);
+    assert.equal(typeof page.fingerprint, "string");
+    expectedFingerprint = String(page.fingerprint);
     cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
   } while (cursor !== undefined);
   assert.deepEqual(scanned, ["nested", "nested/b.txt", "plain.txt"]);
@@ -1500,7 +1504,6 @@ test("R3 kernel scans a fixed workspace view and materializes an immutable root 
   const managedRootId = String(managedRegistration.rootId);
   const target = path.join(managed, "thread-one");
   await fs.mkdir(target, { recursive: true });
-  await fs.writeFile(path.join(target, "old.txt"), "replace me\n");
   const first = await client.fileMaterialize({
     operationId: "r3-materialize-first",
     workspaceId: "r3-materialize-workspace",
@@ -1598,7 +1601,6 @@ test("R3 materialization reconciles a crash after live backup before staging pro
 
   const live = path.join(managed, "thread-crash");
   await fs.mkdir(live, { recursive: true });
-  await fs.writeFile(path.join(live, "old.txt"), "old live body\n");
   const faultedHost = createKernelClient({
     hostId: "r3-reconcile-host",
     storageRoot,

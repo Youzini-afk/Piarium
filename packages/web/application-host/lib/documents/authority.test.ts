@@ -771,8 +771,11 @@ it('edits the fixed surface buffer and refuses a later user edit without touchin
       filesystemProfile: 'test',
       workspaceId: harness.identity.workspaceId,
     },
+    // This sequential surface-CAS fixture supplies its own backend seam. Routing
+    // it back into Documents would recursively re-enter the injected storage.
+    // Actual kernel nesting/coverage is exercised by file-resource-audit.test.ts.
     resourceOperationGate: {
-      run: (resources, callback) => harness.authority.runResourceOperation(harness.identity.workspaceId, resources, callback),
+      run: (_resources, callback) => callback(),
     },
     root: path.join(harness.dataDir, 'agent-mutation-objects'),
   }));

@@ -1,6 +1,6 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1 state/storage, R2 file/recovery authority, and R3 baseline/materialization lifecycle are complete. R0 and R4–R6 retain their own remaining delivery evidence
+Status: accepted architecture; R1 core state/storage cutover complete; R2/R3 wired but acceptance reopened by D-278; R0 and R4–R6 remain separate.
 
 Last updated: 2026-09-14
 
@@ -9,7 +9,7 @@ Last updated: 2026-09-14
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-WorkingState root/path/range、branch publish/CAS、materializer 输入、result/draft/verification/review/retrieval，以及 Recovery/Integration/agent-mutation 的耐久元数据均已接到 Rust format v9。生产没有 callback 全树投影、TS recovery SQLite 或 optional dual writer。D-276 又完成 R2 file-resource authority：Documents-authorized canonical execution root、exact/subtree overlap lease、稳定 file-state capture、内容对象安装、conditional apply、mkdir/remove/rename 与 started-operation restart reconciliation 均由 Rust 持有；Documents/Files/Recovery/Integration 与生产 `fs.lock` 进入同一资源边界。Registry 仍是未保存 buffer/grouped undo 的唯一权威，Host 负责 surface receipt 协调，不把编辑器正文复制到 Rust。Piarium 模式下 Pi `write`/`edit`/`apply_patch` 不再退回 worker 本地磁盘 writer。旧 TS file/recovery helpers 仅作测试 seam，不是运行时兼容路径。R1 的 storage location 产品语义仍为：内置 Recovery 与 WorkingState 共用 `<PIARIUM_DATA_DIR>/kernel/<hostId>`，不独立迁移并声明 `storageManagement: false`；可替换 provider 仍可实现公开 v5 的可选位置管理。D-277 已完成 R3：生产 baseline 的目录枚举与正文 capture 由 Rust `file.scan` / `file.capture` 执行；Git 仅提供真实 inventory/index/filter 身份与稳定性校验。immutable root → execution directory 的 staging/backup/promotion、对象完整性、copy/clone backend 事实、restart reconciliation、managed directory remove 与空间测量都进入 kernel file-resource authority。Git execution context 只迁移 linked-worktree metadata，并用真实 `read-tree` / `add` / baseline commit 建立可解析执行基线，不再把 workspace bytes 从 TS copy 回 live。native result root 取代生产 mandatory `.snapshot`；旧 TS materializer/snapshot/switch helper 仅保留测试 seam。R0 与 R4–R6 仍按各自状态验收。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。R2/R3 主要 file-resource 与物化原语已经 wired，但 D-278 通过真实反例修复了物理租约、owner、GC、重试和实际 root admission，并撤回整体完成声明。剩余的 low-level pending operation 产品处置和 kernel/Git/Registry 持久 switch 交接见 [审查记录](rust-kernel-audit.md)；下文规定目标契约，不以目标替代交付事实。
 
 ## 1. 产品与阶段目标
 

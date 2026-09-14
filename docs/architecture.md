@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench and harness in production; Rust kernel R1 state/storage, R2 file/recovery authority, and R3 baseline/materialization lifecycle are complete. R0 packaging/process evidence remains tracked separately, and R4–R6 retain their defined migrations.
+Status: Pi-native workbench and harness in production; R1 core storage cutover complete; D-278 reopens R2/R3 recovery and lifecycle acceptance. R0 and R4–R6 retain their own scope.
 
 Last updated: 2026-09-14
 
@@ -1175,7 +1175,7 @@ that authority. Registry remains the sole unsaved-buffer/grouped-undo authority;
 the durable mixed operation without copying editor text into Rust. Piarium `write`/`edit`/`apply_patch` no
 longer fall back to direct pi-host disk mutation when the Host backend is unavailable.
 
-D-277 closes R3. Production baseline inventory and file-body capture now use the same Host-admitted,
+D-277 wired major R3 primitives; D-278 reopens full lifecycle acceptance. Production baseline inventory and file-body capture now use the same Host-admitted,
 same-grant Rust file authority that owns WorkingState objects; Git remains the semantic adapter for staged/
 unstaged/untracked paths, index modes and configured clean/filter behavior rather than a second body writer.
 Immutable roots materialize through kernel-owned staging/backup/promotion with object verification, truthful
@@ -1187,3 +1187,12 @@ reclaim/discard/delete use kernel subtree removal and prune linked-worktree meta
 real allocated blocks where the platform exposes them; Windows currently reports `allocatedBytes: null` rather
 than guessing. Thread/Run retention policy, active-writer/command guards, unsaved buffers and Git product policy
 remain in their existing Host/Registry domains. R4–R6 are unchanged.
+
+## D-278 audit correction
+
+The [R0–R3 audit](rust-kernel-audit.md) retains the single Rust storage authority and Registry buffer authority,
+but reopens R2/R3 completion claims. Independent release-kernel cases reproduced physical-root lease partitioning,
+reversed coverage, destructive operation replay, stale GC cleanup, epoch pin leaks, and actual consumer identity
+failures. These are repaired without introducing another persistent authority. Native lifecycle acceptance still
+requires Host-visible pending file-operation disposition and durable kernel/Git/Registry execution-generation handoff.
+CI now has an explicit native authority command; editing that workflow is not evidence that remote CI has passed.

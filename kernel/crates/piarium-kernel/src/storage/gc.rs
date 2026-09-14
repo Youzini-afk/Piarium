@@ -11,6 +11,20 @@ impl Storage {
         let mut deleted = Vec::new();
         let mut failures = Vec::new();
         for (hash, raw_path) in rows {
+            // An object may have been installed again after an earlier cleanup
+            // failure. A stale delete intent cannot revoke a newer catalog fact.
+            let installed: bool = self.conn.query_row(
+                "SELECT EXISTS(SELECT 1 FROM blobs WHERE hash = ?1)",
+                params![hash],
+                |row| row.get(0),
+            )?;
+            if installed {
+                self.conn.execute(
+                    "DELETE FROM pending_gc_files WHERE hash = ?1",
+                    params![hash],
+                )?;
+                continue;
+            }
             let derived = match object_path(&self.root, &hash) {
                 Ok(path) => path,
                 Err(error) => {
@@ -155,6 +169,16 @@ impl Storage {
         {
             roots.insert(row?);
         }
+        // A failed/paused materialization must retain its immutable source even
+        // after the caller's epoch-local pin or branch has been released.
+        for row in self.conn.prepare(
+            "SELECT result_json FROM operations WHERE state = 'started' AND kind = 'file.materialize'"
+        )?.query_map([], |row| row.get::<_, String>(0))? {
+            let envelope: Value = serde_json::from_str(&row?)?;
+            let root = envelope.get("intent").and_then(|intent| intent.get("sourceRoot"))
+                .and_then(Value::as_str).ok_or_else(|| KernelError::Storage("pending materialization has no source root".to_string()))?;
+            roots.insert(root.to_string());
+        }
         let mut nodes = BTreeSet::new();
         let mut blobs = BTreeSet::new();
         for root in roots {
@@ -208,14 +232,9 @@ impl Storage {
                 )?;
             }
         }
-        self.conn.execute(
-            "DELETE FROM operation_owners WHERE operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
-            [],
-        )?;
-        self.conn.execute(
-            "DELETE FROM object_owners WHERE operation_id IN (SELECT operation_id FROM operations WHERE state != 'committed')",
-            [],
-        )?;
+        // Domain owners are released by their explicit terminal transitions.
+        // In particular a started file operation is durable recovery evidence,
+        // not a failed transaction or a garbage-collection candidate.
         let all_nodes: Vec<String> = self
             .conn
             .prepare("SELECT hash FROM trie_nodes")?

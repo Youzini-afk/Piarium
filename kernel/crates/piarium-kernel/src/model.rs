@@ -136,9 +136,15 @@ pub(crate) struct FileRoot {
     pub(crate) canonical_root: PathBuf,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FileLeaseResource {
     pub(crate) path: String,
+    pub(crate) subtree: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CanonicalFileLeaseResource {
+    pub(crate) absolute: PathBuf,
     pub(crate) subtree: bool,
 }
 
@@ -149,4 +155,5 @@ pub(crate) struct FileLease {
     pub(crate) workspace_id: String,
     pub(crate) grant_id: String,
     pub(crate) resources: Vec<FileLeaseResource>,
+    pub(crate) canonical_resources: Vec<CanonicalFileLeaseResource>,
 }

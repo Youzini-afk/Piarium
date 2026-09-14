@@ -122,3 +122,29 @@ The production adapter longitudinal path is assembled in `application-host/index
 derive session identity from the persisted turn and use an explicit maintenance grant only for startup/list/GC
 operations, never the Host-management grant for domain calls. `KernelRecoveryContentStore` is explicitly bound after adapter construction;
 an unbound file store or Documents resource gate fails instead of writing the kernel object directory from TS or running without a gate.
+
+## D-278 authority audit and acceptance boundary
+
+The independent audit is recorded in [rust-kernel-audit.md](../../../../../docs/rust-kernel-audit.md).
+R1 core storage cutover remains complete after GC/owner/pin repairs. R2/R3 retain their production primitives,
+but full recovery/lifecycle acceptance is reopened: unresolved low-level file operations must become visible Host
+state, and kernel promotion must be durably joined to Git executionBaseline and Thread Registry/view binding.
+Do not treat a helper suite or an optional legacy seam as proof of that native transition.
+
+Physical lease overlap now lives in Rust `storage/file_resource_leases.rs`, across all registered roots. Grant/root
+ownership still authorizes access; directional coverage alone authorizes use of an existing lease. Both nested
+Host gates and production Documents calls use `file.lease.check`; equal paths do not imply equal scopes.
+Root and resolved canonical scope are revalidated. Started remove/rename operations reconcile rather than replay
+irreversible actions; ambiguous directory operations remain pending. Fresh materialization refuses uncollected
+content, and failed verification preserves live/backup. GC retains pending materialization roots and cancels stale
+physical cleanup when a blob has been reinstalled. Old epoch query pins expire while explicit revision pins survive.
+
+`managed-root-admission.ts` separates recorded Thread target ownership from Documents execution workspace identity.
+Materialization requires a retained worktree and the existing ownership assertion, not a guessed application-data
+prefix. Capture/settle/reclaim use the actual execution workspace. `file.scan` continuations carry an inventory
+fingerprint and fail on drift; the implementation still rescans each page and makes no O(page) performance claim.
+
+Run `bun run test:kernel` from the repository root (or invoke its script by absolute path). The dedicated command
+requires a release binary and runs Node-only transport tests separately from Vitest authority/adapter/recovery tests.
+CI uses `node scripts/test-kernel-authority.mjs --build` in the existing Linux/Windows jobs. Generic tests may skip
+native cases in an unbuilt checkout; the dedicated acceptance command cannot silently skip them.

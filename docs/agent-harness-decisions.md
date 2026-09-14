@@ -6103,3 +6103,29 @@ Rust catalog `user_version` 与握手 storage format 同为 v9。R1 仍为 Parti
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-277 | accepted / implemented / R3 complete | — | status 阶段 R3；plan 阶段 R3；architecture；rust-kernel-design；kernel/Harness documentation |
+
+### D-278 · 2026-09-14 · R0–R3 审查返工：修复物理租约、GC、操作重试与实际装配，重新打开 R2/R3 完成度
+
+类型：独立反例审查与正确性返工；只追加，不改写 D-275–D-277 的历史正文
+
+问题：在 `e465e2df` 的真实 release kernel 上，新写的十个反例全部失败，涉及跨 root/alias 同盘 writer、反向 lease coverage、租约重用、root 替换、rename 假成功、remove 重试误删用户新文件、跨 grant owner 和 execution-only maintenance 装配。进一步复现了 GC 陈旧物理删除意图伤害重新引用的 blob、未完成 operation 被释放、ephemeral query pin 跨 epoch 保留及 Documents nested exact/subtree shortcut。原 combined kernel recovery 测试使用 fake Documents/no-op gate，不能作为完整生产组合证据。
+
+决定：
+
+1. `file_resource_leases.rs` 作为同一 Storage 的独立物理互斥模块，跨 root 检查 canonical paths；overlap 对称而 coverage 有方向。leaseId 重用绑定相同资源和身份，生产 nested Host/Documents gate 调用生成协议 `file.lease.check`，不由 TS 自行扩大租约。
+2. 每次解析重核 root 与 canonical scope；apply 验证临时 owner 的 workspace/hash/grant。remove/rename 中断后先观察可证明事实，不重放不可逆副作用，不把无关 target 当成功。物化保护未收集内容，验证失败保留 live/backup，readonly 安装和目录同步按实际句柄/层级完成。
+3. GC 尊重重新安装的 catalog fact、started file operation 及其 materialization source root；operation.release 不释放未完成操作。旧 epoch query pins 清除，显式 revision pins 保留。owner 不以 INSERT OR REPLACE 覆盖其他身份。
+4. managed-root admission 依据 owning workspace 的真实 Thread 记录和既有 ownership assertion，不以 data-directory 前缀或目标自身的新 Documents root 猜权限。baseline/settle/reclaim 继续携带实际 execution identity。失败的 branch metadata 读取不得吞为 null 来迁就不完整 fixture。
+5. file.scan continuation 绑定 inventory fingerprint；变化直接失败，不伪造稳定分页。此修复不声称消除了每页重扫或逐文件 RPC。Node/Vitest 测试入口拆开；`test:kernel` 拒绝缺失 release binary，现有 Linux/Windows CI job 显式构建并执行 native authority tests。
+
+状态修正：R1 核心 production metadata cutover 保持 Complete，本轮修复其 GC/pin 正确性。R2 改为 Partial（生产文件权威已接通，低层 pending operation 到 Host 可见处置仍待闭环）；R3 改为 Partial（kernel 原语/主要消费者已接通，kernel promotion→Git executionBaseline→Thread Registry/execution view 尚无贯穿的 durable switch intent/receipt，setup 停止与真实退出也需验收）。这不是新增签名、本地跨平台或物理断电门槛，也不恢复 TS writer。R0 保持 Partial，R4–R6 不变。
+
+证据与未决项详见 [rust-kernel-audit.md](rust-kernel-audit.md)。新增反例在真实 release kernel 上运行；真实 DocumentAuthority 的保存/移动/删除、独立 owning/execution 的 materialize/publish/restore，以及去掉 no-op gate 的 combined Recovery/restart/undo 均纳入同一验收。更新 workflow 不冒充远端 CI 已绿，legacy seam 单测不冒充 native 生命周期证明。
+
+## D-278 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-276 | production cutover retained; full completion claim superseded in part | D-278 | status R2；audit |
+| D-277 | primitives/consumer implementation retained; completion claim superseded in part | D-278 | status R3；audit |
+| D-278 | implemented audit repairs; R2/R3 acceptance reopened | — | rust-kernel-audit；plan/status；architecture；kernel/Documents/Harness documentation；native CI |

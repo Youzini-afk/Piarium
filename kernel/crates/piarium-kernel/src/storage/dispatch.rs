@@ -68,6 +68,7 @@ impl Storage {
             ),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.lease.acquire" => storage.file_lease_acquire(authorized_params, authorized_grant),
+            "file.lease.check" => storage.file_lease_check(authorized_params, authorized_grant),
             "file.lease.release" => storage.file_lease_release(authorized_params, authorized_grant),
             "file.capture" => storage.file_capture(authorized_params, authorized_grant),
             "file.apply" => storage.file_apply(authorized_params, authorized_grant),

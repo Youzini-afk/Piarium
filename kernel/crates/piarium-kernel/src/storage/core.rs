@@ -184,6 +184,9 @@ impl Storage {
         } else {
             Self::validate_catalog_schema(&conn)?;
         }
+        // Query pins belong to the process epoch that created them. Durable
+        // revision pins and pending domain-operation references remain intact.
+        conn.execute("DELETE FROM pins WHERE ephemeral = 1", [])?;
         let mut storage = Self {
             root: PathBuf::from(root),
             conn,

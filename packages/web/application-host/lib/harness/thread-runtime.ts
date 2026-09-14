@@ -1284,8 +1284,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     gitChangedPaths: readonly string[] | undefined,
   ): Promise<string[] | undefined> => {
     if (gitChangedPaths === undefined) return undefined;
-    const branch = await store.getBranchRoot(branchId).catch(() => null);
-    if (!branch || branch.captureScopes.length === 0) return [...new Set(gitChangedPaths)].sort();
+    const branch = await store.getBranchRoot(branchId);
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    if (branch.captureScopes.length === 0) return [...new Set(gitChangedPaths)].sort();
     const [currentScopePaths, priorScope] = await Promise.all([
       store.listCaptureScopePaths(directory, branch.captureScopes),
       store.listPaths(branchId, branch.captureScopes),
@@ -1325,6 +1326,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               indexModes === undefined ? {} : { indexModes },
             );
           },
+          "exclusive",
+          { executionWorkspace: await options.resolveRuntimeWorkspaceId(thread.worktree!.path) },
         );
       })();
     let worktree = thread.worktree;
@@ -2462,6 +2465,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
                 publishedIndexModes === undefined ? {} : { indexModes: publishedIndexModes },
               );
             },
+            "exclusive",
+            isVirtualWorktree(currentWorktree) ? undefined
+              : { executionWorkspace: await options.resolveRuntimeWorkspaceId(currentWorktree!.path) },
           );
           publishedResultRevision = published.resultRevision;
           changedFiles = published.changedPaths;
@@ -3411,6 +3417,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           "thread-result-reclaim-check",
           (store) => store.directoryMatchesResult(thread.workBranchId!, thread.resultRevision!, thread.worktree!.path),
           "shared",
+          { executionWorkspace: await options.resolveRuntimeWorkspaceId(thread.worktree!.path) },
         );
       } catch {
         matchesResult = null;
@@ -3627,6 +3634,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           "thread-result-reclaim-check",
           (store) => store.directoryMatchesResult(latest.workBranchId!, latest.resultRevision!, latest.worktree!.path),
           "shared",
+          { executionWorkspace: await options.resolveRuntimeWorkspaceId(latest.worktree!.path) },
         ).catch(() => false);
         if (!matches) {
           current.worktree.retentionReason = "Worktree changed after its latest result was published";

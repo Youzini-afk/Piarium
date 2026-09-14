@@ -35,6 +35,8 @@ jobs:
       - run: bun run test:i18n
       - run: bun run type-check
       - run: bun run lint
+      - name: Build and verify native kernel authority
+        run: node scripts/test-kernel-authority.mjs --build
       - run: bun run test:pi
       # Imports the built server artifact under plain Node: vitest's CJS
       # interop hides require/import mismatches that break `node server/index.js`.
@@ -54,6 +56,8 @@ jobs:
           node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run build:type-dependencies
+      - name: Build and verify native kernel authority
+        run: node scripts/test-kernel-authority.mjs --build
       - run: bun run test:pi
       - run: |
           bun run --cwd packages/electron test:architecture

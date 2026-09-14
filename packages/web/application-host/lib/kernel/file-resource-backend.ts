@@ -134,7 +134,20 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         if (resources.length === 0) return operation();
         const context = await this.bind(identity);
         const existing = this.leaseFor(context);
-        if (existing) return operation();
+        if (existing) {
+          await context.client.fileLeaseCheck({
+            workspaceId: context.owningWorkspaceId,
+            rootId: context.rootId,
+            leaseId: existing.leaseId,
+            resources: resources.map((resource) => ({
+              path: this.translated(context, resource.resourceId), scope: resource.scope,
+            })),
+          });
+          return operation();
+        }
+        if (this.leaseContext.getStore()) {
+          throw new Error("Nested file operation cannot rebind its active resource lease to another root");
+        }
         const leaseId = await this.acquire(context, resources);
         const lease: LeaseContext = {
           key: `${context.owningWorkspaceId}\0${context.rootId}`,
@@ -197,7 +210,10 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     relativePath: string,
     state: RecoveryState,
   ): Promise<void> {
-    await this.applyStateDetailed(identity, relativePath, state);
+    const applied = await this.applyStateDetailed(identity, relativePath, state);
+    if (applied.status === "conflict") {
+      throw new Error(`Kernel file apply conflict: ${relativePath}`);
+    }
   }
 
   async applyStateDetailed(
@@ -320,6 +336,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const context = await this.bind(identity);
     const output: string[] = [];
     let cursor: number | undefined;
+    let expectedFingerprint: string | undefined;
     do {
       const value = await context.client.fileScan({
         workspaceId: context.owningWorkspaceId,
@@ -328,12 +345,15 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
         ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalizeRelative) } : {}),
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 1024,
+        ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
       }, options.signal);
       const page = Array.isArray(value.paths) && value.paths.every((entry) => typeof entry === "string")
         ? value.paths as string[]
         : null;
       if (!page) throw new Error("Kernel returned an invalid file scan page");
       output.push(...page.map(normalizeRelative));
+      if (typeof value.fingerprint !== "string") throw new Error("Kernel scan returned no inventory identity");
+      expectedFingerprint = value.fingerprint;
       cursor = typeof value.nextCursor === "number" ? value.nextCursor : undefined;
     } while (cursor !== undefined);
     return [...new Set(output)].sort();

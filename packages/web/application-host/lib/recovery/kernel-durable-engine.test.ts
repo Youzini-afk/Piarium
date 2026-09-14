@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { createDocumentAuthority, type DocumentAuthority } from "../documents/authority.js";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "../kernel/kernel-recovery-store.js";
 import { KernelStorageAdapter } from "../kernel/storage-adapter.js";
@@ -13,8 +14,10 @@ const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "p
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
 const roots: string[] = [];
 const clients: KernelClient[] = [];
+const authorities: DocumentAuthority[] = [];
 
 afterEach(async () => {
+  await Promise.all(authorities.splice(0).map((authority) => authority.dispose()));
   await Promise.allSettled(clients.splice(0).map((client) => client.close()));
   await Promise.allSettled(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
@@ -38,7 +41,6 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   const workspace = path.join(root, "workspace");
   const dataDir = path.join(root, "host-data");
   const storageRoot = path.join(root, "kernel-storage");
-  const workspaceId = "durable-combined-workspace";
   const sessionId = "durable-combined-session";
   await fs.mkdir(workspace, { recursive: true });
   const note = path.join(workspace, "note.txt");
@@ -46,13 +48,13 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
 
   let leaf: string | null = "assistant-1";
   let loseNavigationResponse = true;
-  const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
-    inspectWorkspace: async () => ({ root: workspace, workspaceId }),
-    listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
-    inspectDirtyBuffers: async () => [],
-    beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-    runResourceOperation: async (_workspaceId, _resources, operation) => operation(),
-  };
+  const documents = createDocumentAuthority({
+    hostId: "durable-combined-host", dataDir,
+    isAllowedRoot: async (candidate) => candidate === await fs.realpath(workspace),
+    isTrusted: async () => true,
+  });
+  authorities.push(documents);
+  const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
   const navigation: CreateWorkspaceRecoveryEngineOptions["sessionNavigation"] = {
     prepare: async () => ({
       expectedLeafId: leaf,
@@ -85,9 +87,10 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
     adapter.bindFileStore(content);
     const store = new KernelRecoveryStore(adapter, content);
     const base = createWorkspaceRecoveryEngine({ authorityId: "durable-combined-host", dataDir, documents, durableRecoveryStore: store, fileStore: content, sessionNavigation: navigation });
-    const engine = createKernelRecoveryDirectFacade(base, store, {
-      resourceOperationGateFor: () => ({ run: (_resources, operation) => operation() }),
-    });
+    const engine = createKernelRecoveryDirectFacade(base, store);
+    documents.bindDurableMutationStorage((id, operation) => engine.withWorkspaceStorage(
+      id, { mode: "exclusive", purpose: "document-mutation", create: true }, operation,
+    ));
     return { adapter, client, engine, store };
   };
 

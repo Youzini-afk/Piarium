@@ -22,6 +22,7 @@ export type KernelMethod =
   | "storage.object.rebindOwner"
   | "file.root.register"
   | "file.lease.acquire"
+  | "file.lease.check"
   | "file.lease.release"
   | "file.capture"
   | "file.apply"
@@ -252,6 +253,7 @@ export interface KernelFileScanParams {
   scopes?: string[];
   cursor?: number;
   pageSize?: number;
+  expectedFingerprint?: string;
 }
 
 export interface KernelFileMeasureParams {
@@ -988,6 +990,7 @@ export type KernelMethodParams = {
   "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
   "file.root.register": KernelFileRootRegisterParams;
   "file.lease.acquire": KernelFileLeaseAcquireParams;
+  "file.lease.check": KernelFileLeaseAcquireParams;
   "file.lease.release": KernelFileLeaseReleaseParams;
   "file.capture": KernelFileCaptureParams;
   "file.apply": KernelFileApplyParams;
@@ -1184,6 +1187,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "file.lease.acquire";
+      params: KernelFileLeaseAcquireParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.lease.check";
       params: KernelFileLeaseAcquireParams;
       epoch?: string;
       grantId?: string;

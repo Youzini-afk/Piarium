@@ -1478,7 +1478,7 @@ describe("thread runtime", () => {
   it("invalidates the default native result when publication fails after a successful snapshot", async () => {
     const publishDirectoryResult = vi.fn(async () => { throw new Error("native publish failed"); });
     const nativeStore = {
-      getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+      getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], captureScopes: [], writeRevision: 0 }),
       publishDirectoryResult,
     } as unknown as WorkingStateStore;
     const nativeFailureRuntime = createThreadRuntime({
@@ -1596,7 +1596,7 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "thread-partial" }),
-          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+          getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], captureScopes: [], writeRevision: 0 }),
           publishDirectoryResult,
           publishHeadResult: publishDirectoryResult,
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
@@ -1639,7 +1639,7 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => { order.push("baseline"); return {}; },
           createBranch,
-          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+          getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], captureScopes: [], writeRevision: 0 }),
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
       },
       resolveWorkspaceRoot: async () => WORKSPACE,
@@ -2396,7 +2396,7 @@ describe("thread runtime", () => {
         withStore: async (_workspaceId, _purpose, operation) => operation({
           captureDirectory: async () => ({}),
           createBranch: async () => ({ branchId: "capture-branch" }),
-          getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+          getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], captureScopes: [], writeRevision: 0 }),
           publishDirectoryResult: async () => { throw new Error("capture failed"); },
           publishHeadResult: async () => { throw new Error("capture failed"); },
         } as unknown as WorkingStateStore, {} as WorkspaceRecoveryStorageContext),
@@ -2786,7 +2786,7 @@ describe("thread runtime", () => {
               captureDirectory: async () => ({}),
               captureBranchCandidateIdentity: async () => "tree-1",
               createBranch: async () => ({ branchId: "branch" }),
-              getBranch: () => ({ draftBasePaths: [], writeRevision: 0 }),
+              getBranch: () => ({ baseState: {}, deltas: {}, draftBasePaths: [], captureScopes: [], writeRevision: 0 }),
               publishDirectoryResult: async () => published,
               publishHeadResult: async () => published,
               resultTreeIdentity: () => "tree-1",

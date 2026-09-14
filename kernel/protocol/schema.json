@@ -24,6 +24,7 @@
     "storage.object.rebindOwner": "KernelObjectOwnerRebindParams",
     "file.root.register": "KernelFileRootRegisterParams",
     "file.lease.acquire": "KernelFileLeaseAcquireParams",
+    "file.lease.check": "KernelFileLeaseAcquireParams",
     "file.lease.release": "KernelFileLeaseReleaseParams",
     "file.capture": "KernelFileCaptureParams",
     "file.apply": "KernelFileApplyParams",
@@ -163,7 +164,7 @@
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "fromPath": {"type": "string"}, "toPath": {"type": "string"}, "targetMustBeMissing": {"type": "boolean", "optional": true}, "expectedFromJson": {"type": "string", "optional": true}, "expectedToJson": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileScanParams": {"fields": {
-      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
+      "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "scopes": {"type": "string[]", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}, "expectedFingerprint": {"type": "string", "optional": true}
     }},
     "KernelFileMeasureParams": {"fields": {
       "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}
@@ -447,6 +448,7 @@
     "storage.object.rebindOwner": "rebind one temporary workspace object owner to the current authorized grant",
     "file.root.register": "register one Documents-authorized canonical filesystem root for this kernel epoch",
     "file.lease.acquire": "acquire an overlapping-path resource lease without holding a database transaction",
+    "file.lease.check": "validate that an existing lease covers a nested resource operation without widening it",
     "file.lease.release": "release a filesystem resource lease",
     "file.capture": "capture one filesystem path and optionally install its bytes into the content store",
     "file.apply": "conditionally apply one typed filesystem path state from kernel-owned content",

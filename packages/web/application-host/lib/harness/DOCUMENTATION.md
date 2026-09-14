@@ -638,3 +638,18 @@ The harness is wired in `packages/web/application-host/index.ts`:
   until `closeSessionShell()` confirms shutdown and writer release.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.
+
+## D-278 native lifecycle acceptance correction
+
+See [the authority audit](../../../../../docs/rust-kernel-audit.md). Native materialization, capture, and root
+publication primitives are wired; this is not a completed cross-domain execution-generation transition.
+`materializeExecutionView` still needs a durable Host switch intent connecting the selected root/writeRevision,
+kernel operationId/receipt, Git executionBaseline, and Registry/view binding. Failed Git attachment or Host exit
+after promotion cannot be resolved by a new random operationId or a current-branch read. Uncollected live content
+is now protected by a kernel conflict rather than overwritten to force a retry through.
+
+Maintenance hints containing only executionWorkspace remain Host operations, not fake session actors. Production
+capture/settle/reclaim carries the real execution workspace. Managed materialization admission uses the owning
+workspace's retained Thread/worktree and existing ownership assertion; root selection does not create authority.
+Branch metadata read failures propagate; incomplete unit fixtures must be corrected instead of swallowing errors.
+R2/R3 are Partial pending the concrete recovery/handoff items, not local platform machines or code signing.

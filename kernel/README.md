@@ -36,3 +36,13 @@ filesystems fall back to byte copy; Windows currently reports copy only and leav
 Managed directory reclaim/delete also runs through the kernel. Git remains a semantic adapter for inventory,
 index/filter behavior, and linked-worktree metadata; it does not become another workspace-body writer.
 There is no arbitrary SQL or arbitrary filesystem-write method on the wire.
+
+## Authority regression acceptance
+
+`bun run test:kernel` requires the built release executable and executes the Node transport suite plus the Vitest
+authority, storage adapter, and combined Recovery suites. `node scripts/test-kernel-authority.mjs --build` builds
+with the toolchain pinned in this workspace before acceptance; existing Linux/Windows CI jobs run it.
+
+The D-278 [audit](../docs/rust-kernel-audit.md) reopens R2/R3 completion claims. Physical leases, object ownership,
+operation replay and GC/pin lifetime have independent real-kernel regression cases. Safe preservation of pending
+state is not yet a complete Host-visible recovery or kernel/Git/Registry lifecycle handshake.

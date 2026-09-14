@@ -52,6 +52,7 @@
     "test:node-smoke": "bun run --cwd packages/web test:node-smoke",
     "kernel:build": "node scripts/build-kernel.mjs",
     "kernel:check": "cargo check --manifest-path kernel/Cargo.toml",
+    "test:kernel": "node scripts/test-kernel-authority.mjs",
     "kernel:protocol": "node scripts/generate-kernel-protocol.mjs",
     "check:pi": "bun run build:type-dependencies && bun run --filter '@piarium/*' type-check && bun run test:pi",
     "test:cloud": "bunx vitest run scripts/cloud-runtime-layout.test.js scripts/cloud-remote-deploy.test.js scripts/docker-cloud-tools.test.js",

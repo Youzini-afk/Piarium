@@ -31,6 +31,7 @@ mod authority_store;
 mod branches;
 mod core;
 mod dispatch;
+mod file_resource_leases;
 mod file_resources;
 mod gc;
 mod maintenance;

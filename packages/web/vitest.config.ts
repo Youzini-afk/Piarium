@@ -25,6 +25,8 @@ export default defineConfig({
       '**/dist-ssr/**',
       // Node smoke tests use node:test, not vitest — run with `node --test` instead.
       '**/*.smoke.test.ts',
+      // Run the real framed child-process suite with Node through test:kernel.
+      '**/lib/kernel/kernel-client.test.ts',
     ],
   },
 });

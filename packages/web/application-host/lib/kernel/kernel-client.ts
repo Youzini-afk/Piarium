@@ -125,6 +125,10 @@ export class KernelScopedClient {
     return this.owner.fileLeaseAcquire(params, this.grant, signal);
   }
 
+  fileLeaseCheck(params: KernelMethodParams["file.lease.check"], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.fileLeaseCheck(params, this.grant, signal);
+  }
+
   fileLeaseRelease(params: KernelMethodParams["file.lease.release"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.fileLeaseRelease(params, this.grant, signal);
   }
@@ -761,6 +765,10 @@ export class KernelClient {
 
   async fileLeaseAcquire(params: KernelMethodParams["file.lease.acquire"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("file.lease.acquire", params, { signal, grant });
+  }
+
+  async fileLeaseCheck(params: KernelMethodParams["file.lease.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>("file.lease.check", params, { signal, grant });
   }
 
   async fileLeaseRelease(params: KernelMethodParams["file.lease.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

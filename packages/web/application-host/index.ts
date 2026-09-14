@@ -17,6 +17,7 @@ import {
   ExtensionPackageManager,
 } from '@piarium/extension-host';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
+import { createManagedRootAdmission } from './lib/kernel/managed-root-admission.js';
 import { registerBuiltinWorkbenchLayoutService } from './lib/extensions/workbench-layout-service.js';
 import { toJsonValue } from './lib/extensions/json-value.js';
 import { createDocumentsCapabilityHandler } from './lib/documents/capability.js';
@@ -1052,32 +1053,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
     },
   });
+  let resolveManagedContainer: ((directory: string, owningWorkspaceId: string) => Promise<{ workspaceId: string; canonicalRoot: string }>) | null = null;
   const resolveKernelExecutionRoot = async (canonicalRoot: string, owningWorkspaceId: string) => {
     try {
       const resolved = await documentsAuthority.resolveWorkspace({ path: canonicalRoot });
       const inspected = await documentsAuthority.inspectWorkspace(resolved.workspaceId);
       return { workspaceId: resolved.workspaceId, canonicalRoot: inspected.root };
     } catch (error) {
-      const candidate = path.resolve(canonicalRoot);
-      const normalize = (value: string) => {
-        const resolved = path.resolve(value).replace(/\\/g, '/');
-        return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
-      };
-      const normalizedCandidate = normalize(candidate);
-      for (const rootName of ['thread-scratch', 'worktrees']) {
-        const root = path.resolve(PIARIUM_DATA_DIR, rootName);
-        const relative = path.relative(root, candidate);
-        const segments = relative.split(/[\\/]/).filter(Boolean);
-        if (!relative
-          || relative.startsWith('..')
-          || path.isAbsolute(relative)
-          || segments.length === 0
-          || !normalizedCandidate.startsWith(`${normalize(root)}/`)) continue;
-        const managedRoot = path.join(root, segments[0]!);
-        await fs.promises.mkdir(managedRoot, { recursive: true });
-        return { workspaceId: owningWorkspaceId, canonicalRoot: managedRoot };
-      }
-      throw error;
+      if (!resolveManagedContainer) throw error;
+      return resolveManagedContainer(canonicalRoot, owningWorkspaceId);
     }
   };
   kernelStorageAdapter.bindFileRootResolver(resolveKernelExecutionRoot);
@@ -1464,6 +1448,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       PATH: platformEnvironmentRuntime.buildAugmentedPath(),
     },
   });
+  const managedRootAdmission = createManagedRootAdmission({
+    listWorktrees: async (workspaceId) => (await threadRegistry.listWorkspaceThreadSnapshots(workspaceId))
+      .flatMap(({ thread }) => thread.worktree ? [thread.worktree] : []),
+    assertOwnership: (worktree, operation, candidates) => threadWorktreeRuntime.assertOwnership(worktree, operation, candidates),
+  });
+  kernelStorageAdapter.bindManagedRootResolver(managedRootAdmission.materialization);
+  resolveManagedContainer = managedRootAdmission.container;
   const branchEntryIdsForSession = async (sessionId: string): Promise<string[]> => {
     const branch = await piRuntimeBroker.requestForSession(sessionId, 'session.entries', {
       sessionId,

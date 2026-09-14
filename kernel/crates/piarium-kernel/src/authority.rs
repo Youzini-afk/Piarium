@@ -40,6 +40,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "operation.release"
         | "file.root.register"
         | "file.lease.acquire"
+        | "file.lease.check"
         | "file.lease.release"
         | "file.capture"
         | "file.apply"

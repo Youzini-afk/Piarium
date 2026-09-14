@@ -6,9 +6,8 @@
 //! Documents-authorized canonical root after every kernel restart.
 use super::*;
 use crate::protocol_generated::{
-    KernelFileApplyParams, KernelFileCaptureParams, KernelFileLeaseAcquireParams,
-    KernelFileLeaseReleaseParams, KernelFileMaterializeParams, KernelFileMeasureParams,
-    KernelFileMkdirParams, KernelFileRemoveParams, KernelFileRenameParams,
+    KernelFileApplyParams, KernelFileCaptureParams, KernelFileMaterializeParams,
+    KernelFileMeasureParams, KernelFileMkdirParams, KernelFileRemoveParams, KernelFileRenameParams,
     KernelFileRootRegisterParams, KernelFileScanParams,
 };
 use serde::de::DeserializeOwned;
@@ -39,9 +38,9 @@ enum FileState {
 }
 
 #[derive(Clone, Debug)]
-struct ResolvedFileResource {
-    path: String,
-    absolute: PathBuf,
+pub(super) struct ResolvedFileResource {
+    pub(super) path: String,
+    pub(super) absolute: PathBuf,
 }
 
 fn file_params_value(params_value: &Value) -> Value {
@@ -52,7 +51,9 @@ fn file_params_value(params_value: &Value) -> Value {
     params
 }
 
-fn parse_file_params<T: DeserializeOwned>(params_value: &Value) -> Result<T, KernelError> {
+pub(super) fn parse_file_params<T: DeserializeOwned>(
+    params_value: &Value,
+) -> Result<T, KernelError> {
     Ok(serde_json::from_value(file_params_value(params_value))?)
 }
 
@@ -113,7 +114,7 @@ fn path_inside(root: &Path, candidate: &Path) -> bool {
     }
 }
 
-fn normalized_relative_path(
+pub(super) fn normalized_relative_path(
     value: &str,
     allow_root: bool,
 ) -> Result<(String, PathBuf), KernelError> {
@@ -157,17 +158,6 @@ fn normalized_relative_path(
     Ok((pieces.join("/"), result))
 }
 
-fn resource_overlap(left: &FileLeaseResource, right: &FileLeaseResource) -> bool {
-    if left.path == right.path {
-        return true;
-    }
-    if left.subtree && (left.path.is_empty() || right.path.starts_with(&(left.path.clone() + "/")))
-    {
-        return true;
-    }
-    right.subtree && (right.path.is_empty() || left.path.starts_with(&(right.path.clone() + "/")))
-}
-
 fn remove_existing(path: &Path) -> Result<(), KernelError> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() => {
@@ -206,13 +196,17 @@ fn materialized_expected_state(state: &PathState) -> FileState {
             byte_length: *byte_length,
             #[cfg(unix)]
             mode: Some(*_mode),
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            mode: Some(if _mode & 0o200 == 0 { 0o444 } else { 0o666 }),
+            #[cfg(not(any(unix, windows)))]
             mode: None,
         },
         PathState::Directory { mode: _mode } => FileState::Directory {
             #[cfg(unix)]
             mode: *_mode,
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            mode: _mode.map(|mode| if mode & 0o200 == 0 { 0o444 } else { 0o666 }),
+            #[cfg(not(any(unix, windows)))]
             mode: None,
         },
         PathState::Symlink {
@@ -316,10 +310,9 @@ fn copy_object_to(source: &Path, destination: &Path) -> Result<&'static str, Ker
 fn durable_directory_rename(source: &Path, target: &Path) -> Result<(), KernelError> {
     #[cfg(windows)]
     {
-        // Windows MoveFileExW with WRITE_THROUGH is reliable for installed
-        // object files, but directory replacement can be rejected by the OS.
-        // R3 only renames to an absent sibling and persists an operation/backup
-        // around the move, so use the native directory rename primitive here.
+        // Directory moves target an absent sibling. Recovery relies on the
+        // persisted intent and observed staging/live/backup state, not on an
+        // unsupported claim of atomic durability across SQLite and the disk.
         fs::rename(source, target)?;
         Ok(())
     }
@@ -361,7 +354,11 @@ fn create_symlink(target: &str, path: &Path) -> Result<(), KernelError> {
 }
 
 impl Storage {
-    fn registered_file_root(&self, root_id: &str, grant: &Grant) -> Result<FileRoot, KernelError> {
+    pub(super) fn registered_file_root(
+        &self,
+        root_id: &str,
+        grant: &Grant,
+    ) -> Result<FileRoot, KernelError> {
         let root = self.file_roots.get(root_id).cloned().ok_or_else(|| {
             KernelError::Authorization(
                 "file root is not registered for this kernel epoch".to_string(),
@@ -377,10 +374,18 @@ impl Storage {
                 "grant workspace identity does not own file root".to_string(),
             ));
         }
+        // A registered pathname is not permanent authorization. A junction or
+        // ancestor may have been replaced since admission.
+        let current = fs::canonicalize(&root.canonical_root)?;
+        if current != root.canonical_root || !fs::metadata(&current)?.is_dir() {
+            return Err(KernelError::Authorization(
+                "registered file root identity changed; Host readmission is required".to_string(),
+            ));
+        }
         Ok(root)
     }
 
-    fn resolve_file_resource(
+    pub(super) fn resolve_file_resource(
         &self,
         root_id: &str,
         relative: &str,
@@ -426,55 +431,24 @@ impl Storage {
                 "file path escaped the registered workspace root".to_string(),
             ));
         }
+        let canonical_relative = current.strip_prefix(&root.canonical_root).map_err(|_| {
+            KernelError::Authorization("resolved resource is outside registered root".to_string())
+        })?;
+        let canonical_scope = canonical_relative
+            .to_str()
+            .ok_or_else(|| {
+                KernelError::Authorization("resolved resource is not UTF-8".to_string())
+            })?
+            .replace('\\', "/");
+        if !path_allowed(grant, &canonical_scope) {
+            return Err(KernelError::Authorization(
+                "resolved file path is outside grant scope".to_string(),
+            ));
+        }
         Ok(ResolvedFileResource {
             path,
             absolute: current,
         })
-    }
-
-    fn assert_file_lease(
-        &self,
-        grant: &Grant,
-        root_id: &str,
-        paths: &[FileLeaseResource],
-        lease_id: Option<&str>,
-    ) -> Result<(), KernelError> {
-        if let Some(lease_id) = lease_id {
-            let lease = self.file_leases.get(lease_id).ok_or_else(|| {
-                KernelError::Operation("file resource lease is no longer active".to_string())
-            })?;
-            if lease.grant_id != grant.grant_id || lease.root_id != root_id {
-                return Err(KernelError::Authorization(
-                    "file resource lease belongs to another grant or root".to_string(),
-                ));
-            }
-            if paths.iter().any(|path| {
-                !lease.resources.iter().any(|held| {
-                    resource_overlap(held, path) && (held.subtree || held.path == path.path)
-                })
-            }) {
-                return Err(KernelError::Authorization(
-                    "file resource is outside the held lease".to_string(),
-                ));
-            }
-        }
-        for lease in self.file_leases.values() {
-            if lease.root_id != root_id || lease_id == Some(lease.lease_id.as_str()) {
-                continue;
-            }
-            if paths.iter().any(|path| {
-                lease
-                    .resources
-                    .iter()
-                    .any(|held| resource_overlap(held, path))
-            }) {
-                return Err(KernelError::Operation(format!(
-                    "file resource is busy under lease {}",
-                    lease.lease_id
-                )));
-            }
-        }
-        Ok(())
     }
 
     fn capture_file_state(
@@ -495,8 +469,9 @@ impl Storage {
         };
         if metadata.file_type().is_symlink() {
             let target = fs::read_link(&resource.absolute)?
-                .to_string_lossy()
-                .to_string();
+                .into_os_string()
+                .into_string()
+                .map_err(|_| KernelError::Operation("symlink target is not UTF-8".to_string()))?;
             return Ok((
                 FileState::Symlink {
                     symlink_target: target,
@@ -704,21 +679,16 @@ impl Storage {
                     .absolute
                     .with_file_name(format!(".piarium-kernel-{}", Uuid::new_v4()));
                 fs::copy(&object, &temporary)?;
+                // Acquire the flush handle before making the file readonly.
+                // Reopening with WRITE afterwards fails on Windows and POSIX.
+                let installed = OpenOptions::new().read(true).write(true).open(&temporary)?;
                 apply_mode(&temporary, *mode)?;
-                OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(&temporary)?
-                    .sync_all()?;
+                installed.sync_all()?;
+                drop(installed);
                 durable_rename(&temporary, &resource.absolute).map_err(|error| {
                     let _ = fs::remove_file(&temporary);
                     KernelError::Storage(error.to_string())
                 })?;
-                OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .open(&resource.absolute)?
-                    .sync_all()?;
                 if let Some(parent) = resource.absolute.parent() {
                     sync_directory(parent)?;
                 }
@@ -783,7 +753,9 @@ impl Storage {
         let mut entries = fs::read_dir(directory)?.collect::<Result<Vec<_>, _>>()?;
         entries.sort_by(|left, right| left.file_name().cmp(&right.file_name()));
         for entry in entries {
-            let name = entry.file_name().to_string_lossy().to_string();
+            let name = entry.file_name().into_string().map_err(|_| {
+                KernelError::Operation("filesystem inventory contains a non-UTF-8 path".to_string())
+            })?;
             if name == ".git" || name == ".piarium" {
                 continue;
             }
@@ -984,6 +956,7 @@ impl Storage {
         });
         let mut reflink = 0usize;
         let mut copy = 0usize;
+        let mut directory_modes = Vec::new();
         for (relative, state) in entries {
             self.check_cancelled()?;
             if relative.is_empty() || matches!(state, PathState::Missing) {
@@ -1010,11 +983,8 @@ impl Storage {
                             "materialize mkdir failed for {relative}: {error}"
                         ))
                     })?;
-                    apply_mode(&target, mode).map_err(|error| {
-                        KernelError::Storage(format!(
-                            "materialize directory mode failed for {relative}: {error}"
-                        ))
-                    })?;
+                    // Install children before restoring a readonly directory.
+                    directory_modes.push((target, mode));
                 }
                 PathState::RegularFile {
                     object_hash,
@@ -1044,11 +1014,13 @@ impl Storage {
                         "reflink" => reflink += 1,
                         _ => copy += 1,
                     }
+                    let installed = OpenOptions::new().read(true).write(true).open(&target)?;
                     apply_mode(&target, Some(mode)).map_err(|error| {
                         KernelError::Storage(format!(
                             "materialize file mode failed for {relative}: {error}"
                         ))
                     })?;
+                    installed.sync_all()?;
                 }
                 PathState::Symlink {
                     symlink_target,
@@ -1076,6 +1048,11 @@ impl Storage {
                 PathState::Missing => {}
             }
         }
+        for (directory, mode) in directory_modes.into_iter().rev() {
+            // Flush each directory's own entries, not only the staging root.
+            apply_mode(&directory, mode)?;
+            sync_directory(&directory)?;
+        }
         sync_directory(destination)?;
         Ok((reflink, copy))
     }
@@ -1086,7 +1063,10 @@ impl Storage {
         kind: &str,
         params_value: &Value,
     ) -> Result<(String, Option<Value>, bool), KernelError> {
-        let identity_params = file_params_value(params_value);
+        let mut identity_params = file_params_value(params_value);
+        if let Some(object) = identity_params.as_object_mut() {
+            object.remove("leaseId");
+        }
         let params_hash = hash_json(&identity_params)?;
         let existing: Option<(String, String, String, Option<String>)> = self.conn.query_row(
             "SELECT kind, params_hash, state, result_json FROM operations WHERE operation_id = ?1",
@@ -1218,6 +1198,35 @@ impl Storage {
             if intent.get("rootId").and_then(Value::as_str) != Some(root_id) {
                 continue;
             }
+            let operation_paths: Vec<FileLeaseResource> = if kind == "file.rename" {
+                let params: KernelFileRenameParams = parse_file_params(intent)?;
+                vec![
+                    FileLeaseResource {
+                        path: params.from_path,
+                        subtree: true,
+                    },
+                    FileLeaseResource {
+                        path: params.to_path,
+                        subtree: true,
+                    },
+                ]
+            } else {
+                vec![FileLeaseResource {
+                    path: intent
+                        .get("path")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| KernelError::Storage("file intent has no path".to_string()))?
+                        .to_string(),
+                    subtree: true,
+                }]
+            };
+            if self
+                .assert_file_lease(grant, root_id, &operation_paths, None)
+                .is_err()
+            {
+                unresolved += 1;
+                continue;
+            }
             let result = match kind.as_str() {
                 "file.apply" => {
                     let params: KernelFileApplyParams = parse_file_params(intent)?;
@@ -1265,9 +1274,20 @@ impl Storage {
                         self.resolve_file_resource(root_id, &params.from_path, grant, false)?;
                     let target =
                         self.resolve_file_resource(root_id, &params.to_path, grant, false)?;
+                    let before = envelope
+                        .get("renameSourceState")
+                        .cloned()
+                        .map(serde_json::from_value::<FileState>)
+                        .transpose()?;
+                    let observed = self.observe_state(&target)?;
                     if fs::symlink_metadata(&source.absolute)
                         .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
-                        && fs::symlink_metadata(&target.absolute).is_ok()
+                        && before.as_ref().is_some_and(|state| {
+                            matches!(
+                                state,
+                                FileState::RegularFile { .. } | FileState::Symlink { .. }
+                            ) && Self::file_state_matches(&observed, state)
+                        })
                     {
                         Some((json!({"status":"renamed","reconciled":true}), None, None))
                     } else {
@@ -1477,102 +1497,6 @@ impl Storage {
         }))
     }
 
-    pub(super) fn file_lease_acquire(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileLeaseAcquireParams = parse_file_params(params_value)?;
-        let _root = self.registered_file_root(&params.root_id, grant)?;
-        let resources = params
-            .resources
-            .iter()
-            .map(|resource| {
-                let (path, _) = normalized_relative_path(&resource.path, true)?;
-                if !path_allowed(grant, &path) {
-                    return Err(KernelError::Authorization(format!(
-                        "path is outside grant scope: {path}"
-                    )));
-                }
-                let subtree = match resource.scope.as_str() {
-                    "exact" => false,
-                    "subtree" => true,
-                    _ => {
-                        return Err(KernelError::Protocol(
-                            "file lease scope must be exact or subtree".to_string(),
-                        ))
-                    }
-                };
-                Ok(FileLeaseResource { path, subtree })
-            })
-            .collect::<Result<Vec<_>, KernelError>>()?;
-        if resources.is_empty() {
-            return Err(KernelError::Operation(
-                "file lease requires at least one resource".to_string(),
-            ));
-        }
-        if let Some(existing) = self.file_leases.get(&params.lease_id) {
-            if existing.grant_id == grant.grant_id
-                && existing.root_id == params.root_id
-                && existing.workspace_id == params.workspace_id
-            {
-                return Ok(
-                    json!({"leaseId": params.lease_id, "status": "acquired", "reused": true}),
-                );
-            }
-            return Err(KernelError::Authorization(
-                "file lease id belongs to another resource owner".to_string(),
-            ));
-        }
-        for existing in self.file_leases.values() {
-            if existing.root_id != params.root_id {
-                continue;
-            }
-            if resources.iter().any(|resource| {
-                existing
-                    .resources
-                    .iter()
-                    .any(|held| resource_overlap(resource, held))
-            }) {
-                return Ok(
-                    json!({"leaseId": params.lease_id, "status": "busy", "blockingLeaseId": existing.lease_id}),
-                );
-            }
-        }
-        self.file_leases.insert(
-            params.lease_id.clone(),
-            FileLease {
-                lease_id: params.lease_id.clone(),
-                root_id: params.root_id,
-                workspace_id: params.workspace_id,
-                grant_id: grant.grant_id.clone(),
-                resources,
-            },
-        );
-        Ok(json!({"leaseId": params.lease_id, "status": "acquired", "reused": false}))
-    }
-
-    pub(super) fn file_lease_release(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileLeaseReleaseParams = parse_file_params(params_value)?;
-        let Some(existing) = self.file_leases.get(&params.lease_id) else {
-            return Ok(json!({"leaseId": params.lease_id, "released": false}));
-        };
-        if existing.grant_id != grant.grant_id
-            || existing.root_id != params.root_id
-            || existing.workspace_id != params.workspace_id
-        {
-            return Err(KernelError::Authorization(
-                "file lease belongs to another resource owner".to_string(),
-            ));
-        }
-        self.file_leases.remove(&params.lease_id);
-        Ok(json!({"leaseId": params.lease_id, "released": true}))
-    }
-
     pub(super) fn file_scan(
         &mut self,
         params_value: &Value,
@@ -1581,7 +1505,18 @@ impl Storage {
         let params: KernelFileScanParams = parse_file_params(params_value)?;
         let base = self.resolve_file_resource(&params.root_id, &params.path, grant, true)?;
         let paths = self.scan_paths(&params.root_id, &base, params.scopes.as_deref(), grant)?;
+        let fingerprint = hash_json(&json!(paths))?;
         let cursor = params.cursor.unwrap_or(0) as usize;
+        if (cursor > 0 && params.expected_fingerprint.is_none())
+            || params
+                .expected_fingerprint
+                .as_ref()
+                .is_some_and(|expected| expected != &fingerprint)
+        {
+            return Err(KernelError::Operation(
+                "file scan inventory changed or continuation fingerprint is missing".to_string(),
+            ));
+        }
         let page_size = params.page_size.unwrap_or(512).clamp(1, 4096) as usize;
         if cursor > paths.len() {
             return Err(KernelError::Operation(
@@ -1592,6 +1527,7 @@ impl Storage {
         let page = paths[cursor..end].to_vec();
         Ok(json!({
             "paths": page,
+            "fingerprint": fingerprint,
             "cursor": cursor,
             "nextCursor": if end < paths.len() { Some(end) } else { None },
             "total": paths.len(),
@@ -1695,6 +1631,27 @@ impl Storage {
             self.begin_file_operation(&params.operation_id, "file.apply", params_value)?;
         if let Some(committed) = committed {
             return Ok(committed);
+        }
+        if let Some(owner_id) = params.owner_id.as_ref() {
+            let FileState::RegularFile { object_hash, .. } = &target else {
+                return Err(KernelError::Authorization(
+                    "only a file target can consume an object owner".to_string(),
+                ));
+            };
+            self.validate_object_owners(
+                &params.workspace_id,
+                &grant.grant_id,
+                &BTreeMap::from([(owner_id.clone(), object_hash.clone())]),
+            )?;
+        } else if matches!(&target, FileState::RegularFile { .. })
+            && !grant.capabilities.contains("storage.maintenance")
+            && !grant.capabilities.contains("recovery.maintenance")
+            && !grant.capabilities.contains("storage.admin")
+        {
+            return Err(KernelError::Authorization(
+                "file apply requires an exact object owner or Host maintenance authority"
+                    .to_string(),
+            ));
         }
         let current = self.observe_state(&resource)?;
         if Self::file_state_matches(&current, &target) {
@@ -1804,6 +1761,16 @@ impl Storage {
         if let Some(committed) = committed {
             return Ok(committed);
         }
+        if resuming {
+            if !fs::symlink_metadata(&resource.absolute)
+                .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+            {
+                return Err(KernelError::Operation("remove needs attention: target exists after interrupted operation; refusing destructive replay".to_string()));
+            }
+            let result = json!({"status": "removed", "reconciled": true});
+            self.finish_file_operation(&params.operation_id, &result)?;
+            return Ok(result);
+        }
         match fs::symlink_metadata(&resource.absolute) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
                 if params.recursive {
@@ -1856,6 +1823,32 @@ impl Storage {
         }
         let source_state = self.observe_state(&source)?;
         let target_state = self.observe_state(&target)?;
+        if resuming {
+            let envelope: String = self.conn.query_row(
+                "SELECT result_json FROM operations WHERE operation_id = ?1",
+                params![params.operation_id],
+                |row| row.get(0),
+            )?;
+            let envelope: Value = serde_json::from_str(&envelope)?;
+            let before = envelope
+                .get("renameSourceState")
+                .cloned()
+                .map(serde_json::from_value::<FileState>)
+                .transpose()?;
+            if matches!(source_state, FileState::Missing)
+                && before.as_ref().is_some_and(|state| {
+                    matches!(
+                        state,
+                        FileState::RegularFile { .. } | FileState::Symlink { .. }
+                    ) && Self::file_state_matches(&target_state, state)
+                })
+            {
+                let result = json!({"status": "renamed", "reconciled": true});
+                self.finish_file_operation(&params.operation_id, &result)?;
+                return Ok(result);
+            }
+            return Err(KernelError::Operation("rename needs attention: interrupted operation has no provable target; refusing replay".to_string()));
+        }
         let expected_source = params
             .expected_from_json
             .as_deref()
@@ -1883,11 +1876,6 @@ impl Storage {
         }
         let source_exists = !matches!(source_state, FileState::Missing);
         let target_exists = !matches!(target_state, FileState::Missing);
-        if !source_exists && target_exists {
-            let result = json!({"status": "renamed", "reconciled": true});
-            self.finish_file_operation(&params.operation_id, &result)?;
-            return Ok(result);
-        }
         if !source_exists {
             return Err(KernelError::Operation(
                 "rename source is missing".to_string(),
@@ -1901,6 +1889,17 @@ impl Storage {
         if let Some(parent) = target.absolute.parent() {
             fs::create_dir_all(parent)?;
         }
+        let envelope: String = self.conn.query_row(
+            "SELECT result_json FROM operations WHERE operation_id = ?1",
+            params![params.operation_id],
+            |row| row.get(0),
+        )?;
+        let mut envelope: Value = serde_json::from_str(&envelope)?;
+        envelope["renameSourceState"] = serde_json::to_value(&source_state)?;
+        self.conn.execute(
+            "UPDATE operations SET result_json = ?2 WHERE operation_id = ?1",
+            params![params.operation_id, serde_json::to_string(&envelope)?],
+        )?;
         durable_rename(&source.absolute, &target.absolute)?;
         if let Some(parent) = source.absolute.parent() {
             sync_directory(parent)?;
@@ -1931,6 +1930,11 @@ impl Storage {
                 "materialize source root is not owned by workspace".to_string(),
             ));
         }
+        if !grant.path_scopes.iter().any(String::is_empty) {
+            return Err(KernelError::Authorization(
+                "materialize requires an unbounded source-view grant".to_string(),
+            ));
+        }
         self.load_node(&params.source_root)?;
         let target = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
         self.assert_file_lease(
@@ -1946,14 +1950,27 @@ impl Storage {
         let backup_path = materialize_side_path(&target.path, &params.operation_id, "backup");
         let stage = self.resolve_file_resource(&params.root_id, &stage_path, grant, false)?;
         let backup = self.resolve_file_resource(&params.root_id, &backup_path, grant, false)?;
+        self.assert_file_lease(
+            grant,
+            &params.root_id,
+            &[
+                FileLeaseResource {
+                    path: stage_path.clone(),
+                    subtree: true,
+                },
+                FileLeaseResource {
+                    path: backup_path.clone(),
+                    subtree: true,
+                },
+            ],
+            None,
+        )?;
 
         let (_hash, committed, resuming) =
             self.begin_file_operation(&params.operation_id, "file.materialize", params_value)?;
         if let Some(committed) = committed {
-            let _ = remove_tree(&stage.absolute);
-            if committed.get("status").and_then(Value::as_str) == Some("materialized") {
-                let _ = remove_tree(&backup.absolute);
-            }
+            // The receipt is immutable; later files at these pathnames are not
+            // owned by replaying an old terminal operation.
             return Ok(committed);
         }
 
@@ -1965,8 +1982,6 @@ impl Storage {
                 "cow": {"reflink": 0, "copy": 0},
             });
             self.finish_file_operation(&params.operation_id, &result)?;
-            let _ = remove_tree(&stage.absolute);
-            let _ = remove_tree(&backup.absolute);
             return Ok(result);
         }
 
@@ -1984,6 +1999,30 @@ impl Storage {
             return Ok(result);
         }
 
+        if resuming {
+            return Err(KernelError::Operation(
+                "materialize needs attention: interrupted state requires reconciliation, not replacement".to_string()));
+        }
+        let occupied = match fs::symlink_metadata(&target.absolute) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
+                fs::read_dir(&target.absolute)?
+                    .next()
+                    .transpose()?
+                    .is_some()
+            }
+            Ok(_) => true,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+            Err(error) => return Err(error.into()),
+        };
+        if occupied
+            || fs::symlink_metadata(&stage.absolute).is_ok()
+            || fs::symlink_metadata(&backup.absolute).is_ok()
+        {
+            let result = json!({"status": "conflict", "root": params.source_root,
+                "reason": "materialization target or staging/backup path contains unowned content"});
+            self.finish_file_operation(&params.operation_id, &result)?;
+            return Ok(result);
+        }
         let (reflink, copy) = self
             .build_materialized_root(&params.source_root, &stage.absolute)
             .map_err(|error| {
@@ -2030,12 +2069,10 @@ impl Storage {
             sync_directory(parent)?;
         }
         if !self.directory_matches_root(&params.root_id, &target, &params.source_root, grant)? {
-            let _ = remove_tree(&target.absolute);
-            if fs::symlink_metadata(&backup.absolute).is_ok() {
-                let _ = durable_directory_rename(&backup.absolute, &target.absolute);
-            }
+            // Verification can fail because an external writer changed live.
+            // Retain both generations; do not erase user bytes to fake rollback.
             return Err(KernelError::Storage(
-                "materialized directory did not match immutable source root".to_string(),
+                "materialize needs attention: live differs from immutable source; live and backup were preserved".to_string(),
             ));
         }
         let result = json!({

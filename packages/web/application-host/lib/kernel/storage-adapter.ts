@@ -62,6 +62,7 @@ export interface KernelStorageContext {
   actor?: KernelActorIdentity;
   identity: RecoveryIdentity;
   root: string;
+  resolveMaterializationRoot(directory: string): Promise<KernelFileAuthorityContext & { basePath: string }>;
   resolveFileRoot(directory: string): Promise<{
     rootId: string;
     canonicalRoot: string;
@@ -229,6 +230,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const root = await this.kernelFileRoot(directory);
     const output: string[] = [];
     let cursor: number | undefined;
+    let expectedFingerprint: string | undefined;
     do {
       signal?.throwIfAborted();
       const page = await this.context.client.fileScan({
@@ -238,11 +240,14 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...(scopes && scopes.length > 0 ? { scopes: scopes.map(normalize) } : {}),
         ...(cursor === undefined ? {} : { cursor }),
         pageSize: 1024,
+        ...(expectedFingerprint === undefined ? {} : { expectedFingerprint }),
       }, signal);
       if (!Array.isArray(page.paths) || !page.paths.every((entry) => typeof entry === "string")) {
         throw new Error("Kernel returned an invalid WorkingState file scan page");
       }
       output.push(...(page.paths as string[]).map(normalize));
+      if (typeof page.fingerprint !== "string") throw new Error("Kernel scan returned no inventory identity");
+      expectedFingerprint = page.fingerprint;
       cursor = typeof page.nextCursor === "number" ? page.nextCursor : undefined;
     } while (cursor !== undefined);
     return [...new Set(output)].sort();
@@ -254,7 +259,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     operationId: string,
     signal?: AbortSignal,
   ): Promise<MaterializeResult> {
-    const root = await this.kernelFileRoot(directory);
+    const root = await this.context.resolveMaterializationRoot(directory);
     const relativePath = root.basePath;
     if (!relativePath) {
       throw new Error(`Managed materialization target must be below its admitted root: ${directory}`);
@@ -262,7 +267,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const leaseId = `materialize-lease:${randomUUID()}`;
     for (;;) {
       signal?.throwIfAborted();
-      const lease = await this.context.client.fileLeaseAcquire({
+      const lease = await root.client.fileLeaseAcquire({
         workspaceId: this.context.identity.workspaceId,
         rootId: root.rootId,
         leaseId,
@@ -273,7 +278,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
     try {
-      const result = await this.context.client.fileMaterialize({
+      const result = await root.client.fileMaterialize({
         operationId,
         workspaceId: this.context.identity.workspaceId,
         rootId: root.rootId,
@@ -282,7 +287,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         leaseId,
       }, signal);
       if (result.status === "conflict") {
-        throw new Error(`Managed materialization target changed after promotion: ${directory}`);
+        throw new Error(`Managed materialization target conflicts with the requested immutable root: ${directory}`);
       }
       if (result.status !== "materialized") {
         throw new Error("Kernel returned an invalid WorkingState materialization result");
@@ -299,7 +304,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         },
       };
     } finally {
-      await this.context.client.fileLeaseRelease({
+      await root.client.fileLeaseRelease({
         workspaceId: this.context.identity.workspaceId,
         rootId: root.rootId,
         leaseId,
@@ -1389,7 +1394,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const actual = await this.captureDirectory(directory, undefined, { store: false });
     const expected = Object.fromEntries(expectedRead.entries.map((entry) => [entry.path, entry.state]));
     const paths = new Set([...Object.keys(expected), ...Object.keys(actual)]);
-    return [...paths].every((file) => sameState(actual[file] ?? { kind: "missing" }, expected[file] ?? { kind: "missing" }));
+    const observable = (state: RecoveryState): RecoveryState => {
+      if (process.platform !== "win32" || (state.kind !== "regular-file" && state.kind !== "directory") || state.mode === undefined) return state;
+      return { ...state, mode: (state.mode & 0o200) === 0 ? 0o444 : 0o666 };
+    };
+    return [...paths].every((file) => sameState(
+      observable(actual[file] ?? { kind: "missing" }), observable(expected[file] ?? { kind: "missing" }),
+    ));
   }
 }
 
@@ -1416,6 +1427,7 @@ export class KernelStorageAdapter {
   private boundFileStore: RecoveryFileStore | undefined;
   private boundFileResources: HostFileResourceBackend | undefined;
   private fileRootResolver: KernelFileRootResolver | undefined;
+  private managedRootResolver: KernelFileRootResolver | undefined;
   private readonly fileStoreProxy: RecoveryFileStore;
   constructor(options: KernelStorageAdapterOptions) {
     this.options = options;
@@ -1449,6 +1461,13 @@ export class KernelStorageAdapter {
       throw new Error("Kernel file-root resolver is already bound");
     }
     this.fileRootResolver = resolver;
+  }
+
+  bindManagedRootResolver(resolver: KernelFileRootResolver): void {
+    if (this.managedRootResolver && this.managedRootResolver !== resolver) {
+      throw new Error("Kernel managed-root resolver is already bound");
+    }
+    this.managedRootResolver = resolver;
   }
 
   async fileAuthorityContext(input: {
@@ -1536,6 +1555,22 @@ export class KernelStorageAdapter {
       },
       reviewRelease: (operationId: string, recordId: string) => scoped.workingReviewRelease({ operationId, workspaceId, recordId }),
     };
+    const resolveMaterializationRoot = async (directory: string) => {
+      if (!this.managedRootResolver || !grant.capabilities.some((capability) => capability === "storage.maintenance" || capability === "storage.admin")) {
+        throw new Error("Kernel managed materialization requires explicit Host ownership admission");
+      }
+      const resolved = await this.managedRootResolver(path.resolve(directory), workspaceId);
+      const basePath = path.relative(resolved.canonicalRoot, path.resolve(directory)).replace(/\\/g, "/");
+      if (!basePath || basePath === ".." || basePath.startsWith("../") || path.isAbsolute(basePath)) {
+        throw new Error(`Managed materialization target is not below its ownership root: ${directory}`);
+      }
+      const authority = await this.fileAuthorityContext({
+        owningWorkspaceId: workspaceId, executionWorkspaceId: resolved.workspaceId,
+        canonicalRoot: resolved.canonicalRoot, purpose: "working-managed-materialization",
+        capabilities: ["storage.maintenance"],
+      });
+      return { ...authority, basePath };
+    };
     const resolveFileRoot = async (directory: string) => {
       const requestedRoot = path.resolve(directory);
       const resolved = this.fileRootResolver
@@ -1572,6 +1607,7 @@ export class KernelStorageAdapter {
       identity,
       root,
       resolveFileRoot,
+      resolveMaterializationRoot,
       actor: {
         ...(grant.sessionId ? { sessionId: grant.sessionId } : {}),
         ...(grant.authorityInstanceId ? { authorityInstanceId: grant.authorityInstanceId } : {}),
@@ -1629,7 +1665,7 @@ export const createKernelWorkspaceWorkingStateAccess = (
         executionWorkspace: workspaceId,
         pathScopes: [""],
         ...(actor ?? {}),
-        capabilities: actor ? [] : ["storage.maintenance"],
+        capabilities: actor?.sessionId ? [] : ["storage.maintenance"],
       });
       const store = new KernelWorkingStateRootStore(context);
       if (!recoveryEngine) return operation(store, {

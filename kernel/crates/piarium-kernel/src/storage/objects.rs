@@ -51,8 +51,28 @@ impl Storage {
         operation_id: Option<&str>,
         grant_id: &str,
     ) -> Result<(), KernelError> {
+        let existing: Option<(String, Option<String>, Option<String>, String)> = self.conn.query_row(
+            "SELECT blob_hash, workspace_id, operation_id, grant_id FROM object_owners WHERE owner_id = ?1",
+            params![owner_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        ).optional()?;
+        if let Some((prior_hash, prior_workspace, prior_operation, prior_grant)) = existing {
+            if prior_hash != hash
+                || prior_workspace.as_deref() != workspace_id
+                || prior_operation.as_deref() != operation_id
+                || prior_grant != grant_id
+            {
+                return Err(KernelError::Authorization(
+                    "temporary object owner was reused with a different identity".to_string(),
+                ));
+            }
+            return Ok(());
+        }
         self.conn.execute(
-            "INSERT OR REPLACE INTO object_owners(owner_id, blob_hash, workspace_id, operation_id, grant_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "DELETE FROM pending_gc_files WHERE hash = ?1",
+            params![hash],
+        )?;
+        self.conn.execute(
+            "INSERT INTO object_owners(owner_id, blob_hash, workspace_id, operation_id, grant_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![owner_id, hash, workspace_id, operation_id, grant_id, now_ms()],
         )?;
         Ok(())

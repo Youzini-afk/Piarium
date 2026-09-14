@@ -41,3 +41,12 @@ Root-session mixed surface/disk mutations preflight every disk member under the 
 Workspace IDs live under `{PIARIUM_DATA_DIR}/documents/workspaces.json` and are scoped to this application host. Converting a filesystem path into an ID performs the current root-admission check once; later operations use that persisted host registration instead of re-reading mutable project selection settings. They still canonicalize the root at use time, reject a changed filesystem identity, enforce resource containment, and fail with `workspace-unavailable` while the root is inaccessible. Loading this registry never touches workspace storage: a deleted or disconnected root keeps its workspace ID and cannot prevent other registrations from loading. Recovery journals live under `{PIARIUM_DATA_DIR}/document-recovery/{hostId}/...`. Agent-input snapshots themselves are deliberately Host-memory state: they survive a renderer/surface disconnect, but Host restart makes an unconsumed opaque ref unavailable rather than reading current disk as the old draft. A Thread created from one first copies its content into the separately persistent WorkingState store. Another host must not inherit the same-path selections.
 
 Electron reuses this Web host in-process. It does not add a generic filesystem preload IPC.
+
+## D-278 kernel gate composition
+
+When durable mutation storage is bound, nested Documents resource operations must enter the kernel gate even when
+canonical path keys match. Only Rust `file.lease.check` may decide whether exact/subtree coverage is sufficient;
+the local queue shortcut is confined to the unbound test seam. The real Documents write/stale-save/move/delete
+composition and a nested exact-to-subtree rejection are covered by `../kernel/file-resource-audit.test.ts`.
+The combined recovery restart/undo test now uses real Documents and the real Recovery kernel gate rather than
+no-op gate stubs. The Pi navigation response-loss adapter is still simulated and is not a real model/UI session.

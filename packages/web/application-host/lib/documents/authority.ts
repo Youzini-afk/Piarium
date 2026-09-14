@@ -560,7 +560,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }));
     const held = activeResourceKeys.getStore();
     const nested = held && queueResources.every((resource) => held.has(resource.key));
-    if (nested) return operation(resolved);
+    // Production nesting must reach the kernel's directional lease coverage
+    // check. Equal path keys do not make an exact lease a subtree lease.
+    if (nested && !durableMutationStorage) return operation(resolved);
 
     const workspaceId = requests[0]?.resource.workspaceId;
     if (durableMutationStorage && workspaceId) {
