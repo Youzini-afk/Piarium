@@ -309,6 +309,22 @@ keeper behavior described here is the current code, not the new target. The cuto
 nudges, block-based compaction coverage and memory-mode UI, while keeping plans, user notes, accepted
 knowledge and real event delivery. See harness section 8.4 and plan 2.4/2.6.
 
+D-286 makes the full context scope explicit: sufficient first presentation of tool material, stable
+history, actual request capacity, retained original messages, one continuation summary, history rereads,
+and independent plans/knowledge. A task can also start a fresh input view when its prior background is
+mostly obsolete. That refresh uses current rules and selected work evidence without discarding files,
+results, pending messages or the old Pi transcript, and does not require a background freshness model.
+
+D-285 accepts task-centered collaboration, also pending implementation. A normal dispatch can inherit
+the current model without a mandatory role; presets resolve per-Run execution configuration. New work
+chooses task-only or inherited active context, while an existing Thread can continue or refresh its input.
+Directed parent/child/peer messages separate information from execution requests, and all nested runs
+under one root task share delegated execution admission. Waiting yields that admission without claiming
+that workers or file writers exited. Immutable staged results and explicit parent-state integration carry
+code dependencies. Automatic review becomes opt-in while existing explicit user choices and revision
+binding remain. The current required roles, direct-child active-only send, per-parent slots and default
+review described elsewhere remain code facts until plan 3.18 completes; they are not evidence of this target.
+
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
 owns command framing and output presentation but does not own a second process table. Background

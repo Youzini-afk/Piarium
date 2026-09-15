@@ -30,11 +30,11 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 15 |
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 32 |
-| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 28 |
+| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 60 |
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 51 |
-| [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10 工作状态、Thread/Run 生命周期、Integration/恢复应用、P0 存储形状与 T 纵切。 | 56 |
+| [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 57 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 
 ## 决策索引
@@ -71,7 +71,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-025 | 2026-09-03 | 3b.1 | superseded in part | D-035（ask 走 UI、三层模型） | agent-harness.md 9.1.2 | [permissions](decisions/permissions.md) |
 | D-026 | 2026-09-03 | 3.4–3.5（§9.3 redo） | superseded in part | D-032（对象模型）、D-033（wait 默认超时）、D-034（`traceHandle`） | agent-harness.md 9.3 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-027 | 2026-09-04 | 2.1–2.10 / 3.4–3.5 / 3b.1（更正 D-023、D-024、D-025、D-026） | implementation（更正记录） | — | status（未完成项表） | [foundation-governance](decisions/foundation-governance.md) |
-| D-028 | 2026-09-04 | 3.6 / 3.7 / 3b.1 / 2.6 | active-design | — | agent-harness.md 9.2.2 / 9.1.2 / 8.4 / 5.9、architecture §5 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-028 | 2026-09-04 | 3.6 / 3.7 / 3b.1 / 2.6 | superseded in part（角色绑定/默认审查与keeper压缩目标退出；现有权限/并发基础保留） | D-284 / D-285 | agent-harness.md 9.2.2 / 9.1.2 / 8.4 / 5.9、architecture §5 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-029 | 2026-09-04 | 交叉（测试卫生与流程） | implementation | — | — | [foundation-governance](decisions/foundation-governance.md) |
 | D-030 | 2026-09-04 | 交叉（决策日志治理） | active-design | — | 本文件治理规则 | [foundation-governance](decisions/foundation-governance.md) |
 | D-031 | 2026-09-04 | 1.9（取代 D-015） | implementation | — | agent-harness.md 5.10、plan 1.9、protocol `harness-settings.ts` | [tool-environment](decisions/tool-environment.md) |
@@ -98,7 +98,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-052 | 2026-09-04 | 3.9（Host 观察游标与后台 shell 持续采集） | implementation | — | agent-harness/plan/status 3.9；protocol / Host observation/shell/diagnostics / pi-host / UI | [tool-environment](decisions/tool-environment.md) |
 | D-053 | 2026-09-04 | 3.4（原生线程进入父会话 Zone 2） | implementation | — | agent-harness/plan/status 3.4/3.5；Host ThreadRegistry / Zone 2 / observation cursors | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-054 | 2026-09-04 | 2.3（Git 状态观察复用现有刷新边界） | implementation | — | agent-harness/plan/status 2.3；Git routes / Documents / knowledge context runtime | [context-knowledge](decisions/context-knowledge.md) |
-| D-055 | 2026-09-04 | 3.4（父 blocks 快照与可核验 ThreadReport） | implementation | — | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-055 | 2026-09-04 | 3.4（父 blocks 快照与可核验 ThreadReport） | superseded in part（背景不再只靠blocks；task/inherit与continue/fresh待实施，成果来源契约保留） | D-284 / D-285 / D-286 | agent-harness 9.2/9.3、plan/status 3.4；ThreadRuntime / knowledge blocks / report | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-056 | 2026-09-04 | 3.6（删除休眠且无依据的 role budget） | implementation | — | plan/status 3.6；protocol role catalog | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-057 | 2026-09-04 | 3.4（结果分支先耐久化，live worktree 暂不自动删除） | superseded in part（既有 Git 结果是迁移来源；原生结果与回收已采用） | D-077 / D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4/3.5；status | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-058 | 2026-09-04 | 2.7（用户标记 → 双作用域知识审阅纵切） | implementation | — | agent-harness 7.2.2、plan/status 2.7；KnowledgeStore / routes / session state UI | [context-knowledge](decisions/context-knowledge.md) |
@@ -244,7 +244,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-204 | 2026-09-10 | 归档等待真实执行退出，物化与预算按整个工作区处理 | implementation（退出、结构化准备、并发预算与原会话恢复） | — | 设计 9.3.4；plan 3.4E / 3.10；status 3.4 / 3.10 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-205 | 2026-09-10 | shell 注册按 actor 代际等待，退出以进程和写者完成为准 | implementation（同代际注册、Windows 真实 shell、退出/写者与请求取消） | — | 设计 5.2；status 1.3 | [tool-environment](decisions/tool-environment.md) |
 | D-206 | 2026-09-10 | 后台 shell 接入终端 runtime，bundled Pi 默认与 todo 确认 | superseded in part（terminal 接线、bundled 优先与 confidence 信息语义保留；身份、退出和 todo 假确认由 D-209 补正） | D-209 | 设计 5.2 / 5.6；architecture 10；status 1.3 / 2.5 | [tool-environment](decisions/tool-environment.md) |
-| D-207 | 2026-09-10 | 结果验证记录与自动 review | superseded in part（三事实与自动 review 保留；命令/父窗口/审阅运行身份由 D-210 补正） | D-210 | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-207 | 2026-09-10 | 结果验证记录与自动 review | superseded in part（D-210身份绑定保留；D-285将自动review默认改为关闭，尚未改代码） | D-210 / D-285 | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-208 | 2026-09-10 | 2.7 / 2.10（Settings 知识目录与用户消息建议） | superseded in part（知识目录与 suggestions 入口保留；CAS、提议身份和去重由 D-211 补正） | D-211 | 设计 7.2.2；architecture 数据所有权；status 2.7 / 2.10 | [context-knowledge](decisions/context-knowledge.md) |
 | D-209 | 2026-09-10 | 1.3 / 2.5（终端身份、退出事实与 todo 单一审批边界） | implementation（全局终端身份、真实退出与 writer 释放、后台自然完成、todo 单一审批边界） | — | 设计 5.2 / 5.6；architecture 4.4 / 6；status 1.3 / 2.5 | [tool-environment](decisions/tool-environment.md) |
 | D-210 | 2026-09-10 | 3.4 / 3.5 / 3.7（验证绑定采用观察边界身份与一次性运行主体） | implementation（观察边界输入身份、一次性 actor/Run 绑定、持久父窗口与 review 运行身份） | — | 设计 9.2.3 / 9.2.5b / 9.3.1；architecture 6.1；status 3.4 / 3.5 / 3.7 | [workingstate-threads](decisions/workingstate-threads.md) |
@@ -252,7 +252,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-212 | 2026-09-11 | 3.4 / 3.4a（WorkingState 虚拟只读视图接入真实 Thread Run） | superseded in part（隔离只读视图与虚拟 scratch spawn 保留；文本写入不再因 edit/write/apply_patch 物化；owning/execution 身份由 D-216 拆开） | D-213 / D-216 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-213 | 2026-09-11 | 3.4 / 3.4a（虚拟 edit/write/apply_patch 与原子物化切换） | superseded in part（虚拟写入与物化切换保留；非草稿基线改在 dispatch 固定；物化 Git 边界由 D-216 改为 detached worktree / 独立 init；写入后重读 view、修订标签、切换 journal 与树不变量由 D-217 补正） | D-214 / D-216 / D-217 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-214 | 2026-09-11 | 3.4 / 3.4a（隔离线程在 dispatch 创建分支时固定磁盘基线） | superseded in part（dispatch 固定 Git/非 Git 磁盘基线保留；catalog 不得用 execution workspaceId；Git 错误不得吞成空清单、捕获窗口与 gitlink 由 D-218 补正） | D-216 / D-218 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
-| D-215 | 2026-09-11 | 3.4 / 3.4a / 3.6（嵌套线程经角色能力与 Host 强制接通） | superseded in part（角色目录与 Host 强制嵌套保留；`getThreadForSession(ctx.workspaceId)` 不再同时表示 owning/execution；未声明 mode 的弱比较由 D-218 撤回；权限冻结、级联、durable 嵌套集成与 captureScopes 由 D-219 补正） | D-216 / D-218 / D-219 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-215 | 2026-09-11 | 3.4 / 3.4a / 3.6（嵌套线程经角色能力与 Host 强制接通） | superseded in part（已有身份/权限/集成修正保留；D-285调整特定角色嵌套、通信与调度目标，尚待实施） | D-216 / D-218 / D-219 / D-285 | 设计 9.2.5b / 9.3.5；plan 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-216 | 2026-09-11 | 3.4 / 3.4a / 3.6（owning/execution workspace 拆分与物化 Git 边界） | superseded in part（owning/execution 拆分与 detach/init 边界保留；执行仓库可解析 baseline 与逻辑 base 不得混用由 D-220 补正；session-bindings 可重建索引、知识 owning 解析与 directory reconcile 的 execution gate 由 D-222 补正） | D-220 / D-222 | 设计 9.2.5b / 9.3.5；plan 3.4 / 3.6；status 3.4 / 3.4a / 3.6；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-217 | 2026-09-11 | 3.4 / 3.4a（虚拟写入、修订标签、物化切换恢复与树不变量） | superseded in part（物化后重读 view、切换 journal、嵌套写 gate 与树不变量保留；lease 后重取当前 view 与 explore 查询级 immutable snapshot 由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-218 | 2026-09-11 | 3.4 / 3.4a（dispatch 基线诚实、mode 全字段比较与失败清理） | superseded in part（Git 失败必抛、gitlink/unsupported、sameState 与失败清理保留；fingerprint 增加内容身份，默认 mode 不再探测用户树，由 D-220 补正） | D-220 | 设计 9.2.5b；plan 3.4 C；status 3.4 / 3.4a；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
@@ -322,3 +322,5 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-282 | 2026-09-15 | R0/R6 收口：有回执的传输窗口、真实发行面、遗留清理与受控资源证据 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-283 | 2026-09-15 | 现有 Harness 优先收口：原生权限唯一权威与 Web 配置闭环 | accepted / implemented / Harness closure complete | — | plan 0.4/0.7/1b.7/3b；status 1b.3–1b.7 / 3b.1–3b.3；architecture/code | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-284 | 2026-09-16 | 上下文无感续接：固定摘要后台准备、容量按需切换与较长原文 | accepted design / implementation pending | — | 设计 8.4 及关联消费者；plan 2.4A/B、2.6A/B；status；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
+| D-285 | 2026-09-16 | 任务线程、可选预设、定向消息、共享执行准入与连续交付 | accepted design / implementation pending | — | 设计9.2/9.3及关联策略；plan3.18A–E；status；architecture4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-286 | 2026-09-16 | 完整上下文取舍与过期背景fresh：工作身份/成果独立于活跃输入 | accepted design / implementation pending；补充D-284 | — | 设计8.0/8.4.7/8.4.8；plan2.4/2.6/3.18B；status；architecture4.4 | [context-knowledge](decisions/context-knowledge.md) |
