@@ -1,9 +1,12 @@
 # syntax=docker/dockerfile:1
 ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main
 
-FROM --platform=$TARGETPLATFORM rust:1.97.1-bookworm AS kernel-builder
+FROM rust:1.97.1-bookworm AS kernel-builder
 WORKDIR /src
 ARG TARGETARCH
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends cmake \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json ./
 COPY kernel ./kernel
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
