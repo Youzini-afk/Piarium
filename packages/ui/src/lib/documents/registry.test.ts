@@ -47,8 +47,10 @@ const createMemoryDocuments = () => {
     resolve: (publication: DirtyPublication) => void;
   }>();
   const waitForDirtyPublication = (predicate: (publication: DirtyPublication) => boolean): Promise<DirtyPublication> => {
-    const existing = dirtyPublications.findLast(predicate);
-    if (existing) return Promise.resolve(existing);
+    for (let index = dirtyPublications.length - 1; index >= 0; index -= 1) {
+      const existing = dirtyPublications[index];
+      if (existing && predicate(existing)) return Promise.resolve(existing);
+    }
     return new Promise((resolve) => { dirtyPublicationWaiters.add({ predicate, resolve }); });
   };
   const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
