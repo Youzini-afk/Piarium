@@ -36,16 +36,16 @@ describe("Pi session feature protocol", () => {
       /Unsupported session feature mutation/,
     );
     assert.deepEqual(
-      parsePiSessionFeatureMutation({ mode: "takeover", ignored: true, type: "memory.mode.set" }),
-      { mode: "takeover", type: "memory.mode.set" },
-    );
-    assert.deepEqual(
-      parsePiSessionFeatureMutation({ mode: "inherit", type: "memory.mode.set" }),
-      { mode: "inherit", type: "memory.mode.set" },
+      parsePiSessionFeatureMutation({ forEntryId: "e1", recap: "recap", ignored: true, type: "assist.set" }),
+      { forEntryId: "e1", recap: "recap", type: "assist.set" },
     );
     assert.throws(
-      () => parsePiSessionFeatureMutation({ mode: "shadow", type: "memory.mode.set" }),
-      /mode must be one of/,
+      () => parsePiSessionFeatureMutation({ forEntryId: "e1", type: "assist.set" }),
+      /requires a recap or suggestion/,
+    );
+    assert.throws(
+      () => parsePiSessionFeatureMutation({ field: "bogus", type: "assist.clear" }),
+      /field must be all, recap, or suggestion/,
     );
   });
 });

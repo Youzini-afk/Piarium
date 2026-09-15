@@ -145,7 +145,7 @@ describe("user Thread history release", () => {
     expect((await h.inspect().expect(200)).body.results[1].protectedReasons).toEqual([]);
     const review = await h.registry.createThread({
       workspaceId: "ws", parent: h.parent, brief: "Review old result", kind: "implementation", createdBy: "agent",
-      concurrency: 8, autoRun: false, worktree: "none", tools: ["read"], permissions: {}, role: "review",
+      concurrency: 8, autoRun: false, worktree: "none", tools: ["read"], permissions: {}, preset: "review",
       reviewOf: { sourceThreadId: h.thread.id, resultRevision: 1 },
     });
     await h.release([1]).expect(409);

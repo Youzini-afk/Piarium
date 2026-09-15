@@ -323,15 +323,14 @@ and independent plans/knowledge. A task can also start a fresh input view when i
 mostly obsolete. That refresh uses current rules and selected work evidence without discarding files,
 results, pending messages or the old Pi transcript, and does not require a background freshness model.
 
-D-285 accepts task-centered collaboration, also pending implementation. A normal dispatch can inherit
-the current model without a mandatory role; presets resolve per-Run execution configuration. New work
-chooses task-only or inherited active context, while an existing Thread can continue or refresh its input.
-Directed parent/child/peer messages separate information from execution requests, and all nested runs
-under one root task share delegated execution admission. Waiting yields that admission without claiming
-that workers or file writers exited. Immutable staged results and explicit parent-state integration carry
-code dependencies. Automatic review becomes opt-in while existing explicit user choices and revision
-binding remain. The current required roles, direct-child active-only send, per-parent slots and default
-review described elsewhere remain code facts until plan 3.18 completes; they are not evidence of this target.
+D-285 accepts task-centered collaboration; plan 3.18A is implemented. A normal dispatch requires only
+`task` and inherits the caller's current model and active tools; presets are optional, resolve per-Run
+execution configuration, and `shared` worktree stays an explicit choice. Each Run freezes its model,
+tool allowlist, permission overlay, scope, worktree, prompt fragment, and input origin at start, and
+automatic review is opt-in by default. Still pending under 3.18B–E: `continue`/`fresh` input origins
+beyond `task`/`inherit`, directed parent/child/peer messages, shared per-root execution admission with
+waiting yield, and staged-result dependency integration. The current direct-child active-only send and
+per-parent slot accounting described elsewhere remain code facts until those parts complete.
 
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
@@ -354,7 +353,7 @@ resolves the active parent's owning session
 instead of comparing its materialized execution workspace to the knowledge store.
 
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role.
-D-227 makes that role a real Thread: `thread.dispatch(role: "retrieval")` freezes the retrieval model
+D-227 makes that role a real Thread: `thread.dispatch(preset: "retrieval")` freezes the retrieval model
 slot, read-only tools, and scope; the child may call explore/read/related/recall and authorized web
 tools, then `submit_facts`. The Host verifies local paths/ranges against Documents and the frozen
 scope before marking a source source-checked, copies excerpts and output handles to durable
@@ -691,10 +690,10 @@ The Web/Application Host advertises `harnessThreads` during the private Host
 handshake. Only then does pi-host register thread tools. Dispatch atomically
 persists a Thread and `starting` Run and returns before worktree/session setup;
 the background runtime creates a real persisted Pi child. Its
-`ThreadLaunchManifest` freezes scope, worktree mode, role prompt fragment,
+`ThreadLaunchManifest` freezes scope, worktree mode, preset prompt fragment,
 whether the parent block snapshot is carried, and active tool names, while the resolved model is supplied at `session.create`
 time. Pi therefore constructs the child with the correct model-family tools
-and a read-only role cannot regain write tools merely because the global
+and a read-only preset cannot regain write tools merely because the global
 settings expose them. Opening the child from the UI supplies the same frozen
 launch values again.
 

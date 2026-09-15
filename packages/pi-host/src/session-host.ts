@@ -168,7 +168,7 @@ import {
   parseHarnessEmbeddingSettings,
   parseHarnessRerankSettings,
   resolveHarnessContextSettings,
-  resolveRoles,
+  resolvePresets,
   type HarnessSettingsInput,
   type ModelSelection,
 } from "@piarium/protocol";
@@ -193,7 +193,7 @@ function permissionJudgeFacts(toolName: string, params: Record<string, unknown>)
         .map((line) => line.replace(/^\*\*\* (?:Add|Update|Delete) File: /, "")),
     };
   }
-  if (toolName === "dispatch") return { role: params.role, task: params.task };
+  if (toolName === "dispatch") return { preset: params.preset, task: params.task };
   return params;
 }
 
@@ -3281,10 +3281,10 @@ export class SessionHost {
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = selectedLaunchModel ?? configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
-      // Roles the session can actually dispatch: a role whose model slot is
-      // unconfigured is omitted from the team prompt and rejected by the
+      // Presets the session can actually dispatch: a preset whose model slot
+      // is unconfigured is omitted from the team prompt and rejected by the
       // tool, rather than silently running on the main model (invariant 6).
-      const resolvedRoles = resolveRoles(
+      const resolvedPresets = resolvePresets(
         harnessSettings.models ?? {},
         sessionModel ? { providerId: sessionModel.provider, modelId: sessionModel.id } : null,
       );
@@ -3302,7 +3302,8 @@ export class SessionHost {
         ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
-        resolvedRoles,
+        resolvedPresets,
+        getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
       const created = await createAgentSessionFromServices({

@@ -1257,5 +1257,7 @@ trieSet 创建 O(depth) 新节点（<10，非 O(pool)）、500→1000→2000 线
 参考上下文两种起点：[LangChain](https://www.langchain.com/blog/organizing-context-in-a-multi-agent-harness)；
 任务结构与协调的经验：[Anthropic](https://www.anthropic.com/research/multiagent-systems)。这些不构成Piarium质量/性能结论。
 
-状态：已采纳，待实施。当前仍是必填role、仅直接子active/running的send、per-parent并发和默认自动review。本次只修改文档，
-真实纵切按3.18实施，不新增付费模型评测前置或固定审查轮数。
+状态：部分实施（3.18A已落地）。dispatch已改为`task`必填、`preset`可选，普通派发继承当前模型与活动工具，shared仅显式
+选择，Run冻结模型/工具/权限/scope/工作区/prompt片段/inputOrigin（task/inherit），Thread持久化与UI投影改用`preset`，
+自动review默认关闭。仍待实施：continue/fresh输入、定向消息语义、同根共享执行准入与分段成果；send仍只收直接子
+active/running，并发仍按parent分别统计，等待仍不让出名额。本次不新增付费模型评测前置或固定审查轮数。

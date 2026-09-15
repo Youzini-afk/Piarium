@@ -43,7 +43,7 @@ export const HarnessThreadMarkers: React.FC<{
       {threads.map((entry) => {
         const state = projectHarnessThreadState(entry);
         const sessionId = entry.activeRun?.sessionId;
-        const label = entry.thread.role ?? (
+        const label = entry.thread.preset ?? (
           entry.thread.kind === 'discussion'
             ? t('harness.threads.discussion')
             : t('harness.threads.userThread')

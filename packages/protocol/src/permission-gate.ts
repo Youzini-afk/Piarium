@@ -320,13 +320,13 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
     }
   }
 
-  // Dispatch askBefore rules (per-role) — must come BEFORE the
+  // Dispatch askBefore rules (per-preset) — must come BEFORE the
   // mutation-based dispatch:allow rule so they match first.
-  for (const [role, ask] of Object.entries(askBefore)) {
-    const literalRole = role.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  for (const [preset, ask] of Object.entries(askBefore)) {
+    const literalPreset = preset.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     rules.push({
       tool: "dispatch",
-      match: { param: "role", pattern: `^${literalRole}$` },
+      match: { param: "preset", pattern: `^${literalPreset}$` },
       decision: ask ? "ask" : "allow",
     });
   }

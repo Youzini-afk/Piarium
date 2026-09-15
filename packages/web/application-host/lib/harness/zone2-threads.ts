@@ -28,7 +28,7 @@ const priority = (thread: Thread): number => {
 const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread => ({
   id: thread.id,
   brief: thread.brief,
-  role: thread.role,
+  preset: thread.preset,
   lifecycle: thread.lifecycle,
   attention: thread.attention,
   integration: thread.integration,

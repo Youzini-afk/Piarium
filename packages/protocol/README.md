@@ -61,7 +61,7 @@ language server read itself, which LSP cannot attribute to a version.
 | `explore.query.release` | `{ queryId }` | `{ released }` | Drop the short-lived query after the public explore tool ends |
 | `related.query` | `{ anchor }` | file-level defines / imports / importers / connection endpoints + query-time `roles` + source status | Symbol-graph topology for a path or name; not `lsp.references`. File roles are a query decoration, not graph facts |
 | `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
-| `thread.dispatch` | `{ role, task, scope? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
+| `thread.dispatch` | `{ task, preset?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
 | `thread.send` | `{ threadId, message, from }` | `ThreadSendResult` | Send message to a thread |
@@ -73,10 +73,6 @@ language server read itself, which LSP cannot attribute to a version.
 content-free `inputContext`. UI surfaces capture dirty document bodies through
 the authenticated Documents API first; the runtime method carries only the
 opaque Host reference or an unavailable dirty-path set. Omission means disk.
-
-`memory.nudge` is a Host→worker method, not a public Runtime API. It wakes the
-existing memory keeper after a material user-terminal command. It does not
-write the command into the main conversation.
 
 ### Thread events
 
@@ -104,7 +100,7 @@ ThreadRun.outcome: success | failure | cancelled | lost
 
 These axes are intentionally independent: a successful Run may leave its
 Thread `merge-ready` or `conflict`, while a lost Run leaves durable work and
-attention intact. `ThreadLaunchManifest` freezes the role's tool allowlist,
+attention intact. `ThreadLaunchManifest` freezes the preset's tool allowlist,
 worktree mode, scope, prompt fragment, parent-block snapshot choice, parent
 concurrency, and the Host-owned persistent editor-draft baseline identity.
 The baseline body remains in WorkingState rather than the catalog or model
@@ -122,9 +118,9 @@ oldest queued Thread.
 
 ### HarnessSettings
 
-Most fields are resolved while the session runtime is assembled. Memory is the
-intentional live exception: the user-owned global default is read on each hook
-boundary and a durable session-wide override can select a mode or inherit again.
+Most fields are resolved while the session runtime is assembled. Context
+preparation is the intentional live exception: the user-owned global default
+is read on each request boundary so toggles apply without a worker restart.
 
 ```typescript
 interface HarnessSettings {
@@ -138,7 +134,8 @@ interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
-  memory: { mode: "off" | "assist" | "takeover" }; // user-only, default takeover
+  context: { backgroundPreparation: boolean; preparationWaterline: number }; // user-only
+  review: { enabled: boolean; gate: boolean }; // automatic review, default off (D-285)
   web?: {
     render?: boolean;
     search?: { provider: "brave" | "exa" | "tavily" | "jina" | "searxng"; endpoint?: string; credentialRef?: string };
@@ -148,15 +145,16 @@ interface HarnessSettings {
 }
 ```
 
-Legacy persisted `memory.shadowMode` values remain readable (`false` → `off`,
-`true` → `assist`); new writes use `memory.mode`. `SessionSnapshot.harness.memory`
-reports configured/effective mode, a session override, and the latest keeper or
-compaction failure when the runtime supports the Harness.
+Legacy persisted `memory` settings remain readable as a migration input only
+(`memory.mode: "off"` maps to `context.backgroundPreparation: false`); new
+writes use `context`. `SessionSnapshot.harness.context` reports the resolved
+preparation state and the latest prepare/commit phase or failure when the
+runtime supports the Harness.
 
 Thread-runtime availability is not a user setting. The Application Host
 advertises `capabilities.harnessThreads` in the private Host handshake; only
 then does pi-host register the seven thread tools. Child sessions receive their
-frozen role model and active tool list in `session.create/open`.
+frozen preset or inherited model and active tool list in `session.create/open`.
 The same handshake owns `harnessLspNavigation`, `harnessWebRead`, and
 `harnessWebSearch`. `harnessWebRead` means the Host permits a configured
 session-local reader model to consume its guarded `web.fetch` result; model and
@@ -172,10 +170,9 @@ worker restart and never reuses a cached key.
 - `harness.ts` — `HarnessServiceMap`, `HarnessMethod`, `HarnessError`, `HarnessRequestData` (no session identity; carries only the optional per-request `timeoutMs`), `HarnessActorIdentity`, `HarnessActorContext`, `HarnessCapability`, `HARNESS_METHOD_CAPABILITY`, `HARNESS_MAX_REQUEST_TIMEOUT_MS`, `OutputRef`, `OutputSlice`, `ShellExecResult`, `DiagnosticsResult`
 - `language-id.ts` — `languageIdForPath`, `editorLanguageIdForLanguage`. Single language identity for the Host language views, provider matching, and the editor; a second table split one file across two sessions and hid extensions from one side
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
-- `harness-roles.ts` — Role catalog: `RoleId`, `RoleDefinition`, `ROLE_DEFINITIONS`, `resolveRoles`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved roles while the host builds threads from the same definitions
+- `harness-presets.ts` — Execution preset catalog: `PresetId`, `ExecutionPreset`, `EXECUTION_PRESETS`, `resolvePresets`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved presets while the host builds threads from the same definitions
 - `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest`, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`
-- `memory-agent.ts` — shared memory-keeper settings, scheduler state/gate, operation DTOs, and strict model-output parser
 - `types.ts` — `AgentInputContext` (disk or content-free surface snapshot reference), `SessionStats` (includes `toolErrors`, `toolRetries`, `outputBytes`, `cacheHitRatio`)

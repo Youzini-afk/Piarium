@@ -108,10 +108,10 @@ describe("Phase 3b permission gate", () => {
     assert.equal(result2.decision, "allow");
   });
 
-  it("dispatch with askBefore: asks for specified roles", () => {
-    const policy = buildPermissionPolicy("normal", { check: true, explore: false });
-    const result1 = evaluateGate("dispatch", { role: "check", task: "test" }, policy);
-    const result2 = evaluateGate("dispatch", { role: "explore", task: "test" }, policy);
+  it("dispatch with askBefore: asks for specified presets", () => {
+    const policy = buildPermissionPolicy("normal", { check: true, retrieval: false });
+    const result1 = evaluateGate("dispatch", { preset: "check", task: "test" }, policy);
+    const result2 = evaluateGate("dispatch", { preset: "retrieval", task: "test" }, policy);
     assert.equal(result1.decision, "ask");
     assert.equal(result2.decision, "allow");
   });
@@ -126,7 +126,7 @@ describe("Phase 3b permission gate", () => {
   it("Phase 3 tools (merge) is gated, dispatch/kill are mutation:none → allow", () => {
     const policy = buildPermissionPolicy("normal");
     // dispatch is mutation:none → allow (unless askBefore configured)
-    assert.equal(evaluateGate("dispatch", { role: "check", task: "test" }, policy).decision, "allow");
+    assert.equal(evaluateGate("dispatch", { preset: "check", task: "test" }, policy).decision, "allow");
     // merge is mutation:journaled → ask in normal mode
     assert.equal(evaluateGate("merge", { threadId: "t1" }, policy).decision, "ask");
     // kill is mutation:none → allow
@@ -135,9 +135,9 @@ describe("Phase 3b permission gate", () => {
 
   it("dispatch with askBefore can override mutation:none → ask", () => {
     const policy = buildPermissionPolicy("normal", { check: true });
-    assert.equal(evaluateGate("dispatch", { role: "check", task: "test" }, policy).decision, "ask");
-    // Other roles still allow
-    assert.equal(evaluateGate("dispatch", { role: "explore", task: "test" }, policy).decision, "allow");
+    assert.equal(evaluateGate("dispatch", { preset: "check", task: "test" }, policy).decision, "ask");
+    // Other presets still allow
+    assert.equal(evaluateGate("dispatch", { preset: "retrieval", task: "test" }, policy).decision, "allow");
   });
 
   it("unknown tools ask because the native gate has no second authority to delegate to", () => {

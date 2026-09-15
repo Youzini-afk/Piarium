@@ -315,7 +315,7 @@ describe("WorkingState Host virtual write production chain", () => {
       workspaceId: f.workspaceId,
       parent: { kind: "session", id: "parent-1" },
       brief: "materialize",
-      role: "hard-implement",
+      preset: "hard-implement",
       kind: "implementation",
       createdBy: "agent",
       concurrency: 1,

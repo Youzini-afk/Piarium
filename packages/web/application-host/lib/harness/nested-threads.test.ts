@@ -89,7 +89,7 @@ describe("nested thread production chain", () => {
       workspaceId: "ws",
       parent: PARENT,
       brief: "parent",
-      role: "hard-implement",
+      preset: "hard-implement",
       kind: "implementation",
       createdBy: "agent",
       concurrency: 4,
@@ -117,7 +117,7 @@ describe("nested thread production chain", () => {
       const child = await registry.createThread(input({
         parent: { kind: "thread", id: parent.id },
         brief: "grandchild",
-        role: "check",
+        preset: "check",
       }));
       await runtime.prepareIsolatedBranch({
         workspaceId: "ws",
@@ -265,7 +265,7 @@ describe("nested thread production chain", () => {
         workspaceId: "ws",
         parent: PARENT,
         brief: "parent",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 4,
@@ -291,7 +291,7 @@ describe("nested thread production chain", () => {
         workspaceId: "ws",
         parent: { kind: "thread", id: parent.id },
         brief: "child",
-        role: "check",
+        preset: "check",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 4,

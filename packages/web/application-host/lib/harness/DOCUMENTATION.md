@@ -130,8 +130,8 @@ returns — including queued threads. Git inventory failures, capture-window par
 writes, active Documents writers, and gitlinks fail the dispatch instead of
 inventing a complete branch. Capture failure or cancellation deletes the
 Thread. `dispatch` then commits a `starting` Run and returns immediately. The
-runtime later opens a real persisted Pi child session with the role's
-active-tool allowlist, and projects broker events into
+runtime later opens a real persisted Pi child session with the preset's or
+inherited active-tool allowlist, and projects broker events into
 progress, attention, report, durable transcript, integration, and verification
 state. A child session whose frozen allowlist includes nest tools can dispatch
 again: the Host resolves `parent.kind: "thread"`, narrows scope/permissions, and
@@ -150,7 +150,7 @@ identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
 Draft merge records that disk commands cannot verify unsaved buffers.
 
-`retrieval` is a Thread role, not a second explore tool. `thread.dispatch`
+`retrieval` is a Thread preset, not a second explore tool. `thread.dispatch`
 freezes the retrieval model slot, read-only allowlist, and scope, and does not
 copy parent blocks. The child delivers facts only through `submit_facts` →
 `thread.facts.set`. Host checks local paths and compact line ranges against
@@ -167,7 +167,7 @@ adjacent staging/result paths must stay below a persistent Host/backend-authoriz
 directory changes. Sealed `report.evidence` is visible through wait / UTF-8 byte-paged
 `read_thread` / Zone 2. Lost keeps pending evidence until the existing
 resume path starts a new Run. The report has no recommendation or priority
-fields. Unconfigured `models.retrievalAgent` omits the role and Host rejects a
+fields. Unconfigured `models.retrievalAgent` omits the preset and Host rejects a
 retrieval dispatch that has no model.
 
 One unexpected worker exit is resumed in the same session/worktree as a new

@@ -575,7 +575,7 @@ export const HarnessThreadsPanel: React.FC<{
           const occupancy = space?.threads.find((item) => item.threadId === entry.thread.id);
           const busy = threadAction === entry.thread.id;
           const deletionPending = entry.thread.deletion !== undefined;
-          const label = entry.thread.role ?? (
+          const label = entry.thread.preset ?? (
             entry.thread.kind === 'discussion'
               ? t('harness.threads.discussion')
               : t('harness.threads.userThread')

@@ -12,7 +12,7 @@
  */
 
 import type { ModelSelection, ThreadReviewFinding, ThreadVerificationProjection } from "@piarium/protocol";
-import type { ResolvedRole } from "./roles.js";
+import type { ResolvedPreset } from "./presets.js";
 import type { CreateThreadInput, Thread } from "./thread-registry.js";
 
 export interface ReviewSensorSettings {
@@ -21,7 +21,7 @@ export interface ReviewSensorSettings {
 }
 
 export const DEFAULT_REVIEW_SENSOR_SETTINGS: ReviewSensorSettings = {
-  enabled: true,
+  enabled: false,
   gate: false,
 };
 
@@ -30,7 +30,7 @@ export interface ReviewDispatchInput {
   source: Thread;
   resultRevision: number;
   changedPaths: readonly string[];
-  reviewRole: ResolvedRole | null;
+  reviewPreset: ResolvedPreset | null;
   settings: ReviewSensorSettings;
   formatDiff: () => Promise<string>;
   recallKnowledge?: () => Promise<string>;
@@ -68,15 +68,15 @@ export const parseReviewFindings = (text: string, extras: readonly string[] = []
 };
 
 export async function onPublishedResult(input: ReviewDispatchInput): Promise<ReviewResult> {
-  const { source, resultRevision, changedPaths, reviewRole, settings } = input;
+  const { source, resultRevision, changedPaths, reviewPreset, settings } = input;
   if (!settings.enabled) {
     return { reviewDispatched: false, blocking: false, skippedReason: "disabled" };
   }
   if (changedPaths.length === 0) {
     return { reviewDispatched: false, blocking: false, skippedReason: "empty-diff" };
   }
-  if (!reviewRole) {
-    return { reviewDispatched: false, blocking: false, skippedReason: "no-review-role" };
+  if (!reviewPreset) {
+    return { reviewDispatched: false, blocking: false, skippedReason: "no-review-preset" };
   }
   const current = input.existingReview;
   if (current && current.resultRevision === resultRevision
@@ -104,17 +104,17 @@ export async function onPublishedResult(input: ReviewDispatchInput): Promise<Rev
     workspaceId: input.workspaceId,
     parent: source.parent,
     brief: `Review ${source.id}@${resultRevision} (${changedPaths.length} files)`,
-    role: reviewRole.id,
+    preset: reviewPreset.id,
     kind: "implementation",
     createdBy: "agent",
     concurrency: 12,
-    model: reviewRole.model,
+    model: reviewPreset.model,
     autoRun: true,
     worktree: "none",
     carryBlocks: false,
-    tools: reviewRole.definition.tools,
+    tools: reviewPreset.definition.tools,
     permissions: {},
-    systemPromptFragment: reviewRole.definition.systemPromptFragment,
+    systemPromptFragment: reviewPreset.definition.systemPromptFragment,
     hidden: true,
     reviewOf: { sourceThreadId: source.id, resultRevision },
     promptText,

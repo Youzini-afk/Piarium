@@ -60,7 +60,7 @@ import { sameState } from "../recovery/journal-files.js";
 import type { VerificationCoordinator } from "./verification-coordinator.js";
 import { formatPublishedResultDiff } from "./working-state/verification-records.js";
 import { onPublishedResult, parseReviewFindings, type ReviewSensorSettings } from "./review-sensor.js";
-import type { ResolvedRole } from "./roles.js";
+import type { ResolvedPreset } from "./presets.js";
 import { runNeedsMaterializedDirectory } from "./working-state/path-requirement.js";
 import {
   directoryBaselineFingerprint,
@@ -156,7 +156,7 @@ export interface ThreadRuntimeOptions {
   hasActiveCommands?(directory: string): boolean | Promise<boolean>;
   verification?: VerificationCoordinator;
   resolveReviewSettings?(workspaceId: string, parent: ThreadParent): Promise<ReviewSensorSettings> | ReviewSensorSettings;
-  resolveReviewRole?(workspaceId: string, parent: ThreadParent): Promise<ResolvedRole | null> | ResolvedRole | null;
+  resolveReviewPreset?(workspaceId: string, parent: ThreadParent): Promise<ResolvedPreset | null> | ResolvedPreset | null;
   recallProjectKnowledge?(workspaceId: string, query: string): Promise<string>;
   onThreadSessionBound?(sessionId: string, owningWorkspaceId: string): void;
 }
@@ -373,7 +373,7 @@ const entryText = (entry: PiSessionMessageEntry): string => {
 const initialPrompt = (
   input: SpawnThreadRunInput,
   parentBlocks?: Array<{ label: string; content: string }> | null,
-): string => input.role === "retrieval"
+): string => input.preset === "retrieval"
   ? [
       "You are working as the retrieval thread for a parent Piarium session.",
       input.systemPromptFragment?.trim() || null,
@@ -387,7 +387,7 @@ const initialPrompt = (
       input.promptText ?? input.brief,
     ].filter((line): line is string => line !== null).join("\n")
   : [
-      `You are working as the ${input.role ?? "teammate"} thread for a parent Piarium session.`,
+      `You are working as the ${input.preset ?? "teammate"} thread for a parent Piarium session.`,
       input.systemPromptFragment?.trim() || null,
       "Work only on the task below. Keep the existing workspace state intact outside that task.",
       input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
@@ -1462,7 +1462,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
 
   const publishPartialResult = async (workspaceId: string, parent: ThreadParent, threadId: string): Promise<void> => {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
-    if (thread?.role === "retrieval") return;
+    if (thread?.preset === "retrieval") return;
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
     const result = isVirtualWorktree(thread.worktree)
       ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
@@ -1655,7 +1655,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     worktree.viewMode = "virtual";
     worktree.materialized = false;
-    if (existing.role === "retrieval") worktree.readOnlyInput = true;
+    if (existing.preset === "retrieval") worktree.readOnlyInput = true;
     worktree.preparationStage = "capturing-baseline";
     delete worktree.materializationFingerprint;
     await options.registry.setWorktree(input.workspaceId, input.threadId, worktree);
@@ -1935,7 +1935,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let preparedCwd: string;
     let worktree = existing?.worktree;
     let needsBranchCapture = false;
-    const retrievalParentInput = input.role === "retrieval"
+    const retrievalParentInput = input.preset === "retrieval"
       && input.parent.kind === "thread"
       && input.worktree === "none"
       && Boolean(options.workingStates);
@@ -2146,7 +2146,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     try {
       const snapshot = await options.sessions.create({
         cwd: preparedCwd,
-        name: `${input.role ?? "Thread"}: ${input.brief.slice(0, 80)}`,
+        name: `${input.preset ?? "Thread"}: ${input.brief.slice(0, 80)}`,
         parentSession: parent.file,
         ...(input.model ? { model: input.model } : {}),
         permissions: normalizeFrozenHarnessPermissions(input.permissions),
@@ -2382,9 +2382,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     try {
       const settings = options.resolveReviewSettings
         ? await options.resolveReviewSettings(source.workspaceId, source.parent)
-        : { enabled: true, gate: false };
-      const reviewRole = options.resolveReviewRole
-        ? await options.resolveReviewRole(source.workspaceId, source.parent)
+        : { enabled: false, gate: false };
+      const reviewPreset = options.resolveReviewPreset
+        ? await options.resolveReviewPreset(source.workspaceId, source.parent)
         : null;
       const existing = source.verification?.review;
       result = await onPublishedResult({
@@ -2392,7 +2392,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         source,
         resultRevision,
         changedPaths,
-        reviewRole,
+        reviewPreset,
         settings,
         ...(existing !== undefined ? { existingReview: existing } : {}),
         formatDiff: async () => options.workingStates!.withBranchStore(source.workspaceId, "thread-review-diff", async (store) => {
@@ -2517,7 +2517,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     } else if (blocks === null) {
       unresolved.push("Thread block storage was unavailable at settlement");
     }
-    if (thread.role === "retrieval") {
+    if (thread.preset === "retrieval") {
       if (stats) {
         await options.registry.updateRunProgress(binding.workspaceId, binding.threadId, {
           steps: Math.max(0, stats.toolCalls - binding.baseline.toolCalls),
@@ -2958,7 +2958,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               threadId: thread.id,
               runId: run.id,
               brief: thread.brief,
-              ...(thread.role ? { role: thread.role } : {}),
+              ...(thread.preset ? { preset: thread.preset } : {}),
               kind: thread.kind,
               createdBy: thread.createdBy,
               carryBlocks: thread.manifest.carryBlocks,
@@ -3239,7 +3239,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           if (killed?.reviewOf) await completeAutoReview(killed, binding.runId, "cancelled", killed.report).catch(reportError);
         }
         const killed = await options.registry.getThreadById(binding.workspaceId, threadId);
-        if (killed?.role === "retrieval" && killed.worktree && options.worktrees.discardInput) {
+        if (killed?.preset === "retrieval" && killed.worktree && options.worktrees.discardInput) {
           await options.worktrees.discardInput(killed.worktree, binding.workspaceId).catch(reportError);
           await options.registry.setWorktree(binding.workspaceId, threadId, killed.worktree).catch(reportError);
         }

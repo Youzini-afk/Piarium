@@ -195,7 +195,7 @@ async function fixture(options?: { attachGit?: () => Promise<void> }) {
       workspaceId,
       parent: { kind: "session", id: "root" },
       brief: "virtual writes",
-      role: "hard-implement",
+      preset: "hard-implement",
       kind: "implementation",
       createdBy: "agent",
       concurrency: 1,

@@ -140,7 +140,7 @@ describe('Pi timeline chat render mode', () => {
     }] as PiSessionEntry[];
     const markerThread: Thread = {
       id: 'thread-1', parent: { kind: 'session', id: 'session' }, workspaceId: 'workspace',
-      forkPoint: { entryId: 'assistant-entry' }, brief: 'Discuss the answer', role: null, model: null,
+      forkPoint: { entryId: 'assistant-entry' }, brief: 'Discuss the answer', preset: null, model: null,
       manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
       createdBy: 'user', kind: 'discussion', worktree: null, lifecycle: 'active', attention: 'user',
       waitingFor: { kind: 'user', text: 'Ready' }, integration: 'none', diffStats: null, report: null,

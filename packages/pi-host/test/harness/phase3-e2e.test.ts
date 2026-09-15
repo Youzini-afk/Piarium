@@ -18,7 +18,7 @@ import {
   createThreadsTool,
   createWaitTool,
 } from "../../src/harness/thread-tools.js";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, resolveRoles } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, resolvePresets } from "@piarium/protocol";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3-e2e-session";
@@ -27,13 +27,13 @@ const PARENT = { kind: "session", id: SESSION_ID } as const;
 const ACTOR = { authorityInstanceId: "test-authority", sessionId: SESSION_ID, workerId: "test-worker", workerGeneration: 1 } as const;
 const CAPABILITIES = ["context.session", "control.thread", "read.lsp", "read.output"] as const;
 const TEST_MAIN_MODEL = { providerId: "anthropic", modelId: "claude-sonnet-4" };
-const TEST_ROLES = resolveRoles({ check: TEST_MAIN_MODEL }, TEST_MAIN_MODEL);
+const TEST_PRESETS = resolvePresets({ check: TEST_MAIN_MODEL }, TEST_MAIN_MODEL);
 
 const threadInput = (brief: string) => ({
   workspaceId: WORKSPACE_ID,
   parent: PARENT,
   brief,
-  role: "check",
+  preset: "check",
   kind: "implementation" as const,
   createdBy: "agent" as const,
   concurrency: 12,
@@ -66,6 +66,10 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
     resolveWorkspaceRoot: async () => workspaceRoot,
     discoveredShells: { hasBash: process.platform !== "win32", hasPowerShell: process.platform === "win32" },
     threadRegistry,
+    threadPrepareIsolatedBranch: async (input) => ({
+      branchId: `branch-${input.threadId}`,
+      worktree: { path: "/tmp/scratch", base: "zero-commit", viewMode: "virtual", materialized: false },
+    }),
     threadSpawnSession: async (input) => {
       const sessionId = `child-session-${++sessionCounter}`;
       await threadRegistry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
@@ -199,8 +203,8 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
   it("dispatch creates a Thread and a running attempt", async () => {
     const harness = await setup();
     try {
-      const result = await executeTool(createDispatchTool(harness.bridge, SESSION_ID, TEST_ROLES), {
-        role: "check",
+      const result = await executeTool(createDispatchTool(harness.bridge, SESSION_ID, TEST_PRESETS), {
+        preset: "check",
         task: "run tests",
       });
       assert.match(result.text, /dispatched/);
@@ -334,7 +338,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
     try {
       const thread = await harness.threadRegistry.createThread({
         ...threadInput("large retrieval"),
-        role: "retrieval",
+        preset: "retrieval",
         worktree: "none",
       });
       const run = await harness.threadRegistry.startRun(WORKSPACE_ID, thread.id);

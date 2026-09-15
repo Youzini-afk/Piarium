@@ -8,7 +8,7 @@
  * mode: normal | accept-edits | bypass | smart
  * Default rules: mutation:none → allow; edit/write/apply_patch/merge →
  *   ask (normal) / allow (accept-edits); bash/write_to_process → ask;
- *   bypass → all allow; dispatch → askBefore[role]
+ *   bypass → all allow; dispatch → askBefore[preset]
  * Rules evaluated top-down, first match wins.
  *
  * Pure types and evaluation functions are in @piarium/protocol

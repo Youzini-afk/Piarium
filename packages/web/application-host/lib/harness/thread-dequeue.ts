@@ -22,7 +22,7 @@ export const createOnThreadDequeued = (options: {
       threadId: thread.id,
       runId: run.id,
       brief: thread.brief,
-      ...(thread.role ? { role: thread.role } : {}),
+      ...(thread.preset ? { preset: thread.preset } : {}),
       kind: thread.kind,
       createdBy: thread.createdBy,
       carryBlocks: thread.manifest.carryBlocks,

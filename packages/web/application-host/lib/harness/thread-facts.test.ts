@@ -40,14 +40,14 @@ describe("thread.facts.set", () => {
     const read = createThreadReadService({ threadRegistry: registry } as never);
     try {
       const dispatched = await dispatch.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Where is login?",
         scope: ["src"],
         model: { providerId: "anthropic", modelId: "haiku" },
       }, parentCtx);
       const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, dispatched.threadId);
       const run = await registry.getActiveRun("workspace-1", dispatched.threadId);
-      expect(thread?.role).toBe("retrieval");
+      expect(thread?.preset).toBe("retrieval");
       await registry.markRunRunning("workspace-1", dispatched.threadId, run!.id, "child-1");
 
       const childActor: HarnessActorContext = {
@@ -119,7 +119,7 @@ describe("thread.facts.set", () => {
     } as never);
     try {
       const dispatched = await dispatch.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Where is login?",
         model: { providerId: "anthropic", modelId: "haiku" },
       }, parentCtx);
@@ -157,7 +157,7 @@ describe("thread.facts.set", () => {
     } as never);
     try {
       const dispatched = await dispatch.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Where is login?",
         model: { providerId: "anthropic", modelId: "haiku" },
       }, parentCtx);
@@ -229,7 +229,7 @@ describe("thread.facts.set run binding", () => {
     } as never);
     try {
       const dispatched = await dispatch.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Where is login?",
         model: { providerId: "anthropic", modelId: "haiku" },
       }, parentCtx);
@@ -281,7 +281,7 @@ describe("thread.facts.set run binding", () => {
     } as never);
     try {
       const dispatched = await dispatch.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Where is login?",
         model: { providerId: "anthropic", modelId: "haiku" },
       }, parentCtx);
@@ -323,7 +323,7 @@ describe("thread.read retrieval pagination", () => {
       workspaceId: "workspace-1",
       parent: { kind: "session", id: "parent-1" },
       brief: "large evidence",
-      role: "retrieval",
+      preset: "retrieval",
       kind: "implementation",
       createdBy: "agent",
       concurrency: 1,
