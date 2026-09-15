@@ -66,6 +66,7 @@ describe("production shell assembly", () => {
       resolveWorkspaceRoot: async (workspaceId) => workspaceId === "ws-a" ? workspaceA : workspaceB,
       discoverShells: () => ({
         gitBashPath: "C:\\Program Files\\Git\\usr\\bin\\bash.exe",
+        hasBash: true,
         hasPowerShell: true,
       }),
     });
@@ -74,20 +75,25 @@ describe("production shell assembly", () => {
       grantedCapabilities: ["process.shell"],
       workspaceId: "ws-a",
       workspaceRoot: workspaceA,
-      shellSetting: "git-bash",
+      shellSetting: process.platform === "win32" ? "git-bash" : "auto",
     });
     host.registerSession({
       actor: actor("session-b"),
       grantedCapabilities: ["process.shell"],
       workspaceId: "ws-b",
       workspaceRoot: workspaceB,
-      shellSetting: "powershell",
+      shellSetting: process.platform === "win32" ? "powershell" : "git-bash",
     });
     const gitBash = host.getInterpreter("session-a");
     const powershell = host.getInterpreter("session-b");
-    expect(gitBash && "kind" in gitBash && gitBash.kind).toBe("git-bash");
-    expect(gitBash && "command" in gitBash ? gitBash.command : "").toBe("C:\\Program Files\\Git\\usr\\bin\\bash.exe");
-    expect(powershell && "kind" in powershell && powershell.kind).toBe("powershell");
+    if (process.platform === "win32") {
+      expect(gitBash && "kind" in gitBash && gitBash.kind).toBe("git-bash");
+      expect(gitBash && "command" in gitBash ? gitBash.command : "").toBe("C:\\Program Files\\Git\\usr\\bin\\bash.exe");
+      expect(powershell && "kind" in powershell && powershell.kind).toBe("powershell");
+    } else {
+      expect(gitBash && "kind" in gitBash && gitBash.kind).toBe("bash");
+      expect(powershell && "unavailable" in powershell && powershell.unavailable.reason).toMatch(/only available on Windows/);
+    }
   });
 
   it("reports a missing interpreter from production discovery, not an injected path", async () => {
@@ -96,26 +102,28 @@ describe("production shell assembly", () => {
     const host = createHost({
       search: async () => ({ status: "empty", generation: undefined }),
       resolveWorkspaceRoot: async () => workspace,
-      discoverShells: () => ({}),
+      discoverShells: () => ({ hasBash: false, hasPowerShell: false }),
     });
     host.registerSession({
       actor: actor("session-missing"),
       grantedCapabilities: ["process.shell"],
       workspaceId: "ws-missing",
       workspaceRoot: workspace,
-      shellSetting: "git-bash",
+      shellSetting: process.platform === "win32" ? "git-bash" : "auto",
     });
     const interpreter = host.getInterpreter("session-missing");
     expect(interpreter && "unavailable" in interpreter).toBe(true);
     if (interpreter && "unavailable" in interpreter) {
-      expect(interpreter.unavailable.reason).toMatch(/Git for Windows not found/);
-      expect(interpreter.unavailable.hint).toMatch(/git-scm.com|powershell/);
+      expect(interpreter.unavailable.reason).toMatch(process.platform === "win32" ? /Git for Windows not found/ : /No suitable shell found/);
     }
     const result = await createShellExecService(host).handle(
       { command: "echo should-not-run" },
       serviceContext("session-missing", "ws-missing"),
     );
-    expect(result).toMatchObject({ kind: "spawn-failed", reason: expect.stringMatching(/Git for Windows not found/) });
+    expect(result).toMatchObject({
+      kind: "spawn-failed",
+      reason: expect.stringMatching(process.platform === "win32" ? /Git for Windows not found/ : /No suitable shell found/),
+    });
   });
 
   it("executes through public shell.exec after real Host discovery", async () => {

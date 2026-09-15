@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { win32 } from "node:path";
 import { discoverShells, listWindowsProgramRoots, parseWslDistroList } from "./shell-discovery.js";
 
 const executable = (files: Set<string>) => {
@@ -34,6 +35,7 @@ describe("discoverShells", () => {
   it("prefers usr\\bin\\bash.exe when both launcher and real bash exist", () => {
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: { ProgramFiles: "C:\\Program Files", SystemRoot: "C:\\Windows" },
       runtime: {
         isExecutable: executable(new Set([
@@ -51,6 +53,7 @@ describe("discoverShells", () => {
   it("keeps bin\\bash.exe when usr\\bin is missing", () => {
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: { ProgramFiles: "C:\\Program Files" },
       runtime: {
         isExecutable: executable(new Set(["C:\\Program Files\\Git\\bin\\bash.exe"])),
@@ -65,6 +68,7 @@ describe("discoverShells", () => {
     const bash = "C:\\Program Files\\Git\\usr\\bin\\bash.exe";
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: {},
       runtime: {
         isExecutable: executable(new Set([bash])),
@@ -78,6 +82,7 @@ describe("discoverShells", () => {
   it("finds bash beside an already-resolved git.exe", () => {
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: {},
       runtime: {
         isExecutable: executable(new Set([
@@ -95,6 +100,7 @@ describe("discoverShells", () => {
   it("omits gitBashPath when no interpreter is executable", () => {
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: { ProgramFiles: "C:\\Program Files" },
       runtime: {
         isExecutable: executable(new Set()),
@@ -109,6 +115,7 @@ describe("discoverShells", () => {
   it("records WSL distros from wsl.exe --list --quiet", () => {
     const discovered = discoverShells({
       platform: "win32",
+      pathModule: win32,
       env: { SystemRoot: "C:\\Windows" },
       runtime: {
         isExecutable: executable(new Set(["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"])),

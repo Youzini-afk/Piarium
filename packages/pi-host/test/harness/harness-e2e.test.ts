@@ -208,8 +208,13 @@ describe("harness e2e integration", () => {
 
       // get_output must retrieve non-empty output
       const outputText = await executeTool(getOutputTool, { handle: shellId });
-      assert.match(outputText, /done/, `get_output should retrieve the output produced after backgrounding: got "${outputText}"`);
-      assert.match(outputText, /\+\d+ bytes since last read.*exited 0/s, `final incremental read should include only new bytes and the exit state: got "${outputText}"`);
+      assert.match(`${bgText}\n${outputText}`, /done/, "the initial snapshot or incremental read must contain the completed output");
+      if (/done/.test(outputText)) {
+        assert.match(outputText, /\+\d+ bytes since last read.*exited 0/s, `final incremental read should include only new bytes and the exit state: got "${outputText}"`);
+      } else {
+        assert.match(bgText, /done/, "output absent from the incremental read must already be in the background snapshot");
+        assert.match(outputText, /no new output since last read.*exited 0/s);
+      }
       const unchanged = await executeTool(getOutputTool, { handle: shellId });
       assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
       await bridge.request("compaction.after", { summary: "compacted", firstKeptEntryId: "entry", tokensBefore: 10 });

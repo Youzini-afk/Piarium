@@ -431,7 +431,8 @@ async function createSemanticHarness(options: {
       "embed-provider",
       sessionOptions.key ?? `embed-key-${workspace.workspaceId}`,
     );
-    hostsByCwd.set(path.resolve(workspace.root), host);
+    const executionRoot = (await documents.inspectWorkspace(workspace.workspaceId)).root;
+    hostsByCwd.set(path.resolve(executionRoot), host);
     const prompt = async (text: string): Promise<void> => {
       const execution = { id: `execution-${snapshot.sessionId}-${Date.now()}-${Math.random()}`, promises: [] as Promise<unknown>[] };
       currentExecution = execution;
@@ -459,7 +460,7 @@ async function createSemanticHarness(options: {
       await coordinator.dispose();
       await host.dispose();
       router.dispose();
-      if (hostsByCwd.get(path.resolve(workspace.root)) === host) hostsByCwd.delete(path.resolve(workspace.root));
+      if (hostsByCwd.get(path.resolve(executionRoot)) === host) hostsByCwd.delete(path.resolve(executionRoot));
     };
     return { host, prompt, observationOrder, toolResults, close };
   };

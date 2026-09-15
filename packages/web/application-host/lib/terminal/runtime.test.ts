@@ -9,6 +9,7 @@ import type { AddressInfo } from 'node:net';
 
 import { createTerminalRuntime } from './runtime.js';
 import { createTerminalWsControlFrame, readTerminalWsControlFrame } from './terminal-ws-protocol.js';
+import { resolveLinuxPtyLaunch } from '../platform/inherited-env.js';
 
 type RuntimeDependencies = Parameters<typeof createTerminalRuntime>[0];
 type TestResponse = ReturnType<typeof createResponse>;
@@ -467,8 +468,10 @@ describe('terminal runtime', () => {
         owner: 'user',
         shell: 'sh',
       });
-      expect(requiredProcess(harness.processes, 0).shell).toBe('/bin/sh');
-      expect(requiredProcess(harness.processes, 0).args).not.toContain('--init-file');
+      const launch = resolveLinuxPtyLaunch('/bin/sh');
+      expect(requiredProcess(harness.processes, 0).shell).toBe(launch.executable);
+      expect(requiredProcess(harness.processes, 0).args).toEqual(launch.args);
+      expect(launch.args).not.toContain('--init-file');
       expect(requiredProcess(harness.processes, 0).options.env.PIARIUM_SHELL_INTEGRATION_ID).toBeUndefined();
     } finally { await harness.runtime.shutdown(); }
   });
@@ -825,8 +828,9 @@ describe('terminal runtime', () => {
         retainWhenDetached: true,
         status: 'running',
       });
-      expect(requiredProcess(harness.processes, 0).shell).toBe('/usr/bin/harness-bash');
-      expect(requiredProcess(harness.processes, 0).args).toEqual(['-l']);
+      const launch = resolveLinuxPtyLaunch('/usr/bin/harness-bash', ['-l']);
+      expect(requiredProcess(harness.processes, 0).shell).toBe(launch.executable);
+      expect(requiredProcess(harness.processes, 0).args).toEqual(launch.args);
 
       const attached = harness.runtime.attachTerminalSession('sh_1');
       expect(attached?.id).toBe('sh_1');
@@ -1070,7 +1074,9 @@ describe('terminal runtime', () => {
       });
       const harnessCommands: unknown[] = [];
       harnessShell.onCommand((event) => { harnessCommands.push(event); });
-      expect(requiredProcess(harness.processes, 1).args).toEqual(['-l']);
+      expect(requiredProcess(harness.processes, 1).args).toEqual(
+        resolveLinuxPtyLaunch('/usr/bin/harness-bash', ['-l']).args,
+      );
       requiredProcess(harness.processes, 1).emitData('\u001b]633;E;agent-cmd\u0007\u001b]633;D;0\u0007');
       expect(harnessCommands).toEqual([]);
       expect(harness.runtime.inspectSession('sh_osc')?.integration).toBe('not-observed');
