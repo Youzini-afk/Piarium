@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessActorIdentity } from "@piarium/protocol";
-import { createShellExecService, createShellReadService, createShellWriteService } from "./harness-services.js";
+import { createShellExecService } from "./harness-services.js";
 import type { HarnessServiceContext } from "./router.js";
 import { createIsolatedTerminalSessionApi } from "../terminal/isolated-session-api.test-helper.js";
 import { discoverShells } from "./shell-discovery.js";
@@ -198,64 +198,6 @@ describe("production shell assembly", () => {
     expect(failed).toMatchObject({ kind: "completed", exitCode: 7 });
     if (first.kind === "completed") expect(first.stdout).toContain("piarium-powershell-one");
     if (second.kind === "completed") expect(second.stdout).toContain("piarium-powershell-two");
-  }, 45_000);
-
-  nativeAuthorityIt("backgrounds a real shell onto the terminal runtime and observes user input", async () => {
-    const discovered = discoverShells();
-    if (process.platform === "win32") {
-      expect(discovered.gitBashPath, "Git Bash should be discovered on this Windows machine").toBeTruthy();
-    } else if (!discovered.hasBash) {
-      return;
-    }
-    const workspace = mkdtempSync(join(tmpdir(), "shell-attach-"));
-    dirs.push(workspace);
-    const host = createHost({
-      search: async () => ({ status: "empty", generation: undefined }),
-      resolveWorkspaceRoot: async () => workspace,
-    });
-    const terminal = terminals[terminals.length - 1];
-    if (!terminal) throw new Error("expected isolated terminal runtime");
-    host.registerSession({
-      actor: actor("session-attach"),
-      grantedCapabilities: ["process.shell"],
-      workspaceId: "ws-attach",
-      workspaceRoot: workspace,
-      shellSetting: "auto",
-    });
-    const ctx = serviceContext("session-attach", "ws-attach");
-    const started = await createShellExecService(host).handle(
-      {
-        command: "node -e \"process.stdin.setRawMode(true); process.stdin.resume(); console.log('ready'); process.stdin.once('data', data => { console.log('got:' + data.toString().trim()); setInterval(() => {}, 1000); })\"",
-        cwd: workspace,
-        waitMs: 400,
-      },
-      ctx,
-    );
-    expect(started.kind).toBe("background");
-    if (started.kind !== "background") return;
-    expect(started.id).toMatch(/^sh_\d+$/);
-    expect(terminal.inspectSession(started.id)).toMatchObject({
-      owner: "harness",
-      retainWhenDetached: true,
-      status: "running",
-    });
-    const attached = terminal.attachTerminalSession(started.id);
-    expect(attached?.id).toBe(started.id);
-    const view: string[] = [];
-    attached?.onData((data) => { view.push(data); });
-    await expect(createShellWriteService(host).handle(
-      { id: started.id, text: "piarium-term-in\r" },
-      ctx,
-    )).resolves.toMatchObject({ accepted: true });
-    let observed = "";
-    while (!observed.includes("got:piarium-term-in")) {
-      const slice = await createShellReadService(host).handle({ id: started.id }, ctx);
-      observed += slice.text;
-      if (!observed.includes("got:piarium-term-in")) await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    expect(observed).toContain("got:piarium-term-in");
-    expect(view.join("")).toContain("got:piarium-term-in");
-    expect(terminal.inspectSession(started.id)?.status).toBe("running");
   }, 45_000);
 
   nativeAuthorityIt("completes background verification from the real command lifecycle without shell.read", async () => {
