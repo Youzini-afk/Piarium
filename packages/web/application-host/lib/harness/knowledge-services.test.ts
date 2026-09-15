@@ -180,7 +180,7 @@ describe("knowledge public service wiring", () => {
     const controller = new AbortController();
     const pending = entry === "recall"
       ? createRecallSearchService(host).handle({ query: "package policy" }, context(controller.signal))
-      : createZone2AssembleService(host).handle({ query: "package policy", sinceTurn: 0, memoryMode: "off", branchEntryIds: [] }, context(controller.signal));
+      : createZone2AssembleService(host).handle({ query: "package policy", sinceTurn: 0, branchEntryIds: [] }, context(controller.signal));
     const rejected = expect(pending).rejects.toMatchObject({ name: "AbortError" });
     await queryStarted;
     controller.abort();

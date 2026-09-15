@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_HARNESS_SETTINGS,
   mergeHarnessSettings,
-  resolveHarnessMemoryMode,
+  resolveHarnessContextSettings,
   resolveHarnessReviewSettings,
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
@@ -138,15 +138,37 @@ describe("harness settings", () => {
     assert.deepEqual(merged.models.check, { providerId: "trusted", modelId: "user-model" });
   });
 
-  it("defaults memory takeover and migrates the legacy shadow boolean", () => {
-    assert.equal(mergeHarnessSettings({}, {}).memory.mode, "takeover");
-    assert.equal(resolveHarnessMemoryMode({ shadowMode: false }), "off");
-    assert.equal(resolveHarnessMemoryMode({ shadowMode: true }), "assist");
-    assert.equal(resolveHarnessMemoryMode({ mode: "takeover", shadowMode: false }), "takeover");
+  it("defaults background preparation on and maps the legacy memory opt-out", () => {
+    assert.deepEqual(mergeHarnessSettings({}, {}).context, {
+      backgroundPreparation: true,
+      preparationWaterline: 0.75,
+    });
+    assert.deepEqual(resolveHarnessContextSettings(undefined, { mode: "off" }), {
+      backgroundPreparation: false,
+      preparationWaterline: 0.75,
+    });
+    assert.deepEqual(resolveHarnessContextSettings(undefined, { shadowMode: false }), {
+      backgroundPreparation: false,
+      preparationWaterline: 0.75,
+    });
+    // A retired mode that kept background work on does not disable preparation.
+    assert.equal(
+      resolveHarnessContextSettings(undefined, { mode: "takeover" }).backgroundPreparation,
+      true,
+    );
+    // An explicit context setting wins over the legacy mapping.
+    assert.equal(
+      resolveHarnessContextSettings({ backgroundPreparation: true }, { mode: "off" }).backgroundPreparation,
+      true,
+    );
+    assert.equal(
+      mergeHarnessSettings({ context: { backgroundPreparation: false } }, {}).context.backgroundPreparation,
+      false,
+    );
   });
 
-  it("keeps automatic review user-owned and defaults to enabled non-blocking", () => {
-    assert.deepEqual(mergeHarnessSettings({}, {}).review, { enabled: true, gate: false });
+  it("keeps automatic review user-owned and defaults to disabled non-blocking", () => {
+    assert.deepEqual(mergeHarnessSettings({}, {}).review, { enabled: false, gate: false });
     assert.deepEqual(mergeHarnessSettings(
       { review: { enabled: false, gate: true } },
       { review: { enabled: true, gate: false } },
@@ -162,21 +184,27 @@ describe("harness settings", () => {
     assert.throws(() => resolveHarnessReviewSettings(false), /must be an object/);
   });
 
-  it("does not let a workspace change the user-owned memory mode", () => {
+  it("does not let a workspace change the user-owned background preparation setting", () => {
     assert.equal(mergeHarnessSettings(
-      { memory: { shadowMode: false } },
-      { memory: { mode: "takeover" } },
-    ).memory.mode, "off");
+      {},
+      { context: { backgroundPreparation: false } },
+    ).context.backgroundPreparation, true);
     assert.equal(mergeHarnessSettings(
-      { memory: { mode: "assist" } },
-      { memory: { mode: "off" } },
-    ).memory.mode, "assist");
+      { context: { backgroundPreparation: false } },
+      { context: { backgroundPreparation: true } },
+    ).context.backgroundPreparation, false);
   });
 
-  it("rejects unknown and malformed user memory modes", () => {
-    assert.throws(() => resolveHarnessMemoryMode({ mode: "automatic" }), HarnessSettingsValidationError);
-    assert.throws(() => resolveHarnessMemoryMode({ shadowMode: "yes" }), /must be a boolean/);
-    assert.throws(() => resolveHarnessMemoryMode(false), /must be an object/);
+  it("rejects malformed context settings", () => {
+    assert.throws(
+      () => resolveHarnessContextSettings({ backgroundPreparation: "yes" }, undefined),
+      HarnessSettingsValidationError,
+    );
+    assert.throws(
+      () => resolveHarnessContextSettings({ preparationWaterline: 1.5 }, undefined),
+      /between 0 and 1/,
+    );
+    assert.throws(() => resolveHarnessContextSettings(false, undefined), /must be an object/);
   });
 
   it("keeps web search provider, credential, and renderer selection user-owned", () => {

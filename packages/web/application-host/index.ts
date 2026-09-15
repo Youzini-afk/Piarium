@@ -50,7 +50,7 @@ import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harne
 import { discoverShells } from './lib/harness/shell-discovery.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
-import { openWorkspaceKnowledge, type BlockChange, type KnowledgeStore } from './lib/knowledge/store.js';
+import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
@@ -60,14 +60,13 @@ import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.j
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime, recallWorkspaceAndUser } from './lib/knowledge/vectors/index.js';
 import type { KnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
-import { createDecisionSuggestionRuntime } from './lib/knowledge/decision-suggestions.js';
-import { DEFAULT_MEMORY_AGENT_SETTINGS } from './lib/harness/memory-agent.js';
 
-import { DEFAULT_COMPACTION_SETTINGS, collectCompactionFacts, createKeeperCoverageStore, type CompactionHandlerDeps } from './lib/harness/compaction.js';
+
+
 import { type TodoToolDeps } from './lib/harness/todo-tool.js';
 import { openUserKnowledgeStore, type RecallToolDeps } from './lib/harness/recall-tool.js';
 import { createThreadRegistry } from './lib/harness/thread-registry.js';
-import { createThreadMemoryReturnAdapter } from './lib/harness/thread-memory-return.js';
+
 import { createOnThreadDequeued } from './lib/harness/thread-dequeue.js';
 import { createThreadTranscriptReader } from './lib/harness/thread-transcript.js';
 import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
@@ -939,19 +938,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     options.piRuntimeBroker
     || (piRuntimeLifecycle?.currentBroker ? piRuntimeBroker : null)
   );
-  const nudgeMemorySession = async (
-    sessionId: string,
-    reason: "plan-edit" | "thread-return",
-    material: { id: string; kind: "plan-edit" | "thread-return"; text: string },
-  ): Promise<void> => {
-    const broker = getReadyPiRuntimeBroker();
-    if (!broker || !sessionSnapshots.has(sessionId)) return;
-    await broker.requestForSession(sessionId, "memory.nudge", {
-      sessionId,
-      reason,
-      materials: [material],
-    });
-  };
   const startPiRuntime = async () => {
     recordStartupPerformance('pi-runtime.warmup.start');
     try {
@@ -1092,7 +1078,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ? Number(configuredDirtyBarrierTimeout)
     : undefined;
   let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
-  let observeKnowledgeBlockChange = (_workspaceId: string, _sessionId: string, _change: BlockChange): void => {};
   let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
@@ -1361,11 +1346,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         properties: { workspaceId, parent, threadId, report },
       });
     },
-    onThreadReturned: (workspaceId, parent, threadId, run, report) => {
-      void nudgeThreadParentMemory(workspaceId, parent, threadId, run, report).catch((error) => {
-        console.error('[HarnessThreads] Memory keeper completion nudge failed:', errorMessage(error));
-      });
-    },
+
     onThreadDequeued: createOnThreadDequeued({
       getRegistry: () => threadRegistry,
       getRuntime: () => threadRuntime,
@@ -1374,12 +1355,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
       },
     }),
-  });
-  const nudgeThreadParentMemory = createThreadMemoryReturnAdapter({
-    registry: threadRegistry,
-    hasLiveSession: (sessionId) => sessionSnapshots.has(sessionId),
-    rootSessionWorkspaceId: (sessionId) => snapshotKnowledgeWorkspaceId(sessionId),
-    nudgeMemory: (sessionId, material) => nudgeMemorySession(sessionId, "thread-return", material),
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
   for (const failure of threadRegistryStartup.failures) {
@@ -1807,17 +1782,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getBranchEntryIds: branchEntryIdsForSession,
     getUserStore: getUserKnowledgeStore,
     getSuggestionSettings: knowledgeSuggestionSettingsForSession,
-    onPlanChanged: (sessionId, block) => nudgeMemorySession(sessionId, "plan-edit", {
-      id: `plan-edit:${sessionId}:${block.sourceLeafId ?? "root"}:${block.updatedAt}`,
-      kind: "plan-edit",
-      text: [
-        `User edited the session plan block at revision ${block.updatedAt}.`,
-        `Branch leaf: ${block.sourceLeafId ?? "root"}`,
-        block.content,
-      ].join("\n"),
-    }).catch((error) => {
-      console.error('[HarnessMemory] Plan edit nudge failed:', errorMessage(error));
-    }),
     onKnowledgeChanged: (sessionId, scope) => {
       broadcastGlobalUiEvent?.({
         type: 'piarium:harness-knowledge-changed',
@@ -1874,7 +1838,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         knowledgeVectors.notify(store, 'workspace', workspaceId, workspaceId, ids);
       },
       onBlocksChanged: (sessionId, change) => {
-        observeKnowledgeBlockChange(workspaceId, sessionId, change);
         broadcastGlobalUiEvent?.({
           type: 'piarium:harness-blocks-changed',
           properties: { workspaceId, sessionId },
@@ -1959,18 +1922,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[HarnessKnowledge] Observer failed:', errorMessage(error)),
   });
-  const decisionSuggestionRuntime = createDecisionSuggestionRuntime({
-    getStore: getKnowledgeStoreForWorkspace,
-    getSettings: knowledgeSuggestionSettingsForSession,
-    onChanged: (sessionId) => {
-      broadcastGlobalUiEvent?.({
-        type: 'piarium:harness-knowledge-changed',
-        properties: { sessionId, scope: 'workspace' },
-      });
-    },
-    onError: (error) => console.error('[HarnessKnowledge] Decision suggestion failed:', errorMessage(error)),
-  });
-  observeKnowledgeBlockChange = decisionSuggestionRuntime.observeBlockChange;
   const catalogFileSearch = createFsSearchRuntimeFactory({ compute: nativeCompute });
   // A grammar catalog must not be able to stop the Host from starting: an
   // unreadable manifest means "nothing is installable", not "no server".
@@ -2103,15 +2054,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     drain: () => knowledgeContextRuntime.drain(),
     listBoundSessions: (workspaceId) => knowledgeContextRuntime.listBoundSessions(workspaceId),
     inspectCwd: (terminalId) => terminalRuntime?.inspectSession(terminalId)?.cwd,
-    nudgeMemory: async (sessionId, input) => {
-      const broker = getReadyPiRuntimeBroker();
-      if (!broker) return;
-      await broker.requestForSession(sessionId, 'memory.nudge', {
-        sessionId,
-        reason: input.reason,
-        commands: input.commands,
-      });
-    },
     onError: (error) => {
       console.error('[HarnessKnowledge] Terminal command projection failed:', errorMessage(error));
     },
@@ -2120,31 +2062,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Zone 2 provider — assembles material from the knowledge store
   async function zone2Provider(request: Parameters<typeof knowledgeContextRuntime.zone2Material>[0]) {
     return knowledgeContextRuntime.zone2Material(request);
-  }
-
-  // Compaction deps provider — uses Pi's preparation (firstKeptEntryId /
-  // tokensBefore) passed directly through the service params, no broker
-  // round-trip for entry ID resolution.
-  // Keeper coverage store — shared between the compaction deps provider
-  // (which checks coverage before takeover) and the service host (which
-  // clears it on compaction.after and session drop).
-  const keeperCoverageStore = createKeeperCoverageStore();
-
-  async function compactionDepsProvider(sessionId: string): Promise<CompactionHandlerDeps> {
-    const store = await getKnowledgeStoreForSession(sessionId);
-    if (!store) throw new Error('No knowledge store for session');
-    return {
-      store,
-      settings: DEFAULT_COMPACTION_SETTINGS,
-      coverageStore: keeperCoverageStore,
-      getFacts: () => collectCompactionFacts(store, sessionId),
-    };
-  }
-
-  async function memoryDepsProvider(sessionId: string) {
-    const store = await getKnowledgeStoreForSession(sessionId);
-    if (!store) throw new Error('No knowledge store for session');
-    return { store, settings: DEFAULT_MEMORY_AGENT_SETTINGS };
   }
 
   // Todo deps provider
@@ -2381,9 +2298,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
-    memoryDepsProvider,
-    compactionDepsProvider,
-    keeperCoverageStore,
     todoDepsProvider,
     recallDepsProvider,
     knowledgeSuggestDepsProvider: async (sessionId, workspaceId) => {
@@ -2884,8 +2798,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await knowledgeVectors?.close();
       if (ownsPiRuntimeBroker) await piRuntimeLifecycle.dispose();
       observeKnowledgeDocumentMutation = () => undefined;
-      observeKnowledgeBlockChange = () => undefined;
-      await decisionSuggestionRuntime.dispose();
       await knowledgeContextRuntime.dispose();
       await Promise.allSettled([...knowledgeStoreLoads.values()]);
       await Promise.allSettled([...knowledgeStores.values()].map((store) => store.close()));

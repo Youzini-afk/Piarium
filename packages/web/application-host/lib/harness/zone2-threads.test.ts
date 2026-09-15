@@ -107,7 +107,7 @@ describe("Zone 2 thread projection", () => {
         },
       }),
     } as unknown as HarnessServiceHost;
-    const result = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [], memoryMode: "assist" }, {
+    const result = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [] }, {
       actor: {
         authorityInstanceId: "authority",
         sessionId: PARENT.id,

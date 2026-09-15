@@ -1,6 +1,6 @@
 import React from 'react';
 import type {
-  HarnessMemoryMode,
+  HarnessContextRuntimeState,
   PiSessionEntry,
   PiSessionMessageEntry,
   SessionSnapshot,
@@ -19,12 +19,6 @@ import {
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
-import {
-  createHarnessMemoryModeMutation,
-  isHarnessMemoryModeSelection,
-  projectHarnessMemoryPresentation,
-} from '@/components/sections/harness/harnessMemoryPresentation';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 const EMPTY_USAGE_VALUES = {
   cacheRead: 0,
@@ -97,103 +91,34 @@ const contentText = (entry: PiSessionMessageEntry): string => {
   return '';
 };
 
-const MEMORY_MODE_LABEL_KEYS: Record<HarnessMemoryMode, I18nKey> = {
-  off: 'contextSidebar.memory.mode.off',
-  assist: 'contextSidebar.memory.mode.assist',
-  takeover: 'contextSidebar.memory.mode.takeover',
+const CONTEXT_CANDIDATE_LABEL_KEYS: Record<HarnessContextRuntimeState['candidate'], I18nKey> = {
+  none: 'contextSidebar.context.candidate.none',
+  preparing: 'contextSidebar.context.candidate.preparing',
+  ready: 'contextSidebar.context.candidate.ready',
 };
 
-const memoryModeLabel = (
-  mode: HarnessMemoryMode | 'inherit',
-  t: (key: I18nKey, params?: Record<string, string | number>) => string,
-): string => mode === 'inherit'
-  ? t('contextSidebar.memory.mode.inherit')
-  : t(MEMORY_MODE_LABEL_KEYS[mode]);
-
-const ContextMemorySection: React.FC<{
-  sessionId: string;
+const ContextPreparationSection: React.FC<{
   snapshot?: SessionSnapshot;
-}> = ({ sessionId, snapshot }) => {
+}> = ({ snapshot }) => {
   const { t } = useI18n();
-  const mutateFeatures = usePiSessionStore((state) => state.mutateFeatures);
-  const [isUpdating, setIsUpdating] = React.useState(false);
-  const [updateError, setUpdateError] = React.useState(false);
-  const [optimisticEffectiveMode, setOptimisticEffectiveMode] = React.useState<HarnessMemoryMode | null>(null);
-
-  React.useEffect(() => {
-    setIsUpdating(false);
-    setUpdateError(false);
-    setOptimisticEffectiveMode(null);
-  }, [sessionId]);
-
-  React.useEffect(() => {
-    setOptimisticEffectiveMode(null);
-  }, [snapshot?.harness?.memory?.effectiveMode, snapshot?.harness?.memory?.overrideMode]);
-
-  const memory = projectHarnessMemoryPresentation(
-    snapshot?.harness?.memory,
-    snapshot?.features?.memoryMode,
-  );
-  if (!memory) return null;
-
-  const selectedMode: HarnessMemoryMode | 'inherit' = memory.overrideMode ?? 'inherit';
-  const effectiveMode = optimisticEffectiveMode
-    ?? memory.effectiveMode;
-  const updateMode = (value: string): void => {
-    if (isUpdating || !isHarnessMemoryModeSelection(value)) return;
-    const mode = value;
-    setIsUpdating(true);
-    setUpdateError(false);
-    void mutateFeatures(sessionId, createHarnessMemoryModeMutation(mode))
-      .then(() => setOptimisticEffectiveMode(mode === 'inherit' ? memory.configuredMode : mode))
-      .catch(() => setUpdateError(true))
-      .finally(() => setIsUpdating(false));
-  };
+  const context = snapshot?.harness?.context;
+  if (!context) return null;
 
   return (
     <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.memory')}</span>
+        <span className="typography-micro text-muted-foreground">{t('contextSidebar.section.contextPreparation')}</span>
         <span className="truncate text-right typography-micro text-muted-foreground/70">
-          {t('contextSidebar.memory.effective', { mode: memoryModeLabel(effectiveMode, t) })}
+          {context.backgroundPreparation
+            ? t(CONTEXT_CANDIDATE_LABEL_KEYS[context.candidate])
+            : t('contextSidebar.context.preparation.disabled')}
         </span>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-3">
-        <span className="min-w-0 truncate typography-micro text-muted-foreground/70">
-          {memory.overrideMode === undefined
-            ? t('contextSidebar.memory.inherited')
-            : t('contextSidebar.memory.override')}
-        </span>
-        <Select value={selectedMode} onValueChange={updateMode}>
-          <SelectTrigger
-            className="min-w-0 max-w-[16rem] flex-1"
-            size="sm"
-            disabled={isUpdating}
-            aria-label={t('contextSidebar.section.memory')}
-          >
-            <SelectValue>
-              {(value) => memoryModeLabel((value ?? 'inherit') as HarnessMemoryMode | 'inherit', t)}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inherit">{t('contextSidebar.memory.mode.inherit')}</SelectItem>
-            <SelectItem value="off">{t('contextSidebar.memory.mode.off')}</SelectItem>
-            <SelectItem value="assist">{t('contextSidebar.memory.mode.assist')}</SelectItem>
-            <SelectItem value="takeover">{t('contextSidebar.memory.mode.takeover')}</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      {isUpdating ? (
-        <p className="mt-2 typography-micro text-muted-foreground">{t('contextSidebar.memory.status.updating')}</p>
-      ) : null}
-      {updateError ? (
-        <p className="mt-2 typography-micro text-destructive">{t('contextSidebar.memory.status.updateFailed')}</p>
-      ) : null}
-      {memory.failure ? (
-        <p className="mt-2 truncate typography-micro text-status-warning" title={memory.failure.message}>
-          {memory.failure.phase === 'keeper'
-            ? t('contextSidebar.memory.status.keeperFailed')
-            : t('contextSidebar.memory.status.compactionFailed')}
+      {context.lastFailure ? (
+        <p className="mt-2 truncate typography-micro text-status-warning" title={context.lastFailure.message}>
+          {context.lastFailure.phase === 'prepare'
+            ? t('contextSidebar.context.status.preparationFailed')
+            : t('contextSidebar.context.status.compactionFailed')}
         </p>
       ) : null}
     </div>
@@ -340,7 +265,7 @@ export const ContextPanelContent: React.FC = () => {
           </div>
         </div>
 
-        <ContextMemorySection sessionId={currentSessionId} snapshot={record?.snapshot} />
+        <ContextPreparationSection snapshot={record?.snapshot} />
 
         {contextUsage ? (
           <div className="mb-5 rounded-lg bg-[var(--surface-elevated)]/70 px-4 py-3.5">

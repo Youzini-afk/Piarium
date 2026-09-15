@@ -42,12 +42,10 @@ describe("harness protocol", () => {
     assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
     const todo = { items: [], branchEntryIds: [] } satisfies HarnessServiceMap["todo.upsert"]["params"];
     const compact = {
-      branchEntryIds: ["entry-1"],
       firstKeptEntryId: "entry-1",
-      mode: "takeover",
-      removedEntryIds: [],
+      summary: "summary",
       tokensBefore: 100,
-    } satisfies HarnessServiceMap["compaction.before"]["params"];
+    } satisfies HarnessServiceMap["compaction.after"]["params"];
     assert.equal("sessionId" in todo, false);
     assert.equal("sessionId" in compact, false);
   });
@@ -57,16 +55,15 @@ describe("harness protocol", () => {
     assert.equal(new Set(codes).size, codes.length);
   });
 
-  it("defines the optional snapshot projection for memory runtime state", () => {
+  it("defines the optional snapshot projection for context runtime state", () => {
     const harness = {
-      memory: {
-        configuredMode: "takeover",
-        effectiveMode: "assist",
-        overrideMode: "assist",
-        lastFailure: { phase: "keeper", message: "block conflict", at: 1 },
+      context: {
+        backgroundPreparation: true,
+        candidate: "preparing",
+        lastFailure: { phase: "commit", message: "summary failed", at: 1 },
       },
     } satisfies HarnessRuntimeState;
-    assert.equal(harness.memory.effectiveMode, "assist");
+    assert.equal(harness.context.candidate, "preparing");
   });
 
   it("uses a batch acquire and lease-only release contract for path locks", () => {

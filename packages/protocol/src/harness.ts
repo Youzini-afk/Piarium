@@ -27,8 +27,6 @@ import type {
   ThreadFactsSetResult,
   RetrievalUrlReceipt,
 } from "./harness-threads.js";
-import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
-import type { HarnessMemoryMode } from "./harness-settings.js";
 import type {
   PermissionAuditRecord,
   PermissionInspectParams,
@@ -388,8 +386,6 @@ export type WorkingBranchEnsureMaterializedResult =
 export interface Zone2AssembleParams {
   afterEventId?: number;
   contextUsage?: { used: number; window: number };
-  /** Effective session memory mode; `off` excludes stored blocks from Zone 2. */
-  memoryMode: HarnessMemoryMode;
   query?: string;
   sinceTurn: number;
   /**
@@ -402,28 +398,6 @@ export interface Zone2AssembleParams {
 export interface Zone2AssembleResult {
   content: string | null;
   eventCursor: number;
-}
-
-export interface CompactionBeforeParams {
-  firstKeptEntryId: string;
-  tokensBefore: number;
-  /** Complete active ancestor path used to resolve branch-local blocks. */
-  branchEntryIds: string[];
-  /**
-   * Entry IDs of the conversation history being removed by compaction,
-   * in branch order (oldest first). The Host uses this to verify the
-   * memory keeper has continuously processed the entire range before
-   * allowing takeover.
-   */
-  removedEntryIds: string[];
-  /** Effective session mode at the Pi hook that requested takeover. */
-  mode: HarnessMemoryMode;
-}
-
-export interface CompactionBeforeResult {
-  summary: string;
-  firstKeptEntryId: string;
-  tokensBefore: number;
 }
 
 export interface CompactionAfterParams {
@@ -1143,13 +1117,10 @@ export interface HarnessServiceMap {
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
-  "compaction.before": { params: CompactionBeforeParams; result: CompactionBeforeResult };
   "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
   "knowledge.suggest": { params: KnowledgeSuggestParams; result: KnowledgeSuggestResult };
-  "memory.blocks.get": { params: { branchEntryIds: string[] }; result: { blocks: MemoryBlockSnapshot[] } };
-  "memory.blocks.apply": { params: { cursorTurn: number; ops: MemoryEditOp[]; branchEntryIds: string[]; coveredEntryIds: string[] }; result: MemoryApplyResult };
   // Phase 3: Thread operations
   "thread.dispatch": { params: ThreadDispatchParams; result: ThreadDispatchResult };
   "thread.facts.set": { params: ThreadFactsSetParams; result: ThreadFactsSetResult };
@@ -1247,13 +1218,10 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "web.search": "read.web",
   "zone2.assemble": "context.session",
-  "compaction.before": "context.session",
   "compaction.after": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
   "knowledge.suggest": "context.session",
-  "memory.blocks.get": "context.session",
-  "memory.blocks.apply": "context.session",
   "thread.dispatch": "control.thread",
   "thread.facts.set": "control.thread",
   "thread.list": "control.thread",
@@ -1320,13 +1288,10 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.search",
   "zone2.assemble",
-  "compaction.before",
   "compaction.after",
   "todo.upsert",
   "recall.search",
   "knowledge.suggest",
-  "memory.blocks.get",
-  "memory.blocks.apply",
   "thread.dispatch",
   "thread.facts.set",
   "thread.list",

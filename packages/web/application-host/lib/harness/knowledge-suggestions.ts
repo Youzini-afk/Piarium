@@ -4,10 +4,9 @@
  * Design: agent-harness.md §7.2.2
  * Plan: agent-harness-plan.md §2.7
  *
- * Triggers (only these three, no heuristics):
+ * Triggers (only these two, no heuristics):
  * 1. User "remember this" action on message/tool result/block entry
- * 2. Memory agent's decisions block new entries at turn end
- * 3. User message explicit pattern (only when models.suggestions configured)
+ * 2. User message explicit pattern (only when models.suggestions configured)
  */
 
 import {
@@ -19,7 +18,7 @@ import type { Knowledge, KnowledgeStore, KnowledgeInput, KnowledgeScope, NodeId 
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type SuggestionTrigger = "user-mark" | "memory-agent" | "user-message";
+export type SuggestionTrigger = "user-mark" | "user-message";
 
 export interface SuggestionInput {
   trigger: SuggestionTrigger;

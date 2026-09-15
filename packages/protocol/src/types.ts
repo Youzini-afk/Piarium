@@ -1,5 +1,4 @@
 import type { PiSessionFeatureState } from "./session-features.js";
-import type { HarnessMemoryMode } from "./harness-settings.js";
 
 // Piarium is pre-release and all product surfaces ship in lockstep. Breaking
 // development changes replace this single contract instead of accumulating
@@ -599,23 +598,24 @@ export interface SessionRuntimeState {
   steeringMode: "all" | "one-at-a-time";
 }
 
-export type HarnessMemoryFailurePhase = "keeper" | "compaction";
+export type HarnessContextFailurePhase = "prepare" | "commit";
 
-export interface HarnessMemoryRuntimeFailure {
+export interface HarnessContextRuntimeFailure {
   at: number;
   message: string;
-  phase: HarnessMemoryFailurePhase;
+  phase: HarnessContextFailurePhase;
 }
 
-export interface HarnessMemoryRuntimeState {
-  configuredMode: HarnessMemoryMode;
-  effectiveMode: HarnessMemoryMode;
-  lastFailure?: HarnessMemoryRuntimeFailure;
-  overrideMode?: HarnessMemoryMode;
+export interface HarnessContextRuntimeState {
+  /** User-owned background preparation switch after legacy mapping. */
+  backgroundPreparation: boolean;
+  /** Live candidate state for the current compaction cycle. */
+  candidate: "none" | "preparing" | "ready";
+  lastFailure?: HarnessContextRuntimeFailure;
 }
 
 export interface HarnessRuntimeState {
-  memory: HarnessMemoryRuntimeState;
+  context: HarnessContextRuntimeState;
 }
 
 export interface SessionSnapshot extends SessionRuntimeState {

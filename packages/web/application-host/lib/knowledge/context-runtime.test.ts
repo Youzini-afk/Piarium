@@ -266,7 +266,6 @@ describe("knowledge context runtime", () => {
   });
 
   it("production adapter projects one command independently to every bound session", async () => {
-    const nudges: string[] = [];
     const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
     runtime.bindSession("session-a", "workspace-1");
     runtime.bindSession("session-b", "workspace-1");
@@ -275,7 +274,6 @@ describe("knowledge context runtime", () => {
       observe: createTerminalCommandObserveAdapter(runtime),
       drain: () => runtime.drain(),
       listBoundSessions: (workspaceId) => runtime.listBoundSessions(workspaceId),
-      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
     });
     const record: TerminalCommandRecord = {
       command: "echo fanout",
@@ -292,7 +290,6 @@ describe("knowledge context runtime", () => {
     expect((await store.listEvents({ sessionId: "session-a" })).filter((event) => event.kind === "command")).toHaveLength(1);
     expect((await store.listEvents({ sessionId: "session-b" })).filter((event) => event.kind === "command")).toHaveLength(1);
     await expect(projector.project(record)).resolves.toEqual({ "session-a": false, "session-b": false });
-    expect(nudges).toEqual(["session-a", "session-b"]);
     await runtime.dispose();
   });
 
@@ -348,8 +345,7 @@ describe("knowledge context runtime", () => {
     await second.dispose();
   });
 
-  it("rebuilds the projector path without a second event or memory nudge", async () => {
-    const nudges: string[] = [];
+  it("rebuilds the projector path without a second event", async () => {
     const record: TerminalCommandRecord = {
       command: "echo hi",
       commandId: "term-1:1:1",
@@ -367,7 +363,6 @@ describe("knowledge context runtime", () => {
       observe: (event) => first.observeTerminalCommand(event),
       drain: () => first.drain(),
       listBoundSessions: (workspaceId) => first.listBoundSessions(workspaceId),
-      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
     });
     await firstProjector.project(record);
     await first.dispose();
@@ -379,10 +374,8 @@ describe("knowledge context runtime", () => {
       observe: (event) => second.observeTerminalCommand(event),
       drain: () => second.drain(),
       listBoundSessions: (workspaceId) => second.listBoundSessions(workspaceId),
-      nudgeMemory: async (sessionId) => { nudges.push(sessionId); },
     });
     await secondProjector.project(record);
-    expect(nudges).toEqual(["session-a"]);
     expect((await store.listEvents({ sessionId: "session-a" })).filter((item) => item.kind === "command")).toHaveLength(1);
     await second.dispose();
   });

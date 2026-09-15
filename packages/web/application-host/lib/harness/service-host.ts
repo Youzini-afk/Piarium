@@ -10,10 +10,7 @@ import type { DiagnosticsProvider } from "./diagnostics-service.js";
 import type { ExploreFileReader } from "./explore-file-reader.js";
 import { createExploreQueryStore, type ExploreQueryStore } from "./explore-query-store.js";
 import type { KnowledgeStore } from "../knowledge/store.js";
-import type { MemoryAgentSettings } from "@piarium/protocol";
 import type { Zone2MaterialRequest, Zone2MaterialResult } from "../knowledge/context-runtime.js";
-import type { CompactionHandlerDeps, CompactionSettings, KeeperCoverageStore } from "./compaction.js";
-import { createKeeperCoverageStore } from "./compaction.js";
 import type { TodoToolDeps } from "./todo-tool.js";
 import type { RecallToolDeps } from "./recall-tool.js";
 import type { KnowledgeSuggestionsSettings } from "./knowledge-suggestions.js";
@@ -234,15 +231,11 @@ export interface HarnessServiceHost {
   documentSurfaceWrite: HarnessDocumentSurfaceWrite | null;
   documentBranchWrite: HarnessDocumentBranchWrite | null;
   workingBranchEnsureMaterialized: HarnessWorkingBranchEnsureMaterialized | null;
-  // Phase 2: knowledge, memory, zone2, compaction, todo, recall
+  // Phase 2: knowledge, zone2, compaction ack, todo, recall
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
-  memoryDepsProvider: ((sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>) | null;
   zone2Provider: ((request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>) | null;
   onSessionCompacted: ((sessionId: string) => void) | null;
-  compactionDepsProvider: ((sessionId: string) => Promise<CompactionHandlerDeps>) | null;
-  compactionSettings: CompactionSettings;
-  keeperCoverageStore: KeeperCoverageStore;
   recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
   knowledgeSuggestDepsProvider: ((
     sessionId: string,
@@ -393,13 +386,8 @@ export interface HarnessServiceHostOptions {
   // Phase 2 options
   knowledgeStore?: KnowledgeStore;
   userKnowledgeStore?: KnowledgeStore;
-  memoryDepsProvider?: (sessionId: string) => Promise<{ store: KnowledgeStore; settings: MemoryAgentSettings }>;
   zone2Provider?: (request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>;
   onSessionCompacted?: (sessionId: string) => void;
-  compactionDepsProvider?: (sessionId: string) => Promise<CompactionHandlerDeps>;
-  compactionSettings?: CompactionSettings;
-  /** External keeper coverage store; if omitted, the host creates one. */
-  keeperCoverageStore?: KeeperCoverageStore;
   recallDepsProvider?: (sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>;
   knowledgeSuggestDepsProvider?: HarnessServiceHost["knowledgeSuggestDepsProvider"];
   todoDepsProvider?: (sessionId: string) => Promise<TodoToolDeps>;
@@ -457,12 +445,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   // Phase 2
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
-  const memoryDepsProvider = options.memoryDepsProvider ?? null;
   const zone2Provider = options.zone2Provider ?? null;
   const onSessionCompacted = options.onSessionCompacted ?? null;
-  const compactionDepsProvider = options.compactionDepsProvider ?? null;
-  const compactionSettings = options.compactionSettings ?? { keepTurns: 8, reinjectFileLimit: 5, reinjectFileTokens: 5000, reinjectTotalTokens: 50000, reinjectSkillsTokens: 25000 };
-  const keeperCoverageStore = options.keeperCoverageStore ?? createKeeperCoverageStore();
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const knowledgeSuggestDepsProvider = options.knowledgeSuggestDepsProvider ?? null;
   const todoDepsProvider = options.todoDepsProvider ?? null;
@@ -593,7 +577,6 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     void Promise.resolve(pathLockService.dropSession(sessionId)).catch((error: unknown) => {
       console.error('[HarnessPathLock] Session lease release failed:', error);
     });
-    keeperCoverageStore.clear(sessionId);
     options.dropAgentInputContexts?.(sessionId);
     verification.revokeSessionActor(sessionId);
   };
@@ -690,12 +673,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     workingBranchEnsureMaterialized,
     knowledgeStore,
     userKnowledgeStore,
-    memoryDepsProvider,
     zone2Provider,
     onSessionCompacted,
-    compactionDepsProvider,
-    compactionSettings,
-    keeperCoverageStore,
     recallDepsProvider,
     knowledgeSuggestDepsProvider,
     todoDepsProvider,

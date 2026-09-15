@@ -26,7 +26,7 @@ export interface PiToolInfoLike {
 const READ_TOOLS = new Set([
   "read", "grep", "find", "ls", "glob", "diagnostics", "symbols", "definition",
   "references", "hover", "get_output", "threads", "wait", "read_thread", "recall",
-  "related", "explore",
+  "related", "explore", "history",
 ]);
 const WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "merge"]);
 const PROCESS_TOOLS = new Set(["bash", "write_to_process", "kill_shell"]);

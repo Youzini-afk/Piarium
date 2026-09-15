@@ -10,11 +10,9 @@ import {
   type PiSessionFeatureState,
   type PiSessionGoalState,
   type PiSessionGoalStatus,
-  type HarnessMemoryMode,
 } from "@piarium/protocol";
 
 export const PIARIUM_SESSION_FEATURES_ENTRY_TYPE = "piarium.session-features/v1";
-export const PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE = "piarium.session-memory-mode/v1";
 
 const RECAP_CHAR_LIMIT = 320;
 const SUGGESTION_CHAR_LIMIT = 500;
@@ -121,40 +119,6 @@ function parseStoredState(value: unknown): PiSessionFeatureState | undefined {
   };
 }
 
-interface StoredMemoryMode {
-  mode?: HarnessMemoryMode;
-  revision: number;
-}
-
-function parseStoredMemoryMode(value: unknown): StoredMemoryMode | undefined {
-  if (!isRecord(value) || value.schemaVersion !== PIARIUM_SESSION_FEATURES_SCHEMA_VERSION) {
-    return undefined;
-  }
-  const revision = nonNegativeInteger(value.revision);
-  if (value.mode === null) return { revision };
-  if (value.mode !== "off" && value.mode !== "assist" && value.mode !== "takeover") {
-    return undefined;
-  }
-  return { mode: value.mode, revision };
-}
-
-function readSessionMemoryMode(
-  manager: Pick<SessionManager, "getEntries">,
-): StoredMemoryMode | undefined {
-  const entries = manager.getEntries();
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
-    const entry = entries[index];
-    if (
-      entry?.type !== "custom"
-      || entry.customType !== PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE
-    ) continue;
-    const parsed = parseStoredMemoryMode(entry.data);
-    if (!parsed) throw new SessionFeatureConflictError("Stored session memory mode is malformed");
-    return parsed;
-  }
-  return undefined;
-}
-
 export function emptySessionFeatures(): PiSessionFeatureState {
   return {
     revision: 0,
@@ -179,12 +143,7 @@ export function readSessionFeatures(
       break;
     }
   }
-  const memory = readSessionMemoryMode(manager);
-  return {
-    ...branchState,
-    ...(memory?.mode === undefined ? {} : { memoryMode: memory.mode }),
-    revision: Math.max(branchState.revision, memory?.revision ?? 0),
-  };
+  return branchState;
 }
 
 function assignOptionalText(
@@ -204,15 +163,12 @@ function appendState(
   current: PiSessionFeatureState,
   update: Omit<PiSessionFeatureState, "revision" | "schemaVersion">,
 ): PiSessionFeatureState {
-  const { memoryMode, ...branchUpdate } = update;
   const next: PiSessionFeatureState = {
-    ...branchUpdate,
-    ...(memoryMode === undefined ? {} : { memoryMode }),
+    ...update,
     revision: current.revision + 1,
     schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
   };
-  const { memoryMode: _sessionMemoryMode, ...stored } = next;
-  manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, stored);
+  manager.appendCustomEntry(PIARIUM_SESSION_FEATURES_ENTRY_TYPE, next);
   return next;
 }
 
@@ -328,14 +284,6 @@ export function mutateSessionFeatures(
         ...current,
         assist,
       });
-    }
-    case "memory.mode.set": {
-      manager.appendCustomEntry(PIARIUM_SESSION_MEMORY_MODE_ENTRY_TYPE, {
-        mode: mutation.mode === "inherit" ? null : mutation.mode,
-        revision: current.revision + 1,
-        schemaVersion: PIARIUM_SESSION_FEATURES_SCHEMA_VERSION,
-      });
-      return readSessionFeatures(manager);
     }
   }
 }

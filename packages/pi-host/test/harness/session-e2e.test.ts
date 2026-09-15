@@ -3,9 +3,9 @@
  * registers for every session, exercised inside an actual agent loop with a
  * faux provider:
  *
- *   - zone2-extension        (before_agent_start → <piarium-context>)
- *   - compaction-extension   (session_before_compact → { compaction })
- *   - permission-gate        (tool_call → ui.select → allow/deny)
+ *   - zone2-extension            (before_agent_start → <piarium-context>)
+ *   - context-preparation        (context budget → session_before_compact)
+ *   - permission-gate            (tool_call → ui.select → allow/deny)
  *
  * The tool-level e2e files (phase2/phase3/phase3b) drive `tool.execute`
  * directly, which never reaches a Pi hook. These tests wire a real
@@ -21,9 +21,9 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
-import { sessionEntryToContextMessages, type AgentSessionServices } from "@earendil-works/pi-coding-agent";
+import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import { DEFAULT_MEMORY_AGENT_SETTINGS, type HostEvent, type HostEventData } from "@piarium/protocol";
+import type { HostEvent, HostEventData } from "@piarium/protocol";
 
 import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
@@ -41,7 +41,6 @@ import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
 import { createWebSearchService } from "../../../web/application-host/lib/harness/web-search.js";
-import { DEFAULT_COMPACTION_SETTINGS, type CompactionFacts, type CompactionHandlerDeps } from "../../../web/application-host/lib/harness/compaction.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 import { createExploreFileReader } from "../../../web/application-host/lib/harness/explore-file-reader.js";
 import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
@@ -546,249 +545,173 @@ describe("session e2e — zone2 extension", () => {
   });
 });
 
-describe("session e2e — memory keeper extension", () => {
-  it("projects the new default, legacy migration, live global setting, and session override", async () => {
-    await withTempRoot("piarium-s-memory-mode-", async (root) => {
+describe("session e2e — context preparation settings", () => {
+  it("projects background preparation state and honors the retired memory off switch", async () => {
+    await withTempRoot("piarium-s-context-settings-", async (root) => {
       const faux = registerFauxProvider();
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       try {
         session = await setupSession({ root, faux });
         const created = await session.host.create(root);
-        assert.deepEqual(created.harness?.memory, {
-          configuredMode: "takeover",
-          effectiveMode: "takeover",
-        });
-
-        const overridden = session.host.mutateFeatures(created.sessionId, {
-          mode: "off",
-          type: "memory.mode.set",
-        });
-        assert.equal(overridden.memoryMode, "off");
-        assert.deepEqual(session.host.snapshot().harness?.memory, {
-          configuredMode: "takeover",
-          effectiveMode: "off",
-          overrideMode: "off",
-        });
+        assert.equal(created.harness?.context.backgroundPreparation, true);
+        assert.equal(created.harness?.context.candidate, "none");
 
         const settings = await session.host.getSettings();
         await assert.rejects(
           session.host.updateSettings("global", {
-            harness: { memory: { mode: "automatic" } },
+            harness: { context: { preparationWaterline: 2 } },
           }, [], settings.globalRevision),
-          /harness\.memory\.mode must be one of/,
+          /harness\.context\.preparationWaterline/,
         );
-        await assert.rejects(
-          session.host.updateSettings("global", {
-            harness: {
-              embedding: {
-                protocol: "openai-compatible",
-                providerId: "p",
-                modelId: "m",
-                dimensions: 0,
-              },
-            },
-          }, [], settings.globalRevision),
-          /harness\.embedding\.dimensions/,
-        );
-        assert.equal((await session.host.getSettings()).globalRevision, settings.globalRevision);
         await session.host.updateSettings("global", {
-          harness: { memory: { mode: "assist" } },
+          harness: { context: { backgroundPreparation: false } },
         }, [], settings.globalRevision);
-        assert.deepEqual(session.host.snapshot().harness?.memory, {
-          configuredMode: "assist",
-          effectiveMode: "off",
-          overrideMode: "off",
-        });
-        session.host.mutateFeatures(created.sessionId, {
-          mode: "inherit",
-          type: "memory.mode.set",
-        });
-        assert.deepEqual(session.host.snapshot().harness?.memory, {
-          configuredMode: "assist",
-          effectiveMode: "assist",
-        });
+        assert.equal(session.host.snapshot().harness?.context.backgroundPreparation, false);
         await session.dispose();
         session = undefined;
 
+        // A retired harness.memory.mode: "off" or shadowMode: false was the
+        // user's explicit opt-out of background maintenance; it disables
+        // background preparation only, never automatic compaction.
         await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
-          harness: { memory: { shadowMode: false } },
+          harness: { memory: { mode: "off" } },
         }), "utf8");
         session = await setupSession({ root, faux });
         const legacyOff = await session.host.create(root);
-        assert.equal(legacyOff.harness?.memory.configuredMode, "off");
-        await session.dispose();
-        session = undefined;
-
-        await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
-          harness: { memory: { shadowMode: true } },
-        }), "utf8");
-        session = await setupSession({ root, faux });
-        const legacyAssist = await session.host.create(root);
-        assert.equal(legacyAssist.harness?.memory.configuredMode, "assist");
+        assert.equal(legacyOff.harness?.context.backgroundPreparation, false);
       } finally {
         await session?.dispose();
         faux.unregister();
       }
     });
   });
+});
 
-  it("uses the active session model to maintain blocks without taking over the conversation", async () => {
-    await withTempRoot("piarium-s-memory-shadow-", async (root) => {
-      const agentDir = join(root, "agent");
-      await mkdir(agentDir, { recursive: true });
-      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-        harness: { memory: { shadowMode: true } },
+describe("session e2e — context preparation chain", () => {
+  it("prepares a candidate in background during a real turn and commits it through a real compaction", async () => {
+    await withTempRoot("piarium-s-context-chain-", async (root) => {
+      // usable = 24000 − 6000 = 18000, waterline 5400, keepRecent target ≈4553.
+      // Provider usage ≈ prompt + output + uncached suffix (≈2×prompt on the
+      // first call), so turn 1 lands ~16k: under compaction threshold, and its
+      // usage plus the new prompt estimate crosses the waterline at turn 2.
+      // Turn 2's request usage then exceeds 18000, so Pi compacts after the
+      // reply and commits the already-prepared candidate.
+      await mkdir(join(root, "agent"), { recursive: true });
+      await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
+        compaction: { enabled: true, reserveTokens: 6_000, keepRecentTokens: 1_200 },
+        harness: { context: { preparationWaterline: 0.3 } },
       }), "utf8");
-      const store = await openWorkspaceKnowledge({
-        dataDir: join(root, "data"),
-        hostId: "memory-host",
-        workspaceId: WORKSPACE_ID,
-        embedding: null,
-      });
-      const faux = registerFauxProvider();
-      const keeperContexts: Context[] = [];
-      faux.setResponses([
-        () => fauxAssistantMessage("x".repeat(50_000)),
-        (context) => {
-          keeperContexts.push(context);
-          return fauxAssistantMessage([fauxToolCall("memory_edit", {
-            ops: [{ op: "create", block: "progress", content: "The first long turn is complete." }],
-          })]);
-        },
-      ]);
-      const session = await setupSession({
-        root,
-        faux,
-        serviceHostOptions: {
-          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
-        },
-      });
 
+      const faux = registerFauxProvider({
+        models: [{ id: "faux-1", contextWindow: 24_000, maxTokens: 800 }],
+      });
+      const summaryCalls: { context: Context }[] = [];
+      const turnCalls: Context[] = [];
+      const compactedSessions: string[] = [];
+      let releaseSummary: (() => void) | undefined;
+      const summaryGate = new Promise<void>((resolve) => { releaseSummary = resolve; });
+      const router = (context: Context, options: { toolChoice?: string } | undefined) => {
+        if (options?.toolChoice === "none") {
+          summaryCalls.push({ context });
+          return summaryGate.then(() => fauxAssistantMessage("Candidate summary: continue the layout report."));
+        }
+        turnCalls.push(context);
+        // The second foreground request reaching the provider while the
+        // summary is still gated is the foreground-continuation evidence:
+        // release it there so a serialized queue would deadlock the test.
+        if (turnCalls.length === 2) releaseSummary?.();
+        return fauxAssistantMessage(`Reply ${turnCalls.length}. ${"detail ".repeat(680)}`);
+      };
+      // Turn 3: after compaction the agent reads the summarized first turn
+      // back verbatim through the public history tool on the same branch.
+      // The still-large kept region crosses the waterline again at turn 3's
+      // context hook, so a second background preparation request (toolChoice
+      // "none") precedes the turn's own first request in the provider queue.
+      let historyResult = "";
+      const secondPreparation = (context: Context, options: { toolChoice?: string } | undefined) => {
+        assert.equal(options?.toolChoice, "none", "the follow-up preparation must reuse the summary request shape");
+        summaryCalls.push({ context });
+        return fauxAssistantMessage("Second candidate summary.");
+      };
+      const turn3History = (context: Context) => {
+        turnCalls.push(context);
+        return fauxAssistantMessage([fauxToolCall("history", { query: "repository layout" })]);
+      };
+      const turn3Final = (context: Context) => {
+        turnCalls.push(context);
+        historyResult = JSON.stringify(context.messages.at(-1));
+        return fauxAssistantMessage("done");
+      };
+      faux.setResponses([router, router, router, secondPreparation, turn3History, turn3Final]);
+
+      let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       try {
+        session = await setupSession({
+          root,
+          faux,
+          serviceHostOptions: {
+            onSessionCompacted: (sessionId) => compactedSessions.push(sessionId),
+          },
+        });
         const snapshot = await session.host.create(root);
-        await session.host.prompt(snapshot.sessionId, "produce a long answer");
-        await session.host.session.waitForIdle();
-        await waitUntil(async () => (await store.getBlocks(snapshot.sessionId)).length > 0);
-        assert.equal(keeperContexts.length, 1);
-        assert.equal(keeperContexts[0]!.tools?.[0]?.name, "memory_edit");
-        assert.match((await store.getBlocks(snapshot.sessionId))[0]!.content, /long turn is complete/);
-        assert.doesNotMatch(JSON.stringify(session.host.session.messages), /memory_edit/);
-      } finally {
-        await session.dispose();
-        await store.close();
-        faux.unregister();
-      }
-    });
-  });
 
-  it("accelerates the same keeper with accepted steering material", async () => {
-    await withTempRoot("piarium-s-memory-steering-", async (root) => {
-      const store = await openWorkspaceKnowledge({
-        dataDir: join(root, "data"),
-        hostId: "memory-steering-host",
-        workspaceId: WORKSPACE_ID,
-        embedding: null,
-      });
-      const faux = registerFauxProvider();
-      const keeperContexts: Context[] = [];
-      faux.setResponses([
-        () => fauxAssistantMessage("initial turn"),
-        (context) => {
-          keeperContexts.push(context);
-          return fauxAssistantMessage([fauxToolCall("memory_edit", {
-            ops: [{ op: "create", block: "progress", content: "Steering was recorded." }],
-          })]);
-        },
-      ]);
-      const session = await setupSession({
-        root,
-        faux,
-        serviceHostOptions: {
-          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
-        },
-      });
-      try {
-        const snapshot = await session.host.create(root, undefined, undefined, []);
-        await session.host.prompt(snapshot.sessionId, "start work");
+        await session.host.prompt(snapshot.sessionId, `Inspect the repository layout. ${"detail ".repeat(1_150)}`);
         await session.host.session.waitForIdle();
-        assert.equal(await session.host.steer(snapshot.sessionId, "change direction"), true);
-        await waitUntil(async () => keeperContexts.length === 1);
-        assert.match(JSON.stringify(keeperContexts[0]!.messages), /steering .*change direction/);
-        await waitUntil(async () => (await store.getBlocks(snapshot.sessionId)).some((block) => block.content === "Steering was recorded."));
-      } finally {
-        await session.dispose();
-        await store.close();
-        faux.unregister();
-      }
-    });
-  });
+        assert.equal(turnCalls.length, 1);
+        assert.equal(summaryCalls.length, 0, "one ordinary turn under the waterline must not prepare anything");
+        assert.equal(compactedSessions.length, 0);
 
-  it("projects a rejected keeper apply while the real Pi conversation continues", async () => {
-    await withTempRoot("piarium-s-memory-failure-", async (root) => {
-      const store = await openWorkspaceKnowledge({
-        dataDir: join(root, "data"),
-        hostId: "memory-failure-host",
-        workspaceId: WORKSPACE_ID,
-        embedding: null,
-      });
-      const faux = registerFauxProvider();
-      faux.setResponses([
-        () => fauxAssistantMessage("x".repeat(50_000)),
-        () => fauxAssistantMessage([fauxToolCall("memory_edit", {
-          ops: [{ op: "create", block: "Invalid!", content: "rejected" }],
-        })]),
-        () => fauxAssistantMessage(`${"y".repeat(50_000)} the next user turn still completed`),
-        () => fauxAssistantMessage("Pi fallback summary after unavailable Host compaction"),
-      ]);
-      const session = await setupSession({
-        root,
-        faux,
-        serviceHostOptions: {
-          memoryDepsProvider: async () => ({ store, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
-        },
-      });
-      try {
-        const snapshot = await session.host.create(root);
-        await session.host.prompt(snapshot.sessionId, "produce a long answer");
+        // The second turn crosses the waterline at its first request: the
+        // summary call starts in the background while the main request
+        // streams. The router releases the summary when that request arrives.
+        // Turn 2's request usage then exceeds the compaction threshold, so Pi
+        // compacts after the reply and commits the prepared candidate as-is.
+        await session.host.prompt(snapshot.sessionId, `Continue with the package list. ${"more ".repeat(3_000)}`);
         await session.host.session.waitForIdle();
-        await waitUntil(async () => session.host.snapshot().harness?.memory.lastFailure?.phase === "keeper");
-        assert.match(
-          session.host.snapshot().harness?.memory.lastFailure?.message ?? "",
-          /Invalid block name/,
+        assert.equal(turnCalls.length, 2);
+        assert.equal(summaryCalls.length, 1, "the derived summary request must reach the provider");
+
+        const entries = session.host.session.sessionManager.getEntries();
+        const compactionEntry = entries.find((entry) => entry.type === "compaction") as
+          | { summary?: string; firstKeptEntryId?: string }
+          | undefined;
+        assert.ok(compactionEntry, "a compaction entry must be persisted in the session log");
+        assert.equal(compactionEntry?.summary, "Candidate summary: continue the layout report.");
+        assert.ok(compactionEntry?.firstKeptEntryId, "the candidate's fixed cut must be committed");
+        assert.ok(
+          entries.some((entry) => entry.id === compactionEntry?.firstKeptEntryId),
+          "firstKeptEntryId must reference a real session entry",
         );
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
-        assert.equal(
-          session.host.snapshot().harness?.memory.lastFailure,
-          undefined,
-          "a deliberate mode change must retire failures from the previous mode",
-        );
-        await session.host.prompt(snapshot.sessionId, "continue after the background failure");
+        assert.deepEqual(compactedSessions, [snapshot.sessionId]);
+        assert.equal(summaryCalls.length, 1, "the commit must reuse the prepared call, never re-summarize");
+
+        // Runtime state returns to idle and stays visible on the snapshot.
+        const state = session.host.snapshot().harness?.context;
+        assert.equal(state?.candidate, "none");
+        assert.equal(state?.backgroundPreparation, true);
+
+        // The summary request reused the main request shape: real system
+        // prompt, schema-only tools, and the fixed-scope instruction at tail.
+        const summaryContext = summaryCalls[0]!.context;
+        assert.equal(summaryContext.systemPrompt, turnCalls[0]!.systemPrompt);
+        for (const tool of (summaryContext.tools ?? []) as { name: string }[]) {
+          assert.equal("execute" in tool, false, "summary tools must carry schema only");
+        }
+        const tail = summaryContext.messages.at(-1) as { role?: string; content?: { text?: string }[] };
+        assert.match(tail?.content?.[0]?.text ?? "", /summary text only/);
+
+        // History readback: the summarized first turn is gone from the live
+        // context, but the public history tool reads the raw entry back from
+        // the same session branch.
+        await session.host.prompt(snapshot.sessionId, "read back the original request");
         await session.host.session.waitForIdle();
-        assert.match(JSON.stringify(session.host.session.messages), /next user turn still completed/);
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
-        await session.host.session.compact();
-        assert.equal(session.host.snapshot().harness?.memory.lastFailure?.phase, "compaction");
-        let settings = await session.host.getSettings();
-        await session.host.updateSettings("global", {
-          harness: { tools: { grep: false } },
-        }, [], settings.globalRevision);
-        assert.equal(
-          session.host.snapshot().harness?.memory.lastFailure?.phase,
-          "compaction",
-          "an unrelated Harness setting must not hide a memory failure",
-        );
-        settings = await session.host.getSettings();
-        await session.host.updateSettings("global", {
-          harness: { memory: { mode: "assist" }, tools: { grep: false } },
-        }, [], settings.globalRevision);
-        assert.equal(
-          session.host.snapshot().harness?.memory.lastFailure,
-          undefined,
-          "a successful global memory setting update must retire the previous mode's failure",
-        );
+        assert.equal(turnCalls.length, 4);
+        assert.equal(summaryCalls.length, 2, "the second preparation is a new candidate, not a recommit of the first");
+        assert.match(historyResult, /Inspect the repository layout/, "history must return the summarized raw user text");
+        assert.match(historyResult, /entry [0-9a-f]+ · message\/user/, "history must identify the entry and its role");
       } finally {
-        await session.dispose();
-        await store.close();
+        releaseSummary?.();
+        await session?.dispose();
         faux.unregister();
       }
     });
@@ -1916,293 +1839,6 @@ describe("session e2e — Harness counters", () => {
         assert.equal(typeof stats.cacheHitRatio, "number");
       } finally {
         await session.dispose();
-        faux.unregister();
-      }
-    });
-  });
-});
-
-// ── Compaction ─────────────────────────────────────────────────────
-
-/**
- * Drive four large turns so the session exceeds `keepRecentTokens`, then
- * compact. Returns the provider call count before and after compaction.
- */
-async function runCompactionCase(options: {
-  root: string;
-  compactionDepsProvider: (sessionId: string) => Promise<CompactionHandlerDeps>;
-}): Promise<{ callsBefore: number; callsAfter: number; messagesJson: string; snapshot: ReturnType<SessionHost["snapshot"]> }> {
-  const faux = registerFauxProvider();
-  const largeText = "x".repeat(30000); // ~7500 tokens per response
-  faux.setResponses([
-    () => fauxAssistantMessage(`${largeText} turn 1`),
-    () => fauxAssistantMessage(`${largeText} turn 2`),
-    () => fauxAssistantMessage(`${largeText} turn 3`),
-    () => fauxAssistantMessage("done"),
-    // Spare responses: when the harness declines to take compaction over,
-    // Pi summarizes with the model and consumes one of these.
-    () => fauxAssistantMessage("pi-generated summary"),
-    () => fauxAssistantMessage("pi-generated summary 2"),
-  ]);
-
-  // Create a shared keeper coverage store and extend it with all branch
-  // entry IDs before compaction, simulating that the keeper has processed
-  // the full conversation history.
-  const { createKeeperCoverageStore } = await import("../../../web/application-host/lib/harness/compaction.js");
-  const keeperCoverageStore = createKeeperCoverageStore();
-  const compactionDeps = new Map<string, CompactionHandlerDeps>();
-  const resolveCompactionDeps = async (sessionId: string): Promise<CompactionHandlerDeps> => {
-    const existing = compactionDeps.get(sessionId);
-    if (existing) return existing;
-    const created = await options.compactionDepsProvider(sessionId);
-    compactionDeps.set(sessionId, created);
-    return created;
-  };
-
-  const session = await setupSession({
-    root: options.root,
-    faux,
-    serviceHostOptions: {
-      compactionDepsProvider: resolveCompactionDeps,
-      keeperCoverageStore,
-    },
-  });
-
-  try {
-    const snapshot = await session.host.create(options.root);
-    session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
-    for (const prompt of ["turn 1", "turn 2", "turn 3", "say done"]) {
-      await session.host.prompt(snapshot.sessionId, prompt);
-      await session.host.session.waitForIdle();
-    }
-    const callsBefore = faux.state.callCount;
-    // Simulate one fully accepted keeper patch using exactly the entries that
-    // Pi materializes into context, rather than the complete append-only branch.
-    const contextEntryIds = session.host.session.sessionManager.buildContextEntries()
-      .flatMap((entry) => sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []);
-    const branchEntryIds = session.host.session.sessionManager.getBranch().map((entry) => entry.id);
-    const deps = await resolveCompactionDeps(snapshot.sessionId);
-    const blocks = await deps.store.getBlocks(snapshot.sessionId, branchEntryIds);
-    keeperCoverageStore.extend(snapshot.sessionId, contextEntryIds, {
-      branchEntryIds,
-      blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
-    });
-    session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
-    await session.host.session.compact();
-    const callsAfter = faux.state.callCount;
-    return {
-      callsBefore,
-      callsAfter,
-      messagesJson: JSON.stringify(session.host.session.messages),
-      snapshot: session.host.snapshot(),
-    };
-  } finally {
-    await session.dispose();
-    faux.unregister();
-  }
-}
-
-describe("session e2e — compaction extension", () => {
-  it("takes compaction over with zero model calls once the memory keeper has blocks", async () => {
-    await withTempRoot("piarium-s-compact-", async (root) => {
-      let store: KnowledgeStore | undefined;
-      try {
-        store = await openWorkspaceKnowledge({
-          dataDir: join(root, "data"),
-          hostId: "test-host",
-          workspaceId: WORKSPACE_ID,
-          embedding: null,
-        });
-        await store.upsertBlock({
-          sessionId: "unused",
-          label: "progress",
-          content: "keeper-written-progress-marker",
-          updatedBy: "memory-agent",
-        });
-        const openStore = store;
-
-        const result = await runCompactionCase({
-          root,
-          compactionDepsProvider: async (sessionId) => {
-            // The keeper block is written under the real session id once it
-            // is known; mirror it here so getBlocks(sessionId) finds it.
-            await openStore.upsertBlock({
-              sessionId,
-              label: "progress",
-              content: "keeper-written-progress-marker",
-              updatedBy: "memory-agent",
-            });
-            return {
-              store: openStore,
-              settings: DEFAULT_COMPACTION_SETTINGS,
-              getFacts: async (): Promise<CompactionFacts> => ({
-                touchedFiles: ["a.ts"],
-                unresolvedDiagnostics: [],
-                checkpoints: [],
-              }),
-            };
-          },
-        });
-
-        assert.match(
-          result.messagesJson,
-          /<piarium-compaction/,
-          "the harness summary must replace the cut-off history",
-        );
-        assert.match(
-          result.messagesJson,
-          /keeper-written-progress-marker/,
-          "the keeper's block must be carried across compaction",
-        );
-        assert.equal(
-          result.callsAfter,
-          result.callsBefore,
-          "taking compaction over must cost zero model calls",
-        );
-        assert.equal(result.snapshot.harness?.memory.lastFailure, undefined);
-      } finally {
-        await store?.close();
-      }
-    });
-  });
-
-  it("leaves compaction to Pi when only the agent's plan block exists", async () => {
-    await withTempRoot("piarium-s-compact-plan-", async (root) => {
-      let store: KnowledgeStore | undefined;
-      try {
-        store = await openWorkspaceKnowledge({
-          dataDir: join(root, "data"),
-          hostId: "test-host",
-          workspaceId: WORKSPACE_ID,
-          embedding: null,
-        });
-        const openStore = store;
-
-        const result = await runCompactionCase({
-          root,
-          compactionDepsProvider: async (sessionId) => {
-            await openStore.upsertBlock({
-              sessionId,
-              label: "plan",
-              content: "- [ ] a task",
-              updatedBy: "agent",
-            });
-            return {
-              store: openStore,
-              settings: DEFAULT_COMPACTION_SETTINGS,
-              getFacts: async (): Promise<CompactionFacts> => ({
-                touchedFiles: ["a.ts"],
-                unresolvedDiagnostics: [],
-                checkpoints: [],
-              }),
-            };
-          },
-        });
-
-        // A todo checklist is not a summary: replacing the conversation with
-        // it would lose the work, so the host reports `unavailable` and Pi
-        // summarizes with the model instead.
-        assert.doesNotMatch(
-          result.messagesJson,
-          /<piarium-compaction/,
-          "the harness must not take compaction over without keeper blocks",
-        );
-        assert.ok(
-          result.callsAfter > result.callsBefore,
-          `Pi must run its own summarization (calls ${result.callsBefore} → ${result.callsAfter})`,
-        );
-        assert.equal(result.snapshot.harness?.memory.lastFailure?.phase, "compaction");
-        assert.match(result.snapshot.harness?.memory.lastFailure?.message ?? "", /no memory-keeper blocks/);
-      } finally {
-        await store?.close();
-      }
-    });
-  });
-
-  it("takes over two consecutive compactions after coverage is rebuilt", async () => {
-    await withTempRoot("piarium-s-compact-twice-", async (root) => {
-      const store = await openWorkspaceKnowledge({
-        dataDir: join(root, "data"),
-        hostId: "twice-host",
-        workspaceId: WORKSPACE_ID,
-        embedding: null,
-      });
-      const faux = registerFauxProvider();
-      const largeText = "x".repeat(30_000);
-      faux.setResponses([
-        () => fauxAssistantMessage(`${largeText} first 1`),
-        () => fauxAssistantMessage(`${largeText} first 2`),
-        () => fauxAssistantMessage(`${largeText} first 3`),
-        () => fauxAssistantMessage("first done"),
-        () => fauxAssistantMessage(`${largeText} second 1`),
-        () => fauxAssistantMessage(`${largeText} second 2`),
-        () => fauxAssistantMessage(`${largeText} second 3`),
-        () => fauxAssistantMessage("second done"),
-        () => fauxAssistantMessage("unexpected Pi summary"),
-      ]);
-      const coverage = (await import("../../../web/application-host/lib/harness/compaction.js"))
-        .createKeeperCoverageStore();
-      const session = await setupSession({
-        root,
-        faux,
-        serviceHostOptions: {
-          keeperCoverageStore: coverage,
-          compactionDepsProvider: async () => ({
-            store,
-            settings: DEFAULT_COMPACTION_SETTINGS,
-            getFacts: async () => ({ touchedFiles: [], unresolvedDiagnostics: [], checkpoints: [] }),
-          }),
-        },
-      });
-      const coverCurrentBranch = async (sessionId: string, marker: string): Promise<void> => {
-        const branchEntryIds = session.host.session.sessionManager.getBranch().map((entry) => entry.id);
-        const contextEntryIds = session.host.session.sessionManager.buildContextEntries()
-          .flatMap((entry) => sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []);
-        const sourceLeafId = branchEntryIds.at(-1) ?? null;
-        await store.upsertBlock({
-          sessionId,
-          label: "progress",
-          content: marker,
-          updatedBy: "memory-agent",
-          branchEntryIds,
-          sourceLeafId,
-        });
-        const blocks = await store.getBlocks(sessionId, branchEntryIds);
-        coverage.extend(sessionId, contextEntryIds, {
-          branchEntryIds,
-          blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
-        });
-      };
-      try {
-        const snapshot = await session.host.create(root);
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
-        for (const prompt of ["first 1", "first 2", "first 3", "first done"]) {
-          await session.host.prompt(snapshot.sessionId, prompt);
-          await session.host.session.waitForIdle();
-        }
-        await coverCurrentBranch(snapshot.sessionId, "first-compaction-marker");
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
-        const callsBeforeFirst = faux.state.callCount;
-        await session.host.session.compact();
-        assert.equal(faux.state.callCount, callsBeforeFirst);
-        assert.equal(coverage.get(snapshot.sessionId), null, "compaction.after must clear old coverage");
-
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "off", type: "memory.mode.set" });
-        for (const prompt of ["second 1", "second 2", "second 3", "second done"]) {
-          await session.host.prompt(snapshot.sessionId, prompt);
-          await session.host.session.waitForIdle();
-        }
-        await coverCurrentBranch(snapshot.sessionId, "second-compaction-marker");
-        session.host.mutateFeatures(snapshot.sessionId, { mode: "takeover", type: "memory.mode.set" });
-        const callsBeforeSecond = faux.state.callCount;
-        await session.host.session.compact();
-        assert.equal(faux.state.callCount, callsBeforeSecond);
-        const messages = JSON.stringify(session.host.session.messages);
-        assert.match(messages, /second-compaction-marker/);
-        assert.equal(session.host.snapshot().harness?.memory.lastFailure, undefined);
-      } finally {
-        await session.dispose();
-        await store.close();
         faux.unregister();
       }
     });

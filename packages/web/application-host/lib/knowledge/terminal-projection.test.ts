@@ -15,15 +15,13 @@ const userCommand = (overrides: Partial<TerminalCommandRecord> = {}): TerminalCo
 });
 
 describe("terminal command projector", () => {
-  it("stores a user command and nudges bound sessions after drain", async () => {
+  it("stores a user command for each bound session after drain", async () => {
     const observed: unknown[] = [];
-    const nudged: unknown[] = [];
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async (cwd) => cwd === "/workspace" ? "ws-1" : null,
       observe: (event) => { observed.push(event); return true; },
       drain: async () => undefined,
       listBoundSessions: () => ["session-a", "session-b"],
-      nudgeMemory: async (sessionId, input) => { nudged.push({ sessionId, input }); },
     });
     await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true, "session-b": true });
     expect(observed).toHaveLength(2);
@@ -41,8 +39,6 @@ describe("terminal command projector", () => {
         workspaceId: "ws-1",
       }),
     ]);
-    expect(nudged).toHaveLength(2);
-    expect(nudged[0]).toMatchObject({ sessionId: "session-a", input: { reason: "user-command" } });
   });
 
   it("ignores harness commands and unresolved workspaces", async () => {
@@ -52,32 +48,31 @@ describe("terminal command projector", () => {
       observe: () => { observed += 1; return true; },
       drain: async () => undefined,
       listBoundSessions: () => ["session-a"],
-      nudgeMemory: async () => { throw new Error("should not nudge"); },
     });
     await projector.project(userCommand({ owner: "harness" }));
     await projector.project(userCommand({ owner: "user" }));
     expect(observed).toBe(0);
   });
 
-  it("does not fail the terminal path when memory nudge throws", async () => {
+  it("reports per-session results when the drain fails", async () => {
+    const errors: unknown[] = [];
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => "ws-1",
       observe: () => true,
-      drain: async () => undefined,
+      drain: async () => { throw new Error("drain failed"); },
       listBoundSessions: () => ["session-a"],
-      nudgeMemory: async () => { throw new Error("worker gone"); },
-      onError: () => undefined,
+      onError: (error) => { errors.push(error); },
     });
     await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": true });
+    expect(errors).toHaveLength(1);
   });
 
-  it("does not nudge memory when the persistent write is a duplicate commandId", async () => {
+  it("returns false for a session when the persistent write is a duplicate commandId", async () => {
     const projector = createTerminalCommandProjector({
       resolveWorkspaceId: async () => "ws-1",
       observe: async () => false,
       drain: async () => undefined,
       listBoundSessions: () => ["session-a"],
-      nudgeMemory: async () => { throw new Error("should not nudge"); },
     });
     await expect(projector.project(userCommand())).resolves.toEqual({ "session-a": false });
   });

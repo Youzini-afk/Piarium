@@ -1,23 +1,12 @@
 import type { TerminalCommandRecord } from "../terminal/session-api.js";
 import type { TerminalCommandEvent } from "./observers.js";
 
-export type TerminalMemoryNudgeCommand = {
-  command: string;
-  commandId: string;
-  cwd?: string;
-  exitCode: number;
-};
-
 export type TerminalCommandProjectionResult = Readonly<Record<string, boolean>>;
 
 export interface TerminalCommandProjectorDeps {
   drain(): Promise<void>;
   inspectCwd?(terminalId: string): string | undefined;
   listBoundSessions(workspaceId: string): string[];
-  nudgeMemory(sessionId: string, input: {
-    commands: TerminalMemoryNudgeCommand[];
-    reason: "user-command";
-  }): Promise<unknown>;
   /** Persist the observation for one target Pi session. */
   observe(event: TerminalCommandEvent, targetSessionId?: string): boolean | Promise<boolean>;
   onError?(error: unknown): void;
@@ -34,13 +23,6 @@ export const createTerminalCommandObserveAdapter = (
 ): TerminalCommandProjectorDeps["observe"] => (
   (event, targetSessionId) => runtime.observeTerminalCommand(event, targetSessionId)
 );
-
-const commandFrom = (record: TerminalCommandRecord, cwd?: string): TerminalMemoryNudgeCommand => ({
-  command: record.command,
-  commandId: record.commandId,
-  exitCode: record.exitCode,
-  ...(cwd === undefined ? {} : { cwd }),
-});
 
 export function createTerminalCommandProjector(deps: TerminalCommandProjectorDeps) {
   const project = async (record: TerminalCommandRecord): Promise<TerminalCommandProjectionResult> => {
@@ -86,16 +68,7 @@ export function createTerminalCommandProjector(deps: TerminalCommandProjectorDep
       deps.onError?.(error);
       return Object.fromEntries(inserted.map(({ sessionId, inserted: wasInserted }) => [sessionId, wasInserted]));
     }
-    const result = Object.fromEntries(inserted.map(({ sessionId, inserted: wasInserted }) => [sessionId, wasInserted]));
-    const commands = [commandFrom(record, cwd)];
-    await Promise.all(inserted.filter((result) => result.inserted).map(async ({ sessionId }) => {
-      try {
-        await deps.nudgeMemory(sessionId, { reason: "user-command", commands });
-      } catch (error) {
-        deps.onError?.(error);
-      }
-    }));
-    return result;
+    return Object.fromEntries(inserted.map(({ sessionId, inserted: wasInserted }) => [sessionId, wasInserted]));
   };
 
   return { project };

@@ -19,11 +19,9 @@ import type { HarnessSearchService } from "./search-service.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { createLspDiagnosticsService, createLspDiagnosticsSnapshotService } from "./diagnostics-service.js";
 import { assembleZone2Content } from "./zone2.js";
-import { handleBeforeCompact } from "./compaction.js";
 import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
-import { applyOps } from "./memory-agent.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
@@ -573,9 +571,6 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
           };
         }
       }
-      const material = params.memoryMode === "off"
-        ? { ...result.material, blocks: [] }
-        : result.material;
       const reviews = threads && threads.status === "ready"
         ? threads.items.flatMap((thread) => {
             const review = thread.verification?.review;
@@ -590,39 +585,8 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
             }];
           })
         : [];
-      const content = assembleZone2Content({ ...material, threads, reviews }, { eventCursor: result.eventCursor });
+      const content = assembleZone2Content({ ...result.material, threads, reviews }, { eventCursor: result.eventCursor });
       return { content, eventCursor: result.eventCursor };
-    },
-  };
-}
-
-export function createCompactionBeforeService(host: HarnessServiceHost): HarnessService<"compaction.before"> {
-  return {
-    handle: async (params, ctx: HarnessServiceContext) => {
-      if (!host.compactionDepsProvider) {
-        throw new HarnessServiceError("unavailable", "Compaction deps not configured");
-      }
-      const deps = await host.compactionDepsProvider(ctx.sessionId);
-      // Merge the host's keeperCoverageStore into the deps. The provider
-      // may not include it, but the host always has one (created by default
-      // in createHarnessServiceHost). This ensures the mandatory coverage
-      // check can run.
-      const depsWithCoverage = {
-        ...deps,
-        ...(deps.coverageStore ? {} : { coverageStore: host.keeperCoverageStore }),
-      };
-      const result = await handleBeforeCompact(
-        ctx.sessionId,
-        depsWithCoverage,
-        {
-          firstKeptEntryId: params.firstKeptEntryId,
-          tokensBefore: params.tokensBefore,
-          branchEntryIds: params.branchEntryIds,
-          removedEntryIds: params.removedEntryIds,
-          mode: params.mode,
-        },
-      );
-      return result;
     },
   };
 }
@@ -632,66 +596,9 @@ export function createCompactionAfterService(host: HarnessServiceHost): HarnessS
     handle: async (_params, ctx: HarnessServiceContext) => {
       host.observationCursors.clearObserver(ctx.sessionId);
       host.threadRegistry?.clearCursorsForSession(ctx.sessionId);
-      host.keeperCoverageStore.clear(ctx.sessionId);
+
       host.onSessionCompacted?.(ctx.sessionId);
       return { acknowledged: true };
-    },
-  };
-}
-
-export function createMemoryBlocksGetService(host: HarnessServiceHost): HarnessService<"memory.blocks.get"> {
-  return {
-    handle: async (params, ctx) => {
-      if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
-      const deps = await host.memoryDepsProvider(ctx.sessionId);
-      const blocks = await deps.store.getBlocks(
-        ctx.sessionId,
-        params.branchEntryIds,
-      );
-      return {
-        blocks: blocks.map((block) => ({
-          label: block.label,
-          content: block.content,
-          updatedBy: block.updatedBy,
-          revision: block.updatedAt,
-          ...(block.cursorTurn === undefined ? {} : { cursorTurn: block.cursorTurn }),
-          ...(block.sourceLeafId === undefined ? {} : { sourceLeafId: block.sourceLeafId }),
-        })),
-      };
-    },
-  };
-}
-
-export function createMemoryBlocksApplyService(host: HarnessServiceHost): HarnessService<"memory.blocks.apply"> {
-  return {
-    handle: async (params, ctx) => {
-      if (!host.memoryDepsProvider) throw new HarnessServiceError("unavailable", "Memory block storage is unavailable");
-      const deps = await host.memoryDepsProvider(ctx.sessionId);
-      // The source leaf is the last entry ID in the branch path — the
-      // current leaf at apply time. Blocks written here will be visible
-      // on this branch and its descendants via ancestor resolution.
-      const sourceLeafId = params.branchEntryIds && params.branchEntryIds.length > 0
-        ? params.branchEntryIds[params.branchEntryIds.length - 1]!
-        : null;
-      const branchSet = new Set(params.branchEntryIds);
-      if (params.coveredEntryIds.some((entryId) => !branchSet.has(entryId))) {
-        throw new HarnessServiceError("invalid-params", "Keeper coverage contains an entry outside the submitted branch");
-      }
-      const result = await applyOps(params.ops, deps.store, ctx.sessionId, params.cursorTurn, deps.settings, {
-        branchEntryIds: params.branchEntryIds,
-        sourceLeafId,
-      });
-      // Only a fully accepted, material block update can certify the context
-      // entries used for that update. Partial patches and no-op/stale results
-      // deliberately leave coverage unchanged so takeover falls back to Pi.
-      if (result.rejected === 0 && result.changedBlocks && params.coveredEntryIds.length > 0) {
-        const blocks = await deps.store.getBlocks(ctx.sessionId, params.branchEntryIds);
-        host.keeperCoverageStore.extend(ctx.sessionId, params.coveredEntryIds, {
-          branchEntryIds: params.branchEntryIds,
-          blocks: blocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
-        });
-      }
-      return result;
     },
   };
 }
@@ -878,16 +785,8 @@ export function registerHarnessServices(
   if (host.zone2Provider) {
     router.register("zone2.assemble", createZone2AssembleService(host));
   }
-  if (host.compactionDepsProvider) {
-    router.register("compaction.before", createCompactionBeforeService(host));
-  }
-  // Every Host can acknowledge compaction and reset observer baselines even
-  // when custom compaction takeover is unavailable.
+  // Every Host can acknowledge compaction and reset observer baselines.
   router.register("compaction.after", createCompactionAfterService(host));
-  if (host.memoryDepsProvider) {
-    router.register("memory.blocks.get", createMemoryBlocksGetService(host));
-    router.register("memory.blocks.apply", createMemoryBlocksApplyService(host));
-  }
   if (host.todoDepsProvider) {
     router.register("todo.upsert", createTodoUpsertService(host));
   }

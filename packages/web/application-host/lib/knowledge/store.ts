@@ -1251,7 +1251,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           sessionId,
           label,
           content: "",
-          updatedBy: options?.updatedBy ?? "memory-agent",
+          updatedBy: options?.updatedBy ?? "agent",
           ...(options?.cursorTurn !== undefined ? { cursorTurn: options.cursorTurn } : {}),
           updatedAt: timestamp,
           sourceLeafId,

@@ -236,14 +236,14 @@ describe("KnowledgeStore", () => {
         sessionId: "s1",
         label: "progress",
         content: "v2",
-        updatedBy: "memory-agent",
+        updatedBy: "agent",
         cursorTurn: 5,
       });
 
       const blocks = await store.getBlocks("s1");
       expect(blocks).toHaveLength(1);
       expect(blocks[0]?.content).toBe("v2");
-      expect(blocks[0]?.updatedBy).toBe("memory-agent");
+      expect(blocks[0]?.updatedBy).toBe("agent");
       expect(blocks[0]?.cursorTurn).toBe(5);
     });
 

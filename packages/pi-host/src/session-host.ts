@@ -74,10 +74,10 @@ import type {
   PiSessionEntry,
   PiSessionFeatureMutation,
   PiSessionFeatureState,
-  HarnessMemoryFailurePhase,
-  HarnessMemoryMode,
-  HarnessMemoryRuntimeFailure,
-  HarnessMemoryRuntimeState,
+  HarnessContextFailurePhase,
+  HarnessContextRuntimeFailure,
+  HarnessContextRuntimeState,
+  HarnessContextSettings,
   SessionEntriesResult,
   SessionHeader,
   SessionSnapshot,
@@ -151,8 +151,10 @@ import {
 import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
-import { createCompactionExtension } from "./harness/compaction-extension.js";
-import { createMemoryAgentExtension, type MemoryAgentExtension, type MemoryNudgeInput } from "./harness/memory-agent-extension.js";
+import {
+  createContextPreparationExtension,
+  type ContextPreparationExtension,
+} from "./harness/context-preparation.js";
 import { createKnowledgeSuggestionExtension } from "./harness/knowledge-suggestion-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
@@ -165,11 +167,9 @@ import {
   type PermissionPolicy,
   parseHarnessEmbeddingSettings,
   parseHarnessRerankSettings,
-  parseMemoryEditOps,
-  resolveHarnessMemoryMode,
+  resolveHarnessContextSettings,
   resolveRoles,
   type HarnessSettingsInput,
-  type MemoryEditOp,
   type ModelSelection,
 } from "@piarium/protocol";
 
@@ -641,9 +641,9 @@ export class SessionHost {
   #sessionToolAllowlist: string[] | undefined;
   #sessionModelSelection: ModelSelection | undefined;
   #frozenPermissionOverlay: PermissionPolicy | undefined;
-  #memoryModeReader: (() => Omit<HarnessMemoryRuntimeState, "lastFailure">) | undefined;
-  #memoryNudge: MemoryAgentExtension["nudge"] | undefined;
-  #memoryLastFailure: HarnessMemoryRuntimeFailure | undefined;
+  #contextPreparation: ContextPreparationExtension | undefined;
+  #contextConfigReader: (() => HarnessContextSettings) | undefined;
+  #contextLastFailure: HarnessContextRuntimeFailure | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
   #backgroundInference: BackgroundInferenceRuntime | undefined;
@@ -848,7 +848,7 @@ export class SessionHost {
       features: readSessionFeatures(session.sessionManager),
       followUp: [...session.getFollowUpMessages()],
       followUpMode: session.followUpMode,
-      harness: { memory: this.#memoryRuntimeState() },
+      harness: { context: this.#contextRuntimeState() },
       isCompacting: session.isCompacting,
       isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
@@ -1304,22 +1304,6 @@ export class SessionHost {
       await this.#queueInstructions(instructions, "steer");
       await this.session.steer(text, images === undefined ? undefined : toImages(images));
       await this.#commitInputContext(inputContext, previousContext);
-      const memoryNudge = this.#memoryNudge;
-      if (memoryNudge) {
-        void memoryNudge({
-          reason: "steering",
-          materials: [{
-            id: `steering:${randomUUID()}`,
-            kind: "steering",
-            text,
-          }],
-        }).catch((error: unknown) => {
-          this.#emit("host.log", {
-            level: "warn",
-            message: `Memory keeper steering nudge failed: ${error instanceof Error ? error.message : String(error)}`,
-          });
-        });
-      }
       return true;
     } catch (error) {
       this.#inputContext = previousContext;
@@ -1411,15 +1395,6 @@ export class SessionHost {
     return wasBusy;
   }
 
-  async nudgeMemory(
-    sessionId: string,
-    input: MemoryNudgeInput,
-  ): Promise<{ accepted: boolean; reason: string }> {
-    this.assertSession(sessionId);
-    if (!this.#memoryNudge) return { accepted: false, reason: "unavailable" };
-    return this.#memoryNudge(input);
-  }
-
   clearQueue(sessionId: string): { cleared: boolean; followUp: string[]; steering: string[] } {
     this.assertSession(sessionId);
     const cleared = this.session.clearQueue();
@@ -1444,7 +1419,6 @@ export class SessionHost {
       const state = mutateSessionFeatures(this.session.sessionManager, mutation, {
         tokenBaseline: this.session.getSessionStats().tokens.total,
       });
-      if (mutation.type === "memory.mode.set") this.#memoryLastFailure = undefined;
       this.#emit("session.snapshot", this.snapshot());
       return state;
     } catch (error) {
@@ -2639,21 +2613,24 @@ export class SessionHost {
       ? join(this.#agentDir, "settings.json")
       : join(this.runtime.cwd, ".pi", "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
-    let globalMemorySettingChanged = false;
+    let globalContextSettingChanged = false;
     if (scope === "global") {
       if (typeof set !== "object" || set === null || Array.isArray(set)) {
         throw new HostError("invalid_config", "Configuration set must be an object");
       }
       const current = await editor.read();
       const currentHarness = current.document.harness;
-      const currentMemory = typeof currentHarness === "object" && currentHarness !== null && !Array.isArray(currentHarness)
-        ? (currentHarness as Record<string, unknown>).memory
-        : undefined;
-      let currentMemoryMode: HarnessMemoryMode | undefined;
+      const currentHarnessRecord = typeof currentHarness === "object" && currentHarness !== null && !Array.isArray(currentHarness)
+        ? currentHarness as Record<string, unknown>
+        : {};
+      let currentContext: ReturnType<typeof resolveHarnessContextSettings> | undefined;
       try {
-        currentMemoryMode = resolveHarnessMemoryMode(currentMemory);
+        currentContext = resolveHarnessContextSettings(
+          currentHarnessRecord.context,
+          currentHarnessRecord.memory,
+        );
       } catch {
-        // A valid candidate may repair malformed persisted memory settings.
+        // A valid candidate may repair malformed persisted context settings.
       }
       const candidate = applyTopLevelJsonChanges(
         current.document,
@@ -2667,17 +2644,18 @@ export class SessionHost {
         )) {
           throw new HarnessSettingsValidationError("harness must be an object");
         }
-        const memory = typeof harness === "object" && harness !== null && !Array.isArray(harness)
-          ? (harness as Record<string, unknown>).memory
-          : undefined;
         const harnessRecord = typeof harness === "object" && harness !== null && !Array.isArray(harness)
           ? harness as Record<string, unknown>
           : {};
         parseHarnessEmbeddingSettings(harnessRecord.embedding);
         parseHarnessRerankSettings(harnessRecord.rerank);
-        const candidateMemoryMode = resolveHarnessMemoryMode(memory);
-        globalMemorySettingChanged = currentMemoryMode === undefined
-          || currentMemoryMode !== candidateMemoryMode;
+        const candidateContext = resolveHarnessContextSettings(
+          harnessRecord.context,
+          harnessRecord.memory,
+        );
+        globalContextSettingChanged = currentContext === undefined
+          || currentContext.backgroundPreparation !== candidateContext.backgroundPreparation
+          || currentContext.preparationWaterline !== candidateContext.preparationWaterline;
       } catch (error) {
         if (
           error instanceof HarnessSettingsValidationError
@@ -2701,7 +2679,7 @@ export class SessionHost {
         reloadErrors.map((entry) => entry.error.message).join("; "),
       );
     }
-    if (globalMemorySettingChanged) this.#memoryLastFailure = undefined;
+    if (globalContextSettingChanged) this.#contextLastFailure = undefined;
     await this.session.reload();
     this.#emit("session.snapshot", this.snapshot());
     return this.#settingsSnapshot();
@@ -2911,7 +2889,7 @@ export class SessionHost {
 
   async #replaceWith(manager: SessionManager): Promise<void> {
     if (this.#disposed) throw new HostError("host_disposed", "Pi session host is disposed");
-    this.#memoryLastFailure = undefined;
+    this.#contextLastFailure = undefined;
     await this.#disposeRuntime();
     const cwd = manager.getCwd();
     const factory = this.#createRuntimeFactory();
@@ -2977,41 +2955,16 @@ export class SessionHost {
       const sessionPermissions = this.#frozenPermissionOverlay
         ? mergePolicies(this.#frozenPermissionOverlay, livePermissions)
         : livePermissions;
-      const memoryModeReader = (): Omit<HarnessMemoryRuntimeState, "lastFailure"> => {
+      const contextConfigReader = () => {
         const currentHarness = (settingsManager.getGlobalSettings() as {
-          harness?: { memory?: unknown };
+          harness?: { context?: unknown; memory?: unknown };
         }).harness;
-        const configuredMode = resolveHarnessMemoryMode(currentHarness?.memory);
-        const overrideMode = readSessionFeatures(sessionManager).memoryMode;
-        return {
-          configuredMode,
-          effectiveMode: overrideMode ?? configuredMode,
-          ...(overrideMode === undefined ? {} : { overrideMode }),
-        };
+        return resolveHarnessContextSettings(currentHarness?.context, currentHarness?.memory);
       };
-      this.#memoryModeReader = memoryModeReader;
+      this.#contextConfigReader = contextConfigReader;
       let permissionJudge: ((toolName: string, params: Record<string, unknown>) => Promise<"allow" | "ask">) | undefined;
       let draftUserMessageSuggestion: ((prompt: string) => Promise<string>) | undefined;
       const serviceRef: { current?: AgentSessionServices } = {};
-      const callMemoryModel = async (
-        model: Model<Api> | undefined,
-        context: Context,
-        signal: AbortSignal,
-      ): Promise<MemoryEditOp[] | null> => {
-        if (!model) return null;
-        const modelRuntime = serviceRef.current?.modelRuntime;
-        if (!modelRuntime) throw new Error("Memory keeper model runtime is not ready");
-        const response = await modelRuntime.completeSimple(model, context, {
-          reasoning: "minimal",
-          signal,
-          toolChoice: "auto",
-        });
-        const call = response.content.find((part) => part.type === "toolCall" && part.name === "memory_edit");
-        if (call?.type !== "toolCall") return null;
-        const ops = parseMemoryEditOps(call.arguments);
-        if (!ops) throw new Error("Memory keeper returned invalid memory_edit operations");
-        return ops;
-      };
       const agentProviders = new AgentProviderBridge();
       this.#agentProviders = agentProviders;
       const fleet = new FleetProviderRegistry([
@@ -3070,61 +3023,54 @@ export class SessionHost {
             {
               factory: createZone2Extension({
                 bridge: hostServicesBridge,
-                getMemoryMode: () => memoryModeReader().effectiveMode,
               }),
               hidden: true,
               name: "piarium-zone2",
             },
             {
-              factory: createCompactionExtension({
-                bridge: hostServicesBridge,
-                getMode: () => memoryModeReader().effectiveMode,
-                onFailure: (message) => {
-                  if (this.#memoryModeReader === memoryModeReader) {
-                    this.#setMemoryFailure("compaction", message);
-                  }
-                },
-                onSuccess: () => {
-                  if (this.#memoryModeReader === memoryModeReader) {
-                    this.#clearMemoryFailure("compaction");
-                  }
-                },
-              }),
-              hidden: true,
-              name: "piarium-compaction",
-            },
-            {
               factory: (() => {
-                const memoryExtension = createMemoryAgentExtension({
-                  bridge: hostServicesBridge,
-                  getMode: () => memoryModeReader().effectiveMode,
-                  callModel: callMemoryModel,
-                  getBranchEntryIds: () => sessionManager.getBranch().map((e) => e.id),
-                  getContextEntryIds: () => sessionManager.buildContextEntries().flatMap((entry) => (
-                    sessionEntryToContextMessages(entry).length > 0 ? [entry.id] : []
-                  )),
-                  onError: (error) => {
-                    this.#emit("host.log", {
-                      level: "warn",
-                      message: `Memory keeper update failed: ${error instanceof Error ? error.message : String(error)}`,
-                    });
+                const contextPreparation = createContextPreparationExtension({
+                  completeSimple: (model, context, requestOptions) => {
+                    const modelRuntime = serviceRef.current?.modelRuntime;
+                    if (!modelRuntime) {
+                      return Promise.reject(new Error("Context preparation model runtime is not ready"));
+                    }
+                    return modelRuntime.completeSimple(model, context, requestOptions);
                   },
-                  onFailure: (message) => {
-                    if (this.#memoryModeReader === memoryModeReader) {
-                      this.#setMemoryFailure("keeper", message);
+                  getCompactionSettings: () => settingsManager.getCompactionSettings(),
+                  getPreparationConfig: () => {
+                    const resolved = contextConfigReader();
+                    return {
+                      enabled: resolved.backgroundPreparation,
+                      waterline: resolved.preparationWaterline,
+                    };
+                  },
+                  onCompaction: (params) => {
+                    void hostServicesBridge.request<"compaction.after">("compaction.after", params, {
+                      timeoutMs: 5_000,
+                    }).catch(() => undefined);
+                  },
+                  onFailure: (phase, message) => {
+                    if (this.#contextConfigReader !== undefined) {
+                      this.#setContextFailure(phase, message);
                     }
                   },
-                  onSuccess: () => {
-                    if (this.#memoryModeReader === memoryModeReader) {
-                      this.#clearMemoryFailure("keeper");
+                  onStatus: () => {
+                    if (this.#contextConfigReader !== undefined && this.#runtime) {
+                      this.#emit("session.snapshot", this.snapshot());
+                    }
+                  },
+                  onSuccess: (phase) => {
+                    if (this.#contextConfigReader !== undefined) {
+                      this.#clearContextFailure(phase);
                     }
                   },
                 });
-                this.#memoryNudge = (input) => memoryExtension.nudge(input);
-                return memoryExtension;
+                this.#contextPreparation = contextPreparation;
+                return contextPreparation;
               })(),
               hidden: true,
-              name: "piarium-memory-keeper",
+              name: "piarium-context-preparation",
             },
             {
               factory: createKnowledgeSuggestionExtension({
@@ -3540,8 +3486,8 @@ export class SessionHost {
     this.#hostServicesBridge = undefined;
     this.#harnessCounters?.reset();
     this.#harnessCounters = undefined;
-    this.#memoryModeReader = undefined;
-    this.#memoryNudge = undefined;
+    this.#contextPreparation = undefined;
+    this.#contextConfigReader = undefined;
     this.#inputContext = { source: "disk" };
     const runtime = this.#runtime;
     this.#runtime = undefined;
@@ -3561,27 +3507,24 @@ export class SessionHost {
     return this.#mcpConfig;
   }
 
-  #memoryRuntimeState(): HarnessMemoryRuntimeState {
-    const mode = this.#memoryModeReader?.() ?? {
-      configuredMode: "takeover" as HarnessMemoryMode,
-      effectiveMode: "takeover" as HarnessMemoryMode,
-    };
+  #contextRuntimeState(): HarnessContextRuntimeState {
     return {
-      ...mode,
-      ...(this.#memoryLastFailure === undefined
+      backgroundPreparation: this.#contextConfigReader?.().backgroundPreparation ?? true,
+      candidate: this.#contextPreparation?.status().candidate ?? "none",
+      ...(this.#contextLastFailure === undefined
         ? {}
-        : { lastFailure: { ...this.#memoryLastFailure } }),
+        : { lastFailure: { ...this.#contextLastFailure } }),
     };
   }
 
-  #setMemoryFailure(phase: HarnessMemoryFailurePhase, message: string): void {
-    this.#memoryLastFailure = { at: Date.now(), message, phase };
+  #setContextFailure(phase: HarnessContextFailurePhase, message: string): void {
+    this.#contextLastFailure = { at: Date.now(), message, phase };
     if (this.#runtime) this.#emit("session.snapshot", this.snapshot());
   }
 
-  #clearMemoryFailure(phase: HarnessMemoryFailurePhase): void {
-    if (this.#memoryLastFailure?.phase !== phase) return;
-    this.#memoryLastFailure = undefined;
+  #clearContextFailure(phase: HarnessContextFailurePhase): void {
+    if (this.#contextLastFailure?.phase !== phase) return;
+    this.#contextLastFailure = undefined;
     if (this.#runtime) this.#emit("session.snapshot", this.snapshot());
   }
 

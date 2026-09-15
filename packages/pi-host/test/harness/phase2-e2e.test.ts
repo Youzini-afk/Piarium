@@ -2,7 +2,7 @@
  * Phase 2 e2e integration test — todo and recall tools through the full
  * bridge → router → service → knowledge store chain.
  *
- * Also tests zone2.assemble and compaction.before service handlers.
+ * Also tests the zone2.assemble and compaction.after service handlers.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -14,17 +14,13 @@ import { createHarnessServiceHost } from "../../../web/application-host/lib/harn
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
 import { openWorkspaceKnowledge } from "../../../web/application-host/lib/knowledge/store.js";
-import { DEFAULT_COMPACTION_SETTINGS } from "../../../web/application-host/lib/harness/compaction.js";
-
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createTodoTool } from "../../src/harness/todo-tool.js";
 import { createRecallTool } from "../../src/harness/recall-tool.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
-import type { CompactionHandlerDeps, CompactionFacts } from "../../../web/application-host/lib/harness/compaction.js";
 import type { TodoToolDeps } from "../../../web/application-host/lib/harness/todo-tool.js";
 import type { RecallToolDeps } from "../../../web/application-host/lib/harness/recall-tool.js";
-import { DEFAULT_MEMORY_AGENT_SETTINGS } from "@piarium/protocol";
 
 const SESSION_ID = "p2-e2e-session";
 const WORKSPACE_ID = "p2-e2e-workspace";
@@ -64,19 +60,6 @@ async function setupP2E2E() {
     } };
   }
 
-  // Compaction deps provider
-  async function compactionDepsProvider(_sessionId: string): Promise<CompactionHandlerDeps> {
-    return {
-      store: knowledgeStore,
-      settings: DEFAULT_COMPACTION_SETTINGS,
-      getFacts: async (): Promise<CompactionFacts> => ({
-        touchedFiles: ["src/index.ts"],
-        unresolvedDiagnostics: [],
-        checkpoints: [],
-      }),
-    };
-  }
-
   // Todo deps provider
   async function todoDepsProvider(sessionId: string): Promise<TodoToolDeps> {
     return {
@@ -102,8 +85,6 @@ async function setupP2E2E() {
     },
     knowledgeStore,
     zone2Provider,
-    compactionDepsProvider,
-    memoryDepsProvider: async () => ({ store: knowledgeStore, settings: DEFAULT_MEMORY_AGENT_SETTINGS }),
     todoDepsProvider,
     recallDepsProvider,
   });
@@ -200,89 +181,11 @@ describe("Phase 2 e2e integration", () => {
       const result = await bridge.request("zone2.assemble", {
         sinceTurn: 0,
         branchEntryIds: [],
-        memoryMode: "assist",
       });
       assert.ok(result.content, "zone2.assemble should return non-null content");
       assert.match(result.content!, /piarium-context/, "zone2 content should contain piarium-context marker");
       assert.match(result.content!, /plan/, "zone2 content should contain plan section");
       assert.equal(result.eventCursor, 7);
-
-      const off = await bridge.request("zone2.assemble", {
-        sinceTurn: 0,
-        branchEntryIds: [],
-        memoryMode: "off",
-      });
-      assert.doesNotMatch(off.content ?? "", /<plan>/, "off mode should not inject stored memory blocks");
-    } finally {
-      await harnessServiceHost.dispose();
-      try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
-      try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
-    }
-  });
-
-  it("memory blocks → bridge → router → validated Host apply", async () => {
-    const { workspaceRoot, dataDir, bridge, knowledgeStore, harnessServiceHost } = await setupP2E2E();
-    try {
-      const before = await bridge.request("memory.blocks.get", { branchEntryIds: ["e1"] });
-      assert.deepEqual(before.blocks, []);
-      const applied = await bridge.request("memory.blocks.apply", {
-        cursorTurn: 4,
-        branchEntryIds: ["e1"],
-        coveredEntryIds: ["e1"],
-        ops: [
-          { op: "create", block: "progress", content: "implemented observer wiring" },
-          { op: "patch", block: "progress", find: "implemented", replace: "verified" },
-        ],
-      });
-      assert.deepEqual(applied, { applied: 2, rejected: 0, errors: [], changedBlocks: true });
-      assert.equal((await knowledgeStore.getBlocks(SESSION_ID, ["e1"]))[0]?.content, "verified observer wiring");
-      assert.equal(harnessServiceHost.keeperCoverageStore.get(SESSION_ID)?.coveredEntryIds.has("e1"), true);
-
-      const partial = await bridge.request("memory.blocks.apply", {
-        cursorTurn: 5,
-        branchEntryIds: ["e1", "e2"],
-        coveredEntryIds: ["e1", "e2"],
-        ops: [
-          { op: "create", block: "partial", content: "written" },
-          { op: "patch", block: "partial", find: "missing", replace: "nope" },
-        ],
-      });
-      assert.equal(partial.rejected, 1);
-      assert.equal(harnessServiceHost.keeperCoverageStore.get(SESSION_ID)?.coveredEntryIds.has("e2"), false);
-    } finally {
-      await harnessServiceHost.dispose();
-      try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
-      try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
-    }
-  });
-
-  it("compaction.before → bridge → router → service: returns custom summary", async () => {
-    const { workspaceRoot, dataDir, bridge, harnessServiceHost, knowledgeStore } = await setupP2E2E();
-    try {
-      // Taking compaction over requires a block written by the memory
-      // keeper — a `plan` block alone is a checklist, not a summary (D-028).
-      await knowledgeStore.upsertBlock({
-        sessionId: SESSION_ID,
-        label: "progress",
-        content: "Wired the compaction service",
-        updatedBy: "memory-agent",
-      });
-      const visibleBlocks = await knowledgeStore.getBlocks(SESSION_ID, ["e1", "test-entry"]);
-      harnessServiceHost.keeperCoverageStore.extend(SESSION_ID, ["e1"], {
-        branchEntryIds: ["e1", "test-entry"],
-        blocks: visibleBlocks.map((block) => ({ label: block.label, revision: block.updatedAt })),
-      });
-      const result = await bridge.request("compaction.before", {
-        branchEntryIds: ["e1", "test-entry"],
-        firstKeptEntryId: "test-entry",
-        mode: "takeover",
-        removedEntryIds: ["e1"],
-        tokensBefore: 50000,
-      });
-      assert.ok(result.summary, "compaction.before should return a summary");
-      assert.match(result.summary, /piarium-compaction/, "summary should contain piarium-compaction marker");
-      assert.equal(result.firstKeptEntryId, "test-entry", "firstKeptEntryId should come from Pi preparation params");
-      assert.equal(result.tokensBefore, 50000, "tokensBefore should come from Pi preparation params");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

@@ -6,7 +6,6 @@ import {
   validatePermissionRule,
   type JsonValue,
   type HarnessWebSearchProvider,
-  type HarnessMemoryMode,
   type HarnessModelPreset,
   type HarnessEmbeddingSettings,
   type HarnessModelRole,
@@ -35,11 +34,6 @@ import { getPiSettings, updatePiSettings } from '@/lib/pi-runtime/settings';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { usePiProviderStore } from '@/stores/usePiProviderStore';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import {
-  HARNESS_MEMORY_MODES,
-  resolveHarnessMemoryModeForUi,
-  withHarnessMemoryMode,
-} from './harnessMemoryPresentation';
 import { embeddingFromDraft, rerankFromDraft } from './harnessInferencePresentation';
 
 const TOOL_KEYS = [
@@ -63,7 +57,7 @@ export interface HarnessSettings {
   models?: Partial<Record<HarnessModelRole, ModelSelection>>;
   embedding?: HarnessEmbeddingSettings;
   rerank?: HarnessRerankSettings;
-  memory?: { mode?: HarnessMemoryMode; shadowMode?: boolean; [key: string]: unknown };
+  context?: { backgroundPreparation?: boolean; preparationWaterline?: number };
   web?: {
     render?: boolean;
     search?: { provider: HarnessWebSearchProvider; endpoint?: string; credentialRef?: string };
@@ -145,11 +139,6 @@ export const HarnessSettingsPage: React.FC = () => {
   const bashWaitMs = harness.bash?.waitMs ?? DEFAULT_HARNESS_SETTINGS.bash.waitMs;
   const permissionMode = harness.permissions?.mode ?? DEFAULT_HARNESS_SETTINGS.permissions?.mode ?? 'normal';
   const smartAvailable = Boolean(harness.models?.permissionJudge);
-  const memoryModeResolution = React.useMemo(
-    () => resolveHarnessMemoryModeForUi(harness.memory),
-    [harness.memory],
-  );
-  const memoryMode = memoryModeResolution.mode ?? 'invalid';
   const models = React.useMemo(() => harness.models ?? {}, [harness.models]);
 
   React.useEffect(() => {
@@ -266,9 +255,14 @@ export const HarnessSettingsPage: React.FC = () => {
     }
   }, [harness, rulesDraft, saveHarness, t]);
 
-  const handleMemoryModeChange = React.useCallback((mode: string) => {
-    if (!(HARNESS_MEMORY_MODES as readonly string[]).includes(mode)) return;
-    void saveHarness(withHarnessMemoryMode(harness, mode as HarnessMemoryMode));
+  const handleContextChange = React.useCallback((patch: { backgroundPreparation?: boolean }) => {
+    void saveHarness({
+      ...harness,
+      context: {
+        ...harness.context,
+        backgroundPreparation: patch.backgroundPreparation ?? harness.context?.backgroundPreparation ?? true,
+      },
+    });
   }, [harness, saveHarness]);
 
   const handleReviewChange = React.useCallback((patch: { enabled?: boolean; gate?: boolean }) => {
@@ -619,34 +613,15 @@ export const HarnessSettingsPage: React.FC = () => {
       </SettingsSection>
 
       <SettingsSection
-        title={t('settings.page.harness.section.memory')}
-        description={t('settings.page.harness.section.memory.description')}
+        title={t('settings.page.harness.section.context')}
+        description={t('settings.page.harness.section.context.description')}
       >
-        <SettingsFieldRow
-          label={t('settings.page.harness.memory.mode.label')}
-          description={t('settings.page.harness.memory.mode.description')}
-        >
-          <Select value={memoryMode} onValueChange={handleMemoryModeChange}>
-            <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} size={SETTINGS_SELECT_SIZE} disabled={isSaving}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className={SETTINGS_OPTION_STACK_CLASS}>
-              {memoryModeResolution.mode === null ? (
-                <SelectItem value="invalid" disabled>
-                  {t('settings.page.harness.memory.mode.invalid')}
-                </SelectItem>
-              ) : null}
-              <SelectItem value="off">{t('settings.page.harness.memory.mode.off')}</SelectItem>
-              <SelectItem value="assist">{t('settings.page.harness.memory.mode.assist')}</SelectItem>
-              <SelectItem value="takeover">{t('settings.page.harness.memory.mode.takeover')}</SelectItem>
-            </SelectContent>
-          </Select>
-          {memoryModeResolution.error ? (
-            <p className="mt-1 text-xs text-destructive" role="alert">
-              {t('settings.page.harness.memory.mode.invalid')}: {memoryModeResolution.error}
-            </p>
-          ) : null}
-        </SettingsFieldRow>
+        <SettingsCheckboxRow
+          checked={harness.context?.backgroundPreparation !== false}
+          onChange={(checked) => handleContextChange({ backgroundPreparation: checked })}
+          label={t('settings.page.harness.context.backgroundPreparation')}
+          description={t('settings.page.harness.context.backgroundPreparation.description')}
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -655,7 +630,7 @@ export const HarnessSettingsPage: React.FC = () => {
       >
         <div className="space-y-2">
           <SettingsCheckboxRow
-            checked={harness.review?.enabled !== false}
+            checked={harness.review?.enabled === true}
             onChange={(checked) => handleReviewChange({ enabled: checked })}
             label={t('settings.page.harness.review.enabled')}
             description={t('settings.page.harness.review.enabled.description')}

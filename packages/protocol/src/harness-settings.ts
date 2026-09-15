@@ -48,23 +48,33 @@ export interface HarnessWorktreeSettings {
   budget?: HarnessWorktreeBudget;
 }
 
-export type HarnessMemoryMode = "off" | "assist" | "takeover";
-
-export interface HarnessMemorySettings {
-  mode: HarnessMemoryMode;
+export interface HarnessContextSettings {
+  /**
+   * Background summary preparation for compaction. Default true. User-owned;
+   * a workspace cannot enable background model calls the user turned off.
+   */
+  backgroundPreparation: boolean;
+  /** Fraction of usable input where preparation starts (0-1, default 0.75). */
+  preparationWaterline: number;
 }
 
 export interface HarnessReviewSettings {
-  /** Default true: review a published non-empty child result once. */
+  /** Default false: automatic review of child results is opt-in. */
   enabled: boolean;
   /** Default false: do not block ordinary settlement on the review finding. */
   gate: boolean;
 }
 
 /**
- * Raw persisted shape accepted while reading Pi settings. `shadowMode` is the
- * pre-takeover setting and is intentionally not part of HarnessSettings.
+ * Raw persisted shape accepted while reading Pi settings. `context` is the
+ * current object; `memory` is the retired keeper setting, still read so an
+ * explicit user `mode: "off"` keeps background preparation disabled.
  */
+export interface HarnessContextSettingsInput {
+  backgroundPreparation?: unknown;
+  preparationWaterline?: unknown;
+}
+
 export interface HarnessMemorySettingsInput {
   mode?: unknown;
   shadowMode?: unknown;
@@ -77,10 +87,7 @@ export class HarnessSettingsValidationError extends Error {
   }
 }
 
-const HARNESS_MEMORY_MODES = ["off", "assist", "takeover"] as const;
-
-/** Resolve the user-owned memory setting, including the legacy boolean. */
-const DEFAULT_HARNESS_REVIEW_SETTINGS: HarnessReviewSettings = { enabled: true, gate: false };
+const DEFAULT_HARNESS_REVIEW_SETTINGS: HarnessReviewSettings = { enabled: false, gate: false };
 
 export function resolveHarnessReviewSettings(value: unknown): HarnessReviewSettings {
   if (value === undefined) return { ...DEFAULT_HARNESS_REVIEW_SETTINGS };
@@ -100,30 +107,46 @@ export function resolveHarnessReviewSettings(value: unknown): HarnessReviewSetti
   };
 }
 
-export function resolveHarnessMemoryMode(value: unknown): HarnessMemoryMode {
-  if (value === undefined) return "takeover";
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new HarnessSettingsValidationError("harness.memory must be an object");
+const DEFAULT_HARNESS_CONTEXT_SETTINGS: HarnessContextSettings = {
+  backgroundPreparation: true,
+  preparationWaterline: 0.75,
+};
+
+export function resolveHarnessContextSettings(
+  context: unknown,
+  legacyMemory: unknown,
+): HarnessContextSettings {
+  if (context !== undefined
+    && (typeof context !== "object" || context === null || Array.isArray(context))) {
+    throw new HarnessSettingsValidationError("harness.context must be an object");
   }
-  const input = value as HarnessMemorySettingsInput;
-  if (input.mode !== undefined) {
-    if (!HARNESS_MEMORY_MODES.includes(input.mode as HarnessMemoryMode)) {
-      throw new HarnessSettingsValidationError(
-        `harness.memory.mode must be one of: ${HARNESS_MEMORY_MODES.join(", ")}`,
-      );
-    }
-    return input.mode as HarnessMemoryMode;
+  const input = (context ?? {}) as HarnessContextSettingsInput;
+  if (input.backgroundPreparation !== undefined && typeof input.backgroundPreparation !== "boolean") {
+    throw new HarnessSettingsValidationError("harness.context.backgroundPreparation must be a boolean");
   }
-  if (input.shadowMode !== undefined) {
-    if (typeof input.shadowMode !== "boolean") {
-      throw new HarnessSettingsValidationError("harness.memory.shadowMode must be a boolean");
-    }
-    return input.shadowMode ? "assist" : "off";
+  if (input.preparationWaterline !== undefined
+    && (typeof input.preparationWaterline !== "number"
+      || input.preparationWaterline <= 0
+      || input.preparationWaterline >= 1)) {
+    throw new HarnessSettingsValidationError(
+      "harness.context.preparationWaterline must be a number between 0 and 1",
+    );
   }
-  return "takeover";
+  // A retired harness.memory.mode: "off" or shadowMode: false was the user's
+  // explicit opt-out of background maintenance; it maps to disabling
+  // background preparation only, never to disabling automatic compaction.
+  const memory = (typeof legacyMemory === "object" && legacyMemory !== null && !Array.isArray(legacyMemory)
+    ? legacyMemory
+    : {}) as HarnessMemorySettingsInput;
+  const legacyOff = memory.mode === "off" || memory.shadowMode === false;
+  return {
+    backgroundPreparation: input.backgroundPreparation ?? !legacyOff,
+    preparationWaterline: input.preparationWaterline ?? DEFAULT_HARNESS_CONTEXT_SETTINGS.preparationWaterline,
+  };
 }
 
-export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "memory" | "review"> & {
+export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "review"> & {
+  context?: HarnessContextSettingsInput;
   memory?: HarnessMemorySettingsInput;
   review?: Partial<HarnessReviewSettings>;
 };
@@ -139,7 +162,8 @@ export interface HarnessSettings {
     eventRetentionDays: number;
     autoAcceptSuggestions: { workspace: boolean; user: boolean };
   };
-  memory: HarnessMemorySettings;
+  /** Context-management settings (background compaction preparation). */
+  context: HarnessContextSettings;
   /** User-owned automatic review of published child results. */
   review: HarnessReviewSettings;
   /** Dedicated embedding backend. Not a chat model slot. */
@@ -181,8 +205,8 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     eventRetentionDays: 30,
     autoAcceptSuggestions: { workspace: false, user: false },
   },
-  memory: { mode: "takeover" },
-  review: { enabled: true, gate: false },
+  context: { backgroundPreparation: true, preparationWaterline: 0.75 },
+  review: { enabled: false, gate: false },
   worktree: {
     copyIgnored: [],
     shareDependencies: false,
@@ -241,8 +265,14 @@ export function mergeHarnessSettings(
   user: HarnessSettingsInput,
   workspace: HarnessSettingsInput,
 ): HarnessSettings {
-  const { embedding: userEmbedding, rerank: userRerank, ...userRest } = user;
-  const { embedding: _workspaceEmbedding, rerank: _workspaceRerank, ...workspaceRest } = workspace;
+  const { context: _userContext, embedding: userEmbedding, memory: _userMemory, rerank: userRerank, ...userRest } = user;
+  const {
+    context: _workspaceContext,
+    embedding: _workspaceEmbedding,
+    memory: _workspaceMemory,
+    rerank: _workspaceRerank,
+    ...workspaceRest
+  } = workspace;
   const askBeforeKeys = new Set([
     ...Object.keys(user.dispatch?.askBefore ?? {}),
     ...Object.keys(workspace.dispatch?.askBefore ?? {}),
@@ -290,9 +320,10 @@ export function mergeHarnessSettings(
           ?? DEFAULT_HARNESS_SETTINGS.knowledge.autoAcceptSuggestions.workspace,
       },
     },
-    // Memory execution is user-owned. A repository cannot disable the keeper,
-    // enable background model calls, or change compaction ownership.
-    memory: { mode: resolveHarnessMemoryMode(user.memory) },
+    // Background preparation is user-owned. A repository cannot enable
+    // background model calls the user turned off; a legacy memory.mode "off"
+    // keeps preparation disabled, and project settings cannot re-enable it.
+    context: resolveHarnessContextSettings(user.context, user.memory),
     // Automatic review enablement and the completion gate are user-owned.
     review: resolveHarnessReviewSettings(user.review),
     // Embedding and rerank bindings are user-owned. A repository cannot

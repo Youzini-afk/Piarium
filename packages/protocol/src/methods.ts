@@ -61,7 +61,7 @@ import type {
 } from "./harness-inference.js";
 import type { ModelSelection } from "./harness-settings.js";
 import type { PermissionPolicy } from "./permission-gate.js";
-import type { MemoryNudgeMaterial, MemoryNudgeReason } from "./memory-agent.js";
+
 
 export interface HostMethodMap {
   "agentProvider.action": {
@@ -177,20 +177,6 @@ export interface HostMethodMap {
   "host.shutdown": {
     params: { force?: boolean };
     result: { accepted: boolean };
-  };
-  "memory.nudge": {
-    params: {
-      commands?: Array<{
-        command: string;
-        commandId: string;
-        cwd?: string;
-        exitCode: number;
-      }>;
-      materials?: MemoryNudgeMaterial[];
-      reason: MemoryNudgeReason;
-      sessionId: string;
-    };
-    result: { accepted: boolean; reason: string };
   };
   "model.list": {
     params: Record<string, never>;
