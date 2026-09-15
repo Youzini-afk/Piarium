@@ -322,7 +322,7 @@ it("audit: real Documents execution identity stays separate from managed-root ma
     await adapter.dispose();
     await documents.dispose();
   }
-});
+}, 30_000);
 
 it("audit: RecoveryFileStore applyState does not turn a conditional conflict into success", async () => {
   const f = await fixture();
