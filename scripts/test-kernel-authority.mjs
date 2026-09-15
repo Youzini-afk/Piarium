@@ -47,4 +47,5 @@ run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run',
   'packages/web/application-host/lib/kernel/process-consumers.test.ts',
   'packages/web/application-host/lib/kernel/storage-adapter.test.ts',
   'packages/web/application-host/lib/recovery/kernel-durable-engine.test.ts',
+  'packages/web/application-host/lib/harness/shell-assembly.test.ts',
 ]);

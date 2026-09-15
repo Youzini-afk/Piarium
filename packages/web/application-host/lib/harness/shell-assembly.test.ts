@@ -11,6 +11,8 @@ import { createHarnessServiceHost } from "./service-host.js";
 import { createVerificationCoordinator } from "./verification-coordinator.js";
 import type { ResultVerificationBundle, WorkingStateRootStore } from "./working-state/types.js";
 
+const nativeAuthorityIt = process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1" ? it : it.skip;
+
 const actor = (sessionId: string): HarnessActorIdentity => ({
   authorityInstanceId: "authority-1",
   sessionId,
@@ -126,7 +128,7 @@ describe("production shell assembly", () => {
     });
   });
 
-  it("executes through public shell.exec after real Host discovery", async () => {
+  nativeAuthorityIt("executes through public shell.exec after real Host discovery", async () => {
     const discovered = discoverShells();
     if (process.platform === "win32") {
       expect(discovered.gitBashPath, "Git Bash should be discovered on this Windows machine").toBeTruthy();
@@ -161,7 +163,7 @@ describe("production shell assembly", () => {
     }
   }, 30_000);
 
-  it("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
+  nativeAuthorityIt("executes consecutive commands and preserves non-zero exit through PowerShell", async () => {
     if (process.platform !== "win32") return;
     const discovered = discoverShells();
     expect(discovered.hasPowerShell, "PowerShell should be discovered on this Windows machine").toBe(true);
@@ -198,7 +200,7 @@ describe("production shell assembly", () => {
     if (second.kind === "completed") expect(second.stdout).toContain("piarium-powershell-two");
   }, 45_000);
 
-  it("backgrounds a real shell onto the terminal runtime and observes user input", async () => {
+  nativeAuthorityIt("backgrounds a real shell onto the terminal runtime and observes user input", async () => {
     const discovered = discoverShells();
     if (process.platform === "win32") {
       expect(discovered.gitBashPath, "Git Bash should be discovered on this Windows machine").toBeTruthy();
@@ -252,7 +254,7 @@ describe("production shell assembly", () => {
     expect(terminal.inspectSession(started.id)?.status).toBe("running");
   }, 45_000);
 
-  it("completes background verification from the real command lifecycle without shell.read", async () => {
+  nativeAuthorityIt("completes background verification from the real command lifecycle without shell.read", async () => {
     const discovered = discoverShells();
     if (process.platform === "win32") {
       expect(discovered.gitBashPath, "Git Bash should be discovered on this Windows machine").toBeTruthy();
