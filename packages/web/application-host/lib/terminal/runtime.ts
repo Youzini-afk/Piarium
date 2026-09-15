@@ -357,12 +357,11 @@ export function createTerminalRuntime({
     if (ptyProcess.terminate && ptyProcess.completion) {
       const nativeTermination = (async () => {
         await ptyProcess.terminate!(force);
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([ptyProcess.completion!, new Promise<never>((_, reject) => {
-            timer = setTimeout(() => reject(new Error("Native terminal exit is unconfirmed; directory writer is retained")), terminalTerminationGraceMs);
-          })]);
-        } finally { if (timer) clearTimeout(timer); }
+        // The Rust guardian owns escalation, process-tree drain, and the
+        // durable exit receipt. Its completion is already bounded and rejects
+        // on authority loss, so a shorter Host timer would only invent an
+        // unconfirmed exit while the guardian is still proving the real one.
+        await ptyProcess.completion;
       })();
       const tracked = nativeTermination.finally(() => pendingTerminations.delete(tracked));
       pendingTerminations.add(tracked);
