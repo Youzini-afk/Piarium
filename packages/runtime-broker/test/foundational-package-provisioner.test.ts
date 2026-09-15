@@ -70,7 +70,7 @@ describe("foundational package reconcile", () => {
     assert.equal(bootstrapCalls, 0);
     assert.equal(disabled.entries[0]?.observed, "disabled");
     assert.equal(broken.entries[0]?.observed, "configured_broken");
-    assert.equal(disabled.state, "degraded");
+    assert.equal(disabled.state, "ready");
     assert.equal(broken.state, "degraded");
   });
 

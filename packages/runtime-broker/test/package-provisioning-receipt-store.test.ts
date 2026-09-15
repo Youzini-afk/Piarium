@@ -3,6 +3,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION } from "@piarium/protocol";
 import {
   createPackageProvisioningReceiptStore,
   packageProvisioningReceiptPath,
@@ -123,11 +124,11 @@ describe("package provisioning receipt store", () => {
 
     const disabled = await store.setAutoInstallNew(false);
     assert.equal(disabled.autoInstallNew, false);
-    assert.equal(disabled.manifestRevisionSeen, 2);
+    assert.equal(disabled.manifestRevisionSeen, FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION);
 
     const enabled = await store.setAutoInstallNew(true);
     assert.equal(enabled.autoInstallNew, true);
-    assert.equal(enabled.manifestRevisionSeen, 2);
+    assert.equal(enabled.manifestRevisionSeen, FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION);
   });
 
   it("fails closed for malformed and unsupported receipt documents", async () => {
