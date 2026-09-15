@@ -54,10 +54,14 @@ const customTools = selectHarnessTools(settings, {
 - `createHarnessCounterTracker` — tracks `toolErrors`, `toolRetries`,
   `outputBytes`, `observationCalls`, and `cacheHitRatio`. Auxiliary per-model usage
   aggregation was removed in D-080; ordinary Pi session cost and token statistics remain unchanged.
-- `createPermissionGateExtension` — Harness-tool fallback for sessions without
-  `pi-permission-system`. It resolves the plugin's session-keyed service on every
-  call and yields completely while that service is active, so there is one
-  approval owner rather than two dialogs. Smart mode is part of this fallback.
+- `createPermissionGateExtension` — Piarium's sole interactive `tool_call`
+  permission authority. It covers the actual Pi registry (Harness overrides,
+  built-ins, MCP and package tools), asks Host `permission.inspect` to bind
+  canonical workspace resources, keeps session grants scoped to the normalized
+  source/action/resources, and emits credential-free decisions through
+  `permission.audit`. Unknown or incomplete third-party actions ask; Smart mode
+  can auto-allow only ordinary complete asks. `/piarium-permissions` revokes
+  remembered session grants.
 - `createKnowledgeSuggestionExtension` — when `models.suggestions` is configured,
   drafts a workspace knowledge proposal from the current user message and stores
   it through Host `knowledge.suggest`. Unconfigured sessions keep user-mark and

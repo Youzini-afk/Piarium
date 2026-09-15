@@ -49,6 +49,8 @@ export interface StartWebUiServerOptions {
   pickPiPackageRoot?: (() => Promise<string | null>) | undefined;
   port?: number | undefined;
   requirePiRuntime?: boolean | undefined;
+  /** Trusted desktop-only offscreen renderer used by harness.web.render. */
+  renderWebPage?: ((url: string, signal?: AbortSignal) => Promise<string>) | undefined;
   standalonePayloadDir?: string | undefined;
   tryCfTunnel?: boolean | undefined;
   tunnelConfigPath?: string | null | undefined;

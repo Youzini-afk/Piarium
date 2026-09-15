@@ -73,6 +73,17 @@ const requestPaths = (
   const record = params && typeof params === "object" && !Array.isArray(params)
     ? params as Record<string, unknown>
     : {};
+  if (method === "permission.inspect") {
+    if (typeof record.cwd !== "string" || !record.cwd.trim()
+      || !Array.isArray(record.paths) || !record.paths.every((path) => typeof path === "string" && path.trim())) {
+      return "invalid";
+    }
+    return [
+      { allowMissing: false, path: record.cwd },
+      ...record.paths.map((path) => ({ allowMissing: true, path: path as string })),
+    ];
+  }
+  if (method === "permission.audit") return [];
   if (method === "explore.search" || method === "explore.query.start") {
     if (record.paths === undefined) return [];
     return Array.isArray(record.paths) && record.paths.every((path) => typeof path === "string" && path.trim())

@@ -1,5 +1,11 @@
-import type { HarnessWebSearchSettings, SearchResultItem } from "@piarium/protocol";
+import {
+  mergeHarnessWebDomainPolicy,
+  type HarnessWebDomainPolicy,
+  type HarnessWebSearchSettings,
+  type SearchResultItem,
+} from "@piarium/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
+import { HarnessServiceError } from "./service-error.js";
 
 export interface SearchProvider {
   id: string;
@@ -265,7 +271,7 @@ export function filterByDomainPolicy<T extends { url: string }>(
     try {
       const hostname = new URL(result.url).hostname.toLowerCase();
       if (blockedDomains?.some((domain) => hostname === domain.toLowerCase() || hostname.endsWith(`.${domain.toLowerCase()}`))) return false;
-      if (allowedDomains?.length && !allowedDomains.some((domain) => hostname === domain.toLowerCase() || hostname.endsWith(`.${domain.toLowerCase()}`))) return false;
+      if (allowedDomains !== undefined && !allowedDomains.some((domain) => hostname === domain.toLowerCase() || hostname.endsWith(`.${domain.toLowerCase()}`))) return false;
       return true;
     } catch {
       return false;
@@ -275,21 +281,29 @@ export function filterByDomainPolicy<T extends { url: string }>(
 
 export function createWebSearchService(
   resolveProvider: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<ResolveSearchProviderResult>,
+  resolveDomainPolicy: (ctx: { sessionId: string; workspaceId: string | null }) => Promise<HarnessWebDomainPolicy> = async () => ({ block: [] }),
 ): HarnessService<"web.search"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
       const providerResult = await resolveProvider(ctx);
       if ("unavailable" in providerResult) {
-        throw new Error(providerResult.hint);
+        throw new HarnessServiceError("unavailable", providerResult.hint);
       }
+      const domainPolicy = mergeHarnessWebDomainPolicy(
+        await resolveDomainPolicy(ctx),
+        {
+          ...(params.allowedDomains === undefined ? {} : { allow: params.allowedDomains }),
+          ...(params.blockedDomains === undefined ? {} : { block: params.blockedDomains }),
+        },
+      );
       const rawResults = await providerResult.search(params.query, {
-        ...(params.allowedDomains ? { allowedDomains: params.allowedDomains } : {}),
-        ...(params.blockedDomains ? { blockedDomains: params.blockedDomains } : {}),
+        ...(domainPolicy.allow === undefined ? {} : { allowedDomains: domainPolicy.allow }),
+        ...(domainPolicy.block.length === 0 ? {} : { blockedDomains: domainPolicy.block }),
         ...(params.recency ? { recency: params.recency } : {}),
         ...(params.limit ? { limit: params.limit } : {}),
         signal: ctx.signal,
       });
-      const filtered = filterByDomainPolicy(rawResults, params.allowedDomains, params.blockedDomains);
+      const filtered = filterByDomainPolicy(rawResults, domainPolicy.allow, domainPolicy.block);
       const results: SearchResultItem[] = filtered.map((result) => ({
         title: result.title,
         url: result.url,

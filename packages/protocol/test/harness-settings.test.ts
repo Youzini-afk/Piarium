@@ -179,20 +179,34 @@ describe("harness settings", () => {
     assert.throws(() => resolveHarnessMemoryMode(false), /must be an object/);
   });
 
-  it("keeps web search provider and credential selection user-owned", () => {
+  it("keeps web search provider, credential, and renderer selection user-owned", () => {
     const merged = mergeHarnessSettings({
       web: {
         search: { provider: "brave", credentialRef: "brave-search" },
         render: false,
+        domains: { allow: ["example.com"], block: ["blocked.example.com"] },
       },
     }, {
       web: {
         search: { provider: "searxng", endpoint: "http://workspace.invalid" },
         render: true,
+        domains: { allow: ["docs.example.com", "outside.test"], block: ["ads.example.com"] },
       },
     });
     assert.deepEqual(merged.web?.search, { provider: "brave", credentialRef: "brave-search" });
-    assert.equal(merged.web?.render, true);
+    assert.equal(merged.web?.render, false);
+    assert.deepEqual(merged.web?.domains, {
+      allow: ["docs.example.com"],
+      block: ["blocked.example.com", "ads.example.com"],
+    });
+  });
+
+  it("preserves an explicit empty web allow intersection as deny-all", () => {
+    const merged = mergeHarnessSettings(
+      { web: { domains: { allow: ["example.com"] } } },
+      { web: { domains: { allow: ["other.test"] } } },
+    );
+    assert.deepEqual(merged.web?.domains, { allow: [], block: [] });
   });
 
   it("only accepts stricter workspace permission modes and ask/deny rules", () => {

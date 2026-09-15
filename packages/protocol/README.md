@@ -140,9 +140,9 @@ interface HarnessSettings {
   };
   memory: { mode: "off" | "assist" | "takeover" }; // user-only, default takeover
   web?: {
-    maxFetchesPerTurn?: number;
     render?: boolean;
     search?: { provider: "brave" | "exa" | "tavily" | "jina" | "searxng"; endpoint?: string; credentialRef?: string };
+    domains?: { allow?: string[]; block: string[] };
   };
   permissions?: { mode?: PermissionMode };   // default "normal"
 }
@@ -160,9 +160,12 @@ frozen role model and active tool list in `session.create/open`.
 The same handshake owns `harnessLspNavigation`, `harnessWebRead`, and
 `harnessWebSearch`. `harnessWebRead` means the Host permits a configured
 session-local reader model to consume its guarded `web.fetch` result; model and
-credential execution remains in pi-host. `harnessWebSearch` is advertised only
-for a real search provider. A configured slot or dormant provider module alone
-does not make those paths available.
+credential execution remains in pi-host. `harnessWebSearch` advertises the
+structural Host service. The provider identity, render permission, and domain
+policy are frozen from Pi settings for one worker generation; `websearch` is
+registered only when that session has a configured provider. Search credentials
+stay in Pi auth and are resolved per request, so revocation does not require a
+worker restart and never reuses a cached key.
 
 ## Exports
 

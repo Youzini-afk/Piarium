@@ -29,8 +29,6 @@ import { MagicContextSettings } from '@/components/sections/plugin-settings/Magi
 import { ObservationalMemorySettings } from '@/components/sections/plugin-settings/ObservationalMemorySettings';
 import { OpenAICodexCompatSettings } from '@/components/sections/plugin-settings/OpenAICodexCompatSettings';
 import { PiLensSettings } from '@/components/sections/plugin-settings/PiLensSettings';
-import { PermissionSystemSettings } from '@/components/sections/plugin-settings/PermissionSystemSettings';
-import { PermissionSystemComposerControl } from '@/components/pi-session/PermissionSystemComposerControl';
 import { RtkSettings } from '@/components/sections/plugin-settings/RtkSettings';
 import { SubagentsSettings } from '@/components/sections/plugin-settings/SubagentsSettings';
 import { WebAccessSettings } from '@/components/sections/plugin-settings/WebAccessSettings';
@@ -141,8 +139,6 @@ const adapterImplementation = (adapterId: string): PiPluginSettingsAdapterImplem
         return <AftSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'pi-lens':
         return <PiLensSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
-      case 'permission-system':
-        return <PermissionSystemSettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'hermes-memory':
         return <HermesMemorySettings runtimeTarget={props.runtimeTarget} targetKey={props.targetKey} />;
       case 'rtk':
@@ -170,12 +166,6 @@ const contributionImplementation = (
   }
   if (contribution?.kind === 'transition-scene') {
     return { framework: 'react-19', Component: BuiltinWorkbenchTransitionScene };
-  }
-  if (
-    contribution?.kind === 'composer-action'
-    && contribution.data.contract === 'pi-permission-system-composer/v1'
-  ) {
-    return { framework: 'react-19', Component: PermissionSystemComposerControl };
   }
   if (contribution?.kind === 'settings-page') return pageImplementation(definition);
   if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {

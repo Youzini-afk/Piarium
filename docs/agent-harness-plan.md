@@ -97,9 +97,9 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 产品与 Agent 编排，Pi 保留 Agent loop/provider/session。未测平台、真实 provider 与真实 CoW 的观察继续如实登记，但不把它们
 改写成已完成平台的功能禁用。
 
-**下一实施主线是现有 Harness 收口（D-283），不是外部 MCP/ACP。** 先由 Piarium 原生权限门完整接管 Harness、Pi 内置、MCP、
-Pi 包工具和嵌套线程的用户确认，再删除 foundational `pi-permission-system` 及其设置/让位双轨；随后收口原生 `webfetch` /
-`websearch` 的配置代际、域名策略、渲染选择与插件替换语义。外部 Agent runtime 和 research profile 在这两项完成后再排。
+**现有 Harness 收口（D-283）已完成。** Piarium 原生权限门已经接管 Harness、Pi 内置、MCP、Pi 包工具和嵌套线程的用户确认，
+foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 `webfetch` / `websearch` 的配置代际、域名策略、渲染选择与
+插件替换语义也已收口。后续回到外部 Agent runtime / research profile 等尚未交付主线，不再重开权限/Web 双轨。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
@@ -135,8 +135,8 @@ Pi 包工具和嵌套线程的用户确认，再删除 foundational `pi-permissi
    explore 负责快速提供当前代码，较长开放追踪由 retrieval 承担；扩散模型与后训练留待后续。
    3.17 的命令输出整理已交付（D-197/D-199）。完成能力即按有效配置提供，缺某一路不丢弃其他材料。
 4. **其余产品面**：知识全量管理、自动 review、后台终端 tab 与 bundled Pi 默认已交付，并经 D-209–D-211 补正身份、并发和退出契约；知识语义召回已沿远程 embedding 接线（D-196）。重叠提示与合并预览随线程服务实现，不设独立收益审批。
-5. **当前 Harness 收口（1b.7 / 3b，D-283）**：先完成原生权限唯一权威，再完成 web 配置与替换语义。两项共享会话工具装配与
-   Settings 边界，按此顺序串行整合；不并行修改同一 tool registry、配置合并和会话冻结契约。
+5. **Harness 收口（1b.7 / 3b，D-283，已交付）**：原生权限唯一权威与 web 配置/替换语义已进入生产链；验证和剩余平台观察见
+   status。本计划后续不再保留 permission-system 共存或 pi-web-access 自动让位作为兼容目标。
 
 TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台与外部 provider 的未验证范围如实报告，不把缺另一平台机器
 写成已验证平台的禁用条件。不自行发起付费记忆实验；完成一个切片后按本节顺序继续，不把文档同步解释为停工点。
@@ -176,12 +176,13 @@ Host 规范化、完整批次全序获取 owner-bound lease；只保证该 Host 
 阶段 1 待做：apply_patch 多文件恢复真会话证据；macOS/Linux 与 Electron 打包验证。
 Windows 生产发现与按工作区 `harness.shell` 接线已由 D-200 交付；后台 shell 与 terminal runtime 共用真实进程、全局身份及退出/写者
 生命周期已由 D-206/D-209 收口。
-websearch provider 当前变更需重启 Host，后续新会话使用新的能力世代，旧会话保持配置；不注册不存在的 provider。
+websearch provider / render / domain policy 现在按 worker generation 冻结：设置改变后新会话直接使用新绑定，无需重启 Host；
+旧会话保持原 provider identity，凭据则每次请求实时解析，撤销后明确 unavailable。
 
-### 1b.7 原生 Web 能力收口（D-283）
+### 1b.7 原生 Web 能力收口（D-283，已完成）
 
 现有 `webfetch`、`websearch`、Host SSRF fetch、Brave/Exa/Tavily/Jina/SearXNG provider、search-only Pi auth 凭据和来源面板
-保留为正式实现。当前代码已经能执行真实搜索；本阶段解决配置和所有权没有收口的问题，不重做搜索引擎，也不新增第二套抓取服务。
+保留为正式实现。本阶段已完成配置和所有权收口，没有重做搜索引擎，也没有新增第二套抓取服务：
 
 1. 删除按 `pi-web-access` 包名/启用状态自动让出 `webfetch` / `websearch` 的会话装配路径。原生工具按 Harness 设置提供；用户要使用
    第三方同名工具时，显式关闭对应原生工具。包的存在本身不改变运行行为，也不保留自动让位兼容分支。
@@ -197,8 +198,8 @@ websearch provider 当前变更需重启 Host，后续新会话使用新的能�
 6. 当前单 provider 配置足以交付；本阶段不增加自动多 provider 并发、隐藏回退或模型包装。以后出现真实可用性需求时再扩展 provider
    选择，不把功能数量当收口条件。
 
-验证沿公开 `websearch` / `webfetch` 工具到 Host HTTP adapter，覆盖配置变更后的新旧会话、credential 撤销、域名策略交集、跨域
-重定向、renderer unavailable 和显式关闭后的第三方替换。status 在生产消费者接通前保持当前交付事实，不用本计划提前标完成。
+验证沿公开 `websearch` / `webfetch` 工具到 Host adapter，覆盖配置变更后的新旧会话、credential 撤销、域名策略交集、跨域
+重定向、renderer unavailable 和显式关闭后的第三方替换；对应证据已写入 status。当前实现仍保持单 provider，不做隐藏回退。
 
 ## 阶段 2：上下文与知识
 
@@ -709,13 +710,11 @@ OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对
 （声明式规则、附加模型总结）未做。**不用小模型总结替代**（漏一个失败是静默的）；模型总结只作非结构化输出上的附加，
 且要明确标注"这是模型挑的行，不是全部"。
 
-## 阶段 3b：原生权限唯一权威（D-283）
+## 阶段 3b：原生权限唯一权威（D-283，已完成）
 
-当前交付事实仍是：foundational `@gotgenes/pi-permission-system` 发布 session-keyed service 时独占确认，Piarium 原生门只在插件缺席时
-覆盖 Harness 工具。原生设置页已有 `normal` / `accept-edits` / `bypass` / `smart`、用户规则和 `permissionJudge`，但插件活跃时这些
-设置不参与最终裁决。这是待替换的双轨，不再作为目标架构。
-
-本阶段完成以下纵切：
+当前交付事实：Piarium 内置 `tool_call` extension 是唯一交互式确认权威，覆盖 Harness、Pi 内置、MCP、Pi package 与嵌套线程工具。
+`normal` / `accept-edits` / `bypass` / `smart`、用户规则、workspace 只收紧和 `permissionJudge` 都作用于这条唯一链；Host 继续只做
+非交互 actor/capability/workspace/path enforcement。D-283 完成了以下纵切：
 
 1. pi-host 内置 `tool_call` extension 成为 Piarium 会话唯一的用户确认权威。它在会话构造时取得所有实际工具的稳定身份与来源，覆盖
    Harness、Pi 内置、MCP、Pi 包工具和嵌套线程允许集；不能再以“非 Harness 工具”直接放行。Host 继续只验证 broker actor、冻结
@@ -736,9 +735,12 @@ OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对
    `@gotgenes/pi-permission-system`，并删除 session service 让位、permission-system Plugin Settings/quick mode/status bridge、专属 i18n 与
    测试路径；不保留默认关闭、旧配置 reader 或双重提示兼容层。
 
-验收以真实公开工具链的反例为准：组合 shell/外部路径/符号链接、MCP read 与 mutation、未知 Pi 包工具、会话授权范围、workspace
-收紧、嵌套冻结、Smart 失败、取消/关闭、审计和一次提示。先证明所有实际消费者已由原生门覆盖，再删除插件；删除后不得出现无门控
-窗口。status 的 3b.1–3b.3 在代码完成前继续描述现状，不能提前写成原生接管。
+实现使用 Pi `getAllTools().sourceInfo` 识别实际来源，SDK Harness override 才按 Harness 元数据分类；MCP/package/未知工具缺副作用证据时
+进入 unknown/ask，不能借同名 `read` 等默认规则放行。路径证据经 Host `permission.inspect` 复用既有规范路径 authority；shell 解析保持
+保守，组合/子 shell 等无法完整归一时标 evidence incomplete，因此不能走 Smart 或 session grant。会话 grant 绑定来源、动作、owning /
+execution workspace、cwd、规范资源、网络目标和 thread scope，`/piarium-permissions` 可撤销。每次决定经 `permission.audit` 投影，不含正文/
+凭据。foundational manifest 已升 revision 3 且只保留 MCP；permission-system 的 service 让位、状态桥、Plugin Settings、Composer quick mode、
+专属 i18n 与测试路径已物理删除。公开反例与跨包类型/lint 证据见 status 3b.1–3b.3。
 
 ## 阶段 R：Rust 系统内核与 Host 分层（D-252）
 

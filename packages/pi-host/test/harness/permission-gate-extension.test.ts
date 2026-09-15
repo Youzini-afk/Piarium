@@ -1,118 +1,180 @@
 import assert from "node:assert/strict";
-import { afterEach, describe, it } from "node:test";
-import { defaultRules } from "@piarium/protocol";
+import { describe, it } from "node:test";
+import { defaultRules, type PermissionAuditRecord, type PermissionInspectParams } from "@piarium/protocol";
 import { createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
 
-const SERVICES_KEY = Symbol.for("@gotgenes/pi-permission-system:session-services");
-const previousServices = (globalThis as Record<symbol, unknown>)[SERVICES_KEY];
-
-afterEach(() => {
-  if (previousServices === undefined) delete (globalThis as Record<symbol, unknown>)[SERVICES_KEY];
-  else (globalThis as Record<symbol, unknown>)[SERVICES_KEY] = previousServices;
+const inspect = (params: PermissionInspectParams) => ({
+  tool: params.tool,
+  source: params.source,
+  action: params.action,
+  executionWorkspaceId: "execution-ws",
+  owningWorkspaceId: "owning-ws",
+  cwd: "workspace:/",
+  paths: params.paths.map((path) => {
+    const resourceId = path.replace(/^[A-Za-z]:[\\/]+workspace[\\/]?/, '').replaceAll('\\', '/');
+    return {
+      inputPath: path,
+      workspaceId: "execution-ws",
+      resourceId,
+      canonicalResourceId: `workspace:/${resourceId}`,
+    };
+  }),
+  networkTargets: params.networkTargets,
+  threadScopes: params.threadScopes,
+  evidenceComplete: params.evidenceComplete,
 });
 
-const harness = (options: Parameters<typeof createPermissionGateExtension>[0]) => {
-  let ready: ((value: unknown) => void) | undefined;
-  let toolCall: ((event: { toolName: string; input: unknown }, ctx: unknown) => Promise<unknown>) | undefined;
-  const extension = createPermissionGateExtension(options);
-  extension({
-    events: {
-      on: (event: string, handler: (value: unknown) => void) => {
-        if (event === "permissions:ready") ready = handler;
-        return () => {};
+const makeBridge = (options: { failInspect?: boolean } = {}) => {
+  const audits: PermissionAuditRecord[] = [];
+  return {
+    audits,
+    bridge: {
+      request: async (method: string, params: unknown) => {
+        if (method === "permission.inspect") {
+          if (options.failInspect) throw new Error("outside workspace");
+          return inspect(params as PermissionInspectParams);
+        }
+        if (method === "permission.audit") {
+          audits.push(params as PermissionAuditRecord);
+          return { accepted: true };
+        }
+        throw new Error(`unexpected method ${method}`);
       },
-    },
+    } as never,
+  };
+};
+
+const harness = (
+  options: Parameters<typeof createPermissionGateExtension>[0],
+  tools: Array<{ name: string; sourceInfo: { path: string; source: string; scope: string; origin: string } }>,
+) => {
+  let toolCall: ((event: { toolName: string; input: unknown }, ctx: unknown) => Promise<unknown>) | undefined;
+  createPermissionGateExtension(options)({
+    getAllTools: () => tools,
+    registerCommand: () => {},
     on: (event: string, handler: typeof toolCall) => {
       if (event === "tool_call") toolCall = handler;
     },
   } as never);
   if (!toolCall) throw new Error("tool_call handler was not registered");
-  return { ready, toolCall };
+  return toolCall;
 };
 
-const ui = (choice: string | undefined = "Allow once") => {
-  const state = {
-    selectCalls: 0,
-    context: { ui: { select: async () => choice } },
+const ui = (choices: Array<string | undefined> = ["Allow once"]) => {
+  const state = { selectCalls: 0, titles: [] as string[] };
+  return {
+    state,
+    context: {
+      cwd: "C:/workspace",
+      signal: undefined,
+      ui: {
+        select: async (title: string) => {
+          state.selectCalls += 1;
+          state.titles.push(title);
+          return choices.shift();
+        },
+      },
+    },
   };
-  state.context.ui.select = async () => {
-    state.selectCalls += 1;
-    return choice;
-  };
-  return state;
 };
+
+const builtin = (name: string) => ({
+  name,
+  sourceInfo: { path: `<builtin:${name}>`, source: "builtin", scope: "temporary", origin: "top-level" },
+});
+const packageTool = (name: string, path = "C:/pkg/index.js") => ({
+  name,
+  sourceInfo: { path, source: "npm:example", scope: "user", origin: "package" },
+});
+const mcpTool = (name: string) => ({
+  name,
+  sourceInfo: { path: "C:/pkg/pi-mcp-adapter/index.js", source: "npm:@piarium/pi-mcp-adapter", scope: "user", origin: "package" },
+});
+
+const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
-  it("yields to a published permission-system service instead of prompting twice", async () => {
-    const sessionId = "coexist-session";
-    (globalThis as Record<symbol, unknown>)[SERVICES_KEY] = new Map([[sessionId, {}]]);
-    let detected = 0;
-    const gate = harness({
-      policy: { mode: "normal", rules: defaultRules("normal") },
-      sessionId,
-      onExternalGateDetected: () => { detected += 1; },
-    });
-    gate.ready?.({ sessionId });
+  it("is the gate for Pi built-ins and allows maintained read-only actions without prompting", async () => {
+    const { bridge, audits } = makeBridge();
+    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("read")]);
     const result = ui();
-    const decision = await gate.toolCall({ toolName: "bash", input: { command: "echo ok" } }, result.context as never);
-    assert.equal(decision, undefined);
-    assert.equal(result.selectCalls, 0);
-    assert.equal(detected, 1);
+    assert.equal(await call({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), undefined);
+    assert.equal(result.state.selectCalls, 0);
+    assert.equal(audits.at(-1)?.decision, "allow");
+    assert.equal(audits.at(-1)?.target.source.kind, "builtin");
   });
 
-  it("uses Smart mode for ordinary asks but never for a high-risk call", async () => {
+  it("asks for MCP and unknown package tools even when their names look read-only", async () => {
+    const { bridge } = makeBridge();
+    const result = ui(["Deny", "Deny"]);
+    const mcp = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [mcpTool("read")]);
+    const pkg = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [packageTool("inspect")]);
+    assert.deepEqual(await mcp({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), {
+      block: true,
+      reason: "User denied read",
+    });
+    assert.deepEqual(await pkg({ toolName: "inspect", input: {} }, result.context as never), {
+      block: true,
+      reason: "User denied inspect",
+    });
+    assert.equal(result.state.selectCalls, 2);
+  });
+
+  it("remembers only the same normalized source/action/workspace/resource scope", async () => {
+    const { bridge, audits } = makeBridge();
+    const result = ui(["Allow for this session scope", "Allow once"]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("edit")]);
+    await call({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never);
+    await call({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never);
+    await call({ toolName: "edit", input: { path: "src/b.ts" } }, result.context as never);
+    assert.equal(result.state.selectCalls, 2, "same scope reuses grant; different canonical path asks again");
+    assert.equal(audits[0]?.remembered, true);
+    assert.equal(audits[1]?.remembered, true);
+    assert.equal(audits[1]?.prompted, false);
+  });
+
+  it("does not remember high-risk or incomplete inspections", async () => {
+    const { bridge } = makeBridge({ failInspect: true });
+    const result = ui(["Allow once", "Allow once"]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("bash")]);
+    await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never);
+    await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never);
+    assert.equal(result.state.selectCalls, 2);
+  });
+
+  it("Smart can resolve an ordinary complete ask but never unknown/high-impact evidence", async () => {
+    const { bridge } = makeBridge();
     let judged = 0;
-    const gate = harness({
+    const result = ui(["Deny"]);
+    const edit = harness({
       policy: { mode: "smart", rules: defaultRules("smart") },
-      sessionId: "smart-session",
+      sessionId: "s",
+      cwd: "C:/workspace",
+      bridge,
       smartJudge: async () => { judged += 1; return "allow"; },
-    });
-    const result = ui();
-    assert.equal(await gate.toolCall(
-      { toolName: "edit", input: { path: "src/a.ts" } },
-      result.context as never,
-    ), undefined);
+    }, [builtin("edit")]);
+    assert.equal(await edit({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never), undefined);
     assert.equal(judged, 1);
-    assert.equal(result.selectCalls, 0);
 
-    await gate.toolCall(
-      { toolName: "bash", input: { command: "rm -rf build" } },
-      result.context as never,
-    );
+    const unknown = harness({
+      policy: { mode: "smart", rules: defaultRules("smart") },
+      sessionId: "s2",
+      cwd: "C:/workspace",
+      bridge,
+      smartJudge: async () => { judged += 1; return "allow"; },
+    }, [packageTool("do_anything")]);
+    await unknown({ toolName: "do_anything", input: {} }, result.context as never);
     assert.equal(judged, 1);
-    assert.equal(result.selectCalls, 1);
+    assert.equal(result.state.selectCalls, 1);
   });
 
-  it("does not yield to another session and observes service removal without a reload", async () => {
-    const services = new Map<string, unknown>([["other-session", {}]]);
-    (globalThis as Record<symbol, unknown>)[SERVICES_KEY] = services;
-    const gate = harness({
-      policy: { mode: "normal", rules: defaultRules("normal") },
-      sessionId: "owned-session",
+  it("dialog cancellation blocks rather than passing the call", async () => {
+    const { bridge } = makeBridge();
+    const result = ui([undefined]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("bash")]);
+    assert.deepEqual(await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never), {
+      block: true,
+      reason: "Permission dialog dismissed for bash",
     });
-    gate.ready?.({ sessionId: "other-session" });
-    const result = ui();
-    await gate.toolCall({ toolName: "bash", input: { command: "echo first" } }, result.context as never);
-    assert.equal(result.selectCalls, 1);
-
-    services.set("owned-session", {});
-    await gate.toolCall({ toolName: "bash", input: { command: "echo second" } }, result.context as never);
-    assert.equal(result.selectCalls, 1);
-
-    services.delete("owned-session");
-    await gate.toolCall({ toolName: "bash", input: { command: "echo third" } }, result.context as never);
-    assert.equal(result.selectCalls, 2);
-  });
-
-  it("recognizes the session-local ready signal from pre-locator plugin releases", async () => {
-    delete (globalThis as Record<symbol, unknown>)[SERVICES_KEY];
-    const gate = harness({
-      policy: { mode: "normal", rules: defaultRules("normal") },
-      sessionId: "legacy-session",
-    });
-    gate.ready?.({ sessionId: "legacy-session" });
-    const result = ui();
-    await gate.toolCall({ toolName: "bash", input: { command: "echo legacy" } }, result.context as never);
-    assert.equal(result.selectCalls, 0);
   });
 });

@@ -58,7 +58,6 @@ source checkouts used for the audit were fast-forwarded to their tracked upstrea
 | `context-mode` | npm/source `1.0.169` | Still has no single native settings authority; the generic configuration surface remains correct. |
 | `@cortexkit/aft-pi` | npm/source `0.52.1` | Added the inspect diagnostics deadline and user-only GitHub CLI shim with the plugin's real project-strip rules. |
 | `pi-lens` | npm/source `4.1.1` | The only relevant schema addition is project Helm configuration, already covered by the adapter. |
-| `@gotgenes/pi-permission-system` | npm/source `27.0.1` | Added the four directional path surfaces, inert-key validation parity, public runtime-event projection, Composer status, and the existing plugin-owned RPC approval flow. |
 | `pi-hermes-memory` | npm/source `0.9.6` | Native authority and command observation are unchanged; no adapter change. |
 | `pi-rtk-optimizer` | npm/source `0.9.0` | Native JSON and `rtk` command contract are unchanged; the narrower upstream peer range remains metadata, not a Piarium compatibility layer. |
 | `@piarium/pi-mcp-adapter` | upstream `2.29.0`; maintained fork `16123de`; npm `2.29.0-piarium.1` | Merged upstream runtime snapshots, progress, cache and raw-tool fixes without dropping `configCatalog/v1`. New Piarium installs use the public scoped npm package; the previous maintained Git source and upstream package name remain identity aliases, so existing installations are adopted rather than duplicated or replaced. |
@@ -83,7 +82,6 @@ Each row is the public contract Piarium consumes. Piarium owns none of these fil
 | `pi-observational-memory` | Registered status/view commands | Native `settings.json#observational-memory` |
 | `context-mode` | Generic plugin configuration surface | No single authoritative settings file |
 | `pi-lens` | Registered Lens commands and packaged skill commands | Plugin-owned user/recent-project config |
-| `@gotgenes/pi-permission-system` | Public ready/prompt/decision events, plugin-owned select/input approvals, and the registered permission command | Global and project policy files |
 | `pi-hermes-memory` | Presence of `memory-insights` in `command.list` | Agent-root `hermes-memory-config.json` |
 | `@cortexkit/aft-pi` | Presence of `aft-status` in `command.list` | CortexKit user `aft.jsonc`, project `.cortexkit/aft.jsonc` |
 | `pi-rtk-optimizer` | Presence of the exact `rtk` command | `<agentDir>/extensions/pi-rtk-optimizer/config.json` |

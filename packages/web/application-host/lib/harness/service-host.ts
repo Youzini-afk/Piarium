@@ -2,6 +2,7 @@ import { createOutputStore, type OutputStore } from "./output-store.js";
 import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
 import type { HarnessShellSetting } from "./harness-shell-settings.js";
+import type { HarnessWebBinding } from "./harness-web-settings.js";
 import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import type { TerminalSessionApi } from "../terminal/session-api.js";
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
@@ -42,6 +43,8 @@ export interface HarnessSessionContext {
   /** Resolved for this workspace at session register. Host-wide options are only a fallback. */
   shellSetting?: HarnessShellSetting;
   shellResolution?: { invalid: { reason: string; hint: string } };
+  /** Frozen credential-free web provider/policy identity for this worker generation. */
+  webBinding?: HarnessWebBinding;
 }
 
 interface SessionEntry {
@@ -52,6 +55,7 @@ interface SessionEntry {
   workspaceId: string | null;
   workspaceRoot: string;
   workspaceScope?: readonly string[];
+  webBinding?: HarnessWebBinding;
 }
 
 export function deriveHarnessCapabilities(
@@ -212,12 +216,15 @@ export interface HarnessServiceHost {
     settings: import("@piarium/protocol").HarnessRerankSettings;
     signal?: AbortSignal;
   }) => Promise<import("@piarium/protocol").HarnessRerankResult>;
+  permissionAudit: ((record: import("@piarium/protocol").PermissionAuditRecord) => void) | null;
   webFetchService: {
     fetch: (url: string, ctx: {
       workspaceId: string;
       authority: import("@piarium/protocol").RetrievalReceiptAuthority;
       render?: boolean;
+      domainPolicy?: import("@piarium/protocol").HarnessWebDomainPolicy;
       signal?: AbortSignal;
+      issueReceipt?: boolean;
     }) => Promise<import("@piarium/protocol").FetchResult>;
   } | null;
   webSearchService: import("./router.js").HarnessService<"web.search"> | null;
@@ -285,6 +292,7 @@ export interface HarnessServiceHost {
   closeSessionShell(sessionId: string): Promise<void>;
   hasActiveCommandAtDirectory(directory: string): boolean;
   getInterpreter(sessionId: string): ShellInterpreter | { unavailable: { reason: string; hint: string } } | null;
+  getWebBinding(sessionId: string): HarnessWebBinding | null;
   resolveWorkspaceRoot?(workspaceId: string): Promise<string | null>;
   readExploreFile?: ExploreFileReader;
   storeRetrievalArtifact?: (
@@ -349,6 +357,7 @@ export interface HarnessServiceHostOptions {
   pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
+  permissionAudit?: (record: import("@piarium/protocol").PermissionAuditRecord) => void;
   shellSetting?: HarnessShellSetting;
   /**
    * Machine-level discovery. Production passes the Host construction result.
@@ -436,6 +445,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const pinWorkingBranchQuery = options.pinWorkingBranchQuery;
   const harnessSettings = options.harnessSettings;
   const rerankExploreViews = options.rerankExploreViews;
+  const permissionAudit = options.permissionAudit ?? null;
   const webFetchService = options.webFetchService ?? null;
   const webSearchService = options.webSearchService ?? null;
   const documentReadSource = options.documentReadSource ?? null;
@@ -562,6 +572,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
       workspaceId: ctx.workspaceId,
       workspaceRoot: ctx.workspaceRoot,
       ...(ctx.actor.workspaceScope?.length ? { workspaceScope: [...ctx.actor.workspaceScope] } : {}),
+      ...(ctx.webBinding ? { webBinding: ctx.webBinding } : {}),
     });
   };
 
@@ -615,6 +626,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     return sessions.get(sessionId)?.interpreter ?? null;
   };
 
+  const getWebBinding = (sessionId: string): HarnessWebBinding | null => sessions.get(sessionId)?.webBinding ?? null;
+
   const hasActor = (identity: HarnessActorIdentity): boolean => {
     const entry = sessions.get(identity.sessionId);
     return Boolean(
@@ -666,6 +679,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     ...(pinWorkingBranchQuery ? { pinWorkingBranchQuery } : {}),
     ...(harnessSettings ? { harnessSettings } : {}),
     ...(rerankExploreViews ? { rerankExploreViews } : {}),
+    permissionAudit,
     webFetchService,
     webSearchService,
     documentReadSource,
@@ -705,6 +719,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     closeSessionShell,
     hasActiveCommandAtDirectory,
     getInterpreter,
+    getWebBinding,
     resolveWorkspaceRoot: options.resolveWorkspaceRoot,
     dispose,
     ...(options.readExploreFile ? { readExploreFile: options.readExploreFile } : {}),

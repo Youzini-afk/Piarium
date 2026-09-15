@@ -29,7 +29,7 @@ const createMockSsrf = (): SsrfPolicy => ({
   },
 });
 
-const noDomainPolicy = (): DomainPolicy => ({ allow: [], block: [] });
+const noDomainPolicy = (): DomainPolicy => ({ block: [] });
 const fetchContext = {
   workspaceId: "ws",
   authority: { owningWorkspaceId: "ws", sessionId: "session-1" },
@@ -104,6 +104,12 @@ describe("web-fetch service", () => {
     });
     const blocked = await service.fetch("https://other.com/page", fetchContext);
     expect(blocked.status).toBe("blocked");
+  });
+
+  it("treats an explicit empty allow list as deny-all", async () => {
+    const service = createWebFetch({ ssrf: createMockSsrf(), domainPolicy: () => ({ allow: [], block: [] }) });
+    const result = await service.fetch("https://example.com/page", fetchContext);
+    expect(result).toMatchObject({ status: "blocked", reason: "domain-blocked" });
   });
 
   it("returns renderer-unavailable when render requested but no renderer", async () => {

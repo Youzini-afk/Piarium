@@ -46,8 +46,6 @@ export interface SelectHarnessToolsDeps {
   autoResizeImages?: boolean;
   /** Whether the Host exposes the Documents-backed native Pi find/ls overlay. */
   documentPathOverlayAvailable?: boolean;
-  /** Tools to yield (not register) because a Pi package provides them. */
-  yieldedTools?: ReadonlySet<string>;
   /** Session-local reader model path; absent keeps webfetch extraction-only. */
   readPage?: NonNullable<Parameters<typeof createWebFetchTool>[2]>["readPage"];
   /** Session-local explore model path; absent keeps algorithm/vector explore. */
@@ -74,8 +72,9 @@ export interface SelectHarnessToolsDeps {
  * New tools (get_output, write_to_process, kill_shell, diagnostics,
  * apply_patch) are omitted when disabled.
  * apply_patch is only included when isOpenAIFamily is true AND not disabled.
- * webfetch / websearch are omitted when in yieldedTools (pi-web-access let-in);
- * websearch is also absent until the application Host advertises a real provider.
+ * webfetch / websearch remain Piarium-native unless explicitly disabled in
+ * harness.tools. Installing pi-web-access does not silently replace them.
+ * websearch is registered only when a provider is frozen into this session.
  */
 export function selectHarnessTools(
   settings: HarnessSettings,
@@ -92,7 +91,6 @@ export function selectHarnessTools(
     documentReadAvailable,
     documentPathOverlayAvailable,
     autoResizeImages,
-    yieldedTools,
     readPage,
     webSearchAvailable,
     threadRuntimeAvailable,
@@ -145,11 +143,10 @@ export function selectHarnessTools(
       }),
     );
   }
-  // Web tools — yield to pi-web-access if it is loaded and enabled
-  if (tools.webfetch !== false && !yieldedTools?.has("webfetch")) {
+  if (tools.webfetch !== false) {
     result.push(createWebFetchTool(bridge, sessionId, readPage ? { readPage } : undefined));
   }
-  if (webSearchAvailable && tools.websearch !== false && !yieldedTools?.has("websearch")) {
+  if (webSearchAvailable && settings.web?.search && tools.websearch !== false) {
     result.push(createWebSearchTool(bridge, sessionId));
   }
   // Phase 2 tools
@@ -200,23 +197,4 @@ export function selectHarnessTools(
   }
 
   return result;
-}
-
-/**
- * Check if pi-web-access is among the loaded and enabled Pi packages.
- * Returns the set of tool names to yield (not register).
- */
-export function computeYieldedTools(
-  packages: Array<{ name: string; enabled: boolean; source: string }>,
-): Set<string> {
-  const webAccessLoaded = packages.some(
-    (p) =>
-      p.enabled &&
-      (p.name.toLowerCase().includes("pi-web-access") ||
-        p.source.toLowerCase().includes("pi-web-access")),
-  );
-  if (webAccessLoaded) {
-    return new Set(["webfetch", "websearch"]);
-  }
-  return new Set();
 }

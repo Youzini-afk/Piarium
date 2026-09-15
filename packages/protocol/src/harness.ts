@@ -29,6 +29,11 @@ import type {
 } from "./harness-threads.js";
 import type { MemoryApplyResult, MemoryBlockSnapshot, MemoryEditOp } from "./memory-agent.js";
 import type { HarnessMemoryMode } from "./harness-settings.js";
+import type {
+  PermissionAuditRecord,
+  PermissionInspectParams,
+  PermissionInspectResult,
+} from "./permission-gate.js";
 import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
@@ -1119,6 +1124,8 @@ export interface ExploreSearchResult {
 }
 
 export interface HarnessServiceMap {
+  "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
+  "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
   "shell.exec": { params: { command: string; cwd?: string; waitMs?: number }; result: ShellExecResult };
   "shell.read": { params: { id: string; offset?: number; length?: number }; result: ShellReadResult };
   "shell.write": { params: { id: string; text: string }; result: { accepted: boolean } };
@@ -1221,6 +1228,8 @@ export type HarnessCapability =
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
+  "permission.inspect": "context.session",
+  "permission.audit": "context.session",
   "shell.exec": "process.shell",
   "shell.read": "process.shell",
   "shell.write": "process.shell",
@@ -1292,6 +1301,8 @@ export interface HarnessActorContext extends HarnessActorIdentity {
 }
 
 const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
+  "permission.inspect",
+  "permission.audit",
   "shell.exec",
   "shell.read",
   "shell.write",

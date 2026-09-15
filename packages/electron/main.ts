@@ -1781,6 +1781,13 @@ const spawnLocalServer = async () => {
     hostEntry,
     apiOnly: false,
     requirePiRuntime: false,
+    renderWebPage: async (url, signal) => {
+      const result = await renderDesktopWebPage(url, signal ? { signal } : {});
+      if (!result.html) {
+        throw new Error(result.timedOut ? 'Web render timed out' : 'Web render failed');
+      }
+      return result.html;
+    },
     createPiRuntimeBroker: (brokerOptions) => createDesktopPiRuntimeBroker({
       ...(typeof process.env.PIARIUM_AGENT_DIR === 'string' && process.env.PIARIUM_AGENT_DIR.trim()
         ? { agentDir: process.env.PIARIUM_AGENT_DIR.trim() }
@@ -4066,6 +4073,69 @@ const finiteNumber = (value: unknown): number | null => (
   typeof value === 'number' && Number.isFinite(value) ? value : null
 );
 
+const renderDesktopWebPage = async (
+  rawUrl: string,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
+): Promise<{ html: string; finalUrl: string; timedOut: boolean }> => {
+  const url = rawUrl.trim();
+  if (!url) throw new Error('url is required');
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error('Invalid URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Only http(s) URLs are supported');
+  }
+  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? Math.min(options.timeoutMs, 30_000)
+    : 20_000;
+  const renderWindow = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      partition: 'persist:piarium-web-agent',
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      allowRunningInsecureContent: false,
+    },
+  });
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const abort = (): void => renderWindow.webContents.stop();
+  options.signal?.addEventListener('abort', abort, { once: true });
+  try {
+    options.signal?.throwIfAborted();
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('Web render timed out')), timeoutMs);
+    });
+    const render = (async () => {
+      await renderWindow.loadURL(url);
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      options.signal?.throwIfAborted();
+      const html = await renderWindow.webContents.executeJavaScript('document.documentElement.outerHTML', true);
+      return {
+        html: typeof html === 'string' ? html : '',
+        finalUrl: renderWindow.webContents.getURL() || url,
+        timedOut: false,
+      };
+    })();
+    return await Promise.race([render, timeout]);
+  } catch (error) {
+    if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Web render aborted', 'AbortError');
+    return {
+      html: '',
+      finalUrl: url,
+      timedOut: error instanceof Error && error.message.includes('timed out'),
+    };
+  } finally {
+    if (timer) clearTimeout(timer);
+    options.signal?.removeEventListener('abort', abort);
+    if (!renderWindow.isDestroyed()) renderWindow.destroy();
+  }
+};
+
 const handleInvoke = async (
   browserWindow: BrowserWindow | null,
   command: PiariumDesktopCommand,
@@ -4923,70 +4993,9 @@ const handleInvoke = async (
       return null;
 
     case 'desktop_web_render': {
-      const url = typeof args.url === 'string' ? args.url.trim() : '';
-      if (!url) {
-        throw new Error('url is required');
-      }
-      let parsed: URL;
-      try {
-        parsed = new URL(url);
-      } catch {
-        throw new Error('Invalid URL');
-      }
-      // Only http/https — block file: and custom protocols
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-        throw new Error('Only http(s) URLs are supported');
-      }
-      const _timeoutMs = typeof args.timeoutMs === 'number' && args.timeoutMs > 0
-        ? Math.min(args.timeoutMs, 30_000)
-        : 20_000;
-
-      // Create a hidden BrowserWindow with an independent profile
-      // (no user cookies, separate partition)
-      const renderWindow = new BrowserWindow({
-        show: false,
-        webPreferences: {
-          partition: 'persist:piarium-web-agent',
-          sandbox: true,
-          contextIsolation: true,
-          nodeIntegration: false,
-          webSecurity: true,
-          allowRunningInsecureContent: false,
-        },
-      });
-
-      try {
-        await renderWindow.loadURL(url);
-
-        // Wait 1s for network idle after load
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Extract the rendered HTML
-        const html = await renderWindow.webContents.executeJavaScript(
-          'document.documentElement.outerHTML',
-          true,
-        );
-
-        const finalUrl = renderWindow.webContents.getURL();
-
-        return {
-          html: typeof html === 'string' ? html : '',
-          finalUrl: finalUrl || url,
-          timedOut: false,
-        };
-      } catch (error) {
-        // Check if it was a timeout
-        const timedOut = error instanceof Error && error.message.includes('timed out');
-        return {
-          html: '',
-          finalUrl: url,
-          timedOut,
-        };
-      } finally {
-        if (!renderWindow.isDestroyed()) {
-          renderWindow.destroy();
-        }
-      }
+      const url = typeof args.url === 'string' ? args.url : '';
+      const timeoutMs = typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined;
+      return renderDesktopWebPage(url, timeoutMs === undefined ? {} : { timeoutMs });
     }
 
     default:

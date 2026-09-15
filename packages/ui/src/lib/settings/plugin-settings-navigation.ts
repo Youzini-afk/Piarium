@@ -8,7 +8,6 @@ export type PluginSettingsIntegrationId =
   | 'aft'
   | 'mcp'
   | 'pi-lens'
-  | 'permission-system'
   | 'hermes-memory'
   | 'rtk';
 
@@ -31,7 +30,6 @@ const INTEGRATION_BY_PLUGIN_ID: Readonly<Record<string, PluginSettingsIntegratio
   'pi-subagents': 'subagents',
   'pi-web-access': 'web-access',
   'pi-lens': 'pi-lens',
-  '@gotgenes/pi-permission-system': 'permission-system',
   'pi-hermes-memory': 'hermes-memory',
   'pi-rtk-optimizer': 'rtk',
 };
@@ -53,7 +51,6 @@ const PLUGIN_ID_BY_INTEGRATION: Readonly<Record<PluginSettingsIntegrationId, str
   'subagents': 'pi-subagents',
   'web-access': 'pi-web-access',
   'pi-lens': 'pi-lens',
-  'permission-system': '@gotgenes/pi-permission-system',
   'hermes-memory': 'pi-hermes-memory',
   'rtk': 'pi-rtk-optimizer',
 };

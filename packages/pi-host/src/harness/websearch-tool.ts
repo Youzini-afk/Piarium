@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HostServicesBridge } from "./host-services-bridge.js";
+import { HarnessRequestError, type HostServicesBridge } from "./host-services-bridge.js";
 
 const WebSearchParams = Type.Object({
   query: Type.String(),
@@ -67,10 +67,11 @@ export function createWebSearchTool(bridge: HostServicesBridge, _sessionId: stri
           },
         };
       } catch (error) {
+        const unavailable = error instanceof HarnessRequestError && error.code === "unavailable";
         return {
           content: [{
             type: "text",
-            text: `websearch error: ${error instanceof Error ? error.message : String(error)}`,
+            text: `${unavailable ? "websearch unavailable" : "websearch error"}: ${error instanceof Error ? error.message : String(error)}`,
           }],
           details: { kind: "websearch", providerId: "error", count: 0 },
           isError: true,

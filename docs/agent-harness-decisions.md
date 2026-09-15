@@ -6264,9 +6264,22 @@ Host 注入同一 native service 到用户终端、Harness shell、Thread setup�
 permission gate、Application Host web runtime、foundational package provision、Harness/Plugin Settings UI、session/Thread 审计和相应
 文档。D-044 的历史共存理由保留为当时事实，其目标架构由本条取代。
 
+实施收口（2026-09-15）：D-283 已进入生产链。Piarium 内置 `tool_call` gate 现在覆盖实际工具注册表，来源取自 Pi
+`getAllTools().sourceInfo`，Host `permission.inspect` 复用 actor/capability/path authority 规范化 cwd/资源；第三方 unknown 或证据不完整
+动作不能借工具名自动放行，也不能进入 Smart/session grant。grant 绑定 source/action/owning+execution workspace/cwd/规范资源/网络/thread
+scope，`/piarium-permissions` 可撤销，`permission.audit` 只投影无正文/凭据决策。foundational manifest revision 3 只保留 MCP，旧
+permission-system service 让位、状态桥、Plugin Settings/Composer/quick mode/config model/专属 i18n 已删除。
+
+Web 侧不再按 `pi-web-access` 自动让位；provider/render/domain policy 按 worker generation 冻结，新会话读新设置且无需 Host 重启，
+credential 每次调用从 Pi auth 实时解析，撤销明确 `unavailable`。fetch/search 共用 user + trusted workspace 的域名 ceiling，工具过滤只能
+继续收紧；Electron Application Host 与既有 `desktop_web_render` 共用一个离屏 renderer helper，`web.render=false` 时不启动 renderer，
+无 renderer 时保持 `renderer-unavailable`。未使用的 `maxFetchesPerTurn` 已从协议/UI/文档删除。定向验证为 protocol 22、pi-host 35、
+Application Host 57、i18n 6 项通过；protocol/pi-host/web/UI/Electron type-check 与相关 lint 通过。本轮未重跑完整 packaged Electron smoke，
+也未用真实付费搜索 provider 做外网调用，因此这些范围不提升为额外平台/provider 证明。
+
 ## D-283 决策索引追加
 
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
-| D-044 | historical coexistence implementation retained until replacement lands; target architecture superseded | D-283 | plan 3b；status 3b.1–3b.3（现状） |
-| D-283 | accepted / implementation planned | — | plan 0.4/0.7/1b.7/3b/阶段 4–6；future design/status/code |
+| D-044 | historical coexistence implementation; target architecture superseded and implementation removed | D-283 | history only |
+| D-283 | accepted / implemented / Harness closure complete | — | plan 0.4/0.7/1b.7/3b；status 1b.3–1b.7 / 3b.1–3b.3；architecture/code |

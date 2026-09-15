@@ -190,7 +190,6 @@ value.
 | pi-lens | Diagnostics; formatting and fixes; context delivery; project scale, rules, and security scans; native runtime actions | Resolved user authority (`PI_LENS_CONFIG_PATH` or `~/.pi-lens/config.json`) plus the nearest ordered project `.pi-lens.json` / `pi-lens.json` authority | future namespaces, detailed rule policies, LSP server maps and tool-specific tuning | project-ignored global keys stay visible, absent values remain unset, and native command availability is observed per session |
 | @cortexkit/aft-pi | Editing mode; tool surface; search, semantic, call-graph, inspection deadlines, LSP, backup, sandbox, and GitHub routing-shim controls | Host-resolved CortexKit user `aft.jsonc` authority plus project `.cortexkit/aft.jsonc`; both are revisioned JSONC drafts | formatter/checker maps, server definitions, shell feature objects, transport, credentials, path lists, and future fields | invalid known fields block structured save; unknown fields and project-stripped fields stay visible and are preserved; runtime observation is command-only |
 | pi-hermes-memory | Memory policy and limits; review; flush; capacity; correction/failure recall; session search and model overrides | Host-resolved global `hermes-memory-user` authority (`hermes-memory-config.json` under the active Pi agent directory) | `memoryDir`, custom policy text, child extension paths, four correction arrays, and future fields | unknown fields are preserved and non-blocking; modern overflow strategy takes precedence without deleting the legacy field; runtime observation is command-only |
-| @gotgenes/pi-permission-system | Task-oriented allow/ask/deny policy; runtime/interface flags; prompt and review-log display budgets | Independent global `extensions/pi-permission-system/config.json` under the active Pi agent root and trusted project `.pi/extensions/pi-permission-system/config.json` | pattern maps, third-party permission surfaces, shell aliases, infrastructure read paths, authorizer chains, and deprecated preview caps | pattern maps remain intact until replaced deliberately, trailing commas and unknown 27.0.0 top-level keys block save, `yoloMode` keeps a source-qualified warning, and runtime availability comes only from the native command catalog |
 | pi-rtk-optimizer | Rewrite/suggest behavior; missing-binary guard; notifications; output, read/source, and truncation controls | Strict JSON at global `<agentDir>/extensions/pi-rtk-optimizer/config.json` | removed rewrite categories, unknown future fields, and complex legacy shapes | missing fields remain absent; unknown and legacy fields are preserved; numeric controls use only native 40–4000 and 1000–200000 ranges; runtime presence is the exact `rtk` command, not binary availability |
 
 Agent definitions and settings overrides are deliberately not one transaction. A definition action
@@ -556,75 +555,15 @@ Acceptance:
 - runtime availability depends only on observing `aft-status`, with no command execution or status
   output parsing.
 
-### 5.8 @gotgenes/pi-permission-system
+### 5.8 Retired permission-system adapter (D-283)
 
-Authority:
-
-- global `<agentDir>/extensions/pi-permission-system/config.json` and project
-  `<cwd>/.pi/extensions/pi-permission-system/config.json` through the existing revisioned
-  `config.text` contract;
-- project configuration only after the Host reports the project trusted;
-- the active session's registered `permission-system` command for showing the plugin's resolved
-  active settings;
-- the plugin's public `permissions:ready`, `permissions:ui_prompt`, and `permissions:decision`
-  EventBus channels for transient session status;
-- the plugin's own `ctx.ui.select` / `ctx.ui.input` request for every interactive decision. Piarium
-  renders and returns that request through the generic Extension UI bridge; it does not decide or
-  reproduce policy.
-
-The global and project documents are independent JSONC drafts. Comments and surrounding formatting
-survive structured edits, while a second strict parse rejects trailing commas because the plugin's
-loader does not accept them. Quick controls show user tasks rather than configuration keys. A scalar
-permission can be left unset or set to allow, ask, or deny; an existing pattern map is shown as a
-disabled custom-rule sentinel and remains unchanged in the shared draft until the user chooses a
-scalar replacement or edits it in Advanced. The current 27.0.1 schema is strict: an unknown top-level
-key would invalidate the entire scope, so Piarium preserves it visibly in the draft but diagnoses and
-blocks saving until it is removed or the adapter is updated for a plugin version that owns it. Known
-booleans, positive integers, permission maps, shell aliases, string arrays, and the optional schema
-reference are validated before save without materializing defaults. The quick policy view includes
-the directional `path_read`, `path_write`, `external_directory_read`, and
-`external_directory_write` surfaces while preserving arbitrary third-party tool surfaces in the
-advanced document. Directional-looking misspellings are rejected at parity with the plugin because
-they would otherwise leave an intended restriction inert.
-
-Saving goes through the Host's normal revision check, atomic write, and active-Host reload. That
-reload is the persistence boundary, not a claim that every runtime value changes immediately. The
-plugin reads policy and runtime knobs at its own lifecycle boundaries: settings used by agent
-preparation are read on the next `before_agent_start`, while session-owned composition is refreshed
-on the next `session_start` (or a later plugin-owned resource reload where documented). The UI does
-not synthesize an immediate effective-state result.
-
-Runtime observation remains non-authoritative. A hidden Host adapter folds the three public event
-channels into `pi-permission-system/status/v1`: whether the plugin announced readiness, active prompts,
-and the last decision. It never reads private logs, never responds to a prompt, and never turns those
-events into a second permission engine. An active session shows the Composer shield after the plugin
-announces readiness; a new-session draft shows it when the package catalog confirms the plugin is
-installed and enabled. It highlights a pending ask and toggles `Ask` / `Auto` directly from the shield by editing the
-plugin-owned `yoloMode`. A trusted bound workspace writes the project scope; an unbound or untrusted session writes
-the global scope. The active-settings
-action still dispatches exactly `/permission-system show`; command output is not parsed into state.
-The plugin's non-TUI select/input flow is the approval authority, so approve once, approve for the
-session, deny, denial reasons, and forwarded-subagent scope choices are returned unchanged to the
-plugin. Review/debug logs remain private plugin artifacts, not Piarium statistics or an audit database.
-
-Acceptance:
-
-- both scopes preserve comments, pattern maps, revisions, dirty drafts,
-  external-change conflicts, and project trust behavior;
-- missing fields stay absent, while invalid known values, unknown 27.0.1 top-level keys, malformed
-  directional surfaces, and trailing
-  commas block save with localized diagnostics;
-- `yoloMode` explains that ask decisions are approved automatically if the selected source becomes
-  effective, while explicit deny decisions still apply;
-- active-session Composer and runtime status appear only after the installed, enabled plugin announces
-  a live session; the new-session Composer uses installed/enabled package state and writes the native
-  config before creating that session; pending asks clear only on the matching public decision event;
-- Composer `Ask` / `Auto` preserves comments and unrelated policy fields, uses revision-checked writes,
-  and never overwrites an invalid or externally changed native config;
-- `ask` choices are answered through `extension.ui.respond` to the plugin's own select/input request,
-  while the active-settings button dispatches exactly `/permission-system show`;
-- Host reload after save and the plugin's next-lifecycle reread are not described as immediate
-  runtime state.
+Piarium no longer provides a first-class adapter, Composer control, status bridge,
+quick mode, or foundational provisioning for `@gotgenes/pi-permission-system`.
+Interactive approvals are owned by the native Piarium Harness permission gate and
+its Harness Settings policy. The package may still be installed by a user as an
+ordinary Pi package through Pi's generic package surface, but Piarium does not
+read or edit its policy files and it cannot replace or bypass the native gate.
+The previous adapter contract is retained only in history/decision records.
 
 ### 5.9 pi-hermes-memory
 

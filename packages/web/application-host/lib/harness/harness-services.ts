@@ -43,6 +43,42 @@ import { presentOrganizedOutput } from "./output-organize/present.js";
 import { utf8Bytes } from "./output-organize/index.js";
 export { createExploreSearchService } from "./explore-service.js";
 
+function createPermissionInspectService(host: HarnessServiceHost): HarnessService<"permission.inspect"> {
+  return {
+    handle: async (params, ctx) => {
+      const cwd = ctx.authorizedPaths[0];
+      if (!cwd) throw new HarnessServiceError("forbidden", "Permission cwd is outside the actor workspace");
+      const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId);
+      return {
+        tool: params.tool,
+        source: params.source,
+        action: params.action,
+        executionWorkspaceId: ctx.workspaceId,
+        owningWorkspaceId: binding?.owningWorkspaceId ?? ctx.workspaceId,
+        cwd: cwd.canonicalResourceId,
+        paths: ctx.authorizedPaths.slice(1).map((path) => ({
+          inputPath: path.inputPath,
+          workspaceId: path.workspaceId,
+          resourceId: path.resourceId,
+          canonicalResourceId: path.canonicalResourceId,
+        })),
+        networkTargets: [...new Set(params.networkTargets)],
+        threadScopes: [...new Set(params.threadScopes)],
+        evidenceComplete: params.evidenceComplete,
+      };
+    },
+  };
+}
+
+function createPermissionAuditService(host: HarnessServiceHost): HarnessService<"permission.audit"> {
+  return {
+    handle: async (params) => {
+      host.permissionAudit?.(params);
+      return { accepted: true };
+    },
+  };
+}
+
 export function createShellExecService(host: HarnessServiceHost): HarnessService<"shell.exec"> {
   return {
     handle: async (params, ctx: HarnessServiceContext) => {
@@ -741,6 +777,8 @@ export function registerHarnessServices(
   router: { register: <M extends keyof HarnessServiceMap>(method: M, service: HarnessService<M>) => void },
   host: HarnessServiceHost,
 ): void {
+  router.register("permission.inspect", createPermissionInspectService(host));
+  router.register("permission.audit", createPermissionAuditService(host));
   router.register("shell.exec", createShellExecService(host));
   router.register("shell.read", createShellReadService(host));
   router.register("shell.write", createShellWriteService(host));
@@ -804,6 +842,18 @@ export function registerHarnessServices(
           && owner.activeRunId === binding.runId
           && owner.lifecycle === "active",
         );
+        const webBinding = host.getWebBinding(ctx.sessionId);
+        const domainPolicy = webBinding?.settings?.domains
+          ? {
+              ...(webBinding.settings.domains.allow === undefined
+                ? {}
+                : { allow: [...webBinding.settings.domains.allow] }),
+              block: [...(webBinding.settings.domains.block ?? [])],
+            }
+          : { block: [] };
+        if (params.render === true && webBinding?.settings?.render !== true) {
+          return { status: "renderer-unavailable", url: params.url };
+        }
         return host.webFetchService!.fetch(params.url, {
           workspaceId,
           authority: {
@@ -811,7 +861,10 @@ export function registerHarnessServices(
             sessionId: ctx.sessionId,
             ...(binding ? { threadId: binding.threadId, runId: binding.runId } : {}),
           },
-          ...(params.render !== undefined ? { render: params.render } : {}),
+          // Renderer access is user-owned and session-frozen. A tool request
+          // cannot turn it on when harness.web.render is false/unset.
+          render: params.render === true,
+          domainPolicy,
           signal: ctx.signal,
           ...(issueReceipt ? { issueReceipt: true } : {}),
         });

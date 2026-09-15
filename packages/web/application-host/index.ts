@@ -106,11 +106,11 @@ import { EMPTY_GRAMMAR_PACK_MANIFEST, loadCommittedGrammarPackManifest } from '.
 import { createGrammarStore } from './lib/structure/grammar-store.js';
 import { resolveStructureRuntimeFile } from './lib/structure/runtime-path.js';
 import { createLanguageSupportRuntime } from './lib/language-support/runtime.js';
-import { createWebFetch, type SsrfPolicy, type DomainPolicy } from './lib/harness/web-fetch.js';
-import { createWebSearchService, resolveConfiguredSearchProvider, type SearchProvider } from './lib/harness/web-search.js';
+import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
+import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
-import { readPiAuthFile, readPiConfigLayers } from './lib/pi-config/storage.js';
+import { readPiAuthFile } from './lib/pi-config/storage.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -884,24 +884,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   type PiAdmissionRequest = Parameters<NonNullable<HostPiRuntimeBrokerFactoryOptions['admitSessionExecution']>>[0];
   let piWriterTracker: PiWriterTracker | null = null;
   let recoveryTurnCoordinator: RecoveryTurnCoordinator | null = null;
-  let configuredWebSearchProvider: SearchProvider | null = null;
-  try {
-    const userConfig = readPiConfigLayers(process.cwd()).userConfig;
-    const searchSettings = recordOf(recordOf(userConfig.harness).web).search;
-    const resolvedSearch = resolveConfiguredSearchProvider({
-      settings: searchSettings,
-      auth: readPiAuthFile(),
-    });
-    if ('unavailable' in resolvedSearch) {
-      if (searchSettings !== undefined) {
-        console.warn(`[HarnessWebSearch] ${resolvedSearch.hint}`);
-      }
-    } else {
-      configuredWebSearchProvider = resolvedSearch;
-    }
-  } catch (error) {
-    console.warn(`[HarnessWebSearch] Unable to load provider configuration: ${errorMessage(error)}`);
-  }
   const admitPiSessionExecution = (request: PiAdmissionRequest) => {
     if (!piWriterTracker) {
       throw new PiRuntimeBrokerError(
@@ -922,7 +904,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     harnessDocumentRead: true,
     harnessDocumentPathOverlay: true,
     harnessWebRead: true,
-    harnessWebSearch: configuredWebSearchProvider !== null,
+    // Provider identity is frozen per session from Pi settings. The Host
+    // service itself is always present, so changing provider does not require
+    // an application restart.
+    harnessWebSearch: true,
     ...brokerOptions,
   }));
   const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(
@@ -1300,19 +1285,30 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   } = {};
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
-    domainPolicy: (_workspaceId: string): DomainPolicy => {
-      // Domain policy from workspace config — empty by default (no restrictions)
-      return { allow: [], block: [] };
-    },
+    ...(options.renderWebPage ? { renderer: options.renderWebPage } : {}),
     persistReceipt: async (workspaceId, receipt, markdown) => {
       if (!retrievalEvidenceAccess.persistReceipt) throw new Error('Durable web receipt storage is unavailable');
       return retrievalEvidenceAccess.persistReceipt(workspaceId, receipt, markdown);
     },
-    // Renderer is wired by desktop host (1b.4); web/cloud host has no renderer
   });
-  const webSearchService = configuredWebSearchProvider
-    ? createWebSearchService(async () => configuredWebSearchProvider!)
-    : null;
+  const webSearchService = createWebSearchService(
+    async ({ sessionId }) => {
+      const search = harnessServiceHost.getWebBinding(sessionId)?.settings?.search;
+      return resolveConfiguredSearchProvider({
+        settings: search,
+        // Credential material is intentionally resolved live for every call.
+        // Revocation makes an old frozen binding unavailable immediately.
+        auth: readPiAuthFile(),
+      });
+    },
+    async ({ sessionId }) => {
+      const domains = harnessServiceHost.getWebBinding(sessionId)?.settings?.domains;
+      return {
+        ...(domains?.allow === undefined ? {} : { allow: [...domains.allow] }),
+        block: [...(domains?.block ?? [])],
+      };
+    },
+  );
   const harnessDiagnosticsProvider = createLanguageSupervisorDiagnosticsProvider(languageSupervisor, {
     documents: documentsAuthority,
     resolveWorkspaceId: async (workspaceRoot) => {
@@ -2329,6 +2325,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticRecall: semanticRuntime.semanticRecall,
     harnessSettings: semanticRuntime.harnessSettings,
     rerankExploreViews: semanticRuntime.rerankExploreViews,
+    permissionAudit: (record) => {
+      broadcastGlobalUiEvent?.({
+        type: 'piarium:harness-permission-decision',
+        properties: record,
+      });
+    },
     fileRelations: async (workspaceId, resourceId) => {
       const store = knowledgeStores.get(workspaceId);
       if (!store) throw new Error(`knowledge store is not open for workspace ${workspaceId}`);

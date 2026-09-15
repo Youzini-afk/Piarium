@@ -66,14 +66,6 @@ describe('plugin settings navigation', () => {
     });
   });
 
-  test('maps the scoped permission-system package to its dedicated adapter', () => {
-    requestPluginSettingsTarget('npm:@gotgenes/pi-permission-system@22.0.0');
-    expect(consumePluginSettingsTarget()).toEqual({
-      integrationId: 'permission-system',
-      pluginId: 'npm:@gotgenes/pi-permission-system@22.0.0',
-    });
-  });
-
   test('maps pi-hermes-memory to its dedicated adapter', () => {
     requestPluginSettingsTarget('npm:pi-hermes-memory@0.9.6');
     expect(consumePluginSettingsTarget()).toEqual({

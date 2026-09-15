@@ -1,10 +1,9 @@
 import type { PackageDescriptor } from "./types.js";
 
-export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 2 as const;
+export const FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION = 3 as const;
 
 export const FOUNDATIONAL_PI_PACKAGE_IDS = [
   "mcp",
-  "permission-system",
 ] as const;
 
 export type FoundationalPiPackageId = (typeof FOUNDATIONAL_PI_PACKAGE_IDS)[number];
@@ -46,13 +45,6 @@ export const FOUNDATIONAL_PI_PACKAGE_MANIFEST = {
       packageAliases: ["@piarium/pi-mcp-adapter", "pi-mcp-adapter"],
       packageName: "@piarium/pi-mcp-adapter",
       source: "npm:@piarium/pi-mcp-adapter",
-    },
-    {
-      id: "permission-system",
-      introducedRevision: 1,
-      packageAliases: ["@gotgenes/pi-permission-system", "pi-permission-system"],
-      packageName: "@gotgenes/pi-permission-system",
-      source: "npm:@gotgenes/pi-permission-system",
     },
   ],
   revision: FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,

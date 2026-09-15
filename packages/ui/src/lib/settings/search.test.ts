@@ -55,7 +55,7 @@ describe('settings search availability', () => {
     expect(build(true).some((result) => result.page === 'mcp')).toBe(true);
   });
 
-  test('indexes the permission-system adapter under Plugin Settings', async () => {
+  test('indexes maintained plugin adapters under Plugin Settings', async () => {
     await ensureBuiltinSettingsContributions();
     if (!getSettingsPageMeta('plugin-settings')) await piariumSurfaceRuntime.activate({
       owner: {
@@ -68,17 +68,6 @@ describe('settings search availability', () => {
         realmId: 'plugin-settings-search-test',
       },
     }, activateBuiltinPiIntegration(PIARIUM_BUILTIN_PLUGIN_SETTINGS_EXTENSION));
-    const results = buildSettingsSearchResults({
-      getPageTitle: (slug) => slug,
-      query: 'permission system',
-      runtimeCtx: runtimeContext(false),
-      t: (key) => key,
-    });
-    expect(results.some((result) => (
-      result.id === 'plugin-settings.configuration'
-      && result.page === 'plugin-settings'
-    ))).toBe(true);
-
     const rtkResults = buildSettingsSearchResults({
       getPageTitle: (slug) => slug,
       query: 'rtk optimizer',

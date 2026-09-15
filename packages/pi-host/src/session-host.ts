@@ -108,7 +108,6 @@ import { ConfigTextFileEditor } from "./config-text-file-editor.js";
 import { resolveConfigTextAuthority } from "./config-text-authority-resolver.js";
 import { ConfigWatchManager } from "./config-watch-manager.js";
 import { createExtensionStateBridgeExtension } from "./extension-state-bridge.js";
-import { createPermissionSystemStateBridgeExtension } from "./permission-system-state-bridge.js";
 import { ExtensionUiBridge } from "./extension-ui-bridge.js";
 import { applyTopLevelJsonChanges, JsonObjectFileEditor } from "./json-object-file-editor.js";
 import { toJsonValue } from "./json.js";
@@ -149,7 +148,7 @@ import {
   createHarnessCounterTracker,
   type HarnessCounterTracker,
 } from "./harness/counter-tracker.js";
-import { selectHarnessTools, computeYieldedTools } from "./harness/select-tools.js";
+import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
 import { createCompactionExtension } from "./harness/compaction-extension.js";
@@ -3041,11 +3040,6 @@ export class SessionHost {
               name: "piarium-extension-state-bridge",
             },
             {
-              factory: createPermissionSystemStateBridgeExtension(this.#emit),
-              hidden: true,
-              name: "piarium-permission-system-state-bridge",
-            },
-            {
               factory: createFleetRegistryExtension(fleet),
               hidden: true,
               name: "piarium-fleet-registry",
@@ -3149,6 +3143,8 @@ export class SessionHost {
             {
               factory: createPermissionGateExtension({
                 sessionId: sessionManager.getSessionId(),
+                cwd,
+                bridge: hostServicesBridge,
                 policy: buildPermissionPolicy(
                   sessionPermissions.mode,
                   Object.fromEntries(
@@ -3160,12 +3156,6 @@ export class SessionHost {
                 smartJudge: async (toolName, params) => permissionJudge
                   ? permissionJudge(toolName, params)
                   : "ask",
-                onExternalGateDetected: () => {
-                  this.#emit("host.log", {
-                    level: "info",
-                    message: "Piarium native permission prompts yielded to the active pi-permission-system package to avoid duplicate approval dialogs",
-                  });
-                },
               }),
               hidden: true,
               name: "piarium-permission-gate",
@@ -3345,16 +3335,6 @@ export class SessionHost {
       // Harness tools — gated by HarnessSettings.tools flags via selectHarnessTools.
       const sessionModel = selectedLaunchModel ?? configured?.model;
       const isOpenAIFamily = sessionModel?.provider === "openai" || (typeof sessionModel?.api === "string" && sessionModel.api.startsWith("openai"));
-      // Check if pi-web-access is loaded and enabled → yield webfetch/websearch.
-      // Read package list from settings directly (session not yet active).
-      const globalPkgs = (settingsManager.getGlobalSettings() as { packages?: Array<{ source?: string; enabled?: boolean }> }).packages ?? [];
-      const projectPkgs = (settingsManager.getProjectSettings() as { packages?: Array<{ source?: string; enabled?: boolean }> }).packages ?? [];
-      const allPkgs = [...globalPkgs, ...projectPkgs].map((p) => ({
-        name: p.source ?? "",
-        source: p.source ?? "",
-        enabled: p.enabled !== false,
-      }));
-      const yieldedTools = computeYieldedTools(allPkgs);
       // Roles the session can actually dispatch: a role whose model slot is
       // unconfigured is omitted from the team prompt and rejected by the
       // tool, rather than silently running on the main model (invariant 6).
@@ -3372,7 +3352,6 @@ export class SessionHost {
         documentReadAvailable: this.#harnessDocumentReadEnabled,
         documentPathOverlayAvailable: this.#harnessDocumentPathOverlayEnabled,
         autoResizeImages: settingsManager.getImageAutoResize(),
-        yieldedTools,
         ...(readPage ? { readPage } : {}),
         ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,

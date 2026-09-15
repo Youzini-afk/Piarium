@@ -89,10 +89,9 @@ describe("evaluateGate", () => {
     expect(evaluateGate("bash", { command: "rm" }, policy).decision).toBe("ask");
   });
 
-  it("non-harness tools pass through (allow)", () => {
+  it("unknown tools ask because Piarium is the sole permission authority", () => {
     const policy: PermissionPolicy = { mode: "normal", rules: defaultRules("normal") };
-    // unknown_tool is not in HARNESS_TOOL_META → passthrough to Pi's permission system
-    expect(evaluateGate("unknown_tool", {}, policy).decision).toBe("allow");
+    expect(evaluateGate("unknown_tool", {}, policy).decision).toBe("ask");
   });
 
   it("find/get_output/diagnostics/webfetch/websearch/kill_shell are allow (mutation: none)", () => {

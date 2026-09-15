@@ -130,6 +130,33 @@ describe("configured web search providers", () => {
     }));
     await expect(service.handle({ query: "q" }, context)).rejects.toThrow("provider unavailable");
     const unavailable = createWebSearchService(async () => ({ unavailable: true, hint: "configure search" }));
-    await expect(unavailable.handle({ query: "q" }, context)).rejects.toThrow("configure search");
+    await expect(unavailable.handle({ query: "q" }, context)).rejects.toMatchObject({
+      harnessCode: "unavailable",
+      message: "configure search",
+    });
+  });
+
+  it("intersects tool domain filters with the frozen persistent policy", async () => {
+    const search = vi.fn(async () => [
+      { title: "Docs", url: "https://api.docs.example.com/a", snippet: "ok" },
+      { title: "Other", url: "https://other.example.com/b", snippet: "blocked by allow" },
+      { title: "Tracker", url: "https://tracker.docs.example.com/c", snippet: "blocked" },
+    ]);
+    const service = createWebSearchService(
+      async () => ({ id: "configured-test", search }),
+      async () => ({ allow: ["example.com"], block: ["tracker.docs.example.com"] }),
+    );
+    const result = await service.handle({
+      query: "q",
+      allowedDomains: ["docs.example.com"],
+      blockedDomains: ["ads.docs.example.com"],
+    }, context);
+    expect(search).toHaveBeenCalledWith("q", expect.objectContaining({
+      allowedDomains: ["docs.example.com"],
+      blockedDomains: ["tracker.docs.example.com", "ads.docs.example.com"],
+    }));
+    expect(result.results).toEqual([
+      { title: "Docs", url: "https://api.docs.example.com/a", snippet: "ok" },
+    ]);
   });
 });

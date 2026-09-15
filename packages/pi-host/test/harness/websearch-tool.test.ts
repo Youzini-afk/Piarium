@@ -88,4 +88,21 @@ describe("websearch tool", () => {
     assert.equal(result.isError, true); // 0 results → error
     bridge.dispose();
   });
+
+  it("surfaces Host credential revocation as unavailable", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const tool = createWebSearchTool(bridge, "test");
+    const resultPromise = tool.execute("tc4", { query: "test" } as never, undefined as never, undefined as never, undefined as never);
+
+    await new Promise((r) => setImmediate(r));
+    bridge.respond("test", emitted[0]!.requestId, {
+      ok: false,
+      error: { code: "unavailable", message: "search credential is unavailable: search-v1" },
+    });
+
+    const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
+    assert.equal(result.isError, true);
+    assert.match(result.content[0]?.text ?? "", /^websearch unavailable: search credential is unavailable/);
+    bridge.dispose();
+  });
 });

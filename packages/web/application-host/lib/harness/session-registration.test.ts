@@ -95,4 +95,148 @@ describe("asynchronous Harness registration", () => {
     await registered;
     expect(await registrations.resolveActor(actor)).not.toBeNull();
   });
+
+  it("freezes credential-free web provider/policy identity per worker generation", async () => {
+    let current: PiSettingsSnapshot = {
+      global: {
+        harness: {
+          web: {
+            render: true,
+            search: { provider: "brave", credentialRef: "search-v1" },
+            domains: { allow: ["example.com"], block: ["ads.example.com"] },
+          },
+        },
+      },
+      globalRevision: "g1",
+      project: {
+        harness: {
+          web: {
+            render: false,
+            search: { provider: "searxng", endpoint: "https://workspace.invalid" },
+            domains: { allow: ["docs.example.com", "outside.test"], block: ["tracker.example.com"] },
+          },
+        },
+      },
+      projectRevision: "p1",
+      projectTrusted: true,
+    };
+    const { host, registrations } = fixture(async () => current);
+    await registrations.register(context());
+    expect(host.getWebBinding(actor.sessionId)).toEqual({
+      generation: "g1:p1",
+      settings: {
+        render: true,
+        search: { provider: "brave", credentialRef: "search-v1" },
+        domains: {
+          allow: ["docs.example.com"],
+          block: ["ads.example.com", "tracker.example.com"],
+        },
+      },
+    });
+
+    current = {
+      global: { harness: { web: { search: { provider: "tavily", credentialRef: "search-v2" } } } },
+      globalRevision: "g2",
+      project: {},
+      projectRevision: "p2",
+      projectTrusted: false,
+    };
+    await registrations.register(context());
+    expect(host.getWebBinding(actor.sessionId)?.settings?.search).toEqual({
+      provider: "brave",
+      credentialRef: "search-v1",
+    });
+
+    const next = { ...actor, workerGeneration: 2 };
+    await registrations.register(context(next));
+    expect(host.getWebBinding(actor.sessionId)).toEqual({
+      generation: "g2:untrusted",
+      settings: {
+        search: { provider: "tavily", credentialRef: "search-v2" },
+        domains: { block: [] },
+      },
+    });
+  });
+
+  it("web binding ignores malformed unrelated harness sections", async () => {
+    const { host, registrations } = fixture(async () => ({
+      global: {
+        harness: {
+          memory: false,
+          web: { search: { provider: "searxng", endpoint: "https://search.example" } },
+        },
+      },
+      globalRevision: "g-web",
+      project: {},
+      projectRevision: "p-web",
+      projectTrusted: false,
+    } as PiSettingsSnapshot));
+    await registrations.register(context());
+    expect(host.hasActor(actor)).toBe(true);
+    expect(host.getWebBinding(actor.sessionId)?.settings?.search).toEqual({
+      provider: "searxng",
+      endpoint: "https://search.example",
+    });
+  });
+
+  it("enforces the frozen renderer switch and domain policy before web.fetch execution", async () => {
+    const fetch = vi.fn(async (url: string) => ({ status: "failed" as const, url, reason: "stub" }));
+    const host = createHarnessServiceHost({
+      search: async () => ({ status: "empty", generation: undefined }),
+      resolveWorkspaceRoot: async () => "D:/workspace",
+      discoveredShells: {},
+      webFetchService: { fetch },
+    });
+    cleanup.push(() => host.dispose());
+    const responses: Array<{ ok: boolean; result?: unknown }> = [];
+    const router = createHarnessRouter({
+      respond: async (_sessionId, _requestId, outcome) => { responses.push(outcome); },
+      resolveActor: (identity) => host.resolveActor(identity),
+    });
+    cleanup.push(() => router.dispose());
+    registerHarnessServices(router, host);
+
+    host.registerSession({
+      ...context(),
+      grantedCapabilities: ["read.web"],
+      webBinding: {
+        generation: "g1:untrusted",
+        settings: { render: false, domains: { allow: ["example.com"], block: ["ads.example.com"] } },
+      },
+    });
+    await router.processEvent({
+      actor,
+      kind: "host",
+      envelope: {
+        kind: "event",
+        event: "harness.request",
+        data: { requestId: "render-off", method: "web.fetch", params: { url: "https://example.com", render: true } },
+      },
+    });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(responses.at(-1)).toMatchObject({ ok: true, result: { status: "renderer-unavailable" } });
+
+    const next = { ...actor, workerGeneration: 2 };
+    host.registerSession({
+      ...context(next),
+      grantedCapabilities: ["read.web"],
+      webBinding: {
+        generation: "g2:untrusted",
+        settings: { render: true, domains: { allow: ["example.com"], block: ["ads.example.com"] } },
+      },
+    });
+    await router.processEvent({
+      actor: next,
+      kind: "host",
+      envelope: {
+        kind: "event",
+        event: "harness.request",
+        data: { requestId: "render-on", method: "web.fetch", params: { url: "https://example.com", render: true } },
+      },
+    });
+    expect(fetch).toHaveBeenCalledWith("https://example.com", expect.objectContaining({
+      render: true,
+      domainPolicy: { allow: ["example.com"], block: ["ads.example.com"] },
+    }));
+  });
 });

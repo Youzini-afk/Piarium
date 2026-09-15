@@ -1,4 +1,4 @@
-import type { FetchResult, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
+import type { FetchResult, HarnessWebDomainPolicy, RetrievalReceiptAuthority, RetrievalUrlReceipt } from "@piarium/protocol";
 import { isSameHost } from "./ssrf-policy.js";
 import { mintWebFetchReceipt, type WebFetchReceiptDraft } from "./web-fetch-receipt.js";
 
@@ -7,14 +7,11 @@ export interface SsrfPolicy {
   isSameHost(url1: string, url2: string): boolean;
 }
 
-export interface DomainPolicy {
-  allow: string[];
-  block: string[];
-}
+export type DomainPolicy = HarnessWebDomainPolicy;
 
 export interface WebFetchDeps {
   ssrf: SsrfPolicy;
-  domainPolicy: (workspaceId: string) => DomainPolicy;
+  domainPolicy?: (workspaceId: string) => DomainPolicy;
   renderer?: (url: string, signal?: AbortSignal) => Promise<string>;
   cacheTtlMs?: number;
   maxBytes?: number;
@@ -53,8 +50,12 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
   };
 
-  const checkDomainPolicy = (url: string, workspaceId: string): { blocked: boolean; reason?: "domain-blocked" } => {
-    const policy = deps.domainPolicy(workspaceId);
+  const checkDomainPolicy = (
+    url: string,
+    workspaceId: string,
+    override?: DomainPolicy,
+  ): { blocked: boolean; reason?: "domain-blocked" } => {
+    const policy = override ?? deps.domainPolicy?.(workspaceId) ?? { block: [] };
     let parsed: URL;
     try {
       parsed = new URL(url);
@@ -69,7 +70,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     }
 
     // Allow list (whitelist mode if non-empty)
-    if (policy.allow.length > 0) {
+    if (policy.allow !== undefined) {
       if (!policy.allow.some((d) => hostname === d.toLowerCase() || hostname.endsWith(`.${d.toLowerCase()}`))) {
         return { blocked: true, reason: "domain-blocked" };
       }
@@ -172,11 +173,12 @@ export function createWebFetch(deps: WebFetchDeps) {
     workspaceId: string;
     authority: RetrievalReceiptAuthority;
     render?: boolean;
+    domainPolicy?: DomainPolicy;
     signal?: AbortSignal;
     issueReceipt?: boolean;
   }): Promise<FetchResult> => {
     // Check domain policy
-    const domainCheck = checkDomainPolicy(url, ctx.workspaceId);
+    const domainCheck = checkDomainPolicy(url, ctx.workspaceId, ctx.domainPolicy);
     if (domainCheck.blocked) {
       return { status: "blocked", url, reason: "domain-blocked" };
     }
@@ -209,7 +211,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     let redirectCount = 0;
 
     while (redirectCount < MAX_REDIRECTS) {
-      const redirectDomainCheck = checkDomainPolicy(currentUrl, ctx.workspaceId);
+      const redirectDomainCheck = checkDomainPolicy(currentUrl, ctx.workspaceId, ctx.domainPolicy);
       if (redirectDomainCheck.blocked) return { status: "blocked", url: currentUrl, reason: "domain-blocked" };
       const redirectSsrfCheck = await deps.ssrf.check(currentUrl);
       if (redirectSsrfCheck.blocked) {

@@ -65,9 +65,9 @@ export interface HarnessSettings {
   rerank?: HarnessRerankSettings;
   memory?: { mode?: HarnessMemoryMode; shadowMode?: boolean; [key: string]: unknown };
   web?: {
-    maxFetchesPerTurn?: number;
     render?: boolean;
     search?: { provider: HarnessWebSearchProvider; endpoint?: string; credentialRef?: string };
+    domains?: { allow?: string[]; block?: string[] };
   };
   permissions?: { mode?: PermissionMode; rules?: PermissionRule[] };
   review?: { enabled?: boolean; gate?: boolean };
@@ -81,6 +81,10 @@ function readHarnessSettings(snapshot: PiSettingsSnapshot | null): HarnessSettin
   }
   return {};
 }
+
+const parseDomainDraft = (value: string): string[] => [...new Set(
+  value.split(/[\n,]/).map((entry) => entry.trim().toLowerCase()).filter(Boolean),
+)];
 
 export const HarnessSettingsPage: React.FC = () => {
   const { t } = useI18n();
@@ -99,6 +103,10 @@ export const HarnessSettingsPage: React.FC = () => {
   const [searchProvider, setSearchProvider] = React.useState<HarnessWebSearchProvider | 'none'>('none');
   const [searchEndpoint, setSearchEndpoint] = React.useState('');
   const [searchApiKey, setSearchApiKey] = React.useState('');
+  const [webRender, setWebRender] = React.useState(false);
+  const [webRestrictDomains, setWebRestrictDomains] = React.useState(false);
+  const [webAllowedDomains, setWebAllowedDomains] = React.useState('');
+  const [webBlockedDomains, setWebBlockedDomains] = React.useState('');
   const [embeddingProviderId, setEmbeddingProviderId] = React.useState('');
   const [embeddingModelId, setEmbeddingModelId] = React.useState('');
   const [rerankProviderId, setRerankProviderId] = React.useState('');
@@ -161,7 +169,11 @@ export const HarnessSettingsPage: React.FC = () => {
     setSearchProvider(harness.web?.search?.provider ?? 'none');
     setSearchEndpoint(harness.web?.search?.endpoint ?? '');
     setSearchApiKey('');
-  }, [harness.web?.search?.endpoint, harness.web?.search?.provider, snapshot?.globalRevision]);
+    setWebRender(harness.web?.render === true);
+    setWebRestrictDomains(harness.web?.domains?.allow !== undefined);
+    setWebAllowedDomains((harness.web?.domains?.allow ?? []).join(', '));
+    setWebBlockedDomains((harness.web?.domains?.block ?? []).join(', '));
+  }, [harness.web, snapshot?.globalRevision]);
 
   React.useEffect(() => {
     if (searchProvider === 'none') {
@@ -323,6 +335,22 @@ export const HarnessSettingsPage: React.FC = () => {
     void saveHarness(next);
   }, [harness, rerankEndpoint, rerankModelId, rerankProviderId, saveHarness, t]);
 
+  const handleWebPolicySave = React.useCallback(() => {
+    const allow = parseDomainDraft(webAllowedDomains);
+    const block = parseDomainDraft(webBlockedDomains);
+    void saveHarness({
+      ...harness,
+      web: {
+        ...harness.web,
+        render: webRender,
+        domains: {
+          ...(webRestrictDomains ? { allow } : {}),
+          block,
+        },
+      },
+    });
+  }, [harness, saveHarness, webAllowedDomains, webBlockedDomains, webRender, webRestrictDomains]);
+
   const handleSearchSave = React.useCallback(async () => {
     if (searchProvider === 'none') {
       const web = { ...harness.web };
@@ -449,7 +477,7 @@ export const HarnessSettingsPage: React.FC = () => {
             />
             {rulesIssue ? <p className="text-xs text-destructive">{rulesIssue}</p> : null}
             <div className="flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">{t('settings.page.harness.permissions.coexistence')}</p>
+              <span />
               <Button type="button" size="sm" onClick={handlePermissionRulesSave} disabled={isSaving}>
                 {t('settings.page.harness.permissions.rules.save')}
               </Button>
@@ -646,6 +674,54 @@ export const HarnessSettingsPage: React.FC = () => {
         description={t('settings.page.harness.section.web.description')}
       >
         <div className="space-y-4">
+          <SettingsCheckboxRow
+            checked={webRender}
+            onChange={setWebRender}
+            label={t('settings.page.harness.web.render')}
+            description={t('settings.page.harness.web.render.description')}
+          />
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-foreground">
+              {t('settings.page.harness.web.domains.title')}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t('settings.page.harness.web.domains.description')}
+            </p>
+            <SettingsCheckboxRow
+              checked={webRestrictDomains}
+              onChange={setWebRestrictDomains}
+              label={t('settings.page.harness.web.domains.allowEnabled')}
+              description={t('settings.page.harness.web.domains.allowEnabled.description')}
+            />
+            <SettingsFieldRow
+              label={t('settings.page.harness.web.domains.allow')}
+              description={t('settings.page.harness.web.domains.allow.description')}
+            >
+              <Input
+                value={webAllowedDomains}
+                onChange={(event) => setWebAllowedDomains(event.target.value)}
+                placeholder="example.com, docs.example.com"
+                disabled={!webRestrictDomains}
+                className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
+            <SettingsFieldRow
+              label={t('settings.page.harness.web.domains.block')}
+              description={t('settings.page.harness.web.domains.block.description')}
+            >
+              <Input
+                value={webBlockedDomains}
+                onChange={(event) => setWebBlockedDomains(event.target.value)}
+                placeholder="ads.example.com"
+                className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}
+              />
+            </SettingsFieldRow>
+            <div className="flex justify-end">
+              <Button type="button" size="sm" disabled={isSaving} onClick={handleWebPolicySave}>
+                {t('settings.page.harness.web.policy.save')}
+              </Button>
+            </div>
+          </div>
           <SettingsFieldRow
             label={t('settings.page.harness.web.search.provider')}
             description={t('settings.page.harness.web.search.provider.description')}
@@ -700,7 +776,7 @@ export const HarnessSettingsPage: React.FC = () => {
             </SettingsFieldRow>
           ) : null}
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">{t('settings.page.harness.web.search.restart')}</p>
+            <p className="text-xs text-muted-foreground">{t('settings.page.harness.nextSession')}</p>
             <Button
               type="button"
               size="sm"

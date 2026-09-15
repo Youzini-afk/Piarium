@@ -28,6 +28,12 @@ export interface HarnessWebSearchSettings {
   credentialRef?: string;
 }
 
+export interface HarnessWebDomainPolicy {
+  /** Undefined means unrestricted; an explicit empty array means allow none. */
+  allow?: string[];
+  block: string[];
+}
+
 export interface HarnessWorktreeBudget {
   maxBytes?: number;
   minFreeRatio?: number;
@@ -142,9 +148,9 @@ export interface HarnessSettings {
   rerank?: HarnessRerankSettings;
   worktree?: HarnessWorktreeSettings;
   web?: {
-    maxFetchesPerTurn?: number;
     render?: boolean;
     search?: HarnessWebSearchSettings;
+    domains?: Partial<HarnessWebDomainPolicy>;
   };
   permissions?: {
     mode?: PermissionMode;
@@ -183,6 +189,52 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
     reclaimIdle: true,
   },
   permissions: { mode: "normal", rules: [] },
+};
+
+const normalizeDomainRule = (value: string): string => value.trim().toLowerCase().replace(/^\.+|\.+$/g, "");
+
+export const normalizeHarnessWebDomainRules = (values: readonly string[] | undefined): string[] | undefined => {
+  if (values === undefined) return undefined;
+  return [...new Set(values.map(normalizeDomainRule).filter(Boolean))];
+};
+
+export const harnessDomainRuleMatches = (hostname: string, rule: string): boolean => {
+  const host = hostname.trim().toLowerCase().replace(/\.+$/g, "");
+  const normalized = normalizeDomainRule(rule);
+  return Boolean(normalized) && (host === normalized || host.endsWith(`.${normalized}`));
+};
+
+const intersectDomainAllows = (
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): string[] | undefined => {
+  const a = normalizeHarnessWebDomainRules(left);
+  const b = normalizeHarnessWebDomainRules(right);
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  const result: string[] = [];
+  for (const leftRule of a) {
+    for (const rightRule of b) {
+      if (harnessDomainRuleMatches(leftRule, rightRule)) result.push(leftRule);
+      else if (harnessDomainRuleMatches(rightRule, leftRule)) result.push(rightRule);
+    }
+  }
+  return [...new Set(result)];
+};
+
+/** User policy is the ceiling. A trusted workspace can only narrow it. */
+export const mergeHarnessWebDomainPolicy = (
+  user: Partial<HarnessWebDomainPolicy> | undefined,
+  workspace: Partial<HarnessWebDomainPolicy> | undefined,
+): HarnessWebDomainPolicy => {
+  const allow = intersectDomainAllows(user?.allow, workspace?.allow);
+  return {
+    ...(allow === undefined ? {} : { allow }),
+    block: [...new Set([
+      ...(normalizeHarnessWebDomainRules(user?.block) ?? []),
+      ...(normalizeHarnessWebDomainRules(workspace?.block) ?? []),
+    ])],
+  };
 };
 
 export function mergeHarnessSettings(
@@ -262,14 +314,11 @@ export function mergeHarnessSettings(
     ...(user.web || workspace.web
       ? {
           web: {
-            ...user.web,
-            // A repository may tune fetch behavior, but cannot redirect web
-            // searches or select a credential from the user's auth store.
-            ...(workspace.web?.maxFetchesPerTurn === undefined
-              ? {}
-              : { maxFetchesPerTurn: workspace.web.maxFetchesPerTurn }),
-            ...(workspace.web?.render === undefined ? {} : { render: workspace.web.render }),
+            // Search provider/credential and renderer access are user-owned.
+            ...(user.web?.render === undefined ? {} : { render: user.web.render }),
             ...(user.web?.search ? { search: { ...user.web.search } } : {}),
+            // Workspace policy may only add blocks or narrow the allow-set.
+            domains: mergeHarnessWebDomainPolicy(user.web?.domains, workspace.web?.domains),
           },
         }
       : {}),

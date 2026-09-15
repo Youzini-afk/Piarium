@@ -7,6 +7,61 @@
 
 export type PermissionMode = "normal" | "accept-edits" | "bypass" | "smart";
 export type PermissionDecision = "allow" | "ask" | "deny";
+export type PermissionAction = "read" | "write" | "process" | "network" | "thread" | "unknown";
+export type PermissionToolSourceKind = "harness" | "builtin" | "mcp" | "package" | "sdk" | "unknown";
+
+/** Credential-free identity for the concrete tool implementation selected by Pi. */
+export interface PermissionToolSource {
+  kind: PermissionToolSourceKind;
+  /** Stable source identity. Package ids/paths are allowed; prompt/tool bodies are not. */
+  id: string;
+  scope?: string;
+}
+
+/** Worker evidence sent to the Host before an interactive decision is made. */
+export interface PermissionInspectParams {
+  tool: string;
+  source: PermissionToolSource;
+  action: PermissionAction;
+  cwd: string;
+  /** Candidate filesystem resources. Host path authority canonicalizes these. */
+  paths: string[];
+  /** Origin-only HTTP(S) targets; query strings and credentials are intentionally excluded. */
+  networkTargets: string[];
+  /** Child-thread scopes/roles, never task/prompt text. */
+  threadScopes: string[];
+  evidenceComplete: boolean;
+}
+
+export interface PermissionCanonicalPath {
+  inputPath: string;
+  workspaceId: string;
+  resourceId: string;
+  canonicalResourceId: string;
+}
+
+/** Host-authoritative, credential/body-free target used for grants and audit. */
+export interface PermissionInspectResult {
+  tool: string;
+  source: PermissionToolSource;
+  action: PermissionAction;
+  executionWorkspaceId: string | null;
+  owningWorkspaceId: string | null;
+  cwd: string;
+  paths: PermissionCanonicalPath[];
+  networkTargets: string[];
+  threadScopes: string[];
+  evidenceComplete: boolean;
+}
+
+export interface PermissionAuditRecord {
+  decision: PermissionDecision;
+  prompted: boolean;
+  remembered: boolean;
+  policyGeneration: string;
+  target: PermissionInspectResult;
+  reason?: string;
+}
 
 export interface PermissionRule {
   tool: string | "*";
@@ -22,6 +77,14 @@ export interface PermissionPolicy {
 export interface GateResult {
   decision: PermissionDecision;
   reason?: string;
+}
+
+/** Default decision after tool source/side effects have been normalized. */
+export function defaultDecisionForAction(action: PermissionAction, mode: PermissionMode): PermissionDecision {
+  if (mode === "bypass") return "allow";
+  if (action === "read" || action === "network" || action === "thread") return "allow";
+  if (action === "write") return mode === "accept-edits" ? "allow" : "ask";
+  return "ask";
 }
 
 export const MAX_PERMISSION_PATTERN_LENGTH = 512;
@@ -186,14 +249,14 @@ export function evaluateGate(
     return { decision: "allow", reason: "bypass mode" };
   }
 
-  // No matching rule: if the tool is not in HARNESS_TOOL_META, it's a
-  // non-harness tool (MCP, Pi built-in) — pass through to Pi's own
-  // permission system (allow here, Pi will handle it).
-  // If it IS a harness tool but somehow has no rule, ask to be safe.
-  if (!HARNESS_TOOL_META[tool]) {
-    return { decision: "allow", reason: "non-harness tool (passthrough)" };
-  }
-  return { decision: "ask", reason: "no matching rule for harness tool" };
+  // There is no second permission authority to delegate to. Unknown tools and
+  // tools not covered by explicit/generated rules ask rather than pass through.
+  return {
+    decision: "ask",
+    reason: HARNESS_TOOL_META[tool]
+      ? "no matching rule for harness tool"
+      : "unknown tool requires confirmation",
+  };
 }
 
 // ── High-risk detection ────────────────────────────────────────────

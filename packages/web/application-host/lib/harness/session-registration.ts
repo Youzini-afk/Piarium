@@ -1,6 +1,7 @@
 import type { HarnessActorIdentity, PiSettingsSnapshot } from "@piarium/protocol";
 import type { HarnessServiceHost, HarnessSessionContext } from "./service-host.js";
 import { HarnessShellSettingsError, resolveHarnessShellSetting } from "./harness-shell-settings.js";
+import { resolveHarnessWebBinding } from "./harness-web-settings.js";
 import { waitWithSignal } from "../knowledge/semantic/cancellation.js";
 
 const sameGeneration = (a: HarnessActorIdentity, b: HarnessActorIdentity): boolean => (
@@ -29,10 +30,13 @@ export function createHarnessSessionRegistration(options: {
     const entry = { actor: { ...context.actor }, controller: new AbortController(), promise: Promise.resolve() };
     pending.set(context.actor.sessionId, entry);
     entry.promise = (async () => {
-      let resolved: Pick<HarnessSessionContext, "shellSetting" | "shellResolution">;
+      let resolved: Pick<HarnessSessionContext, "shellSetting" | "shellResolution" | "webBinding">;
       try {
         const settings = await waitWithSignal(options.readSettings(context), entry.controller.signal);
-        resolved = { shellSetting: resolveHarnessShellSetting(settings) };
+        resolved = {
+          shellSetting: resolveHarnessShellSetting(settings),
+          webBinding: resolveHarnessWebBinding(settings),
+        };
       } catch (error) {
         if (entry.controller.signal.aborted) return;
         resolved = { shellResolution: { invalid: {

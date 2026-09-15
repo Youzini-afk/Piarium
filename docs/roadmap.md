@@ -738,21 +738,21 @@ tests pass, 102/102 web harness+knowledge tests pass. See D-023.
   ready/empty/unavailable states (`lib/harness/lsp-nav.ts`). 13 tests.
   **Not wired** (TODO).
 
-### Phase 3b: Permission integration (delivered 2026-09-04)
+### Phase 3b: Native permission authority (completed 2026-09-15, D-283)
 
-- **3b.1 Host and fallback gate**: broker-pinned actor identity, static
-  capability and path/scope checks are non-interactive. The pi-host fallback
-  implements user/workspace rule ownership, normal/accept-edits/bypass and
-  high-risk session-grant behavior for Harness tools.
-- **3b.2 Smart fallback**: `models.permissionJudge` is resolved in SessionHost;
-  ordinary asks may be auto-allowed, while high-risk calls never reach the model.
-  Model failure or any output other than exact `allow` falls back to asking.
-- **3b.3 Mature plugin coexistence**: `@gotgenes/pi-permission-system` remains
-  foundational. When its session-keyed service is present it is the sole prompt
-  owner and the native fallback yields; another session cannot trigger that yield,
-  and removing the service reactivates fallback. D-044 records why replacing the
-  plugin would currently reduce Bash/path/MCP/skill/subagent/audit coverage.
+- **3b.1 One interactive gate**: broker-pinned actor identity and Host
+  capability/path checks remain non-interactive; pi-host's native `tool_call`
+  gate owns user confirmation for Harness, Pi built-ins, MCP, package tools,
+  and nested-thread tools. Actual tool source and Host-canonicalized targets
+  define the approval scope; unknown third-party side effects ask.
+- **3b.2 Smart inside the same gate**: `models.permissionJudge` is resolved in
+  SessionHost. Only ordinary complete asks may be auto-allowed; high-risk,
+  unknown, or incomplete evidence never reaches the model, and failures ask.
+- **3b.3 Dual-track cleanup**: `@gotgenes/pi-permission-system` is no longer
+  foundational and its Piarium-specific service yield, settings/composer/status
+  bridge, and compatibility path are removed. The foundational manifest now
+  contains only the maintained MCP adapter.
 
 Current delivery evidence and remaining blockers live only in
-[`agent-harness-status.md`](agent-harness-status.md); D-044 records the
-coexistence and scope boundary.
+[`agent-harness-status.md`](agent-harness-status.md); D-044 remains only as the
+historical coexistence record superseded by D-283.

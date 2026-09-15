@@ -119,7 +119,6 @@ permet à ces paquets de continuer à évoluer de leur côté.
 | `context-mode` | Paquet Pi natif recommandé, avec configuration de plugin générique faute de document de réglages canonique unique |
 | `pi-lens` | Configuration native utilisateur/projet le plus proche, contrôles de diagnostic et de formatage, actions de commandes enregistrées |
 | `@cortexkit/aft-pi` | JSONC natif utilisateur/projet pour l'édition, la recherche, l'analyse sémantique, le LSP, la sauvegarde et le bac à sable |
-| `@gotgenes/pi-permission-system` | Politique de permissions native globale/projet, contrôles de l'interface d'exécution et disponibilité des commandes |
 | `pi-hermes-memory` | Configuration native de la politique mémoire, de la revue en arrière-plan, du vidage, de la capacité, du rappel et des surcharges de modèle |
 | `pi-background-tasks` | Visibilité Fleet, lancement, journaux bornés et arrêt via le contrat EventBus public |
 | `pi-rtk-optimizer` | Configuration native en JSON strict de la réécriture RTK, de la sortie, de la lecture et de la troncature, plus la disponibilité des commandes |

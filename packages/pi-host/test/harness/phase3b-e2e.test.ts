@@ -140,15 +140,20 @@ describe("Phase 3b permission gate", () => {
     assert.equal(evaluateGate("dispatch", { role: "explore", task: "test" }, policy).decision, "allow");
   });
 
-  it("non-harness tools pass through (allow)", () => {
+  it("unknown tools ask because the native gate has no second authority to delegate to", () => {
     const policy = buildPermissionPolicy("normal");
-    assert.equal(evaluateGate("mcp_some_tool", {}, policy).decision, "allow");
-    assert.equal(evaluateGate("unknown_custom_tool", {}, policy).decision, "allow");
+    assert.equal(evaluateGate("mcp_some_tool", {}, policy).decision, "ask");
+    assert.equal(evaluateGate("unknown_custom_tool", {}, policy).decision, "ask");
   });
 
   it("permission gate extension factory creates a valid extension", () => {
     const policy = buildPermissionPolicy("normal");
-    const factory = createPermissionGateExtension({ policy, sessionId: "phase3b-session" });
+    const factory = createPermissionGateExtension({
+      policy,
+      sessionId: "phase3b-session",
+      cwd: process.cwd(),
+      bridge: { request: async () => { throw new Error("not invoked by factory construction"); } } as never,
+    });
     assert.equal(typeof factory, "function");
   });
 

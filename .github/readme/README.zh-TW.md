@@ -96,7 +96,6 @@ Piarium 不會 fork 這些擴充，也不會複製它們的私有狀態。整合
 | `context-mode` | 推薦的原生 Pi 套件；因沒有單一權威設定檔，使用通用外掛設定介面 |
 | `pi-lens` | 原生使用者/最近專案設定、診斷與格式化控制，以及已註冊命令操作 |
 | `@cortexkit/aft-pi` | 原生使用者/專案 JSONC 中的編輯、搜尋、語意分析、LSP、備份和沙箱設定 |
-| `@gotgenes/pi-permission-system` | 原生全域/專案權限策略、執行介面控制和命令可用狀態 |
 | `pi-hermes-memory` | 原生記憶策略、背景審查、清出、容量、召回和模型覆寫設定 |
 | `pi-background-tasks` | 透過公開 EventBus 在 Fleet 中檢視、啟動、讀取記錄和停止背景任務 |
 | `pi-rtk-optimizer` | 原生嚴格 JSON 中的 RTK 改寫、輸出、讀取和截斷設定，以及命令可用狀態 |

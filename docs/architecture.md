@@ -613,8 +613,11 @@ Host authorization is non-interactive: `HARNESS_METHOD_CAPABILITY` maps every
 method to a structural capability, and path-bearing shell/search/LSP/lock calls
 must remain within the actor workspace and the broker-pinned child scope when
 one exists. User-facing allow/ask/deny stays at Pi's `tool_call` boundary:
-`pi-permission-system` owns it when that session publishes its service, otherwise
-pi-host's Harness-only fallback handles it. The two checks do not duplicate prompts.
+Piarium's built-in permission gate is the sole interactive authority for Harness,
+Pi built-ins, MCP tools, package tools, and nested-thread tools. It derives the
+actual source from Pi's active tool registry and asks the Host to canonicalize
+filesystem targets before a decision; unknown or incomplete third-party side
+effects ask rather than inheriting authority from a tool name or annotation.
 Scope constrains Host-visible paths and search results; it is not an OS sandbox and
 does not constrain paths embedded in shell text or Pi tools executing inside the worker.
 
@@ -738,7 +741,7 @@ Git and copy directories remain materialization and migration backends as specif
 | Magic Context | Its shared SQLite/config | Read through a maintained adapter; do not duplicate memory state |
 | Native harness thread lifecycle and working state | Host atomic Thread/ThreadRun catalog + Pi child session JSONL; Rust content-addressed WorkingState/result/draft/retrieval, recovery/Integration/agent-mutation durable metadata, canonical file resources, fixed baseline/materialization and managed-directory lifecycle; Document Registry remains unsaved-buffer authority | Dispatch asynchronously, project broker events/Fleet/UI from one registry, preserve attempts and transcripts, publish immutable native results, and merge only the child delta; TS coordinates Registry receipts and Git semantics while controlled disk capture/apply, baseline body capture, immutable-root materialization, reclaim and measurement use the Rust R2/R3 file-resource backend |
 | MCP | `pi-mcp-adapter` config/status events | Show the adapter-owned effective server catalog, project its public `status/v1` snapshot, invoke its commands, and edit one native source at a time without reproducing merge or credential logic |
-| Web Access | `pi-web-access` config/custom entries | Edit its native `web-search.json`; tools, activity widgets, and custom result entries continue through the generic extension bridge |
+| Web Access | Piarium native `webfetch` / `websearch`; optional `pi-web-access` config/custom entries | Native tools keep Host-owned SSRF/domain/provider authority and never auto-yield to a package. The optional plugin keeps its own `web-search.json`, commands, and stored-result UI through the generic extension bridge |
 | Piarium extensions | Piarium Extension Manager below `PIARIUM_DATA_DIR` | Keep installation, desired state, grants, layout, and extension-owned storage separate from Pi packages and plugin-native data |
 | Workspace and user knowledge | Per-host workspace/user `.tdb` under `PIARIUM_DATA_DIR` | Settings catalog and suggestion accept/edit/retire mutate this store with opened-revision CAS; proposals use the authenticated actor workspace, atomically deduplicate against all history, and consume the session's trusted auto-accept policy. Vectors are derived and must not become a second write authority |
 | Workspace text documents | Application-host document authority; the file on disk | One revisioned read/write/watch path with opaque revisions; never a second text shape in `FilesAPI`/`WorkspaceAPI` |
@@ -909,8 +912,8 @@ so Pi reloads the real extension instance; otherwise they use the current worksp
 Disabling a package keeps its installation and native configuration intact, filters all Pi resource
 types from that package, and restores the package's previous native filters when enabled again.
 
-Piarium provisions two global foundational Pi packages when a runtime generation first becomes
-available: the maintained `pi-mcp-adapter` and `@gotgenes/pi-permission-system`. This is a broker-owned bootstrap layered on top of the same Pi
+Piarium provisions one global foundational Pi package when a runtime generation first becomes
+available: the maintained `pi-mcp-adapter`. This is a broker-owned bootstrap layered on top of the same Pi
 package operations, not a second package manager. It does not block the Host handshake or cloud
 health endpoint; the first newly created session waits for the bootstrap, while sessions already
 bound to a worker keep running. Existing enabled or disabled packages are adopted as-is. A configured
@@ -955,9 +958,10 @@ the resulting package catalog.
   route; the adapter owns merging, host imports, transports, OAuth/keyring data, and connection state.
 - **pi-web-access:** Piarium edits the extension's agent-level `web-search.json` and discovers its
   current registered commands in the active session. The GUI can open the native Curator, invoke
-  Gemini Web account diagnostics, and browse the plugin's stored results, while provider routing,
-  credentials, SSRF policy, health/activity state, search/fetch tools, dialogs, follow-up messages,
-  persisted results, and the optional Curator server remain extension-owned.
+  Gemini Web account diagnostics, and browse the plugin's stored results. Those plugin commands,
+  credentials, health/activity state, persisted results, and optional Curator server remain
+  extension-owned. Installing the package does not replace Piarium's native `webfetch`/`websearch`;
+  users who want a third-party same-name tool explicitly disable the corresponding native tool.
 
 PiDeck-installed local extensions are not product dependencies. Local working trees and other Pi
 package sources remain installable directly, and the generic UI bridge allows unknown packages to
