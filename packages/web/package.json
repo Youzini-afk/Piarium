@@ -6,6 +6,17 @@
   "type": "module",
   "main": "./server/index.js",
   "types": "./server/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./server/index.d.ts",
+      "default": "./server/index.js"
+    },
+    "./server/*": "./server/*",
+    "./application-host/*": {
+      "types": "./.application-host-types/*.d.ts",
+      "default": "./server/*.js"
+    }
+  },
   "bin": {
     "piarium": "./bin/cli.js"
   },

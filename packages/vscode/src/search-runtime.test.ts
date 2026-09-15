@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createDocumentAuthority } from '../../web/server/lib/documents/authority.js';
+import { createDocumentAuthority } from '@piarium/web/application-host/lib/documents/authority';
 import { createVSCodeWorkspaceSearch } from './search-runtime';
 import { handleWorkspaceSearchBridgeMessage } from './bridge-search-runtime';
 

@@ -51,7 +51,7 @@ import {
 } from './bridge-fs-helpers-runtime';
 // Reuse the web runtime's terminal auth helper so VS Code and web install the
 // same gh hosts.yml and git credential helper behavior.
-import { configureGitHubGitAuthor, installTerminalGitHubAuth } from '../../web/server/lib/github/terminal-auth.js';
+import { configureGitHubGitAuthor, installTerminalGitHubAuth } from '@piarium/web/application-host/lib/github/terminal-auth';
 
 export interface BridgeRequest {
   id: string;

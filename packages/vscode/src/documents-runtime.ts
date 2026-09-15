@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { createDocumentAuthority } from '../../web/server/lib/documents/authority.js';
-import { createDocumentsCapabilityHandler } from '../../web/server/lib/documents/capability.js';
+import { createDocumentAuthority } from '@piarium/web/application-host/lib/documents/authority';
+import { createDocumentsCapabilityHandler } from '@piarium/web/application-host/lib/documents/capability';
 
 type VSCodeWorkspaceLike = {
   isTrusted: boolean;

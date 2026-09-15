@@ -1,8 +1,8 @@
 import path from 'node:path';
-import type { DocumentAuthority } from '../../web/server/lib/documents/authority.js';
-import { createKernelClient } from '../../web/server/lib/kernel/kernel-client.js';
-import { createKernelComputeService } from '../../web/server/lib/kernel/compute-service.js';
-import { createWorkspaceContentSearch } from '../../web/server/lib/search/content.js';
+import type { DocumentAuthority } from '@piarium/web/application-host/lib/documents/authority';
+import { createKernelClient } from '@piarium/web/application-host/lib/kernel/kernel-client';
+import { createKernelComputeService } from '@piarium/web/application-host/lib/kernel/compute-service';
+import { createWorkspaceContentSearch } from '@piarium/web/application-host/lib/search/content';
 
 /** The companion reuses the Host compute implementation and owns its lifetime.
  * No source loader, Cargo runner or local ripgrep fallback is used in a VSIX. */

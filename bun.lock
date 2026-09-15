@@ -328,6 +328,7 @@
         "@piarium/runtime-client": "workspace:*",
         "@piarium/settings-store": "workspace:*",
         "@piarium/ui": "workspace:*",
+        "@piarium/web": "workspace:*",
         "react": "^19.1.1",
         "react-dom": "^19.1.1",
       },

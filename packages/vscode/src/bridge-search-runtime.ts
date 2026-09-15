@@ -1,4 +1,4 @@
-import type { createWorkspaceContentSearch } from '../../web/server/lib/search/content.js';
+import type { createWorkspaceContentSearch } from '@piarium/web/application-host/lib/search/content';
 import type { BridgeResponse } from './bridge';
 
 type BridgeMessageInput = {

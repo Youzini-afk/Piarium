@@ -507,6 +507,7 @@ export class KernelClient {
   private closePromise: Promise<void> | undefined;
   private readonly revokedGrants = new Set<string>();
   private started = false;
+  private transportFailed = false;
   private readonly exitListeners = new Set<(error: Error) => void>();
   private closed = false;
   private epoch: string | null = null;
@@ -607,6 +608,7 @@ export class KernelClient {
       throw new KernelClientError({ code: "kernel-manifest-missing", message: "Rust kernel manifest is required for this Host", retryable: false });
     }
     this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+    this.transportFailed = false;
     this.revokedGrants.clear();
     const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
@@ -619,6 +621,14 @@ export class KernelClient {
       windowsHide: true,
     });
     this.child = child;
+    child.stdin.on("error", (error) => {
+      if (this.child !== child) return;
+      this.failAll(new KernelClientError({
+        code: "kernel-disconnected",
+        message: `Rust kernel stdin failed: ${error.message}`,
+        retryable: true,
+      }));
+    });
     child.stdout.on("data", (chunk: Buffer | string) => { if (this.child === child) this.consume(chunk); });
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
@@ -711,6 +721,11 @@ export class KernelClient {
   }
 
   private failAll(error: Error, terminate = false): void {
+    if (this.transportFailed) {
+      if (terminate && this.child && !this.child.killed) this.child.kill();
+      return;
+    }
+    this.transportFailed = true;
     this.window.close(error);
     for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
