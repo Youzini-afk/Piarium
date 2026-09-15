@@ -2,7 +2,7 @@
 
 Status: integration contract, not a per-release certification
 
-Last updated: 2026-09-02
+Last updated: 2026-09-15
 
 ## What this document is
 

@@ -2,7 +2,7 @@
 
 Status: implemented; this is the ownership contract adapters are held to
 
-Last updated: 2026-09-02
+Last updated: 2026-09-15
 
 ## 1. Purpose
 
