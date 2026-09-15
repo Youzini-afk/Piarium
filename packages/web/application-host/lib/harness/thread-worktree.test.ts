@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { createThreadWorktreeRuntime } from "./thread-worktree.js";
+import { canonicalizePathIdentity, normalizePathIdentity } from "../workspace/path-safety.js";
 
 const git = (cwd: string, args: string[]): string => execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
 
@@ -789,9 +790,9 @@ describe("thread worktree runtime", () => {
       }, "live");
       expect(inspected.changedFiles).not.toContain(undefined);
       git(live, ["rev-parse", "--verify", attached.executionBaseline!]);
-      const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
-      expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
-      expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());
+      const childTop = normalizePathIdentity(await canonicalizePathIdentity(git(live, ["rev-parse", "--show-toplevel"])));
+      expect(childTop).toBe(normalizePathIdentity(await canonicalizePathIdentity(live)));
+      expect(childTop).not.toBe(normalizePathIdentity(await canonicalizePathIdentity(fixture.repo)));
       const parentStatus = git(fixture.repo, ["status", "--porcelain"]);
       git(live, ["status", "--porcelain"]);
       git(live, ["reset", "--hard"]);
@@ -854,9 +855,9 @@ describe("thread worktree runtime", () => {
       const attached = await runtime.attachIsolatedGitContext(fixture.repo, worktree);
       expect(attached.kind).toBe("worktree");
       expect(attached.executionBaseline).toMatch(/^[0-9a-f]{40}$/);
-      const childTop = git(live, ["rev-parse", "--show-toplevel"]).replace(/\\/g, "/").toLowerCase();
-      expect(childTop).toBe(live.replace(/\\/g, "/").toLowerCase());
-      expect(childTop).not.toBe(fixture.repo.replace(/\\/g, "/").toLowerCase());
+      const childTop = normalizePathIdentity(await canonicalizePathIdentity(git(live, ["rev-parse", "--show-toplevel"])));
+      expect(childTop).toBe(normalizePathIdentity(await canonicalizePathIdentity(live)));
+      expect(childTop).not.toBe(normalizePathIdentity(await canonicalizePathIdentity(fixture.repo)));
       git(live, ["status", "--porcelain"]);
       git(live, ["reset", "--hard"]);
       writeFileSync(join(live, "child-only.txt"), "child commit\n");
@@ -867,10 +868,14 @@ describe("thread worktree runtime", () => {
       expect(readFileSync(join(fixture.repo, "tracked.txt"), "utf8")).toBe("base\n");
       expect(git(fixture.repo, ["branch"])).toBe(parentBranches);
       expect(existsSync(join(fixture.repo, ".git", "worktrees"))).toBe(true);
+      const liveIdentity = normalizePathIdentity(await canonicalizePathIdentity(live));
       const reclaimed = await runtime.reclaim(worktree, { nativeVerified: true });
       expect(reclaimed.reclaimed).toBe(true);
-      expect(git(fixture.repo, ["worktree", "list", "--porcelain"]).replace(/\\/g, "/").toLowerCase())
-        .not.toContain(live.replace(/\\/g, "/").toLowerCase());
+      const remainingWorktrees = await Promise.all(git(fixture.repo, ["worktree", "list", "--porcelain"])
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith("worktree "))
+        .map((line) => canonicalizePathIdentity(line.slice("worktree ".length))));
+      expect(remainingWorktrees.map((entry) => normalizePathIdentity(entry))).not.toContain(liveIdentity);
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }

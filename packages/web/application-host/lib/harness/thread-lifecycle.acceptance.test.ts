@@ -7,6 +7,7 @@ import type { SessionSnapshot, SessionStats } from '@piarium/protocol';
 import { createDocumentAuthority } from '../documents/authority.js';
 import { createNativeAuthorityTestRuntime } from '../kernel/native-authority.test-helper.js';
 import { createManagedRootAdmission } from '../kernel/managed-root-admission.js';
+import { canonicalizePathIdentity, normalizePathIdentity } from '../workspace/path-safety.js';
 import { assertManagedWorktreeOwnership } from './worktree-ownership.js';
 import { ThreadExecutionViewRegistry } from './working-state/execution-view.js';
 import { createThreadRegistry } from './thread-registry.js';
@@ -111,7 +112,8 @@ it('continues the original session after Git/native archive, reclaim and restore
     expect(restored.activeRun?.id).not.toBe(firstRun.id);
     expect(readFileSync(join(directory, 'result.txt'), 'utf8')).toBe('first result\n');
     expect(existsSync(join(directory, '.git'))).toBe(true);
-    expect(git(directory, ['rev-parse', '--show-toplevel']).replace(/\\/g, '/')).toBe(directory.replace(/\\/g, '/'));
+    expect(normalizePathIdentity(await canonicalizePathIdentity(git(directory, ['rev-parse', '--show-toplevel']))))
+      .toBe(normalizePathIdentity(await canonicalizePathIdentity(directory)));
     await runtime.send('child-session', 'Continue the work', 'user');
     expect(sessions.prompt).toHaveBeenLastCalledWith('child-session', expect.stringContaining('Continue the work'));
     writeFileSync(join(directory, 'result.txt'), 'second result\n');

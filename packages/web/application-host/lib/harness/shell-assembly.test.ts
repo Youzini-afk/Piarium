@@ -243,7 +243,7 @@ describe("production shell assembly", () => {
       if (view.join("").includes("got:piarium-term-in")) resolveView();
     });
     await expect(createShellWriteService(host).handle(
-      { id: started.id, text: "piarium-term-in\n" },
+      { id: started.id, text: "piarium-term-in\r" },
       ctx,
     )).resolves.toMatchObject({ accepted: true });
     let observed = "";
