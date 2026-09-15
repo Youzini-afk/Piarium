@@ -128,7 +128,7 @@ phone-sized screen.
 ## Maintained extension integrations
 
 Piarium does not fork Pi extensions or copy their private state. Maintained adapters consume each
-extension's public commands, events, settings files, and capability contracts — covering subagent
+extension's public commands, events, settings files, and capability contracts — including subagent
 fleets, context managers, workspace history, MCP servers, web access, memory systems, background
 tasks, and LSP/tooling configuration — so package updates can continue to advance independently.
 

@@ -2,9 +2,9 @@
 
 Piarium protocol types, schemas, and event/method definitions.
 
-## Harness Events and Methods
+## Harness events and methods
 
-### Broker Events
+### Broker events
 
 | Event | Direction | Description |
 |-------|-----------|-------------|
@@ -14,7 +14,7 @@ Piarium protocol types, schemas, and event/method definitions.
 | `workspace.mutation.request` | pi-host → host | Request a file mutation (before/after) |
 | `workspace.mutation.respond` | host → pi-host | Accept/reject a mutation request |
 
-### Harness Service Methods
+### Harness service methods
 
 | Method | Params | Result | Description |
 |--------|--------|--------|-------------|
@@ -78,7 +78,7 @@ opaque Host reference or an unavailable dirty-path set. Omission means disk.
 existing memory keeper after a material user-terminal command. It does not
 write the command into the main conversation.
 
-### Thread Events
+### Thread events
 
 Two host events, both carrying state only — never message bodies.
 
@@ -92,7 +92,7 @@ callbacks. `onThreadDequeued` is a registry callback only, not a protocol
 event: it asks the host to spawn a child session for a thread that was
 waiting on a concurrency slot.
 
-### Thread Lifecycle
+### Thread lifecycle
 
 ```
 Thread.lifecycle: queued → active → settled → archived
@@ -112,7 +112,7 @@ arguments, so queued and restarted Runs do not depend on the ephemeral surface
 snapshot. Reaching a terminal Run frees a concurrency slot and may promote the
 oldest queued Thread.
 
-### ShellExecResult Variants
+### ShellExecResult variants
 
 | Kind | Fields | Description |
 |------|--------|-------------|

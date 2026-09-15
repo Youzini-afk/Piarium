@@ -4,7 +4,7 @@ Electron desktop runtime for Piarium on macOS, Windows, and Linux.
 
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and Piarium server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
-## How It Runs
+## How it runs
 
 Desktop starts the Piarium web server in the same Electron main process. There is no separate sidecar subprocess for the Piarium server.
 
@@ -18,7 +18,7 @@ Same-origin session-chat iframes complete an authenticated parent-frame handshak
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
 
-## Main Files
+## Main files
 
 | File | Purpose |
 |------|---------|
@@ -37,7 +37,7 @@ The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.
 
 The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. The `files` config in `package.json` ships only those two bundled entries — no `.ts` source, test, or loader reaches the packaged app.
 
-## Desktop IPC Contract
+## Desktop IPC contract
 
 All 58 `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@piarium/application-client/desktop` subpath.
 
@@ -140,7 +140,7 @@ Set `PIARIUM_SMOKE_PROFILE_SOURCE` to a packaged Piarium user-data directory to 
 smoke profile with Piarium settings plus Chromium Local/Session Storage. The source profile is never
 launched or modified.
 
-## Platform Notes
+## Platform notes
 
 macOS packages must be built on the matching native Intel or Apple Silicon runner. The public release
 workflow currently produces unsigned `dmg` and `zip` assets by explicitly disabling identity discovery,
@@ -149,7 +149,7 @@ credentials and restore those production signing options without changing the ap
 
 Windows packaging uses `electron-builder` with the NSIS target. For reliable native module rebuilds and NSIS installer creation, run Windows builds on a Windows runner or host. The default x64 path uses `node-pty`'s published N-API prebuild and therefore does not require Visual Studio's optional Spectre libraries; set `PIARIUM_REBUILD_NODE_PTY_FROM_SOURCE=1` only when intentionally testing its C++ source build. If no Windows signing environment is present, `package.mjs` intentionally disables code signing and produces an unsigned installer.
 
-### Code Signing
+### Code signing
 
 Windows code signing is optional. If signing credentials are present, `package.mjs` uses the standard `electron-builder` signing environment variables:
 
@@ -160,7 +160,7 @@ For compatibility with earlier Piarium automation, `package.mjs` also maps `WIND
 
 When these variables are absent, the build falls back to an unsigned NSIS installer.
 
-### Smoke Builds
+### Smoke builds
 
 Run the `Windows Desktop Build` workflow on demand for a focused Windows x64, ARM64, or dual-architecture
 build. For a release, run `Desktop Release Build` against an existing version tag. It builds and smokes
@@ -189,7 +189,7 @@ every referenced `zip`/`dmg` checksum and merges Intel and Apple Silicon entries
 `latest-mac.yml`, so both architectures use the standard Electron updater channel without overwriting
 one another.
 
-### Updater End-to-End Fixture
+### Updater end-to-end fixture
 
 A loopback-only updater fixture is available for contributor QA of N-to-N+1 AppImage replacement and restart behavior. It is test infrastructure, not a user-configurable update source. See [`scripts/updater-e2e-fixture.md`](./scripts/updater-e2e-fixture.md) for the controlled test procedure. Unit tests cover feed selection, check failures, no-update results, and fixture generation; actual AppImage replacement and restart remains a manual native N-to-N+1 release boundary because it requires executing two packaged versions on each supported architecture.
 
@@ -197,7 +197,7 @@ The package supports macOS, Windows, and Linux desktop features. Linux AppImage 
 
 The macOS menu bar item is enabled by default and can be disabled in General settings. The setting applies after restart; while disabled, Desktop does not create the native tray controller or start the renderer subscriptions, polling, quota refresh, or IPC updates that feed it.
 
-## Pi Runtime
+## Pi runtime
 
 Packaged Desktop builds include Piarium's compiled Host bootstrap and runtime broker, but runtime
 execution no longer binds to a permanently bundled copy of the three Pi SDK packages. The Runtime
@@ -216,7 +216,7 @@ standalone installation payload. The production dependencies that normal Node wo
 remain unpacked for filesystem module resolution. Chromium locale files are limited to Piarium's
 supported interface languages.
 
-## Common Env Vars
+## Common env vars
 
 | Variable | Use |
 |----------|-----|
@@ -232,7 +232,7 @@ supported interface languages.
 | `PIARIUM_SKIP_API_COMPRESSION=true` | Defaulted by Desktop to reduce local CPU overhead |
 | `PIARIUM_STARTUP_PERF=1` | Enables privacy-safe startup phase timings in Desktop/server logs; disabled by default |
 
-## Native Features Owned Here
+## Native features owned here
 
 - Floating Mini Chat windows.
 - Multiple native windows.
@@ -245,7 +245,7 @@ supported interface languages.
 - Tunnel lifecycle integration through the web server runtime.
 - Auto-update checks, downloads, and restart/apply flow.
 
-## IPC Pattern
+## IPC pattern
 
 Renderer code should call the desktop bridge exposed by `preload.ts`. Do not import Electron from shared UI code.
 
@@ -257,13 +257,13 @@ Add new native capabilities in this order:
 4. Gate privileged commands in main process logic so remote pages cannot access local filesystem or shell capabilities.
 5. Keep server/runtime APIs in `packages/web` when the behavior is not inherently native.
 
-## Logs And Data
+## Logs and data
 
 Electron uses `electron-log`. In development, console logs are also visible in the terminal. In packaged apps, logs are written through the platform log path for the `Piarium` app name.
 
 Development builds use a separate user data directory named `Piarium Dev`, so dev state does not overwrite normal packaged app state.
 
-## Things To Be Careful With
+## Things to be careful with
 
 - Keep desktop-specific code in this package. Pi runtime behavior belongs in the host/broker packages.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
@@ -271,7 +271,7 @@ Development builds use a separate user data directory named `Piarium Dev`, so de
 - Run `verify:native` after changing Electron, Rust-kernel packaging, TriviumDB, sherpa, or target architecture; do not restore addon rebuilds for storage or PTY.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 
-## Quick Checks
+## Quick checks
 
 ```bash
 bun run type-check:electron

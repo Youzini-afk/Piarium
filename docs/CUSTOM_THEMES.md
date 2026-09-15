@@ -3,7 +3,7 @@
 Piarium supports user-defined themes. Drop a JSON file into the Piarium data directory's `themes`
 folder and reload it without restarting the application.
 
-## Quick Start
+## Quick start
 
 1. Create the themes directory:
    ```bash
@@ -16,7 +16,7 @@ folder and reload it without restarting the application.
 
 4. Select your theme from the dropdown.
 
-## Theme Location
+## Theme location
 
 | Platform | Default path |
 |----------|--------------|
@@ -28,7 +28,7 @@ When `PIARIUM_DATA_DIR` is set, the authoritative location on every platform is
 `$PIARIUM_DATA_DIR/themes`. The server process that owns the current application host reads this
 directory; a remote browser or mobile client does not read themes from its own device.
 
-## Theme Format
+## Theme format
 
 ```json
 {
@@ -216,7 +216,7 @@ directory; a remote browser or mobile client does not read themes from its own d
 }
 ```
 
-## Surface Alpha Requirement
+## Surface alpha requirement
 
 - `colors.surface.muted` and `colors.surface.elevated` must always use 90 alpha (`...90` in 8-digit hex, e.g. `#1C1B1A90`).
 

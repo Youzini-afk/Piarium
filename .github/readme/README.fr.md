@@ -146,7 +146,7 @@ le compositeur sur un écran de téléphone.
 
 Piarium ne fork pas ces extensions et ne recopie pas leur état privé. Les adaptateurs maintenus
 consomment les commandes, événements, fichiers de configuration et contrats de capacités publics de
-chaque extension — couvrant flottes de sous-agents, gestionnaires de contexte, historique d'espace de
+chaque extension — dont les flottes de sous-agents, les gestionnaires de contexte, l'historique d'espace de
 travail, serveurs MCP, accès web, systèmes de mémoire, tâches en arrière-plan et configuration
 LSP/outillage — ce qui permet à ces paquets de continuer à évoluer de leur côté.
 

@@ -15,7 +15,7 @@ The native product identity is Piarium-owned:
 These identifiers intentionally do not accept the unreleased inherited OpenChamber identity as a
 compatibility alias.
 
-## Runtime Model
+## Runtime model
 
 - The native app bundles the mobile UI only; it does not embed the Piarium web server or Pi runtime.
 - On first launch in Capacitor, the app shows a connection screen for an existing Piarium server.
@@ -45,7 +45,7 @@ Run these from `packages/mobile`, or use the root `mobile:*` aliases.
 - `bun run open:ios`: opens the iOS project.
 - `bun run open:android`: opens the Android project.
 
-## Headless Quickstart
+## Headless quickstart
 
 ```sh
 bun run build
@@ -56,7 +56,7 @@ bun run build:android:debug
 
 These commands build and sync the native projects without launching Xcode, Android Studio, Simulator, or an emulator.
 
-## Local Tooling
+## Local tooling
 
 The default scripts assume the local Homebrew/Xcode paths prepared for this workspace:
 
@@ -95,7 +95,7 @@ The repository does not ship another product's Firebase or Apple credentials.
 - If connecting to a remote Piarium server fails from the app while `/health` works in curl, check that the server build includes the packaged-client CORS allowlist for `capacitor://localhost` and local dev origins.
 - If `serve-sim` preview says the stream is not producing frames, check the raw MJPEG stream before assuming the simulator stopped. In prior testing the raw stream worked while the browser preview UI stayed stale.
 
-## Generated Assets
+## Generated assets
 
 Launcher, adaptive, and splash assets are generated from Piarium's shared startup-cube mark. From the
 repository root, regenerate every product surface together:
