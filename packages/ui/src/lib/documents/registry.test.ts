@@ -42,6 +42,8 @@ const createMemoryDocuments = () => {
   const listeners = new Set<(event: PiariumDocumentWatchEvent) => void>();
   const dirtyPublications: Array<Parameters<DocumentsAPI['publishDirtyBuffers']>[0]> = [];
   const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
+  let resolveBarrierAcknowledgement: () => void = () => undefined;
+  const barrierAcknowledged = new Promise<void>((resolve) => { resolveBarrierAcknowledgement = resolve; });
   const surfaceCompletions: PiariumDocumentSurfaceOperationCompletion[] = [];
   let surfaceOperation: PiariumDocumentSurfaceOperationPayload | null = null;
   let revisionSeq = 1;
@@ -56,6 +58,7 @@ const createMemoryDocuments = () => {
   const api: DocumentsAPI = {
     ackDirtyStateBarrier: async (request) => {
       barrierAcknowledgements.push(request);
+      resolveBarrierAcknowledgement();
       return { acknowledged: true };
     },
     clearDirtyBuffers: async () => ({ cleared: true }),
@@ -214,6 +217,7 @@ const createMemoryDocuments = () => {
 
   return {
     api,
+    barrierAcknowledged,
     barrierAcknowledgements,
     dirtyPublications,
     files,
@@ -585,7 +589,7 @@ describe('DocumentRegistry', () => {
   });
 
   test('publishes every dirty revision and fences affected edits during a Host barrier', async () => {
-    const { api, barrierAcknowledgements, dirtyPublications, emit } = createMemoryDocuments();
+    const { api, barrierAcknowledged, barrierAcknowledgements, dirtyPublications, emit } = createMemoryDocuments();
     const identity = resource();
     await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
@@ -605,7 +609,7 @@ describe('DocumentRegistry', () => {
       paths: ['note.txt'],
       workspaceId: identity.workspaceId,
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await barrierAcknowledged;
     expect(barrierAcknowledgements).toHaveLength(1);
     expect(barrierAcknowledgements[0]).toEqual({
       barrierId: 'barrier-1',
