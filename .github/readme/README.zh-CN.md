@@ -13,11 +13,13 @@
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](../../LICENSE)
 
-**一个 Pi 原生、可重组的编程智能体工作空间：以本地和桌面体验为中心，同时覆盖 Web、编辑器与移动端。**
+**一个 Pi 原生、可重组的编程智能体工作空间与受治理的 Agent Harness：以本地和桌面体验为中心，
+同时覆盖 Web、编辑器与移动端。**
 
-Piarium 将 [Pi 编程智能体](https://github.com/earendil-works/pi)扩展为一套完整的产品工作空间。
-它直接使用 Pi 的公开 SDK、会话树、包管理器和扩展模型，不抓取终端输出，也不保留永久的
-OpenCode 兼容层。
+Piarium 将 [Pi 编程智能体](https://github.com/earendil-works/pi)扩展为一套完整的产品。
+Pi 继续作为智能体内核——模型与提供商栈、会话树、包管理器和扩展模型——而 Piarium 拥有它周围
+的一切：工具环境、工作状态、恢复、检索、上下文策略与任务治理，以及智能体运行在其中的工作台
+界面。它直接使用 Pi 的公开 SDK，不抓取终端输出，也不保留永久的 OpenCode 兼容层。
 
 它的界面不是固定外壳。Piarium 自带两套官方工作形态：**Agent Workspace** 以会话、任务和上下文
 为中心，**IDE Workbench** 以编辑器、搜索、Git、诊断和调试为中心并把智能体作为可停靠面板。两者
@@ -54,25 +56,51 @@ IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体�
 
 ## Piarium 提供什么
 
+### 受治理的 Agent Harness
+
+- **Thread、Run 与不可变工作状态：** 工作被组织为 Thread 与 Run，其文件变更以不可变 root 发布。
+  智能体在隔离的虚拟或物化工作区中起草，再把经过审阅的结果合并回来，而不是对你的检出目录
+  随手修改。
+- **唯一的权限门：** 单个 `tool_call` 确认覆盖 harness 工具、Pi 内置工具、MCP 工具、包工具和
+  嵌套线程工具。会话授权始终绑定在获批的工具、动作、工作区、路径和网络目标上。
+- **跟随智能体的恢复：** Host 拥有的恢复服务把智能体的变更与你自己的编辑记入同一组检查点，
+  受影响文件回退、撤销/重做和崩溃恢复可以跨越多次工具调用工作，无需扫描整个工作区。
+- **原生的工具环境：** shell 监督器运行真实 PTY，支持自动转后台、`get_output`、
+  `write_to_process` 和 `kill_shell`；`edit`/`write`/`apply_patch` 附带编辑后诊断与按路径租约；
+  超长结果变成可分页的 `OutputRef`；包管理器输出按命令整理而不是原样倾倒。
+
+### 上下文、检索与知识
+
+- **结构化上下文组装：** Zone 2 层把观察到的工作区事实——你的编辑、终端命令、诊断、Git 状态——
+  注入上下文，而不改动系统提示词。memory keeper 以 off/assist/takeover 三种模式维护持久记忆，
+  Host 侧压缩可以接管摘要工作且不产生额外模型调用。
+- **分层检索：** 精确匹配用 `grep`；分组发现用 `explore`/`related`，由符号图和 tree-sitter
+  结构支撑；持久记忆用 `recall` 查询每个工作区的知识库，可选 embedding 与重排。每一层都可以
+  直接使用，不要求上一层先失败。
+- **原生 Web 工具：** `webfetch` 带 SSRF 与域名策略、正文提取、PDF 和缓存；`websearch` 走用户
+  配置的提供商；来源面板；桌面端离屏页面渲染。
+
+### 真正的编程工作空间
+
 - **Pi 原生会话：** 支持流式响应、分支、会话树导航、压缩、引导和后续消息队列、模型与思考
   级别选择，以及会话重命名、归档、恢复和删除。
-- **真正的编程工作空间：** 文件、Diff、Git、工作树、终端、SSH 主机、远程实例、代码评论和
-  编辑器上下文，共享当前 Pi 会话及其工作目录。
+- **工作区工具：** 文件、Diff、Git、工作树、终端、SSH 主机、远程实例、代码评论和编辑器上下文，
+  共享当前 Pi 会话及其工作目录。
+- **编辑器级基础设施：** 一套带版本的文档权威和真实的冲突处理；桌面/Web 的 Agent 与 IDE 共用
+  Monaco model、编辑器组、工作区搜索、宿主侧语言服务器和标准调试适配器，移动/嵌入式编辑器通过
+  轻量 CodeMirror adapter 接入同一文档权威。智能体的修改会与你未保存的缓冲区协调，而不是直接覆盖。
+- **自定义提供商：** 配置 Pi 原生的提供商分层、认证、模型发现和自定义端点，不把凭据复制到
+  渲染进程存储中。
+
+### 可重组，覆盖多端
+
 - **不另造一套插件系统：** 可以安装、更新、移除和检查 Pi `PackageManager` 接受的任意包。
   尚未专门适配的扩展仍可使用通用的命令、工具、条目、通知和 UI 桥接。
 - **常用插件的专用配置界面：** 已维护的插件拥有针对性的 GUI，同时继续以插件自己的原生
   JSON/JSONC 文件、命令、数据库和迁移逻辑为权威。
-- **原生的受影响文件恢复：** 对话回退沿用 Pi 的追加式会话树；可替换的
-  `piarium.workspace-recovery@5` Host 服务负责联合回退、检查点、撤销/重做、保留策略和崩溃恢复，
-  无需扫描整个工作区。
-- **自定义提供商：** 配置 Pi 原生的提供商分层、认证、模型发现和自定义端点，不把凭据复制到
-  渲染进程存储中。
 - **可重组的工作台：** 选择 Agent 或 IDE Profile，也可以自建。既能替换整个外壳，也能只替换导航、
   编辑器、面板、Composer、Timeline 或状态栏，并混用官方与社区贡献。切换是实时的，不刷新文档、
   不重启 Pi 运行时、不丢失共享的工作区状态。
-- **编辑器级基础设施：** 一套带版本的文档权威和真实的冲突处理；桌面/Web 的 Agent 与 IDE 共用
-  Monaco model、编辑器组、工作区搜索、宿主侧语言服务器和标准调试适配器，移动/嵌入式编辑器通过
-  轻量 CodeMirror adapter 接入同一文档权威。智能体的修改会与你未保存的缓冲区协调，而不是直接覆盖。
 - **多个产品端：** Electron、Web 和 Capacitor 移动端外壳共享一套 React UI，并通过明确的运行时
   能力与宿主通信；VS Code 是把编辑器上下文送进 Piarium 的伴侧扩展，而不是第二套工作台。
 - **云端与远程运行：** 支持带认证的 WebSocket、Relay/隧道、多架构容器，以及经过健康检查和
@@ -80,25 +108,9 @@ IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体�
 
 ## 已维护的扩展集成
 
-Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。集成只依赖插件公开的 Pi 命令、事件、
-设置文件和能力协议，因此插件可以继续独立更新。
-
-| 扩展 | Piarium 集成 |
-| --- | --- |
-| `pi-subagents` | 通过插件公开的 RPC 和命令展示并控制 Fleet/任务树 |
-| `@cortexkit/pi-magic-context` | 原生用户/项目 JSONC 配置、已注册命令、状态和公开条目 |
-| `pi-workspace-history` | 可选且独立的工作区历史命令和原生设置；Piarium 恢复不会调用它 |
-| `pi-wtf` | 提示词修复操作和插件自有的 `wtf.json` 配置 |
-| `@piarium/pi-mcp-adapter` | 插件计算的有效服务目录、公开状态与操作，以及带版本校验的原生配置来源编辑 |
-| `pi-web-access` | 原生 `web-search.json`、Curator 与账号操作、已保存结果导航 |
-| `pi-openai-codex-compat` | 原生的全局/项目请求、推理、远程压缩和 Codex 工具配置 |
-| `pi-observational-memory` | 原生的全局/项目观察、反思、压缩、池和工作进程配置 |
-| `context-mode` | 推荐的原生 Pi 包；因没有单一权威设置文件，使用通用插件配置界面 |
-| `pi-lens` | 原生用户/最近项目配置、诊断与格式化控制，以及已注册命令操作 |
-| `@cortexkit/aft-pi` | 原生用户/项目 JSONC 中的编辑、搜索、语义分析、LSP、备份和沙箱配置 |
-| `pi-hermes-memory` | 原生记忆策略、后台审查、刷新、容量、召回和模型覆盖配置 |
-| `pi-background-tasks` | 通过公开 EventBus 在 Fleet 中查看、启动、读取日志和停止后台任务 |
-| `pi-rtk-optimizer` | 原生严格 JSON 中的 RTK 改写、输出、读取和截断配置，以及命令可用状态 |
+Piarium 不会 fork 这些扩展，也不会复制它们的私有状态。已维护的适配器只消费各扩展公开的命令、
+事件、设置文件和能力协议——覆盖子智能体集群、上下文管理、工作区历史、MCP 服务、Web 访问、
+记忆系统、后台任务和 LSP/工具链配置——因此插件可以继续独立更新。
 
 每个扩展的集成面——Piarium 读取或调用哪些命令、事件和原生配置，以及哪些文件仍归插件所有——记录在
 [扩展集成契约](../../docs/extension-compatibility.md)。Piarium 不逐版本认证插件与 Pi 的搭配。
@@ -138,13 +150,18 @@ Windows x64/ARM64、Linux x64/ARM64，以及 macOS Intel/Apple Silicon 桌面包
 
 - Node.js 22.19 或更高版本；Node.js 24 是当前支持的源码开发基线
 - Bun 1.3.14
+- 与 `kernel/rust-toolchain.toml` 匹配的 Rust 工具链（rustup 会自动选择）
 - Git
 - 在 Windows 上运行 Pi shell 工具时，需要 Git for Windows 和 Git Bash
 
-桌面端不再使用永久捆绑的 Pi SDK。它会先发现用户级 Pi 安装，再由“Pi 运行时”引导用户选择、安装
-或仅向上升级 Pi；完成真实 Host 握手后即可使用，无需重启 Piarium。Electron 自带运行应用所需的
-Node 环境，但 Pi 本身仍作为独立的用户级工具存在。Windows、Linux 和 macOS 的 x64/ARM64 原生桌面包
-均在对应架构的 runner 上验证应用启动、运行时设置、健康检查和终端生命周期；可选离线包仍待后续提供。
+Rust 系统内核是必需的运行时组件，不是可选加速器。源码开发模式下，若没有已暂存的二进制，Host
+会通过 Cargo 直接运行它；`bun run kernel:build` 产出打包布局要求的、带 manifest 校验的发行
+可执行文件。
+
+Piarium 自带捆绑的 Pi 运行时，并通过 Runtime Manager 发现用户级 Pi 安装，由它选择、安装或仅向上
+升级 Pi；完成真实 Host 握手后即可使用，无需重启 Piarium。Electron 自带运行应用所需的 Node 环境，
+但 Pi 本身仍作为独立的用户级工具存在。Windows、Linux 和 macOS 的 x64/ARM64 原生桌面包均在对应
+架构的 runner 上验证应用启动、Runtime Manager、健康检查和终端生命周期；可选离线包仍待后续提供。
 容器和 VS Code 扩展则固定自带经过验证的 Pi 运行时，以保证无人值守部署和编辑器宿主可复现。
 
 ### 运行 Web 开发环境
@@ -213,24 +230,29 @@ docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 
 ```mermaid
 flowchart LR
-    S["渲染器：由 Workbench Profile 选定外壳扩展"] --> C["@piarium/runtime-client"]
+    S["渲染器：由 Workbench Profile 选定外壳扩展"] --> C["@piarium/application-client"]
     S --> D["文档、搜索、语言与运行调试 API"]
-    C --> T["带认证的 WebSocket 或编辑器传输"]
+    C --> T["带认证的 HTTP/WebSocket 或编辑器传输"]
     T --> A["应用宿主：@piarium/web 服务"]
     D --> A
+    A --> K["piarium-kernel：私有 Rust 系统内核"]
     A --> B["@piarium/runtime-broker"]
-    A --> L["LSP、DAP、测试与任务监督器"]
     B --> H["隔离的 @piarium/pi-host 工作进程"]
     H --> P["Pi SDK + 受信任的 Pi 包"]
 ```
+
+应用宿主是唯一的可信后端。每个宿主拥有一个私有 `piarium-kernel` 子进程，它是持久化与贴近机器
+资源的生产权威：不可变工作状态 root、内容对象与 GC、恢复元数据、canonical 文件资源与物化、PTY
+和管道进程树、固定视图的文件与结构计算。宿主保留产品策略——actor 准入、文档协调、Thread/Run
+生命周期、知识与模型编排——并通过私有 framed stdio 协议与内核通信，从不开放公开端口。每类资源
+只有一个生产写者，内核之后不再保留 TypeScript 兜底权威。
 
 Broker 管理一个目录工作进程和每个会话各自的工作进程。渲染器重新加载不会终止正在执行的任务，
 Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 Piarium 协议 DTO；SDK 回调、凭据对象和
 扩展实现细节不会越过这条边界。
 
-应用宿主是唯一的可信后端。它拥有带版本的文档权威、工作区搜索、语言服务器以及调试/测试/任务进程，
-所以渲染器只发送带类型的请求，从不自己启动进程。Electron 在主进程里运行同一个宿主，而不是再造一套
-桌面后端；只有窗口、菜单、对话框这类真正的原生能力才跨过 Electron preload 边界。
+Electron 在主进程里运行同一个宿主，而不是再造一套桌面后端；只有窗口、菜单、对话框这类真正的
+原生能力才跨过 Electron preload 边界。
 
 第三方 Pi 包是拥有当前用户操作系统权限的可执行代码。Piarium 会展示观察到的能力，并对项目内
 可执行资源设置授权门槛，但不会把受信任扩展宣传成完整的沙箱。在公开远程实例或安装陌生代码之前，
@@ -240,8 +262,10 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 
 | 路径 | 职责 |
 | --- | --- |
+| `kernel/` | 私有 Rust 系统内核：工作状态、文件资源、进程与计算 |
+| `packages/application-client` | 与框架无关的 `RuntimeAPIs`、传输、带类型错误与桌面 IPC 契约 |
 | `packages/ui` | 共享的 Pi 原生 React UI、状态、设置和扩展界面 |
-| `packages/web` | 浏览器/远程前端、HTTP/WebSocket 服务和云端 CLI |
+| `packages/web` | 浏览器/远程前端、可信 Application Host 与云端 CLI |
 | `packages/electron` | 原生桌面外壳、特权边界、打包、SSH 和更新 |
 | `packages/vscode` | VS Code 扩展宿主、Webview 和运行时桥接 |
 | `packages/mobile` | 连接 Piarium 服务端的 Capacitor iOS/Android 外壳 |
@@ -249,6 +273,7 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 | `packages/runtime-client` | 可在浏览器中使用的运行时请求/事件客户端 |
 | `packages/runtime-broker` | 目录/会话工作进程的管理、路由和关闭 |
 | `packages/pi-host` | 嵌入 Pi SDK 和扩展的隔离 Node 工作进程 |
+| `packages/settings-store` | 各 Host 共享的原子化设置文件持久化 |
 | `packages/extension-contract` | 清单、贡献、工作台、服务和发现协议 |
 | `packages/extension-surface` | 与框架无关的归属域和事务式 Surface 注册表 |
 | `packages/extension-sdk`、`-react`、`-cli` | 公开的作者 SDK、React 适配器和作者工具链 |
@@ -256,8 +281,8 @@ Pi 工作进程异常也不会让渲染器一同崩溃。跨进程传输的是 P
 | `packages/extension-loader` | 带认证的 managed Surface 模块加载器与隔离运行域 |
 | `packages/extension-builtins` | Piarium 内置扩展的清单，含两套官方外壳 |
 | `packages/docs` | 面向用户的文档站源码 |
-| `docs` | 架构、工作台、迁移、恢复、插件、云端和安全约定 |
-| `scripts` | 开发、发布、云端构建、部署和校验工具 |
+| `docs` | 架构、harness、内核、工作台、迁移、恢复、云端和安全约定 |
+| `scripts` | 开发、内核构建/测量、发布、云端、部署和校验工具 |
 
 ## 开发与校验
 
@@ -268,10 +293,15 @@ bun install --frozen-lockfile
 bun run type-check
 bun run lint
 bun run test:pi
+bun run test:kernel
 bun run test:cloud
 bun run build
 bun run test:pi:dist
 ```
+
+`bun run kernel:check` 是 Rust 快速编译检查；`bun run test:kernel` 针对构建出的发行可执行文件
+运行不可跳过的原生权威套件。`bun run test:docs` 与 `bun run docs:validate` 分别校验工程文档和
+文档站内容。
 
 CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行时行为和 Ubuntu 生产构建。
 类型检查、lint 和全仓测试只在权威门禁中执行一次；Windows 只补充平台相关测试。云端/运行时输入
@@ -286,6 +316,8 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 - [工程开发与知识导航](../../docs/development.md)
 - [架构](../../docs/architecture.md)
 - [路线图](../../docs/roadmap.md)
+- [Agent Harness 契约](../../docs/agent-harness.md)，附[交付状态](../../docs/agent-harness-status.md)、[实施计划](../../docs/agent-harness-plan.md)与[决策日志](../../docs/agent-harness-decisions.md)
+- [Rust 系统内核设计](../../docs/rust-kernel-design.md)与[审查记录](../../docs/rust-kernel-audit.md)
 - [可组合工作台与 IDE 约定](../../docs/composable-workbench.md)
 - [统一文件编辑器平台](../../docs/unified-file-editor-platform.md)
 - [Piarium 扩展平台](../../docs/piarium-extension-platform.md)

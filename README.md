@@ -13,12 +13,15 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 [![Docker Images](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml/badge.svg)](https://github.com/Youzini-afk/Piarium/actions/workflows/docker.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
-**A Pi-native, recomposable workspace for coding agents: built for local work and usable across
-desktop, web, editors, and mobile clients.**
+**A Pi-native, recomposable workspace and governed agent harness for coding agents: built for
+local work and usable across desktop, web, editors, and mobile clients.**
 
-Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a complete product
-workspace. It uses Pi's public SDK, session tree, package manager, and extension model directly—no
-terminal scraping and no permanent OpenCode compatibility layer.
+Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a complete product.
+Pi stays the agent kernel — model and provider stack, session tree, package manager, and extension
+model — while Piarium owns everything around it: the tool environment, working state, recovery,
+retrieval, context policy, and task governance, plus the workbench surfaces the agent runs inside.
+It uses Pi's public SDK directly—no terminal scraping and no permanent OpenCode compatibility
+layer.
 
 Its interface is not a fixed shell. Piarium ships two first-party working shapes — an **Agent
 Workspace** centered on sessions, tasks, and context, and an **IDE Workbench** centered on editors,
@@ -61,29 +64,61 @@ phone-sized screen.
 
 ## What Piarium provides
 
+### A governed agent harness
+
+- **Threads, runs, and immutable working state:** work is organized into threads and runs whose
+  file changes publish as immutable roots. Agents draft in isolated virtual or materialized
+  workspaces and merge reviewed results back, instead of making loose edits to your checkout.
+- **One permission gate:** a single `tool_call` confirmation covers harness tools, Pi built-ins,
+  MCP tools, package tools, and nested-thread tools. Session grants stay scoped to the tool,
+  action, workspace, paths, and network targets they were approved for.
+- **Recovery that follows the agent:** the Host-owned recovery service journals agent mutations
+  alongside your own edits into combined checkpoints, so affected-file rollback, undo/redo, and
+  crash recovery work across tool calls without scanning the whole workspace.
+- **A native tool environment:** the shell supervisor runs real PTYs with automatic background
+  promotion, `get_output`, `write_to_process`, and `kill_shell`; `edit`/`write`/`apply_patch` carry
+  post-edit diagnostics and per-path leases; oversized results become paginated `OutputRef`s; and
+  package-manager output is organized instead of dumped raw.
+
+### Context, retrieval, and knowledge
+
+- **Structured context assembly:** a Zone 2 layer injects observed workspace facts — your edits,
+  terminal commands, diagnostics, Git status — without touching the system prompt. A memory keeper
+  maintains durable memory in off/assist/takeover modes, and Host-side compaction can take over
+  summarization without extra model calls.
+- **Layered retrieval:** `grep` for exact match, `explore`/`related` for grouped discovery backed
+  by a symbol graph and tree-sitter structure, and `recall` against a per-workspace knowledge store
+  with optional embeddings and reranking. Each layer is reachable directly; none requires the
+  others to fail first.
+- **Native web tools:** `webfetch` with SSRF and domain policy, extraction, PDF, and caching;
+  `websearch` through user-configured providers; a sources panel; and offscreen page rendering on
+  the desktop surface.
+
+### A real coding workspace
+
 - **Pi-native conversations:** streaming, branching, tree navigation, compaction, steering and
   follow-up queues, model and thinking selection, session rename, archive, restore, and deletion.
-- **A real coding workspace:** files, diffs, Git, worktrees, terminals, SSH hosts, remote instances,
+- **Workspace tooling:** files, diffs, Git, worktrees, terminals, SSH hosts, remote instances,
   comments, and editor context share the active Pi session and workspace.
-- **Packages without a parallel plugin system:** install, update, remove, and inspect any package
-  accepted by Pi's `PackageManager`. Unknown extensions still receive generic command, tool, entry,
-  notification, and UI handling.
-- **First-class plugin configuration:** maintained plugins get focused GUI surfaces while their own
-  native JSON/JSONC files, commands, databases, and migration logic remain authoritative.
-- **Native affected-file recovery:** conversation rollback follows Pi's append-only session tree;
-  the replaceable `piarium.workspace-recovery@5` Host service owns combined rollback, checkpoints,
-  undo/redo, retention, and crash recovery without scanning the whole workspace.
-- **Custom providers:** configure Pi-native provider layers, authentication, model discovery, and
-  custom endpoints without mirroring credentials into renderer storage.
-- **A recomposable workbench:** pick the Agent or IDE profile, or build your own. Replace the whole
-  shell or just the navigation, editor, panel, composer, timeline, or status bar, and mix first-party
-  with community contributions. Switching happens live, without reloading documents, restarting the
-  Pi runtime, or losing shared workspace state.
 - **Editor-grade infrastructure:** one revisioned document authority with real conflict handling;
   desktop/Web Agent and IDE surfaces share Monaco models, editor groups, workspace search,
   host-owned language servers, and standards-conformant debug adapters, while mobile and embedded
   editors use a lightweight CodeMirror adapter against the same authority. Agent edits reconcile
   with your unsaved buffers instead of overwriting them.
+- **Custom providers:** configure Pi-native provider layers, authentication, model discovery, and
+  custom endpoints without mirroring credentials into renderer storage.
+
+### Composable and everywhere
+
+- **Packages without a parallel plugin system:** install, update, remove, and inspect any package
+  accepted by Pi's `PackageManager`. Unknown extensions still receive generic command, tool, entry,
+  notification, and UI handling.
+- **First-class plugin configuration:** maintained plugins get focused GUI surfaces while their own
+  native JSON/JSONC files, commands, databases, and migration logic remain authoritative.
+- **A recomposable workbench:** pick the Agent or IDE profile, or build your own. Replace the whole
+  shell or just the navigation, editor, panel, composer, timeline, or status bar, and mix first-party
+  with community contributions. Switching happens live, without reloading documents, restarting the
+  Pi runtime, or losing shared workspace state.
 - **Multiple product surfaces:** a shared React UI powers Electron, Web, and the Capacitor mobile
   shell through explicit runtime capabilities, with VS Code as a companion that brings editor context
   to Piarium rather than a second workbench.
@@ -92,30 +127,14 @@ phone-sized screen.
 
 ## Maintained extension integrations
 
-Piarium does not fork these extensions or copy their private state. It consumes their public Pi
-commands, events, settings files, and capability contracts, so package updates can continue to
-advance independently.
+Piarium does not fork Pi extensions or copy their private state. Maintained adapters consume each
+extension's public commands, events, settings files, and capability contracts — covering subagent
+fleets, context managers, workspace history, MCP servers, web access, memory systems, background
+tasks, and LSP/tooling configuration — so package updates can continue to advance independently.
 
-| Extension | Piarium integration |
-| --- | --- |
-| `pi-subagents` | Fleet/task projections and controls through the extension's public RPC and commands |
-| `@cortexkit/pi-magic-context` | Native user/project JSONC configuration, registered commands, status, and public entries |
-| `pi-workspace-history` | Optional independent workspace-history commands and native settings; it is not used by Piarium recovery |
-| `pi-wtf` | Prompt repair actions and extension-owned `wtf.json` configuration |
-| `@piarium/pi-mcp-adapter` | Adapter-owned effective server catalog, public status/actions, and revisioned native-source editing |
-| `pi-web-access` | Native `web-search.json`, Curator and account actions, and stored-result navigation |
-| `pi-openai-codex-compat` | Native global/project request, reasoning, remote-compaction, and Codex-tool configuration |
-| `pi-observational-memory` | Native global/project observation, reflection, compaction, pool, and worker configuration |
-| `context-mode` | Recommended native Pi package with generic plugin configuration because it has no single canonical settings document |
-| `pi-lens` | Native user/nearest-project configuration, diagnostics and formatting controls, and registered command actions |
-| `@cortexkit/aft-pi` | Native user/project JSONC for editing, search, semantic analysis, LSP, backup, and sandbox configuration |
-| `pi-hermes-memory` | Native memory policy, background review, flush, capacity, recall, and model-override configuration |
-| `pi-background-tasks` | Fleet visibility, launch, bounded logs, and stop controls through the public EventBus contract |
-| `pi-rtk-optimizer` | Native strict-JSON RTK rewrite, output, read, and truncation configuration plus command availability |
-
-See [maintained extension integration](docs/extension-compatibility.md) for the commands, events, and
-native configuration each adapter consumes, and which files stay plugin-owned. Piarium does not
-certify plugin versions against Pi releases.
+See [maintained extension integration](docs/extension-compatibility.md) for the per-extension
+command, event, and native-configuration contract, and which files stay plugin-owned. Piarium does
+not certify plugin versions against Pi releases.
 
 ## Build Piarium extensions
 
@@ -153,17 +172,22 @@ through [GitHub Releases](https://github.com/Youzini-afk/Piarium/releases).
 
 - Node.js 22.19 or newer; Node.js 24 is the supported source-development baseline
 - Bun 1.3.14
+- A Rust toolchain matching `kernel/rust-toolchain.toml` (rustup selects it automatically)
 - Git
 - Git for Windows and Git Bash when running Pi shell tools on Windows
 
-Desktop no longer uses a permanently bundled Pi SDK. It discovers a user-level Pi installation
-first, then the Pi Runtime flow can select, install, or upgrade Pi without downgrading it. Piarium
-becomes ready only after a real Host handshake and does not need to restart after activation.
-Electron contains the Node runtime needed to run the application, while Pi remains an independently
-managed user-level tool. Native x64/ARM64 desktop packages for Windows, Linux, and macOS are validated
-on matching runners for application startup, Runtime Manager, health, and terminal lifecycle; optional
-offline installers remain future work. Containers and the VS Code extension keep a pinned, self-contained
-Pi runtime for reproducible unattended and editor-host execution.
+The Rust system kernel is a required runtime component, not an optional accelerator. Source
+development runs it through Cargo when no staged binary is present; `bun run kernel:build` produces
+the manifest-verified release executable that packaged layouts require.
+
+Piarium ships a bundled Pi runtime and discovers user-level Pi installations through the Runtime
+Manager, which can select, install, or upgrade Pi without downgrading it. Piarium becomes ready only
+after a real Host handshake and does not need to restart after activation. Electron contains the
+Node runtime needed to run the application, while Pi remains an independently managed tool. Native
+x64/ARM64 desktop packages for Windows, Linux, and macOS are validated on matching runners for
+application startup, Runtime Manager, health, and terminal lifecycle; optional offline installers
+remain future work. Containers and the VS Code extension keep a pinned, self-contained Pi runtime
+for reproducible unattended and editor-host execution.
 
 ### Run the Web development surface
 
@@ -236,26 +260,32 @@ complete persistent-path, environment, container, and SSH rollback contract is d
 
 ```mermaid
 flowchart LR
-    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@piarium/runtime-client"]
+    S["Renderer: a Workbench Profile selects the shell extension"] --> C["@piarium/application-client"]
     S --> D["Documents, search, language, and run APIs"]
-    C --> T["Authenticated WebSocket or editor transport"]
-    T --> A["Application host: the @piarium/web service"]
+    C --> T["Authenticated HTTP/WebSocket or editor transport"]
+    T --> A["Application host (@piarium/web)"]
     D --> A
+    A --> K["piarium-kernel: private Rust system kernel"]
     A --> B["@piarium/runtime-broker"]
-    A --> L["LSP, DAP, test, and task supervisors"]
     B --> H["Isolated @piarium/pi-host workers"]
     H --> P["Pi SDK + trusted Pi packages"]
 ```
+
+The application host is the single trusted backend. Each host owns a private `piarium-kernel` child
+process that is the production authority for durable and machine-adjacent resources: immutable
+working-state roots, content objects and GC, recovery metadata, canonical file resources and
+materialization, PTY and pipe process trees, and fixed-view file and structure computation. The host
+keeps product policy — actor admission, document coordination, thread and run lifecycle, knowledge,
+and model orchestration — and talks to the kernel over a private framed stdio protocol, never a
+public port. There is exactly one production writer per resource; no TypeScript fallback authority
+remains behind the kernel.
 
 The broker owns a catalog worker plus per-session workers. A renderer reload does not terminate an
 active task, and a Pi worker failure does not crash the renderer. Protocol DTOs cross the process
 boundary; SDK callbacks, credential objects, and extension implementation details do not.
 
-The application host is the single trusted backend. It owns the revisioned document authority,
-workspace search, language servers, and debug/test/task processes, so renderers send typed requests
-and never start a process. Electron runs that same host in its main process rather than adding a
-parallel desktop backend; only native capability such as windows, menus, and dialogs crosses the
-Electron preload boundary.
+Electron runs that same host in its main process rather than adding a parallel desktop backend; only
+native capability such as windows, menus, and dialogs crosses the Electron preload boundary.
 
 Third-party Pi packages are executable code with the user's operating-system permissions. Piarium
 shows observed capabilities and gates project-local executable resources, but it does not claim to
@@ -266,8 +296,10 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 
 | Path | Responsibility |
 | --- | --- |
+| `kernel/` | Private Rust system kernel: working state, file resources, processes, and compute |
+| `packages/application-client` | Framework-neutral `RuntimeAPIs`, transports, typed failures, and the desktop IPC contract |
 | `packages/ui` | Shared Pi-native React UI, stores, settings, and extension surfaces |
-| `packages/web` | Browser/remote frontend, HTTP/WebSocket service, and cloud CLI |
+| `packages/web` | Browser/remote frontend, trusted Application Host, and cloud CLI |
 | `packages/electron` | Native desktop shell, privileged boundary, packaging, SSH, and updates |
 | `packages/vscode` | VS Code extension host, webview, and runtime bridge |
 | `packages/mobile` | Capacitor iOS/Android shell connected to a Piarium server |
@@ -275,6 +307,7 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/runtime-client` | Browser-safe runtime request/event client |
 | `packages/runtime-broker` | Catalog/session worker ownership, routing, and shutdown |
 | `packages/pi-host` | Isolated Node worker embedding the Pi SDK and extensions |
+| `packages/settings-store` | Atomic settings-file persistence shared by the hosts |
 | `packages/extension-contract` | Manifest, contribution, workbench, service, and discovery contracts |
 | `packages/extension-surface` | Framework-neutral owner scopes and transactional Surface registries |
 | `packages/extension-sdk`, `-react`, `-cli` | Public authoring SDK, React adapter, and author tooling |
@@ -282,8 +315,8 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/extension-loader` | Authenticated managed Surface module loader and isolated realms |
 | `packages/extension-builtins` | Manifests for Piarium's built-in extensions, including both shells |
 | `packages/docs` | User-facing documentation site source |
-| `docs` | Architecture, workbench, migration, recovery, plugin, cloud, and security contracts |
-| `scripts` | Development, release, cloud build, deployment, and validation tooling |
+| `docs` | Architecture, harness, kernel, workbench, migration, recovery, cloud, and security contracts |
+| `scripts` | Development, kernel build/measurement, release, cloud, deployment, and validation tooling |
 
 ## Development and validation
 
@@ -295,10 +328,15 @@ bun install --frozen-lockfile
 bun run type-check
 bun run lint
 bun run test:pi
+bun run test:kernel
 bun run test:cloud
 bun run build
 bun run test:pi:dist
 ```
+
+`bun run kernel:check` is the fast Rust compile check; `bun run test:kernel` runs the non-skipping
+native authority suite against the built release executable. `bun run test:docs` and
+`bun run docs:validate` check engineering and docs-site content.
 
 CI exposes three stable gates with distinct responsibilities: Ubuntu source quality, Windows runtime
 behavior, and the Ubuntu production build. Type checking, lint, and the full workspace tests run once
@@ -307,15 +345,18 @@ inputs make the Docker workflow verify the container contract, build the coupled
 base/application images, smoke both applications by immutable digest, and promote tags only after
 both candidates pass.
 
-Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md) and the repository-specific rules in
-[AGENTS.md](AGENTS.md).
+Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the repository-specific rules in
+[AGENTS.md](AGENTS.md), and the [engineering guide](docs/development.md).
 
 ## Design and operations documentation
 
 - [Architecture](docs/architecture.md)
+- [Engineering guide](docs/development.md)
 - [Roadmap](docs/roadmap.md)
+- [Agent harness contract](docs/agent-harness.md) (Chinese), with [delivery status](docs/agent-harness-status.md), [plan](docs/agent-harness-plan.md), and [decision log](docs/agent-harness-decisions.md)
+- [Rust system kernel design](docs/rust-kernel-design.md) and [audit record](docs/rust-kernel-audit.md)
 - [Composable workbench and IDE contract](docs/composable-workbench.md) (Chinese)
-- [Agent harness: tools, retrieval, knowledge store, cache contract](docs/agent-harness.md) (Chinese)
+- [Unified file editor platform](docs/unified-file-editor-platform.md)
 - [Piarium extension platform](docs/piarium-extension-platform.md)
 - [VS Code companion migration](docs/vscode-companion.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
