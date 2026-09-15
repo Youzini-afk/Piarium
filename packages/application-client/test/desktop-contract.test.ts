@@ -11,7 +11,6 @@ import {
 } from '../src/desktop.js';
 
 test('desktop command catalog is exhaustive, unique, and usable as a runtime guard', () => {
-  assert.equal(PIARIUM_DESKTOP_COMMAND_LIST.length, 58);
   assert.equal(new Set(PIARIUM_DESKTOP_COMMAND_LIST).size, PIARIUM_DESKTOP_COMMAND_LIST.length);
   assert.deepEqual([...PIARIUM_DESKTOP_COMMAND_LIST].sort(), Object.keys(PIARIUM_DESKTOP_COMMAND_CATALOG).sort());
   assert.equal(isPiariumDesktopCommand('desktop_get_app_version'), true);

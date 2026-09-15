@@ -71,28 +71,33 @@ impl Storage {
             for (key, value) in observed.as_object().into_iter().flatten() {
                 record[key] = value.clone();
             }
-        } else if record["writerActive"].as_bool() != Some(false) {
-            let epoch = string(&record, "kernelEpoch")?;
-            let receipt = process::read_receipt(&self.root, id, epoch)?;
-            #[cfg(windows)]
-            let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
-            #[cfg(unix)]
-            let gone = receipt.is_some();
-            if gone {
-                if let Some(receipt) = receipt {
-                    for key in ["status", "pid", "exitCode", "signal", "reason"] {
-                        record[key] = receipt[key].clone();
-                    }
-                } else {
-                    record["status"] = json!("exited");
-                    record["reason"]=json!("prior native Job is gone; command is not replayed and exit code is unknown");
-                }
-                record["writerActive"] = json!(false);
-            } else {
-                record["status"] = json!("unknown");
-                record["reason"]=json!("prior process tree has no confirmed exit receipt; execution directory is retained");
-            }
+        } else {
+            // Process output lives in the owning kernel process. Once a new
+            // kernel opens this record there is no readable buffer, even if
+            // the previous kernel persisted the exit before it shut down.
             record["outputAvailable"] = json!(false);
+            if record["writerActive"].as_bool() != Some(false) {
+                let epoch = string(&record, "kernelEpoch")?;
+                let receipt = process::read_receipt(&self.root, id, epoch)?;
+                #[cfg(windows)]
+                let gone = process::platform::prior_tree_gone(&process::job_name(&self.root, id))?;
+                #[cfg(unix)]
+                let gone = receipt.is_some();
+                if gone {
+                    if let Some(receipt) = receipt {
+                        for key in ["status", "pid", "exitCode", "signal", "reason"] {
+                            record[key] = receipt[key].clone();
+                        }
+                    } else {
+                        record["status"] = json!("exited");
+                        record["reason"]=json!("prior native Job is gone; command is not replayed and exit code is unknown");
+                    }
+                    record["writerActive"] = json!(false);
+                } else {
+                    record["status"] = json!("unknown");
+                    record["reason"]=json!("prior process tree has no confirmed exit receipt; execution directory is retained");
+                }
+            }
         }
         self.persist_process_record(id, &record)?;
         Ok(Some(record))

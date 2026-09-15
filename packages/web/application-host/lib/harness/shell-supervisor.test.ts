@@ -287,6 +287,8 @@ describe("background shell output", () => {
       const started = await supervisor.exec("never completes", { waitMs: 5 });
       expect(started).toMatchObject({ kind: "background", id: "sh_1" });
       expect(supervisor.hasActiveCommandAt(workspace)).toBe(true);
+      expect(supervisor.hasActiveCommandAt(join(workspace, "nested-worktree"))).toBe(true);
+      expect(supervisor.hasActiveCommandAt(join(workspace, "..", "unrelated-worktree"))).toBe(false);
     } finally {
       await supervisor.dispose();
       rmSync(workspace, { recursive: true, force: true });

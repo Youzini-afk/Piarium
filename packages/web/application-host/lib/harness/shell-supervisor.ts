@@ -1138,18 +1138,24 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
   const hasActiveCommandAt = (directory: string): boolean => {
     const target = path.resolve(directory);
-    const same = (cwd: string): boolean => {
+    const overlaps = (cwd: string): boolean => {
       const resolved = path.resolve(cwd);
-      return process.platform === "win32"
-        ? resolved.toLowerCase() === target.toLowerCase()
-        : resolved === target;
+      const left = process.platform === "win32" ? resolved.toLowerCase() : resolved;
+      const right = process.platform === "win32" ? target.toLowerCase() : target;
+      const relative = path.relative(left, right);
+      const reverse = path.relative(right, left);
+      const contained = (value: string): boolean => value === ""
+        || (value !== ".." && !value.startsWith(`..${path.sep}`) && !path.isAbsolute(value));
+      return contained(relative) || contained(reverse);
     };
-    if (stopping && stoppingDirectory && same(stoppingDirectory)) return true;
-    if (pendingCommand && same(pendingCommand.cwd)) return true;
+    const admittedRoot = deps.cwd ?? process.cwd();
+    if (stopping && stoppingDirectory && overlaps(stoppingDirectory)) return true;
+    if (pendingCommand && (overlaps(pendingCommand.cwd) || overlaps(admittedRoot))) return true;
     for (const background of backgroundShells.values()) {
-      if ((!background.exited || background.writer !== null || background.writerClosePromise !== undefined) && same(background.cwd)) return true;
+      if ((!background.exited || background.writer !== null || background.writerClosePromise !== undefined)
+        && (overlaps(background.cwd) || overlaps(admittedRoot))) return true;
     }
-    for (const cwd of lingeringWriters.values()) if (same(cwd)) return true;
+    for (const cwd of lingeringWriters.values()) if (overlaps(cwd) || overlaps(admittedRoot)) return true;
     return false;
   };
 

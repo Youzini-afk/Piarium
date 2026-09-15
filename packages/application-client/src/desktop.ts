@@ -1,7 +1,7 @@
 /**
  * Framework-neutral desktop IPC contract.
  *
- * This module is the single type owner for the 58 `desktop_*` commands
+ * This module is the single type owner for every `desktop_*` command
  * exposed by the Electron preload/main bridge. Electron main, preload,
  * and the UI package all import from here so the compiler can prove
  * command/args/result correlation across all three consumers.
