@@ -1,27 +1,42 @@
 # syntax=docker/dockerfile:1
 ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main
 
-FROM rust:1.97.1-bookworm AS kernel-builder
+FROM --platform=$BUILDPLATFORM rust:1.97.1-bookworm AS kernel-builder
 WORKDIR /src
+ARG BUILDARCH
 ARG TARGETARCH
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends cmake \
+  && apt-get install -y --no-install-recommends cmake gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
   && rm -rf /var/lib/apt/lists/*
 COPY package.json ./
 COPY kernel ./kernel
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=private \
+  --mount=type=cache,target=/src/kernel/target,sharing=private \
   set -eux; \
   case "$TARGETARCH" in \
     amd64) kernel_arch="x64"; kernel_target="x86_64-unknown-linux-gnu" ;; \
-    arm64) kernel_arch="arm64"; kernel_target="aarch64-unknown-linux-gnu" ;; \
+    arm64) \
+      kernel_arch="arm64"; \
+      kernel_target="aarch64-unknown-linux-gnu"; \
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER="aarch64-linux-gnu-gcc"; \
+      export CC_aarch64_unknown_linux_gnu="aarch64-linux-gnu-gcc"; \
+      export CXX_aarch64_unknown_linux_gnu="aarch64-linux-gnu-g++"; \
+      export AR_aarch64_unknown_linux_gnu="aarch64-linux-gnu-ar"; \
+      ;; \
     *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; \
   esac; \
+  if [ "$BUILDARCH" != "amd64" ]; then \
+    echo "Piarium's Linux cross-build stage requires an amd64 build runner, found $BUILDARCH" >&2; \
+    exit 1; \
+  fi; \
   build_identity="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1)"; \
   test -n "$build_identity"; \
+  rustup target add "$kernel_target"; \
   PIARIUM_KERNEL_BUILD_IDENTITY="$build_identity" \
   PIARIUM_KERNEL_TARGET="$kernel_target" \
   PIARIUM_KERNEL_ARCH="$kernel_arch" \
-  cargo build --manifest-path kernel/Cargo.toml --release --bin piarium-kernel --locked
+  cargo build --manifest-path kernel/Cargo.toml --release --bin piarium-kernel --locked --target "$kernel_target"; \
+  install -D -m 0755 "kernel/target/$kernel_target/release/piarium-kernel" /out/piarium-kernel
 
 FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app
@@ -57,7 +72,7 @@ RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./scripts/fix-deprecation.js
 
 COPY . .
-COPY --from=kernel-builder /src/kernel/target/release/piarium-kernel /tmp/piarium-kernel
+COPY --from=kernel-builder /out/piarium-kernel /tmp/piarium-kernel
 RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \
   PIARIUM_KERNEL_PREBUILT=/tmp/piarium-kernel \
   PIARIUM_TARGET_PLATFORM=linux \
