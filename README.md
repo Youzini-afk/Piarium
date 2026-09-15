@@ -35,8 +35,7 @@ part of it.
 
 ## Product surfaces
 
-The screenshots below use an isolated `demo-workspace` with anonymous sample files and no personal
-accounts, projects, conversations, or credentials.
+The screenshots below come from an isolated `demo-workspace` with anonymous sample files.
 
 ### Agent Workspace
 

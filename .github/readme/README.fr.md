@@ -38,8 +38,7 @@ donc vous pouvez remplacer l'une ou l'autre, ou n'importe laquelle de leurs part
 
 ## Interfaces du produit
 
-Les captures ci-dessous utilisent un `demo-workspace` isolé et des fichiers d'exemple anonymes, sans
-compte, projet, conversation ni identifiant personnel.
+Les captures ci-dessous utilisent un `demo-workspace` isolé et des fichiers d'exemple anonymes.
 
 ### Agent Workspace
 
