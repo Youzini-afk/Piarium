@@ -291,23 +291,31 @@ server backend and current command set are not yet sufficient as the sole produc
 Direct workers are also where Piarium's own agent harness lives. The session worker overrides Pi's
 built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
 recovery journal already uses, and mounts in-process extension hooks for tail-appended turn context,
-post-tool feedback, a background memory keeper, and per-compaction takeover. Memory defaults to `takeover`; `assist` keeps Pi's
-summarizer and `off` stops keeper injection. The effective mode is read live from the user-owned global setting plus a durable
-session override. The heavy services behind those tools — shell
-supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
+post-tool feedback, and fixed-candidate context preparation (D-284). On every model request —
+including tool-loop continuations — the context hook compares the projected request size against a
+configurable waterline of the usable window (context window minus Pi's reserve). Once crossed, the
+extension fixes a branch- and model-bound preparation range and runs one derived summary request in
+the background over the same ModelRuntime: real system prompt, schema-only tools, `toolChoice: none`,
+no tool executor. The foreground turn keeps running; when Pi later reaches `session_before_compact`,
+the ready candidate is committed (or awaited, with a synchronous fallback), Pi persists the
+compaction entry, and `compaction.after` resets Host observation baselines. A `history` tool reads
+summarized raw entries back from the session's own branch. The heavy services behind those tools —
+shell supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
 handing the worker host credentials. The harness contract, its cache rules, and the profile model
 are specified in [agent-harness.md](agent-harness.md); which of its capabilities are implemented,
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
 
-D-284 accepts the replacement context policy, pending implementation: derive one fixed-range summary
-from the active model request near capacity while foreground work continues, then commit it with retained
-original messages only when the next request needs room. Pi remains the session/history authority;
-request budgeting and summary scheduling stay in the TypeScript/Pi layer, not the Rust kernel. The
-keeper behavior described here is the current code, not the new target. The cutover also removes keeper
-nudges, block-based compaction coverage and memory-mode UI, while keeping plans, user notes, accepted
-knowledge and real event delivery. See harness section 8.4 and plan 2.4/2.6.
+D-284's replacement context policy is implemented: one fixed-range summary is derived from the active
+model request near capacity while foreground work continues, then committed with retained original
+messages only when a later request needs room. Pi remains the session/history authority; request
+budgeting and summary scheduling stay in the TypeScript/Pi layer, not the Rust kernel. The continuous
+memory keeper, its coverage-driven takeover path, keeper nudges, block-based compaction coverage, and
+memory-mode UI are deleted; plans, user notes, accepted knowledge, and real event delivery remain.
+Background preparation is on by default and can be disabled independently of Pi's own automatic
+compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
+read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
 D-286 makes the full context scope explicit: sufficient first presentation of tool material, stable
 history, actual request capacity, retained original messages, one continuation summary, history rereads,
@@ -333,18 +341,17 @@ release actually complete. Reading output is observation, never the completion t
 User terminal tabs inject generation-tagged OSC 633 on bash / PowerShell / zsh; finished commands
 with real command text and exit codes become workspace events and the next Zone 2
 `<user-terminal>` section. The parser only accepts this session integration's tagged frames.
-`/bin/sh` is not treated as Bash. Command/cwd text is encoded before Zone 2 and keeper material.
+`/bin/sh` is not treated as Bash. Command/cwd text is encoded before Zone 2.
 `putEvent` is idempotent on `targetPiSessionId + commandId`; one terminal command is projected once
-to each active Pi session in the workspace, and only a newly inserted target event nudges that session's
-keeper. PowerShell uses the command-start `LASTEXITCODE` baseline and reports `1` when it cannot prove
+to each active Pi session in the workspace. PowerShell uses the command-start `LASTEXITCODE` baseline
+and reports `1` when it cannot prove
 that an unchanged native status belongs to the current command. The live PTY path does not replay after
 Host restart. Missing integration is `not-observed`, not a guessed command (D-226 / D-229 / D-233).
 
-Accepted steering, user plan revisions, and newly persisted child Run reports also accelerate that
-same keeper (D-238). The UI plan route observes only its successful user writes; Registry return
-notifications bind the actual Run/report. Nested delivery resolves the active parent's owning session
-instead of comparing its materialized execution workspace to the knowledge store. Notifications carry
-encoded material and reuse the in-flight/cooldown queue; off and duplicate delivery make no model call.
+User plan revisions and child Run reports remain observable facts: the UI plan route observes only its
+successful user writes, and Registry return notifications bind the actual Run/report. Nested delivery
+resolves the active parent's owning session
+instead of comparing its materialized execution workspace to the knowledge store.
 
 Retrieval design D-173–D-179 keeps fast `explore` separate from the longer-running `retrieval` role.
 D-227 makes that role a real Thread: `thread.dispatch(role: "retrieval")` freezes the retrieval model
@@ -384,16 +391,18 @@ mutations and successful native Pi journal after events invalidate the same inde
 response; embedding proceeds asynchronously. Configuration refreshes precede subsequent queries,
 and responses from retired workspace workers cannot replace current bindings.
 
-Session memory blocks remain in the Host store. The renderer reads and edits them only through
+Session knowledge blocks (plans, todos, user notes, accepted knowledge) remain in the Host store. The
+renderer reads and edits them only through
 UI-authenticated HTTP routes; SSE carries `{workspaceId, sessionId}` invalidation facts, never block
 content. The same UI-auth boundary protects the thread metadata route.
 
 The accepted delivery policy in harness decision D-078 is to implement complete usable paths and ship them
 as defaults after focused correctness checks. Replay sets and external tester reports support diagnosis
 and optimization; they are not mandatory activation gates. Existing explicit user choices remain valid.
-Decision D-081 implements that policy for memory: takeover requires the keeper's actual context-entry coverage,
-the active branch path, and the current visible block revisions to match. Missing or stale evidence falls back
-to Pi for that compaction; Host restart never promotes its empty in-memory coverage into a durable checkpoint.
+D-284 implements that policy for context: a prepared candidate is committed only while its epoch,
+branch, model, compaction boundary, and first-kept entry still match the live session; anything stale
+is discarded and that compaction falls back to Pi's synchronous preparation or fails honestly without
+truncating history. Host restart never promotes an empty in-memory candidate into durable evidence.
 The capability matrix records the remaining implementation boundaries.
 
 ### 4.5 Composable workbench and document authority
@@ -617,7 +626,7 @@ The `HarnessServiceMap` defines the following method groups:
   user-selected SearXNG endpoint. Provider identity is user-owned, keys live in
   fixed search-only Pi auth entries, and the Host advertises `web.search` only
   when startup configuration is usable.
-- **Phase 2**: `zone2.assemble`, `compaction.before`, `compaction.after`, `todo.upsert`, `recall.search`, `memory.blocks.get`, `memory.blocks.apply`
+- **Phase 2**: `zone2.assemble`, `compaction.after`, `todo.upsert`, `recall.search`
 - **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
 
 Each has typed params and result in `@piarium/protocol`. The host's

@@ -102,10 +102,10 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 `webfetch` / `websearch` 的配置代际、域名策略、渲染选择与
 插件替换语义也已收口，不再重开权限/Web 双轨。
 
-**下一主线是 D-284 上下文无感续接（已采纳、待实施）。** 保留正常前台没有明显整理窗口期的目标，把持续 keeper 改为按容量
-提前生成固定摘要、前台继续追加、需要空间才切换。按 **2.4A → 2.4B → 2.6A → 2.6B** 串行推进，同阶段完成相关消费者替换，
-其中完整上下文原则与 fresh 构造由 D-286 补充；之后按 **3.18A–E（D-285）** 完成任务线程、可选预设、定向通信与连续交付，
-再进入外部 runtime / research profile。本文不代表代码已切换；status 保留当前 keeper/角色/send/review 的事实。
+**D-284 上下文无感续接已实施（2.4A/B、2.6A/B 完成）。** 持续 keeper/coverage 接管已删除，容量驱动的固定候选后台摘要、
+前台追加、按需提交与 history 回读已进入生产链并经真 Pi+faux 纵切验证。**当前主线是 D-285 任务线程与 D-286 的线程侧消费**，
+按 **3.18A–E** 推进普通派发/可选预设、task/inherit/continue/fresh、定向通信、共享准入与连续交付，
+再进入外部 runtime / research profile。status 保留当前角色/send/review/调度的事实。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
@@ -125,15 +125,15 @@ foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 
    D-228 纠正了 CRLF/CR 身份、整组 undo、耐久 `agent-mutation` 补偿、磁盘 encoding/BOM 恢复，以及
    `apply_patch` 在 `readSource` 非 disk 时不得回退磁盘；D-232 再补写前全磁盘预检、外部回执阶段、逐路径条件补偿和 Recovery UI。
    写入到 target-after 捕获之间崩溃会明确 needs-attention，完整桌面 Registry 与 Host 进程重启仍未实测。
-   D-226 已把用户终端真实命令完成接入 Zone 2，并用 `memory.nudge` 唤醒现有 keeper。
+   D-226 已把用户终端真实命令完成接入 Zone 2（当时的 `memory.nudge` 唤醒链已随 D-284 删除）。
    D-229 纠正了 PowerShell 退出码捕获、`/restart` 代际重置、`sh` 不当作 Bash、用户 shell
-   保留、带代际标识的 OSC 观察和 Zone 2/keeper 结构编码；D-233 把终端事实按目标 Pi session 分别持久化并用
+   保留、带代际标识的 OSC 观察和 Zone 2 结构编码；D-233 把终端事实按目标 Pi session 分别持久化并用
    `targetPiSessionId + commandId` 幂等，补正 PowerShell 旧状态归属与 zsh `ZDOTDIR`。
    zsh/macOS/Linux 真机用户终端与完整桌面重启仅未实测。
    D-227 / D-230 / D-234 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
    Host 校验 `submit_facts`，Run-bound receipt 与 artifact 持久保护正文，报告经 wait / 支持字节分页的 read_thread / Zone 2 可见。
-2. **上下文后台准备与续接（2.4/2.6，D-284 待实施）**：D-081 的 `takeover` 和 keeper coverage 仍是当前生产行为，完成新链时
-   一并删除。新链包括真实请求前预算、固定前缀后台摘要、按需提交、近期原文、history 与 UI/线程/知识消费者收口，不能只把旧 mode 改成 off。
+2. **上下文后台准备与续接（2.4/2.6，D-284 已实施）**：真实请求前预算、固定前缀后台摘要、按需提交、近期原文保留、
+   history 回读与 UI/线程/知识消费者收口已进入生产链；D-081 的 `takeover`、keeper coverage 与 memory-mode 设置/UI 已删除。
 3. **已接线的快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
    3.15 A–D 已接入公开 `explore`；独立验收补齐 actor scope、取消/截止、真实来源状态、终态、稳定视图、单元排名、required 组、到达即读与 scope 内 Top-K，见 status 3.15 与 D-182–D-189。
    3.16A 已提交（`37b12e8e`、`8752e039`）。3.16B–E 已接入生产链（D-190–D-193）：远程 embedding 绑定、向量复用与前台优先、
@@ -232,7 +232,7 @@ Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐�
 用户终端、steering、计划修改和子返回的事实送达保留；D-284 删除为持续 keeper 发送 `memory.nudge` 的模型调度依赖。
 事件实际带来的新内容计入下次请求预算，事件名称/完成/缓存 TTL 本身不触发摘要。
 
-### 2.4 后台摘要准备（D-284，待实施）
+### 2.4 后台摘要准备（D-284，已实施）
 
 正常路径无明显整理停顿是本阶段的产品目标。后台只为下一次压缩生成固定历史摘要，不持续维护工作块；候选 ready 不提前
 提交，前台正常新增 entry 不使候选失效。术语、默认和失败语义统一见设计 8.4。
@@ -273,7 +273,7 @@ D-286 明确本阶段吸收完整上下文讨论，不能仅交付无感调度�
 普通计划不中断、显式审批与取消/冲突的既有边界保持，不重新增加记忆维护义务。
 停止 keeper 后 plan/todo、用户编辑与笔记继续可见可写；不得沿旧 `memoryMode:off → blocks:[]` 将这些能力一并屏蔽。
 
-### 2.6 按需切换与消费者收口（D-284，待实施）
+### 2.6 按需切换与消费者收口（D-284，已实施）
 
 #### 2.6A 提交、异常容量与历史回读
 
@@ -318,7 +318,7 @@ D-286 明确本阶段吸收完整上下文讨论，不能仅交付无感调度�
 人工标记、suggestions 槽位的用户消息提议和 Settings 全量列表/取代链均已接（D-208/D-211）；未配走已有
 无模型路径。Settings 的编辑/接受/驳回/停用以打开时完整修订在同一写队列 CAS，同 scope 预检后提交，旧历史保留；模型提议的
 scope/source 由 Host actor 固定，相同正文的历史查重与插入原子完成。自动接受仍按用户显式 scope 设置。
-当前代码还含 keeper decisions 来源，D-284 的 2.6B 将其移除；不从续接摘要追加自动提炼调用，已有知识/建议不删除。
+keeper decisions 来源已随 2.6B 移除；不从续接摘要追加自动提炼调用，已有知识/建议不删除。
 
 ### 2.8 embedding
 

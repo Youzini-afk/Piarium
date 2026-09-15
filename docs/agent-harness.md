@@ -12,10 +12,10 @@ Section 4 of [architecture.md](architecture.md) gives the process model this doc
 [agent-harness-status.md](agent-harness-status.md)；未完成的纵切与实施规则看 [agent-harness-plan.md](agent-harness-plan.md)；
 每个偏离的理由看 [agent-harness-decisions.md](agent-harness-decisions.md)——日志不是规格，被采纳的决定都已回写到本文。
 
-D-284 将上下文管理改为容量驱动的后台摘要准备与按需切换，保留前台无明显整理停顿的目标。本文相关章节描述新目标；
-当前运行代码仍是 D-081 的持续 keeper / takeover，尚未完成替换。实施范围见 plan 2.2–2.7，当前事实见 status。
+D-284 将上下文管理改为容量驱动的后台摘要准备与按需切换，保留前台无明显整理停顿的目标，已实施：持续 keeper /
+takeover 已删除，新链按 2.4A/B、2.6A/B 接线并经真 Pi+faux 纵切验证，当前事实见 status。
 D-285 接受以工作为中心的可续做线程、可选预设、定向通信与分段成果；D-286 补齐整套上下文原则及“工作可延续、上下文可重建”。
-以下新目标与尚未切换的角色/send/review/调度实现分开，交付不能仅凭文档描述。
+D-285 的线程侧目标与尚未切换的角色/send/review/调度实现分开，交付不能仅凭文档描述。
 
 ## 1. 决定
 
@@ -1251,8 +1251,9 @@ Pi 原生会话与外部配置不删、不静默改写。新运行时不保留�
 含义不同的自动压缩开关。新后台准备选项未显式设置时，外部旧 `mode:off` / `shadowMode:false` 的关闭意图按“后台准备关闭”
 处理；用户显式的新选择优先。这里只保留外部关闭意图，不恢复旧三态引擎或建立内部格式迁移器。Pi 自动压缩禁用与显式保留量必须尊重。
 
-D-284 当前为已采纳、待实施。Pi 0.84.3 的自动入口位于 prompt 前/agent_end 后，默认摘要改变 system/messages；实现必须接通
-回合内真实请求前预算与后台请求派生，不能只改 keepRecentTokens 或挂上 session_before_compact 就声称完成。
+D-284 已实施：预算检查位于 `context` hook，覆盖回合内每次真实请求；摘要经同一 ModelRuntime 派生，保留真实 system 与
+schema-only 工具，`toolChoice:none`、无执行器。不能只改 keepRecentTokens 或挂上 session_before_compact 就声称完成——
+本实现逐项对应上述要求。
 
 #### 8.4.7 工作连续性与上下文重建（D-285 / D-286）
 
