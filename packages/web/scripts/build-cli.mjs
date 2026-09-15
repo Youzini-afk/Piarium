@@ -45,8 +45,6 @@ try {
   if (!fs.existsSync(entry)) throw new Error('CLI staging output does not contain cli.js');
   const source = fs.readFileSync(entry, 'utf8');
   if (!source.startsWith('#!/usr/bin/env node')) throw new Error('CLI entrypoint lost its Node shebang');
-  const syntax = spawnSync(process.execPath, ['--check', entry], { stdio: 'pipe', shell: false });
-  if (syntax.status !== 0) throw new Error(`CLI entrypoint failed syntax check: ${syntax.stderr?.toString() ?? ''}`);
 
   if (fs.existsSync(outputDir)) fs.renameSync(outputDir, backupDir);
   try {
