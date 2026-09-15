@@ -13,6 +13,8 @@ dist
 **/dist
 build
 **/build
+target
+**/target
 .DS_Store
 .idea
 .vscode

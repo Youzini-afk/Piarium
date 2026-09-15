@@ -1,9 +1,29 @@
 # syntax=docker/dockerfile:1
 ARG RUNTIME_BASE_IMAGE=ghcr.io/youzini-afk/piarium-runtime-slim:main
 
+FROM --platform=$TARGETPLATFORM rust:1.97.1-bookworm AS kernel-builder
+WORKDIR /src
+ARG TARGETARCH
+COPY package.json ./
+COPY kernel ./kernel
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+  set -eux; \
+  case "$TARGETARCH" in \
+    amd64) kernel_arch="x64"; kernel_target="x86_64-unknown-linux-gnu" ;; \
+    arm64) kernel_arch="arm64"; kernel_target="aarch64-unknown-linux-gnu" ;; \
+    *) echo "Unsupported Docker target architecture: $TARGETARCH" >&2; exit 1 ;; \
+  esac; \
+  build_identity="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1)"; \
+  test -n "$build_identity"; \
+  PIARIUM_KERNEL_BUILD_IDENTITY="$build_identity" \
+  PIARIUM_KERNEL_TARGET="$kernel_target" \
+  PIARIUM_KERNEL_ARCH="$kernel_arch" \
+  cargo build --manifest-path kernel/Cargo.toml --release --bin piarium-kernel --locked
+
 FROM --platform=$BUILDPLATFORM oven/bun:1.3.14 AS builder
 WORKDIR /app
 ARG PIARIUM_SOURCE_REVISION
+ARG TARGETARCH
 
 # Keep dependency installation cacheable while still presenting every Bun
 # workspace manifest required by the frozen monorepo lockfile.
@@ -34,7 +54,11 @@ RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./scripts/fix-deprecation.js
 
 COPY . .
+COPY --from=kernel-builder /src/kernel/target/release/piarium-kernel /tmp/piarium-kernel
 RUN PIARIUM_SOURCE_REVISION="${PIARIUM_SOURCE_REVISION}" \
+  PIARIUM_KERNEL_PREBUILT=/tmp/piarium-kernel \
+  PIARIUM_TARGET_PLATFORM=linux \
+  PIARIUM_TARGET_ARCH="${TARGETARCH}" \
   bun run build:cloud-runtime -- --output /app/artifacts/cloud-runtime --no-archive
 
 # This stage runs on TARGETPLATFORM. Installing the canonical runtime tree here
