@@ -456,7 +456,7 @@ const bundledReady: RuntimeCandidate = {
   version: "0.84.1",
 };
 
-const handshake = (source: "bundled" | "system", packageRoot: string, dataDir: string) => ({
+const handshake = (source: "bundled" | "system", packageRoot: string, dataDir: string): import("../src/runtime-probe.js").PiRuntimeProbeResult => ({
   handshake: {
     capabilities: {
       agentProviders: true,
@@ -475,7 +475,7 @@ const handshake = (source: "bundled" | "system", packageRoot: string, dataDir: s
     protocolVersion: 1,
     runtime: {
       agentDir: dataDir,
-      nodePath: source === "bundled" ? bundledReady.nodePath : systemReady.nodePath,
+      nodePath: source === "bundled" ? bundledReady.nodePath! : systemReady.nodePath!,
       nodeVersion: "22.19.0",
       packageRoot,
       piVersion: "0.84.1",

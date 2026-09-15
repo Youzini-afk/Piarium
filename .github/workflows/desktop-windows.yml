@@ -60,7 +60,7 @@ jobs:
           bun run --cwd packages/electron build:web-assets
           bun run --cwd packages/electron prepare:pi-runtime
           bun run --cwd packages/electron bundle:main
-          bun run --cwd packages/electron rebuild:native
+          bun run --cwd packages/electron verify:native
           Push-Location packages/electron
           try {
             $electronVersion = node -p "require('electron/package.json').version"

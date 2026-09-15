@@ -80,6 +80,8 @@ jobs:
           npm audit --omit=dev --package-lock-only --prefix packages/vscode/runtime
           bun run --cwd packages/vscode verify:pi-runtime
       - run: bun run build
+      - name: Smoke VS Code packaged native search authority
+        run: bun run --cwd packages/vscode test:native-search
       - run: bun run build:cloud-runtime -- --skip-build --no-archive --output artifacts/cloud-runtime-ci
       - name: Smoke atomic cloud deployment and rollback
         shell: bash

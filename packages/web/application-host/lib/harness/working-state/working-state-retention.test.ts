@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { listObjectReferences, openRecoveryJournalCatalog, replaceObjectReferences } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { WorkingStateStore } from "./working-state-store.js";
 import type { WorkspaceRecoveryStorageContext } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 

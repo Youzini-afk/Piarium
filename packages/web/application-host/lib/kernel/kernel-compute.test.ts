@@ -137,11 +137,15 @@ it("R5 structure provider analyzes and chunks a disk file directly through nativ
   assert.equal(units.revision,analysis.outline.revision);
   assert.ok(units.units.some(unit=>unit.parentName==="diskFunction"&&unit.text.includes("join('a','b')")),JSON.stringify(units));
   const pin=await f.branch({"src/pinned.ts":text},"structure-pin");
+  const listed=await runKernelCompute(f.client,{workspaceId:"ws",pinId:String(pin.pinId),operation:"list",lane:"foreground",paths:["src/pinned.ts"]});
+  const fileRevision=listed.records.find(record=>record.path==="src/pinned.ts")?.revision;
+  assert.ok(fileRevision,"fixed inventory requires the same content identity without re-reading bodies");
   const fixed=await provider.unitsFixed!({
     workspaceId:"ws",path:"src/pinned.ts",languageId:"typescript",lane:"foreground",
     compute:(input,options)=>runKernelCompute(f.client,{...input,workspaceId:"ws",pinId:String(pin.pinId)},options),
   });
   assert.equal(fixed.status,"ready",JSON.stringify(fixed));
+  assert.equal(fixed.revision,fileRevision,"pin inventory and native structural units must share the document revision");
   assert.ok(fixed.revision);
   assert.ok(fixed.units.some(unit=>unit.parentName==="diskFunction"&&unit.text.includes("join('a','b')")),JSON.stringify(fixed));
 },60000);

@@ -7,7 +7,7 @@ import { WorkingStateStore } from "./working-state-store.js";
 import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-helper.js";
 import type { RecoveryState, RegularFileState, WorkingStateRootStore } from "./types.js";
 import { openRecoveryJournalCatalog, type SqliteDatabase } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 
 describe("draft-baseline", () => {
   let tempDir: string;

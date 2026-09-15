@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { createVSCodeWorkspaceSearch } from './search-runtime';
 import * as vscode from 'vscode';
 import {
   parsePiariumExtensionActualState,
@@ -32,6 +33,7 @@ interface BridgeResponse {
 interface ExtensionRuntime {
   documents: ReturnType<typeof createVSCodeDocumentAuthority>;
   runtime: ApplicationExtensionRuntime;
+  search: ReturnType<typeof createVSCodeWorkspaceSearch>;
 }
 
 const runtimes = new WeakMap<vscode.ExtensionContext, Promise<ExtensionRuntime>>();
@@ -102,6 +104,9 @@ const getRuntime = (
       dataDir,
       workspace: vscode.workspace,
     });
+    const search = createVSCodeWorkspaceSearch({ documents, dataDir, hostId: runtime.services.hostId,
+      extensionPath: context.extensionUri.fsPath, version: context.extension.packageJSON.version,
+    });
     piRuntime?.setSessionExecutionAdmission(createWorkspaceExecutionAdmission(documents));
     runtime.workbench.setWorkspaceScopeResolver((scopeId) => documents.resolveScopeId(scopeId));
     runtime.capabilities.register('workspace.documents', createDocumentsCapabilityHandler(documents));
@@ -132,7 +137,7 @@ const getRuntime = (
         return disposal;
       },
     });
-    return { documents, runtime };
+    return { documents, runtime, search };
   })();
   runtimes.set(context, creating);
   return creating;
@@ -143,11 +148,11 @@ export const disposeVSCodeExtensionRuntime = (context: vscode.ExtensionContext):
   if (active) return active;
   const creating = runtimes.get(context);
   if (!creating) return Promise.resolve();
-  const disposal = creating.then(async ({ documents, runtime }) => {
+  const disposal = creating.then(async ({ documents, runtime, search }) => {
     try {
       await runtime.stop();
     } finally {
-      await documents.dispose();
+      try { await search.dispose(); } finally { await documents.dispose(); }
     }
   }).finally(() => {
     runtimes.delete(context);
@@ -156,6 +161,9 @@ export const disposeVSCodeExtensionRuntime = (context: vscode.ExtensionContext):
   runtimeDisposals.set(context, disposal);
   return disposal;
 };
+
+export const getVSCodeWorkspaceSearch = async (context: vscode.ExtensionContext, piRuntime?: VSCodePiRuntime) =>
+  (await getRuntime(context, piRuntime)).search;
 
 export const getVSCodeDocuments = async (
   context: vscode.ExtensionContext,

@@ -16,7 +16,7 @@ import {
   type LiveSurfaceBuffer,
 } from './contract-fixtures.js';
 import type { WatchPosition, WorkspaceWatchFs } from './watch.js';
-import { createRecoveryFileStore } from '../recovery/journal-files.js';
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createInMemoryRecoveryDurablePort } from '../recovery/recovery-durable-port.test-helper.js';
 
 defineDocumentAuthorityContract({ describe, it, expect, beforeEach, afterEach });

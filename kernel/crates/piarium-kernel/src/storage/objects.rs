@@ -279,6 +279,7 @@ impl Storage {
         let decoded = BASE64
             .decode(bytes)
             .map_err(|error| KernelError::Operation(format!("invalid bytesBase64: {error}")))?;
+        if decoded.len() > 65536 { return Err(KernelError::Protocol("Upload chunk exceeds transport bound".into())); }
         let stream = self
             .streams
             .get_mut(stream_id)

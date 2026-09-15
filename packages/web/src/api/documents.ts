@@ -101,7 +101,7 @@ const parseWorkspaceFileEvent = (value: unknown): PiariumWorkspaceFileEvent => {
   return event as PiariumWorkspaceFileEvent;
 };
 
-const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEvent => {
+export const parseDocumentWatchEvent = (value: unknown): PiariumDocumentWatchEvent => {
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const event = value as Record<string, unknown>;
     if (event.kind === 'surface-operation') {
@@ -223,7 +223,7 @@ export const createWebDocumentsAPI = (): DocumentsAPI => ({
           }
           reconnectDelayMs = 250;
           await readSseEvents(response, (event) => {
-            if (event.kind === 'dirty-state-barrier') listener(event);
+            if (event.kind === 'dirty-state-barrier' || event.kind === 'surface-operation') listener(event);
             else tracker.accept(event);
           }, controller.signal);
           if (!controller.signal.aborted) throw new DocumentsError('Document watch ended', { reason: 'failed' });

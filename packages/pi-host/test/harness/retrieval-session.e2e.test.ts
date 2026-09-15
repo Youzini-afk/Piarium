@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
@@ -20,11 +20,11 @@ import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/app
 import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
 import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
 import { createWorkingBranchLookups } from "../../../web/application-host/lib/harness/working-state/working-branch-lookups.js";
-import { WorkingStateStore } from "../../../web/application-host/lib/harness/working-state/working-state-store.js";
-import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "../../../web/application-host/lib/harness/working-state/working-state-root-adapter.test-helper.js";
-import { openRecoveryJournalCatalog } from "../../../web/application-host/lib/recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/journal-files.js";
 import { projectZone2Threads } from "../../../web/application-host/lib/harness/zone2-threads.js";
+import { createNativeAuthorityTestRuntime } from "../../../web/application-host/lib/kernel/native-authority.test-helper.js";
+import { createManagedRootAdmission } from "../../../web/application-host/lib/kernel/managed-root-admission.js";
+import { assertManagedWorktreeOwnership } from "../../../web/application-host/lib/harness/worktree-ownership.js";
+import { createKernelComputeService } from "../../../web/application-host/lib/kernel/compute-service.js";
 import { SessionHost } from "../../src/session-host.js";
 
 const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
@@ -64,33 +64,19 @@ describe("retrieval thread public slice", () => {
       isTrusted: async () => true,
     });
     const identity = await documents.resolveWorkspace({ path: workspace });
-    const recoveryRoot = join(root, "recovery");
-    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
-    if (!database) throw new Error("recovery catalog missing");
-    const workingContext = {
-      database,
-      fileStore: createRecoveryFileStore(),
-      identity: {
-        authorityId: "retrieval-e2e-authority",
-        canonicalRoot: workspace,
-        filesystemProfile: "test",
-        workspaceId: identity.workspaceId,
-      },
-      resourceOperationGate: { run: async <T>(_resources: readonly unknown[], operation: () => Promise<T>) => operation() },
-      root: recoveryRoot,
-    } as never;
-    const workingStore = await WorkingStateStore.open(workingContext);
-    const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
-      withStore: async (_workspaceId, _purpose, operation) => operation(workingStore, workingContext),
-    };
-    const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
+    const native = await createNativeAuthorityTestRuntime({ documents, hostId: "retrieval-e2e-host", dataDir: join(root, "data") });
+    const { workingStates } = native;
+    const compute = createKernelComputeService({ client: native.client, resolveIdentity: async (cwd) => {
+      const { workspaceId } = await documents.resolveWorkspace({ path: cwd });
+      return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: (await documents.inspectWorkspace(workspaceId)).root };
+    } });
     const executionViews = new ThreadExecutionViewRegistry();
     const branchLookups = createWorkingBranchLookups({ views: executionViews, workingStates });
     const paths = createHarnessPathAuthority({
       authorityId: "retrieval-e2e-authority",
       documents,
     });
-    const search = createWorkspaceContentSearch({ documents, pathModule: path, spawn });
+    const search = createWorkspaceContentSearch({ documents, pathModule: path, compute });
 
     const faux = registerFauxProvider();
     const model = faux.getModel();
@@ -268,6 +254,13 @@ describe("retrieval thread public slice", () => {
     };
 
     const managedWorktreeRoot = join(root, "managed-scratch");
+    const managed = createManagedRootAdmission({
+      listWorktrees: async (id) => (await registry.listWorkspaceThreads(id)).flatMap(thread => thread.worktree ? [thread.worktree] : []),
+      assertOwnership: (worktree, operation, candidates) => assertManagedWorktreeOwnership(worktree, operation, candidates, {
+        authorizeManagedRoot: (candidate) => path.resolve(candidate) === path.resolve(managedWorktreeRoot),
+      }),
+    });
+    native.adapter.bindManagedRootResolver(managed.materialization);
     const worktrees = createThreadWorktreeRuntime({
       authorizeManagedRoot: (candidate) => path.resolve(candidate) === path.resolve(managedWorktreeRoot),
       createScratch: async (_sourceRoot, threadId) => ({
@@ -295,8 +288,8 @@ describe("retrieval thread public slice", () => {
     harnessServiceHost = createHarnessServiceHost({
       search: (request, options) => search.searchContent(request, options),
       resolveWorkspaceRoot: async () => workspace,
-      readExploreFile: createExploreFileReader(documents, paths),
-      branchCorpus: (sessionId) => branchLookups.searchCorpus(sessionId),
+      readExploreFile: createExploreFileReader(documents, paths, (sessionId, resourceId) => branchLookups.exploreFile(sessionId, resourceId)),
+      pinWorkingBranchQuery: (sessionId, options) => branchLookups.pinQuery(sessionId, options),
       documentReadSource: async (sessionId, _context, resourceId) => (
         await branchLookups.readSource(sessionId, resourceId) ?? { status: "disk" as const }
       ),
@@ -428,17 +421,17 @@ describe("retrieval thread public slice", () => {
       await registry.markRunRunning(identity.workspaceId, parentThread.id, parentRun.id, parent.sessionId);
       const parentScratch = join(managedWorktreeRoot, parentThread.id);
       await mkdir(parentScratch, { recursive: true });
-      await workingStates.withStore(identity.workspaceId, "parent-frozen-only-file", async (store) => {
+      await workingStates.withBranchStore(identity.workspaceId, "parent-frozen-only-file", async (store) => {
         const baseline = await store.captureDirectory(workspace);
         const branchId = `thread-${parentThread.id}`;
         await store.createBranch(identity.workspaceId, branchId, baseline, "parent-baseline");
         const body = Buffer.from("export const parentOnly = 'frozen-parent-body';\n", "utf8");
         const object = await store.putObject(body);
-        await store.commitVirtualWrite(branchId, 0, "only-in-parent.ts", {
+        await store.commitVirtualWrites(branchId, 0, { "only-in-parent.ts": {
           kind: "regular-file",
           objectHash: object.hash,
           byteLength: object.byteLength,
-        });
+        } });
         await registry.setWorkingState(identity.workspaceId, parentThread.id, {
           branchId,
           worktree: {
@@ -530,8 +523,9 @@ describe("retrieval thread public slice", () => {
       router?.dispose();
       await harnessServiceHost?.dispose();
       await registry.dispose();
+      await compute.dispose();
+      await native.dispose();
       await documents.dispose();
-      database.close();
       faux.unregister();
       await rm(root, { recursive: true, force: true });
     }

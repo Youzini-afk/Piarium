@@ -5,15 +5,14 @@ import { tmpdir } from 'node:os';
 import { expect, it, vi } from 'vitest';
 import type { SessionSnapshot, SessionStats } from '@piarium/protocol';
 import { createDocumentAuthority } from '../documents/authority.js';
-import { createRecoveryFileStore } from '../recovery/journal-files.js';
-import { openRecoveryJournalCatalog } from '../recovery/journal-catalog.js';
-import type { WorkspaceRecoveryStorageContext } from '../recovery/local-sqlite-recovery-engine.test-helper.js';
+import { createNativeAuthorityTestRuntime } from '../kernel/native-authority.test-helper.js';
+import { createManagedRootAdmission } from '../kernel/managed-root-admission.js';
+import { assertManagedWorktreeOwnership } from './worktree-ownership.js';
+import { ThreadExecutionViewRegistry } from './working-state/execution-view.js';
 import { createThreadRegistry } from './thread-registry.js';
 import { createThreadRuntime, type ThreadSessionAdapter } from './thread-runtime.js';
 import { createThreadWorktreeRuntime } from './thread-worktree.js';
 import { createWorktreeReclaimGuard } from './worktree-reclaim-guard.js';
-import { WorkingStateStore } from './working-state/working-state-store.js';
-import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from './working-state/working-state-root-adapter.test-helper.js';
 
 const git = (cwd: string, args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
@@ -33,19 +32,24 @@ it('continues the original session after Git/native archive, reclaim and restore
   const documents = createDocumentAuthority({ hostId: 'host', dataDir: join(root, 'documents'), isAllowedRoot: async () => true });
   const { workspaceId } = await documents.resolveWorkspace({ path: repo });
   const registry = createThreadRegistry({ hostId: 'host', dataDir: join(root, 'threads') });
-  const recoveryRoot = join(root, 'recovery');
-  const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
-  if (!database) throw new Error('Missing recovery catalog');
-  const context: WorkspaceRecoveryStorageContext = {
-    database, root: recoveryRoot, fileStore: createRecoveryFileStore(),
-    identity: { authorityId: 'host', canonicalRoot: repo, filesystemProfile: 'test', workspaceId },
-    resourceOperationGate: { run: async (_resources, operation) => operation() },
-  };
-  const legacyWorkingStates: TestWorkspaceWorkingStateAccess = {
-    withStore: async (_workspaceId, _purpose, operation) => operation(await WorkingStateStore.open(context), context),
-  };
-  const workingStates = asTestWorkingStateRootAccess(legacyWorkingStates);
+  const native = await createNativeAuthorityTestRuntime({ documents, hostId: 'host', dataDir: join(root, 'data') });
+  const { workingStates } = native;
+  const managed = createManagedRootAdmission({
+    listWorktrees: async (id) => (await registry.listThreads(id, { kind: 'session', id: 'parent' }, true)).flatMap(thread => thread.worktree ? [thread.worktree] : []),
+    assertOwnership: (worktree, operation, candidates) => assertManagedWorktreeOwnership(worktree, operation, candidates, {
+      authorizeManagedRoot: (candidate) => candidate === worktreeRoot,
+    }),
+  });
+  native.adapter.bindManagedRootResolver(managed.materialization);
   const worktrees = createThreadWorktreeRuntime({
+    createScratch: async (_directory, threadId) => ({ path: join(worktreeRoot, threadId), managedRoot: worktreeRoot }),
+    authorizeManagedRoot: (candidate) => candidate === worktreeRoot,
+    removeManagedPath: async ({ workspaceId: id, managedRoot, path: target, operationId }) => {
+      const container = await managed.container(managedRoot, id);
+      const authority = await native.adapter.fileAuthorityContext({ owningWorkspaceId: id, executionWorkspaceId: id, canonicalRoot: container.canonicalRoot });
+      const relative = target.slice(managedRoot.length + 1).replaceAll('\\', '/');
+      await authority.client.fileRemove({ workspaceId: id, rootId: authority.rootId, path: relative, operationId, recursive: true, force: true });
+    },
     createWorktree: async (directory, input) => {
       const target = join(worktreeRoot, String(input.worktreeName));
       git(directory, ['worktree', 'add', '-b', String(input.branchName), target, String(input.startRef)]);
@@ -75,7 +79,7 @@ it('continues the original session after Git/native archive, reclaim and restore
     entries: async (sessionId, scope = 'branch') => ({ sessionId, scope, leafId: null, entries: [] }),
   };
   const runtime = createThreadRuntime({
-    registry, sessions, worktrees, workingStates,
+    registry, sessions, worktrees, workingStates, executionViews: new ThreadExecutionViewRegistry(),
     resolveWorkspaceRoot: async () => repo,
     resolveRuntimeWorkspaceId: async (cwd) => (await documents.resolveWorkspace({ path: cwd })).workspaceId,
     canReclaimWorktree: createWorktreeReclaimGuard(documents),
@@ -90,12 +94,14 @@ it('continues the original session after Git/native archive, reclaim and restore
     const thread = await registry.createThread(input);
     const firstRun = await registry.startRun(workspaceId, thread.id);
     await runtime.spawn({ ...input, threadId: thread.id, runId: firstRun.id });
+    const materialized = await runtime.materializeExecutionView('child-session');
+    expect(materialized, JSON.stringify(materialized)).toMatchObject({ status: 'materialized' });
     const first = (await registry.getThread(workspaceId, parent, thread.id))!;
     const directory = first.worktree!.path;
     writeFileSync(join(directory, 'result.txt'), 'first result\n');
     const archived = await runtime.archiveUser(workspaceId, parent, thread.id);
     expect(archived.thread.lifecycle).toBe('archived');
-    expect(archived.reclaimed).toBe(true);
+    expect(archived.reclaimed, JSON.stringify(archived)).toBe(true);
     expect(existsSync(directory)).toBe(false);
     const oldRevision = archived.thread.resultRevision!;
 
@@ -112,9 +118,9 @@ it('continues the original session after Git/native archive, reclaim and restore
     const archivedAgain = await runtime.archiveUser(workspaceId, parent, thread.id);
     expect(archivedAgain.reclaimed).toBe(true);
     expect(archivedAgain.thread.resultRevision).toBeGreaterThan(oldRevision);
-    await workingStates.withStore(workspaceId, 'verify-retained-results', async (store) => {
-      const old = store.getResult(first.workBranchId!, oldRevision)!;
-      const latest = store.getResult(first.workBranchId!, archivedAgain.thread.resultRevision!)!;
+    await workingStates.withBranchStore(workspaceId, 'verify-retained-results', async (store) => {
+      const old = (await store.getResult(first.workBranchId!, oldRevision))!;
+      const latest = (await store.getResult(first.workBranchId!, archivedAgain.thread.resultRevision!))!;
       const oldState = old.pathStates['result.txt']!;
       const latestState = latest.pathStates['result.txt']!;
       expect(oldState.kind).toBe('regular-file');
@@ -128,7 +134,7 @@ it('continues the original session after Git/native archive, reclaim and restore
     await runtime.dispose();
     await registry.dispose();
     await documents.dispose();
-    database.close();
+    await native.dispose();
     rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);

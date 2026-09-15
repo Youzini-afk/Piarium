@@ -94,8 +94,9 @@ review and Integration users; the current branch, report and transcript are reta
 is exposed only in that leased Host context and checks all remaining reference owners. A completed
 Integration owns its own safety/target objects, so undo does not depend on retaining the source result.
 
-WorkingState publication retains the old owners and temporarily protects new bytes as
-`working-state-write` until its atomic JSON catalog is durable. Startup and explicit release reconcile
-these derived reference rows against the parsed catalog before removing obsolete ownership. A missing
-or malformed catalog cannot authorize deletion. Metadata release and physical cleanup have separate
-outcomes; cleanup failure keeps a retryable request and does not report zero bytes as success (D-239).
+WorkingState publication installs and flushes new objects before a Rust SQLite transaction publishes the
+immutable root, domain record and references. Old revisions/results/pins keep independent references until
+their explicit release; GC only schedules objects that are unreachable from every live root, recovery
+operation and temporary owner. A missing or malformed node/object/catalog fails open rather than authorizing
+deletion. Metadata release and physical cleanup have separate outcomes; cleanup failure keeps a retryable
+request and does not report zero bytes as success (D-239/D-282).

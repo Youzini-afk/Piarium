@@ -1320,7 +1320,17 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...Object.entries(result.baseStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `base:${file}`, objectHash: state.objectHash }] : []),
         ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
       ];
-      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: `working-result:${branchId}@${revision}`, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
+      const resultRecordId = `working-result:${branchId}@${revision}`;
+      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: resultRecordId, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
+      // Publishing consumes transient blob owners. Keep immediate readers on
+      // the immutable result record rather than on the branch head, which may
+      // already have advanced concurrently.
+      for (const [file, state] of Object.entries(result.baseStates)) if (state.kind === "regular-file") {
+        this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
+      }
+      for (const [file, state] of Object.entries(result.pathStates)) if (state.kind === "regular-file") {
+        this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
+      }
       return result;
     } finally {
       if (!fixedPin) await pin.release();
@@ -1788,22 +1798,24 @@ export const createKernelWorkspaceWorkingStateAccess = (
         ...(actor ?? {}),
         capabilities: actor?.sessionId ? [] : ["storage.maintenance"],
       });
-      const store = new KernelWorkingStateRootStore(context);
-      if (!recoveryEngine) return operation(store, {
-        ...context,
-        ...(durableRecoveryStore ? { durableRecoveryStore } : {}),
-      });
+      if (!recoveryEngine) {
+        const composed = { ...context, ...(durableRecoveryStore ? { durableRecoveryStore } : {}) };
+        return operation(new KernelWorkingStateRootStore(composed), composed);
+      }
       return recoveryEngine.withWorkspaceStorage(
         workspaceId,
         { mode: _mode, purpose, create: true },
-        (recoveryContext) => operation(store, {
+        (recoveryContext) => {
+          const composed = {
           ...context,
           fileStore: recoveryContext.fileStore,
           resourceOperationGate: recoveryContext.resourceOperationGate,
           ...(recoveryContext.collectUnreachableObjects ? { collectUnreachableObjects: recoveryContext.collectUnreachableObjects } : {}),
           ...(recoveryContext.resolveDirectoryApplyContext ? { resolveDirectoryApplyContext: recoveryContext.resolveDirectoryApplyContext } : {}),
           ...(durableRecoveryStore ? { durableRecoveryStore } : recoveryContext.durableRecoveryStore ? { durableRecoveryStore: recoveryContext.durableRecoveryStore } : {}),
-        }),
+          };
+          return operation(new KernelWorkingStateRootStore(composed), composed);
+        },
       );
     },
   });

@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "moduleDetection": "force",
@@ -13,13 +17,30 @@
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",
-    "types": ["vite/client", "@types/dom-speech-recognition"],
+    "types": [
+      "vite/client",
+      "@types/dom-speech-recognition"
+    ],
     "paths": {
-      "@/*": ["../ui/src/*", "./src/*"],
-      "@web/*": ["./src/*"],
-      "@piarium/ui/*": ["../ui/src/*"],
-      "@piarium/web/*": ["./src/*"]
+      "@/*": [
+        "../ui/src/*",
+        "./src/*"
+      ],
+      "@web/*": [
+        "./src/*"
+      ],
+      "@piarium/ui/*": [
+        "../ui/src/*"
+      ],
+      "@piarium/web/*": [
+        "./src/*"
+      ]
     }
   },
-  "include": ["src", "../ui/src", "../ui/src/types/**/*"]
+  "include": [
+    "src",
+    "../ui/src",
+    "../ui/src/types/**/*",
+    "test/**/*.test.ts"
+  ]
 }

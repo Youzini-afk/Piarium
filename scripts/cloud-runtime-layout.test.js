@@ -84,6 +84,7 @@ const createFixture = () => {
     if (directory === 'web') {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
+      fs.mkdirSync(path.join(packageRoot, 'kernel'), { recursive: true });
     }
     if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
   }
@@ -120,9 +121,10 @@ describe('Piarium cloud runtime layout', () => {
     expect(builderSource).toContain("['--frozen-lockfile']");
     expect(builderSource).toContain("case '--update-lock'");
     expect(builderSource).toContain('pruneNonRuntimeFiles');
-    expect(builderSource).toContain("require('better-sqlite3')");
+    expect(builderSource).not.toContain("require('better-sqlite3')");
+    expect(builderSource).toContain("'verify-kernel.mjs'");
     expect(builderSource).toContain("require.resolve('web-tree-sitter')");
-    expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual(['node-pty']);
+    expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual([]);
   });
 
   it('builds every compiled browser dependency before the Web bundle', () => {

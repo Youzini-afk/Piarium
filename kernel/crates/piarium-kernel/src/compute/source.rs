@@ -15,6 +15,12 @@ pub(crate) fn normalize(value:&str)->Result<String>{
     Ok(value.split('/').filter(|s|!s.is_empty()&&*s!=".").collect::<Vec<_>>().join("/"))
 }
 pub(crate) fn revision(bytes:&[u8])->String{format!("d1_{}",URL_SAFE_NO_PAD.encode(Sha256::digest(bytes)))}
+fn revision_from_object_hash(hash:&str)->Result<String>{
+    let hex=hash.strip_prefix("sha256-").ok_or("Invalid immutable object identity")?;
+    let bytes=hex::decode(hex).map_err(|_|"Invalid immutable object identity")?;
+    if bytes.len()!=32{return Err("Invalid immutable object identity".into());}
+    Ok(format!("d1_{}",URL_SAFE_NO_PAD.encode(bytes)))
+}
 fn read_bytes(mut file:File,expected:Option<&str>,shared:&Shared)->Result<Vec<u8>>{
     let before=file.metadata().map_err(|e|e.to_string())?;
     let mut result=Vec::new();let mut buffer=[0u8;65536];let mut digest=Sha256::new();
@@ -132,7 +138,8 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                         let file=File::open(object_path(objects,object_hash).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
                         Some(read_bytes(file,Some(object_hash),shared)?)
                     },_=>None};
-                    let revision=bytes.as_deref().map(revision).or_else(||state.object_hash().map(str::to_string)).unwrap_or_else(||root.clone());
+                    let revision=if let Some(bytes)=bytes.as_deref(){revision(bytes)}
+                        else if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};
                     if !callback(Document{path,revision,state,bytes})?{return Ok(partial);}
                 }
             }}

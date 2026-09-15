@@ -50,6 +50,10 @@ impl Storage {
             "storage.putBlob.begin" => {
                 storage.begin_blob_stream(authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.putBlob.chunk" => {
+                storage.stream_blob_chunk(authorized_params, grant_id.unwrap_or(""))?;
+                Ok(json!({"sequence": authorized_params["sequence"]}))
+            }
             "storage.putBlob.finish" => idempotent(storage, method, authorized_params, |storage| {
                 storage.finish_blob_stream(authorized_params, grant_id.unwrap_or(""))
             }),

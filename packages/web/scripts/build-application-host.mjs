@@ -12,6 +12,7 @@
  * is left untouched. On success, the old server/ is replaced.
  */
 
+import { pruneLegacyHostArtifacts } from '../../../scripts/host-production-boundary.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -151,6 +152,8 @@ try {
     throw new Error(`Staging index.js failed syntax check: ${checkResult.stderr?.toString() ?? 'unknown error'}`);
   }
 
+  const boundary = pruneLegacyHostArtifacts(stagingDir);
+  log(`Production boundary: ${boundary.runtimeModules} reachable modules; ${boundary.removedArtifacts} legacy/test artifacts excluded.`);
   log(`Staging complete: ${stagingDir}`);
 
   // ── Step 4: Atomically replace server/ ─────────────────────────────────

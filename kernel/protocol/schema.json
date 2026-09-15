@@ -3,9 +3,9 @@
   "kernelEpoch": "per-process",
   "framing": "u32be-json",
   "maxFrameBytes": 16777216,
-  "contentTransport": "putBlob.begin + bounded data frames + putBlob.finish",
+  "requestWindow": 2,
+  "contentTransport": "putBlob.begin + acknowledged bounded putBlob.chunk requests + putBlob.finish",
   "request": {"v": 1, "kind": "request", "id": "request-id", "method": "method", "params": {}},
-  "data": {"v": 1, "kind": "data", "id": "stream-id", "streamId": "stream-id", "sequence": 0, "bytesBase64": "..."},
   "response": {"v": 1, "kind": "response", "id": "request-id", "ok": true, "result": {}},
   "requestUnion": true,
   "methodParams": {
@@ -25,6 +25,7 @@
     "authority.grant.revoke": "KernelGrantRevokeParams",
     "storage.snapshot": "KernelSnapshotParams",
     "storage.putBlob.begin": "KernelPutBlobBeginParams",
+    "storage.putBlob.chunk": "KernelPutBlobChunkParams",
     "storage.putBlob.finish": "KernelPutBlobFinishParams",
     "storage.putBlob.abort": "KernelPutBlobAbortParams",
     "storage.blob.release": "KernelBlobReleaseParams",
@@ -148,6 +149,7 @@
       "operationId": {"type": "string"}, "streamId": {"type": "string"}, "byteLength": {"type": "number"},
       "expectedHash": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
     }},
+    "KernelPutBlobChunkParams": {"fields": {"streamId": {"type": "string"}, "sequence": {"type": "number"}, "bytesBase64": {"type": "string"}}},
     "KernelPutBlobFinishParams": {"fields": {
       "operationId": {"type": "string"}, "streamId": {"type": "string"},
       "expectedHash": {"type": "string", "optional": true}, "workspaceId": {"type": "string", "optional": true}
@@ -382,6 +384,7 @@
         "targetTriple": {"type": "string"},
         "arch": {"type": "string"},
         "kernelEpoch": {"type": "string"},
+        "requestWindow": {"type": "number"},
         "hostId": {"type": "string"},
         "hostGeneration": {"type": "string"},
         "storageRoot": {"type": "string"},
@@ -491,6 +494,7 @@
     "authority.grant.revoke": "revoke a Host actor grant",
     "storage.snapshot": "list durable branch roots and published revisions",
     "storage.putBlob.begin": "open a backpressured content upload stream",
+    "storage.putBlob.chunk": "append and acknowledge one sequenced bounded content chunk",
     "storage.putBlob.finish": "commit a content upload stream",
     "storage.putBlob.abort": "discard a content upload stream",
     "storage.blob.release": "release a temporary content owner",

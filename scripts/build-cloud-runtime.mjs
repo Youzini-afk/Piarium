@@ -32,11 +32,8 @@ export const CLOUD_RUNTIME_PACKAGE_DIRS = Object.freeze([
   'web',
 ]);
 
-// better-sqlite3 13 ships platform prebuilds. Trusting it makes Bun run its
-// implicit node-gyp fallback instead of using those binaries in slim images.
-export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([
-  'node-pty',
-]);
+// All shipped native authorities use verified prebuilt binaries. No PTY source rebuild fallback.
+export const CLOUD_RUNTIME_TRUSTED_DEPENDENCIES = Object.freeze([]);
 
 export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
   'api.openchamber.dev/v1/update/check',
@@ -100,7 +97,7 @@ const packageFiles = Object.freeze({
     optional: [],
   },
   web: {
-    required: ['package.json', 'bin', 'server', 'dist'],
+    required: ['package.json', 'bin', 'server', 'dist', 'kernel'],
     optional: ['public', 'README.md'],
   },
 });
@@ -343,12 +340,13 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); const Database = require('better-sqlite3'); const database = new Database(':memory:'); database.close(); const pty = require('node-pty'); if (typeof pty.spawn !== 'function') throw new Error('node-pty is unavailable'); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
+    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
   ], {
     cwd: resolvedOutput,
     json,
     label: 'Cloud runtime Pi host resolution',
   });
+  run('node', [path.join(resolvedOutput, 'verify-kernel.mjs'), path.join(resolvedOutput, 'packages/web')], { cwd: resolvedOutput, json, label: 'Cloud release kernel authority smoke' });
 };
 
 const buildSourcePackages = ({ json }) => {
@@ -388,6 +386,8 @@ const stageRuntimeTree = (outputDir) => {
     path.join(outputDir, 'package.json'),
     `${JSON.stringify(createRuntimeRootPackage(rootPackage), null, 2)}\n`,
   );
+  copyEntry(path.join(repoRoot, 'scripts/smoke-kernel-release.mjs'), path.join(outputDir, 'verify-kernel.mjs'), true);
+  copyEntry(path.join(repoRoot, 'kernel/THIRD_PARTY_NOTICES.md'), path.join(outputDir, 'KERNEL_THIRD_PARTY_NOTICES.md'), true);
   copyEntry(path.join(repoRoot, 'LICENSE'), path.join(outputDir, 'LICENSE'), true);
   copyEntry(
     path.join(repoRoot, 'THIRD_PARTY_NOTICES.md'),

@@ -43,7 +43,6 @@ import {
 } from "@piarium/extension-contract";
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from "./errors.js";
 import {
-  createRecoveryFileStore,
   normalizeResourceId,
   parseRecoveryState,
   sameState,
@@ -135,7 +134,7 @@ export interface CreateWorkspaceRecoveryEngineOptions {
   dataDir: string;
   documents: RecoveryDocumentsAuthority;
   durableRecoveryStore: RecoveryDurableMetadataPort;
-  fileStore?: RecoveryFileStore;
+  fileStore: RecoveryFileStore;
   sessionNavigation: RecoverySessionNavigation;
   resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
 }
@@ -316,7 +315,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     authorityId,
     documents,
     durableRecoveryStore: durable,
-    fileStore = createRecoveryFileStore(),
+    fileStore,
     sessionNavigation,
     resolveDirectoryApplyContext,
   } = options;

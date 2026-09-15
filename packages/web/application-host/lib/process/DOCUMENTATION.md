@@ -42,7 +42,7 @@ Pi session/catalog/inference worker creation stays with runtime-broker. Short Gi
 under the file gate and shell-discovery/bootstrap probes remain domain adapters: this is not a
 replacement of every child_process import. Debuggee children spawned inside a native DAP adapter
 belong to that native process tree, not another Host backend. Node/Bun PTY providers are not selected
-in production; removing their unused distribution packages/rebuild probes is R6 release cleanup.
+in production, and D-282 removed their distribution packages and Electron rebuild probe.
 
 The OS implementation is in `kernel/crates/piarium-kernel/src/process/` and
 `storage/process_resources.rs`. A guardian is the same packaged executable and owns no SQLite

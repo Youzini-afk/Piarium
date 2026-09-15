@@ -24,7 +24,7 @@ if (args.includes('--build')) {
   const channel = /^channel\s*=\s*"([^"]+)"/m.exec(toolchain)?.[1];
   if (!channel) throw new Error('kernel/rust-toolchain.toml has no pinned channel');
   env.RUSTUP_TOOLCHAIN = channel;
-  run('rustup', ['toolchain', 'install', channel, '--profile', 'minimal']);
+  run('rustup', ['toolchain', 'install', channel, '--profile', 'minimal', '--component', 'rustfmt']);
   run(process.execPath, ['scripts/build-kernel.mjs']);
 }
 
@@ -41,6 +41,8 @@ run(process.execPath, ['--import', 'tsx', '--test',
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run',
   'packages/web/application-host/lib/kernel/file-resource-audit.test.ts',
   'packages/web/application-host/lib/kernel/kernel-compute.test.ts',
+  'packages/web/application-host/lib/kernel/request-window.test.ts',
+  'packages/web/application-host/lib/kernel/kernel-transport.acceptance.test.ts',
   'packages/web/application-host/lib/kernel/kernel-process.test.ts',
   'packages/web/application-host/lib/kernel/process-consumers.test.ts',
   'packages/web/application-host/lib/kernel/storage-adapter.test.ts',

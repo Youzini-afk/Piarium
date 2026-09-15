@@ -65,7 +65,7 @@ export const createVSCodeDocumentsAPI = (): DocumentsAPI => ({
       if (event.data?.type !== 'api:documents:watch:event') return;
       if (event.data.watchId !== watchId || !event.data.event) return;
       if (JSON.stringify(event.data.event).includes('"content":')) return;
-      if (event.data.event.kind === 'dirty-state-barrier') listener(event.data.event);
+      if (event.data.event.kind === 'dirty-state-barrier' || event.data.event.kind === 'surface-operation') listener(event.data.event);
       else tracker.accept(event.data.event);
     };
     window.addEventListener('message', onEvent);

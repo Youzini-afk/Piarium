@@ -1,6 +1,6 @@
-use crate::authority::require_capability;
 use crate::error::{response_error, KernelError};
 use crate::protocol::*;
+use crate::protocol_generated::KERNEL_REQUEST_WINDOW;
 use crate::storage::Storage;
 use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
@@ -137,45 +137,6 @@ impl Kernel {
         if kind == "cancel" {
             return Ok(None);
         }
-        if kind == "data" {
-            if !self.handshaken {
-                return Err(KernelError::Protocol(
-                    "handshake is required before data frames".to_string(),
-                ));
-            }
-            let request_epoch = request
-                .get("epoch")
-                .and_then(Value::as_str)
-                .ok_or_else(|| {
-                    KernelError::Authorization("epoch is required after handshake".to_string())
-                })?;
-            if request_epoch != self.epoch {
-                return Err(KernelError::Authorization("stale kernel epoch".to_string()));
-            }
-            let storage = self
-                .storage
-                .as_mut()
-                .ok_or_else(|| KernelError::Storage("storage is not open".to_string()))?;
-            let grant_id = request
-                .get("grantId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Authorization("grantId is required".to_string()))?;
-            let params_value = json!({"streamId": request.get("streamId"), "sequence": request.get("sequence"), "bytesBase64": request.get("bytesBase64")});
-            let host_id = self.host_id.as_deref().ok_or_else(|| {
-                KernelError::Authorization("Host identity is unavailable".to_string())
-            })?;
-            let (grant, _) = storage.authorize(
-                Some(grant_id),
-                &self.epoch,
-                host_id,
-                self.host_generation.as_deref().unwrap_or_default(),
-                "storage.putBlob.chunk",
-                &params_value,
-            )?;
-            require_capability(&grant, "storage.putBlob.chunk")?;
-            storage.stream_blob_chunk(&params_value, grant_id)?;
-            return Ok(None);
-        }
         if kind != "request" {
             return Err(KernelError::Protocol("expected request frame".to_string()));
         }
@@ -270,7 +231,7 @@ impl Kernel {
             self.handshaken = true;
             return Ok(Some(response_ok(
                 id,
-                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
+                json!({"protocolVersion": PROTOCOL_VERSION, "kernelVersion": KERNEL_VERSION, "kernelBuildIdentity": KERNEL_BUILD_IDENTITY, "targetTriple": KERNEL_TARGET, "arch": KERNEL_ARCH, "applicationBuildVersion": build_version, "buildVersion": KERNEL_BUILD_IDENTITY, "kernelEpoch": self.epoch, "requestWindow": KERNEL_REQUEST_WINDOW, "hostId": host_id, "hostGeneration": host_generation, "storageRoot": canonical_root, "capabilities": KERNEL_CAPABILITIES}),
             )));
         }
         if !self.handshaken {
@@ -364,10 +325,10 @@ impl Kernel {
 }
 
 pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // The worker and writer are each serial, so queueing more than one full
-    // envelope cannot improve throughput. A one-item handoff provides real
-    // backpressure without multiplying the 16 MiB control-frame bound.
-    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(1);
+    // The Host holds at most this many acknowledgement-backed credits. The
+    // stdin reader therefore stays available for cancel/revoke even while the
+    // serial Storage worker is busy. Upload chunks consume the same credits.
+    let (request_tx, request_rx) = mpsc::sync_channel::<(Value, Arc<AtomicBool>)>(KERNEL_REQUEST_WINDOW);
     let (response_tx, response_rx) = mpsc::sync_channel::<Value>(1);
     let cancellations = Arc::new(Mutex::new(HashMap::<String, ActiveRequest>::new()));
     let revoked_grants = Arc::new(Mutex::new(HashSet::<String>::new()));
@@ -487,7 +448,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     });
     let stdin = io::stdin();
     let mut input = stdin.lock();
-    while let Some(payload) = read_frame(&mut input)? {
+    loop {
+        let payload = match read_frame(&mut input) {
+            Ok(Some(payload)) => payload,
+            Ok(None) => break,
+            Err(error) => { eprintln!("kernel input disconnected: {error}"); break; }
+        };
         if writer_failed.load(Ordering::Acquire) {
             break;
         }
@@ -530,6 +496,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             }
             continue;
         }
+        if request.get("kind").and_then(Value::as_str) != Some("request") || id.is_empty() {
+            eprintln!("invalid kernel request admission");
+            break;
+        }
         let token = Arc::new(AtomicBool::new(false));
         let request_epoch = request
             .get("epoch")
@@ -547,6 +517,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         if !id.is_empty() {
             if let Ok(mut active) = cancellations.lock() {
+                if active.contains_key(&id) { eprintln!("duplicate in-flight request id"); break; }
                 active.insert(
                     id,
                     ActiveRequest {
@@ -557,9 +528,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
-        if request_tx.send((request, token)).is_err() {
+        if request_tx.try_send((request, token)).is_err() {
+            // A sender violating the negotiated window loses this epoch, not
+            // the cancellation/control channel. Never accept a silent drop.
+            eprintln!("kernel request admission window exceeded");
             break;
         }
+    }
+    if let Ok(active) = cancellations.lock() {
+        for request in active.values() { request.token.store(true, Ordering::Release); }
     }
     drop(request_tx);
     let _ = worker.join();

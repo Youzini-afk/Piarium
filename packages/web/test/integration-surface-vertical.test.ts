@@ -3,34 +3,46 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { DocumentRegistry } from '@piarium/ui/lib/documents/registry';
-import { createDocumentAuthority } from '../../documents/authority.js';
-import { createWorkspaceRecoveryEngine } from '../../recovery/journal-engine.js';
-import { createWorkspaceWorkingStateAccess } from './working-state-store.js';
-import { IntegrationCoordinator } from './integration-coordinator.js';
+import type { DocumentsAPI } from '@piarium/application-client';
+import { createDocumentAuthority, type DocumentAuthority } from '../application-host/lib/documents/authority.js';
+import { createNativeAuthorityTestRuntime } from '../application-host/lib/kernel/native-authority.test-helper.js';
+import { IntegrationCoordinator } from '../application-host/lib/harness/working-state/integration-coordinator.js';
 
-const roots = [];
+import { parseDocumentWatchEvent } from '../src/api/documents';
 
-const documentsClient = (authority) => ({
+const roots: string[] = [];
+// The direct test transport applies the public client's required epoch shape.
+async function publicEpoch<T extends { status: string }>(work: Promise<T>): Promise<Exclude<T, { status: 'stale-epoch' }> | { status: 'stale-epoch'; currentEpoch: number }> {
+  const value = await work;
+  if (value.status === 'stale-epoch') {
+    const epoch = (value as { currentEpoch?: unknown }).currentEpoch;
+    if (typeof epoch !== 'number' || !Number.isSafeInteger(epoch)) throw new Error('Missing current workspace epoch');
+    return { status: 'stale-epoch', currentEpoch: epoch };
+  }
+  return value as Exclude<T, { status: 'stale-epoch' }>;
+}
+
+const documentsClient = (authority: DocumentAuthority): DocumentsAPI => ({
   resolveWorkspace: authority.resolveWorkspace,
   read: authority.read,
-  write: authority.write,
-  move: authority.move,
-  delete: authority.delete,
+  write: (request) => publicEpoch(authority.write(request)),
+  move: (request) => publicEpoch(authority.move(request)),
+  delete: (request) => publicEpoch(authority.delete(request)),
   publishDirtyBuffers: authority.publishDirtyBuffers,
   clearDirtyBuffers: authority.clearDirtyBuffers,
   ackDirtyStateBarrier: authority.acknowledgeDirtyStateBarrier,
   captureAgentInputSnapshot: authority.captureAgentInputSnapshot,
-  releaseAgentInputSnapshot: authority.releaseAgentInputSnapshot,
+  releaseAgentInputSnapshot: async ({ sessionId, context }) => authority.releaseAgentInputSnapshot(sessionId, context),
   listRecoveryJournals: authority.listRecoveryJournals,
   readRecoveryJournal: authority.readRecoveryJournal,
-  writeRecoveryJournal: authority.writeRecoveryJournal,
-  deleteRecoveryJournal: authority.deleteRecoveryJournal,
+  writeRecoveryJournal: (request) => publicEpoch(authority.writeRecoveryJournal(request)),
+  deleteRecoveryJournal: (request) => publicEpoch(authority.deleteRecoveryJournal(request)),
   readSurfaceOperation: authority.readSurfaceOperation,
   completeSurfaceOperation: authority.completeSurfaceOperation,
-  watch(workspaceId, listener, options) {
-    const files = authority.watch(workspaceId, listener);
+  watch(...[workspaceId, listener, options]: Parameters<DocumentsAPI["watch"]>) {
+    const files = authority.watch(workspaceId, (event) => listener(parseDocumentWatchEvent(event)));
     const surface = options?.dirtyOwner
-      ? authority.registerDirtySurface({ ...options.dirtyOwner, workspaceId }, listener)
+      ? authority.registerDirtySurface({ ...options.dirtyOwner, workspaceId }, (event) => listener(parseDocumentWatchEvent(event)))
       : null;
     return {
       close() {
@@ -40,13 +52,6 @@ const documentsClient = (authority) => ({
     };
   },
 });
-
-const navigation = {
-  prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-  prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-  commit: async () => ({}),
-  commitLeaf: async () => ({}),
-};
 
 afterEach(async () => {
   for (const root of roots.splice(0)) await fs.promises.rm(root, { recursive: true, force: true });
@@ -79,12 +84,8 @@ describe('surface Integration vertical path', () => {
       recoverySessionId: 'surface-vertical-editor',
       journalDebounceMs: 0,
     });
-    const engine = createWorkspaceRecoveryEngine({
-      authorityId: 'surface-vertical-test',
-      dataDir,
-      documents: authority,
-      sessionNavigation: navigation,
-    });
+    const native = await createNativeAuthorityTestRuntime({ documents: authority, hostId: 'surface-vertical-host', dataDir });
+    const { workingStates } = native;
     try {
       const resource = { workspaceId: identity.workspaceId, resourceId: 'draft.txt' };
       await registry.open(resource);
@@ -92,8 +93,7 @@ describe('surface Integration vertical path', () => {
       await expect.poll(async () => (await authority.inspectDirtyBuffers(identity.workspaceId))[0]?.resources.length)
         .toBe(1);
 
-      const workingStates = createWorkspaceWorkingStateAccess(engine);
-      const result = await workingStates.withStore(identity.workspaceId, 'surface-vertical-result', async (store) => {
+      await workingStates.withBranchStore(identity.workspaceId, 'surface-vertical-baseline', async (store) => {
         const disk = await store.captureDirectory(workspace);
         const draft = await store.putObject(Buffer.from('draft\n'));
         const saved = disk['draft.txt'];
@@ -107,8 +107,11 @@ describe('surface Integration vertical path', () => {
             ...(saved.mode !== undefined ? { mode: saved.mode } : {}),
           },
         }, 'base', ['draft.txt']);
-        return store.publishDirectoryResult('thread-surface-vertical', child);
       });
+      const execution = await authority.resolveWorkspace({ path: child });
+      const result = await workingStates.withBranchStore(identity.workspaceId, 'surface-vertical-result',
+        (store) => store.publishDirectoryResult('thread-surface-vertical', child),
+        'exclusive', { executionWorkspace: execution.workspaceId });
       const coordinator = new IntegrationCoordinator({
         workingStates,
         inspectDirtyBuffers: authority.inspectDirtyBuffers,
@@ -127,7 +130,7 @@ describe('surface Integration vertical path', () => {
       expect(registry.get(resource)).toMatchObject({ buffer: 'saved\n', dirty: false });
       expect(await fs.promises.readFile(path.join(workspace, 'draft.txt'), 'utf8')).toBe('saved\n');
       expect(await fs.promises.readFile(path.join(workspace, 'disk.txt'), 'utf8')).toBe('disk child\n');
-      expect(merged.appliedPaths.toSorted()).toEqual(['disk.txt', 'draft.txt']);
+      expect([...merged.appliedPaths].sort()).toEqual(['disk.txt', 'draft.txt']);
 
       const undone = await coordinator.undoIntegration({
         workspaceId: identity.workspaceId,
@@ -140,9 +143,10 @@ describe('surface Integration vertical path', () => {
       expect(await fs.promises.readFile(path.join(workspace, 'draft.txt'), 'utf8')).toBe('saved\n');
       expect(await fs.promises.readFile(path.join(workspace, 'disk.txt'), 'utf8')).toBe('disk base\n');
     } finally {
-      registry.dispose();
-      await engine.dispose();
+      await registry.flushRecoveryJournals();
+      await registry.dispose();
       await authority.dispose();
+      await native.dispose();
     }
   });
 });

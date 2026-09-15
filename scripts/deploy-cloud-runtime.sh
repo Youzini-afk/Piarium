@@ -339,11 +339,10 @@ else
       const hostEntry = broker.resolveBundledPiHostEntry();
       if (!hostEntry) throw new Error("Pi host entry could not be resolved");
       const require = createRequire(new URL("./packages/web/package.json", import.meta.url));
-      const pty = require("node-pty");
-      if (typeof pty.spawn !== "function") throw new Error("node-pty is unavailable");
       require.resolve("sherpa-onnx-node");
       console.log(`Verified Pi host: ${hostEntry}`);
     '
+    node verify-kernel.mjs packages/web
   )
 
   printf '%s\n' "${EXPECTED_SHA256,,}" > "${RELEASE_DIR}/.archive-sha256"

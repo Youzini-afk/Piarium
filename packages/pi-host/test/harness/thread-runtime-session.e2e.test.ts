@@ -12,9 +12,12 @@ import { registerHarnessServices } from "../../../web/application-host/lib/harne
 import { createThreadRegistry } from "../../../web/application-host/lib/harness/thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../../../web/application-host/lib/harness/thread-runtime.js";
 import { createThreadWorktreeRuntime } from "../../../web/application-host/lib/harness/thread-worktree.js";
+import { ThreadExecutionViewRegistry } from "../../../web/application-host/lib/harness/working-state/execution-view.js";
 import { IntegrationCoordinator } from "../../../web/application-host/lib/harness/working-state/integration-coordinator.js";
-import { createTestWorkingStateRootAccess } from "../../../web/application-host/lib/harness/working-state/working-state-root-adapter.test-helper.js";
-import { createWorkspaceRecoveryEngine } from "../../../web/application-host/lib/recovery/engine.js";
+import { createNativeAuthorityTestRuntime } from "../../../web/application-host/lib/kernel/native-authority.test-helper.js";
+import { createDocumentAuthority } from "../../../web/application-host/lib/documents/authority.js";
+import { createManagedRootAdmission } from "../../../web/application-host/lib/kernel/managed-root-admission.js";
+import { assertManagedWorktreeOwnership } from "../../../web/application-host/lib/harness/worktree-ownership.js";
 import { SessionHost } from "../../src/session-host.js";
 
 describe("thread runtime with real Pi sessions", () => {
@@ -278,7 +281,6 @@ describe("thread runtime with native working-state integration", () => {
     const agentDir = join(root, "agent");
     const worktreeRoot = join(root, "thread-worktrees");
     const dataDir = join(root, "recovery-data");
-    const workspaceId = "native-thread-workspace";
     const authorityInstanceId = "native-thread-authority";
     await mkdir(workspace, { recursive: true });
     await mkdir(agentDir, { recursive: true });
@@ -304,6 +306,7 @@ describe("thread runtime with native working-state integration", () => {
     const childHosts = new Map<string, SessionHost>();
     const childSessionFiles = new Map<string, string>();
     const childRunIds = new Map<string, string>();
+    const executionContexts = new Map<string, { workspaceId: string; root: string }>();
     let spawningRunId: string | undefined;
 
     const model = faux.getModel();
@@ -327,14 +330,12 @@ describe("thread runtime with native working-state integration", () => {
       return { model };
     };
 
-    const documents = {
-      inspectWorkspace: async () => ({ root: workspace, workspaceId }),
-      listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
-      beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-      inspectDirtyBuffers: async () => [],
-    };
-    const recoveryEngine = createWorkspaceRecoveryEngine({
-      authorityId: authorityInstanceId,
+    const documents = createDocumentAuthority({
+      hostId: authorityInstanceId, dataDir, isAllowedRoot: async () => true, isTrusted: async () => true,
+    });
+    const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
+    const native = await createNativeAuthorityTestRuntime({
+      hostId: authorityInstanceId,
       dataDir,
       documents,
       sessionNavigation: {
@@ -352,13 +353,16 @@ describe("thread runtime with native working-state integration", () => {
         commitLeaf: async () => ({ alreadyApplied: false, markerId: "native-undo-leaf-marker", snapshot: {} }),
       },
     });
-    const workingStates = createTestWorkingStateRootAccess(recoveryEngine);
+    const recoveryEngine = native.engine;
+    const { workingStates } = native;
     const integrationCoordinator = new IntegrationCoordinator({ workingStates });
     const worktrees = createThreadWorktreeRuntime({
+      authorizeManagedRoot: (candidate) => candidate === worktreeRoot,
+      createScratch: async (_directory, threadId) => ({ path: join(worktreeRoot, threadId), managedRoot: worktreeRoot }),
       createWorktree: async (_source, input) => {
         const target = join(worktreeRoot, String(input.worktreeName));
         await mkdir(target, { recursive: true });
-        return { path: target };
+        return { path: target, managedRoot: worktreeRoot };
       },
       getWorktreeBootstrapStatus: async () => ({
         status: "ready",
@@ -368,6 +372,17 @@ describe("thread runtime with native working-state integration", () => {
       }),
     });
     const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "native-thread-host" });
+    const managed = createManagedRootAdmission({
+      listWorktrees: async (id) => {
+        const sessionId = parentHost?.sessionId;
+        if (!sessionId) return [];
+        return (await registry.listThreads(id, { kind: "session", id: sessionId }, true)).flatMap(thread => thread.worktree ? [thread.worktree] : []);
+      },
+      assertOwnership: (worktree, operation, candidates) => assertManagedWorktreeOwnership(worktree, operation, candidates, {
+        authorizeManagedRoot: (candidate) => candidate === worktreeRoot,
+      }),
+    });
+    native.adapter.bindManagedRootResolver(managed.materialization);
 
     const hostFor = (sessionId: string): SessionHost => {
       if (sessionId === parentHost?.sessionId) return parentHost!;
@@ -410,9 +425,25 @@ describe("thread runtime with native working-state integration", () => {
     };
 
     const emitFrom = (sessionId: string, event: HostEvent, data: unknown): void => {
+      if (event === "extension.ui.request") {
+        const request = data as { id?: string; method?: string; payload?: { options?: string[] } };
+        if (request.id && request.method === "select") {
+          // The fixture explicitly answers the frozen child permission prompt;
+          // it must not widen the child to the parent's bypass mode.
+          hostFor(sessionId).ui.respond({ requestId: request.id, value: "Allow once" });
+        }
+        return;
+      }
       if (event === "harness.request") {
         const actor = actorFor(sessionId);
         if (!actor) throw new Error(`Harness request has no registered actor: ${sessionId}`);
+        if (!harnessServiceHost.hasActor(actor)) {
+          const execution = executionContexts.get(sessionId);
+          harnessServiceHost.registerSession({ actor,
+            workspaceId: execution?.workspaceId ?? workspaceId, workspaceRoot: execution?.root ?? workspace,
+            grantedCapabilities: ["context.session", "control.thread", "read.document", "write.document", "read.search", "read.output"],
+          });
+        }
         void router!.processEvent({
           actor,
           kind: "host",
@@ -478,6 +509,8 @@ describe("thread runtime with native working-state integration", () => {
         const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
         childRunIds.set(created.sessionId, spawningRunId);
+        const execution = await documents.resolveWorkspace({ path: input.cwd });
+        executionContexts.set(created.sessionId, { workspaceId: execution.workspaceId, root: input.cwd });
         if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
         return created;
       },
@@ -497,6 +530,8 @@ describe("thread runtime with native working-state integration", () => {
         return opened;
       },
       prompt: async (sessionId, text, instructions) => {
+        const materialized = await runtime.materializeExecutionView(sessionId);
+        assert.equal(materialized.status, "materialized", JSON.stringify(materialized));
         const result = await hostFor(sessionId).prompt(sessionId, text, undefined, instructions);
         if (!result.accepted) throw new Error(`Native child prompt was not accepted: ${sessionId}`);
       },
@@ -513,9 +548,10 @@ describe("thread runtime with native working-state integration", () => {
       registry,
       sessions,
       resolveWorkspaceRoot: async () => workspace,
-      resolveRuntimeWorkspaceId: async () => workspaceId,
+      resolveRuntimeWorkspaceId: async (cwd) => (await documents.resolveWorkspace({ path: cwd })).workspaceId,
       readBlocks: async () => [],
       workingStates,
+      executionViews: new ThreadExecutionViewRegistry(),
       resolveIntegrationCoordinator: async () => integrationCoordinator,
       worktrees,
     });
@@ -527,7 +563,10 @@ describe("thread runtime with native working-state integration", () => {
         hasBash: process.platform !== "win32",
         hasPowerShell: process.platform === "win32",
       },
+      documentReadSource: (sessionId, context, resourceId) => documents.readAgentInputSnapshot(sessionId, context, resourceId),
+      documentSurfaceWrite: (sessionId, id, context, changes, signal) => documents.applyAgentSurfaceWrite(sessionId, id, context, changes, signal),
       threadRegistry: registry,
+      threadPrepareIsolatedBranch: (input) => runtime.prepareIsolatedBranch(input),
       threadSpawnSession: async (input) => {
         spawningRunId = input.runId;
         try {
@@ -570,8 +609,14 @@ describe("thread runtime with native working-state integration", () => {
 
     let parentFirstRoundTools = 0;
     let childRoundTools = 0;
+    let firstRoundFailure: unknown;
     const firstRoundResponse = (context: { messages: unknown[] }) => {
       const serialized = JSON.stringify(context.messages);
+      const last = context.messages.at(-1) as { role?: string; isError?: boolean } | undefined;
+      if (last?.role === "toolResult" && last.isError) {
+        firstRoundFailure = last;
+        return fauxAssistantMessage("Fixture stopped after the failed tool result.");
+      }
       if (serialized.includes("You are working as the hard-implement thread")) {
         childRoundTools += 1;
         return childRoundTools === 1
@@ -615,6 +660,7 @@ describe("thread runtime with native working-state integration", () => {
       await runtime!.drain();
 
       const created = (await registry.listThreads(workspaceId, { kind: "session", id: parent.sessionId }))[0];
+      assert.equal(firstRoundFailure, undefined, JSON.stringify(firstRoundFailure));
       assert.ok(created);
       assert.equal(created.lifecycle, "settled");
       assert.equal(created.integration, "merge-ready");
@@ -626,9 +672,10 @@ describe("thread runtime with native working-state integration", () => {
       assert.equal(await readFile(firstPath, "utf8"), "first child result\n");
 
       await writeFile(firstPath, "live child result\n", "utf8");
-      const second = await workingStates.withStore(workspaceId, "native-live-result", (store) => (
+      const executionWorkspace = (await documents.resolveWorkspace({ path: created.worktree.path })).workspaceId;
+      const second = await workingStates.withBranchStore(workspaceId, "native-live-result", (store) => (
         store.publishDirectoryResult(created.workBranchId!, created.worktree!.path)
-      ));
+      ), "exclusive", { executionWorkspace });
       assert.equal(second.resultRevision, 2);
       await registry.setWorkingState(workspaceId, created.id, {
         branchId: created.workBranchId,
@@ -674,12 +721,13 @@ describe("thread runtime with native working-state integration", () => {
       assert.equal(settled.status, "ready");
       assert.equal(settled.binding?.status, "ready");
 
-      await recoveryEngine.withWorkspaceStorage(workspaceId, { mode: "shared", purpose: "assert-native-merge", create: false }, ({ database }) => {
-        const integration = database.prepare("SELECT id, state FROM operations WHERE id = ? AND kind = 'integration'").get(mergeOperationId) as { id: string; state: string } | undefined;
-        assert.deepEqual(integration, { id: mergeOperationId, state: "complete" });
-        const change = database.prepare("SELECT tool_name, mutation_id FROM checkpoint_changes WHERE checkpoint_id = (SELECT checkpoint_id FROM turn_bindings WHERE execution_id = ?) AND path = 'child-result.txt'").get("native-parent-merge-execution") as { tool_name: string; mutation_id: string } | undefined;
-        assert.deepEqual(change, { tool_name: "thread.merge", mutation_id: mergeOperationId });
-      });
+      const integration = await native.recovery.getOperation(workspaceId, mergeOperationId!);
+      assert.equal(integration?.state, "complete");
+      assert.equal(integration?.kind, "integration");
+      const recorded = await native.recovery.listChanges({ workspaceId, executionId: "native-parent-merge-execution" });
+      const change = recorded.changes.find(change => change.path === "child-result.txt");
+      assert.equal(change?.toolName, "thread.merge");
+      assert.equal(change?.mutationId, `thread.merge:${mergeOperationId}:child-result.txt`);
 
       const prepared = await recoveryEngine.prepareCombinedRecovery({
         entryId: parentUserEntryId,
@@ -707,7 +755,8 @@ describe("thread runtime with native working-state integration", () => {
       router.dispose();
       await harnessServiceHost.dispose();
       await registry.dispose();
-      await recoveryEngine.dispose();
+      await native.dispose();
+      await documents.dispose();
       faux.unregister();
       await rm(root, { recursive: true, force: true }).catch(() => undefined);
     }

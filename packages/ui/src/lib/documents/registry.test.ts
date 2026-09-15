@@ -226,6 +226,37 @@ const createMemoryDocuments = () => {
 };
 
 describe('DocumentRegistry', () => {
+  test('disposal waits for the final dirty journal and owner release before Host teardown', async () => {
+    const memory = createMemoryDocuments();
+    let releaseJournal!: () => void;
+    let releaseOwner!: () => void;
+    const journalGate = new Promise<void>(resolve => { releaseJournal = resolve; });
+    const ownerGate = new Promise<void>(resolve => { releaseOwner = resolve; });
+    let journalEntered = false;
+    let ownerEntered = false;
+    const registry = new DocumentRegistry({ documents: {
+      ...memory.api,
+      writeRecoveryJournal: async request => { journalEntered = true; await journalGate; return memory.api.writeRecoveryJournal(request); },
+      clearDirtyBuffers: async request => { ownerEntered = true; await ownerGate; return memory.api.clearDirtyBuffers(request); },
+    }, getGeneration: () => 1, journalDebounceMs: 60_000 });
+    await registry.open(resource());
+    registry.applyTransaction(resource(), 'unsaved', { origin: 'editor' });
+    const closing = registry.dispose();
+    expect(registry.dispose()).toBe(closing);
+    let closed = false;
+    void closing.then(() => { closed = true; });
+    for (let n = 0; n < 10; n++) await Promise.resolve();
+    expect(journalEntered).toBe(true);
+    expect(ownerEntered).toBe(true);
+    expect(closed).toBe(false);
+    releaseJournal();
+    await Promise.resolve();
+    expect(closed).toBe(false);
+    releaseOwner();
+    await closing;
+    expect(closed).toBe(true);
+    expect(memory.journals.size).toBe(1);
+  });
   test('captures serialized CRLF editor content with UTF-8 BOM metadata', async () => {
     const { api } = createMemoryDocuments();
     const identity = resource('crlf-bom.txt');

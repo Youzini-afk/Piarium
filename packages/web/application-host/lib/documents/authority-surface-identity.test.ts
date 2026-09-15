@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   attachLiveSurfaceCompleter,
   createDocumentAuthorityHarness,
@@ -14,52 +14,27 @@ import {
   markAgentMutationSurfaceDispatched,
   reconcileInterruptedAgentMutations,
 } from "./agent-mutation-operation.js";
-import { createRecoveryFileStore } from "../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import type { DurableFileOperationContext } from "../recovery/durable-file-operation.js";
 import {
   createInMemoryRecoveryDurablePort,
-  type InMemoryRecoveryDurablePort,
 } from "../recovery/recovery-durable-port.test-helper.js";
+
+import { createNativeAuthorityTestRuntime } from "../kernel/native-authority.test-helper.js";
+import type { RecoveryDurableOperationPort } from "../recovery/journal-engine.js";
 
 const utf16LeHello = Buffer.from([0xff, 0xfe, 0x68, 0x00, 0x69, 0x00]);
 
 const bindDurableCatalog = async (harness: DocumentAuthorityHarness) => {
-  const objectRoot = path.join(harness.dataDir, "agent-mutation-objects");
-  await fs.promises.mkdir(objectRoot, { recursive: true });
-  const fileStore = createRecoveryFileStore();
-  const durableRecoveryStore = createInMemoryRecoveryDurablePort();
-  const inspected = await harness.authority.inspectWorkspace(
-    harness.identity.workspaceId,
-  );
-  const identity = {
-    authorityId: harness.authority.hostId,
-    canonicalRoot: inspected.root,
-    filesystemProfile: "test",
-    workspaceId: harness.identity.workspaceId,
-  };
-  harness.authority.bindDurableMutationStorage(
-    async (_workspaceId, operation) => {
-      return operation({
-        durableRecoveryStore,
-        fileStore,
-        identity,
-        resourceOperationGate: {
-          run: (resources, next) =>
-            harness.authority.runResourceOperation(
-              harness.identity.workspaceId,
-              resources,
-              next,
-            ),
-        },
-        root: objectRoot,
-      });
-    },
-  );
-  return { objectRoot, identity, fileStore, durableRecoveryStore };
+  const native = await createNativeAuthorityTestRuntime({ documents: harness.authority, hostId: harness.authority.hostId, dataDir: harness.dataDir });
+  const cleanup = harness.cleanup;
+  harness.cleanup = async () => { try { await native.dispose(); } finally { await cleanup(); } };
+  const context = await native.engine.withWorkspaceStorage(harness.identity.workspaceId, { mode: "exclusive", purpose: "surface-identity-acceptance", create: true }, current => current);
+  return { ...native, context, objectRoot: context.root, identity: context.identity, fileStore: context.fileStore, durableRecoveryStore: native.recovery };
 };
 
 const inspectAgentMutationOperation = async (
-  durableRecoveryStore: InMemoryRecoveryDurablePort,
+  durableRecoveryStore: RecoveryDurableOperationPort,
   workspaceId: string,
   operationId: string,
 ): Promise<(Record<string, unknown> & { data: Record<string, unknown> }) | null> => {
@@ -496,26 +471,13 @@ describe("surface identity and durable compensation", () => {
   });
 
   it("records compensated or needs-attention after a surface apply then I/O throw", async () => {
-    const fsPromises = new Proxy(fs.promises, {
-      get(target, property, receiver) {
-        if (property === "writeFile") {
-          return async (...args: Parameters<typeof fs.promises.writeFile>) => {
-            if (String(args[0]).includes("other.ts")) {
-              throw new Error("injected disk I/O failure");
-            }
-            return target.writeFile(...args);
-          };
-        }
-        const member = Reflect.get(target, property, receiver) as unknown;
-        return typeof member === "function"
-          ? (member as (...inner: never[]) => unknown).bind(target)
-          : member;
-      },
+    harness = await createDocumentAuthorityHarness();
+    const { durableRecoveryStore, backend } = await bindDurableCatalog(harness);
+    const write = backend.writeBytes.bind(backend);
+    vi.spyOn(backend, "writeBytes").mockImplementation(async (identity, relative, bytes, options) => {
+      if (relative === "other.ts") throw new Error("injected native disk I/O failure");
+      return write(identity, relative, bytes, options);
     });
-    harness = await createDocumentAuthorityHarness({
-      authority: { fsPromises },
-    });
-    const { durableRecoveryStore } = await bindDurableCatalog(harness);
     const live = new Map<string, LiveSurfaceBuffer>();
     const surface = attachLiveSurfaceCompleter(harness.authority, {
       generation: 1,
@@ -665,7 +627,7 @@ describe("surface identity and durable compensation", () => {
   it("keeps dispatched surface uncertainty while compensating another applied disk path", async () => {
     harness = await createDocumentAuthorityHarness();
     const activeHarness = harness;
-    const { objectRoot, identity, fileStore, durableRecoveryStore } =
+    const { objectRoot, identity, fileStore, durableRecoveryStore, context: nativeContext } =
       await bindDurableCatalog(activeHarness);
     await fs.promises.writeFile(
       path.join(activeHarness.workspaceRoot, "disk.txt"),
@@ -690,20 +652,7 @@ describe("surface identity and durable compensation", () => {
         path.join(activeHarness.workspaceRoot, "disk.txt"),
         "after\n",
       );
-      const context: DurableFileOperationContext = {
-        durableRecoveryStore,
-        fileStore,
-        identity,
-        resourceOperationGate: {
-          run: (resources, next) =>
-            activeHarness.authority.runResourceOperation(
-              activeHarness.identity.workspaceId,
-              resources,
-              next,
-            ),
-        },
-        root: objectRoot,
-      };
+      const context: DurableFileOperationContext = nativeContext;
       const data = await beginAgentMutationOperationAsync(context, {
         operationId: "op-dispatched-surface",
         sessionId: "session-dispatched",

@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import {
   createDocumentBranchWriteService,
   createDocumentReadSourceService,

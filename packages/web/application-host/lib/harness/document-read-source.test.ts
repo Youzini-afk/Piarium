@@ -3,6 +3,7 @@ import path from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AgentInputContext, HarnessActorContext, HarnessServiceMap } from "@piarium/protocol";
+import { createNativeAuthorityTestRuntime } from "../kernel/native-authority.test-helper.js";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createSurfaceSnapshotStore } from "../documents/surface-snapshot-store.js";
 import { createDocumentReadSourceService, createDocumentSurfaceWriteService } from "./harness-services.js";
@@ -25,6 +26,7 @@ async function fixture() {
     isTrusted: async () => true,
   });
   const { workspaceId } = await documents.resolveWorkspace({ path: workspace });
+  const native = await createNativeAuthorityTestRuntime({ documents, hostId: "test-host", dataDir: path.join(root, "data") });
   const actor: HarnessActorContext = {
     authorityInstanceId: "test-host",
     sessionId: "test-session",
@@ -57,6 +59,7 @@ async function fixture() {
     router.dispose();
     await host.dispose();
     await documents.dispose();
+    await native.dispose();
     expect(path.dirname(path.resolve(root))).toBe(path.resolve(tmpdir()));
     await fs.rm(root, { recursive: true, force: true });
   });
@@ -257,7 +260,8 @@ describe("native read source through Host router and Documents", () => {
         action: "write",
         content: "plain\n",
       }, context);
-      expect(diskPath).toEqual({ ok: true, result: { status: "disk" } });
+      expect(diskPath, JSON.stringify(diskPath)).toMatchObject({ ok: true, result: { status: "applied", results: [{ target: "disk", status: "applied" }] } });
+      expect(await fs.readFile(path.join(f.workspace, "other.ts"), "utf8")).toBe("plain\n");
     } finally {
       surface.close();
     }

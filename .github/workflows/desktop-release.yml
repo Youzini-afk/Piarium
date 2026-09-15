@@ -156,7 +156,7 @@ jobs:
           bun run --cwd packages/electron build:web-assets
           bun run --cwd packages/electron prepare:pi-runtime
           bun run --cwd packages/electron bundle:main
-          bun run --cwd packages/electron rebuild:native
+          bun run --cwd packages/electron verify:native
           args=("--${{ matrix.target }}" "--${{ matrix.architecture }}" "--publish=never")
           if [ "${{ matrix.platform }}" = "macos" ]; then
             args+=("--piarium-unsigned-mac")
@@ -219,8 +219,9 @@ jobs:
             fi
             runtime_native_modules="${runtime_native_modules}${runtime_native_modules:+$'\n'}${native_module}"
           done <<< "$native_modules"
-          printf '%s\n' "$runtime_native_modules" | grep -q "/better-sqlite3/prebuilds/darwin-${{ matrix.architecture }}.node$"
-          for required in pty.node sherpa-onnx.node; do
+          file "$app/Contents/Resources/kernel/piarium-kernel" | grep -q "$expected_arch"
+          printf '%s\n' "$runtime_native_modules" | grep -q "/triviumdb.darwin-${{ matrix.architecture }}.node$"
+          for required in sherpa-onnx.node; do
             printf '%s\n' "$runtime_native_modules" | grep -q "/$required$"
           done
           while IFS= read -r native_module; do

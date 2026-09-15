@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { WorkingStateStore } from "./working-state-store.js";
 import {
   EMPTY_STATE_TRIE,

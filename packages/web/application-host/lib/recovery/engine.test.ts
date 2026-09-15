@@ -1044,7 +1044,7 @@ describe('affected-file workspace recovery journal', () => {
 
     // Recovery semantics: target = 'before' (rollback destination), safety = 'after' (current).
     // Use a spy fileStore that crashes after applyState writes the rollback target.
-    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const { createRecoveryFileStore } = await import('./file-store.test-helper.js');
     const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
       await realFileStore.applyState(...args);
@@ -1161,7 +1161,7 @@ describe('affected-file workspace recovery journal', () => {
     // Phase 3: compensation applyState writes safety ('after') — then crashes.
     // This leaves the operation in 'compensating-files' with phase 'compensate-intent'
     // and the file at safety ('after') on disk.
-    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const { createRecoveryFileStore } = await import('./file-store.test-helper.js');
     const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
     let applyCallCount = 0;
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
@@ -1281,7 +1281,7 @@ describe('affected-file workspace recovery journal', () => {
     });
 
     // Use a crash fileStore to capture safety and crash during applyState.
-    const { createRecoveryFileStore } = await import('./journal-files.js');
+    const { createRecoveryFileStore } = await import('./file-store.test-helper.js');
     const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
       await realFileStore.applyState(...args);

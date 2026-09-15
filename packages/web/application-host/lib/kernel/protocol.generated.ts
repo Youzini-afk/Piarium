@@ -4,6 +4,7 @@
  */
 
 export const KERNEL_PROTOCOL_VERSION = 1 as const;
+export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_PROTOCOL_SCHEMA = "piarium.kernel.v1" as const;
 
 export type KernelMethod =
@@ -23,6 +24,7 @@ export type KernelMethod =
   | "authority.grant.revoke"
   | "storage.snapshot"
   | "storage.putBlob.begin"
+  | "storage.putBlob.chunk"
   | "storage.putBlob.finish"
   | "storage.putBlob.abort"
   | "storage.blob.release"
@@ -199,9 +201,7 @@ export interface KernelProcessWriteResult {
   queued: boolean;
 }
 
-export interface KernelEmptyParams {
-
-}
+export type KernelEmptyParams = Record<string, never>;
 
 export interface KernelHandshakeParams {
   protocolVersion: number;
@@ -246,6 +246,12 @@ export interface KernelPutBlobBeginParams {
   byteLength: number;
   expectedHash?: string;
   workspaceId?: string;
+}
+
+export interface KernelPutBlobChunkParams {
+  streamId: string;
+  sequence: number;
+  bytesBase64: string;
 }
 
 export interface KernelPutBlobFinishParams {
@@ -1000,6 +1006,7 @@ export interface KernelHandshakeResult {
   targetTriple: string;
   arch: string;
   kernelEpoch: string;
+  requestWindow: number;
   hostId: string;
   hostGeneration: string;
   storageRoot: string;
@@ -1211,6 +1218,7 @@ export type KernelMethodParams = {
   "authority.grant.revoke": KernelGrantRevokeParams;
   "storage.snapshot": KernelSnapshotParams;
   "storage.putBlob.begin": KernelPutBlobBeginParams;
+  "storage.putBlob.chunk": KernelPutBlobChunkParams;
   "storage.putBlob.finish": KernelPutBlobFinishParams;
   "storage.putBlob.abort": KernelPutBlobAbortParams;
   "storage.blob.release": KernelBlobReleaseParams;
@@ -1432,6 +1440,15 @@ export type KernelRequest =
       id: string;
       method: "storage.putBlob.begin";
       params: KernelPutBlobBeginParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.putBlob.chunk";
+      params: KernelPutBlobChunkParams;
       epoch?: string;
       grantId?: string;
     }
@@ -2128,5 +2145,4 @@ export type KernelRequest =
       epoch?: string;
       grantId?: string;
     }
-  | { v: typeof KERNEL_PROTOCOL_VERSION; kind: "cancel"; id: string; epoch?: string; grantId?: string; }
-  | { v: typeof KERNEL_PROTOCOL_VERSION; kind: "data"; id: string; streamId: string; sequence: number; bytesBase64: string; epoch: string; grantId: string; };
+  | { v: typeof KERNEL_PROTOCOL_VERSION; kind: "cancel"; id: string; epoch?: string; grantId?: string; };

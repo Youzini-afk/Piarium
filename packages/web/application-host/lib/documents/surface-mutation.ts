@@ -1111,7 +1111,10 @@ export async function applyAgentSurfaceMutation(
   };
   if (deps.durable && toApplyDisk.some((entry) => entry.class === "disk")) {
     return deps.durable.resourceOperationGate.run(
-      toApplyDisk.filter((entry) => entry.class === "disk").map((item) => ({ resourceId: item.change.resourceId, scope: "exact" as const })),
+      // The nested Documents write/delete owns this path's subtree (type
+      // replacement can remove children). Acquire the same directional scope
+      // up front; an exact read lease cannot authorize that mutation.
+      toApplyDisk.filter((entry) => entry.class === "disk").map((item) => ({ resourceId: item.change.resourceId, scope: "subtree" as const })),
       executeMutation,
     );
   }

@@ -255,6 +255,7 @@ it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the dura
     dataDir,
     documents,
     durableRecoveryStore: kernelRecoveryStore,
+    fileStore: content,
     sessionNavigation: {
       prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
       prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
@@ -325,6 +326,7 @@ it.skipIf(!hasReleaseKernel)("uses Rust operation phases for dirty surface integ
     dataDir,
     documents,
     durableRecoveryStore: kernelRecoveryStore,
+    fileStore: content,
     sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
   });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);
@@ -448,6 +450,7 @@ it.skipIf(!hasReleaseKernel)("reconciles a branch CAS after the terminal respons
     dataDir,
     documents,
     durableRecoveryStore: kernelRecoveryStore,
+    fileStore: content,
     sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
   });
   const engine = createKernelRecoveryDirectFacade(baseEngine, kernelRecoveryStore);

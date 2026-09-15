@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
 import { createLocalSqliteWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions as LocalRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";

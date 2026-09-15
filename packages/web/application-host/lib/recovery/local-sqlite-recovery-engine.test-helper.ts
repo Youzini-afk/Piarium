@@ -78,17 +78,8 @@ import {
   writeOperationRow,
 } from './journal-catalog.js';
 import { failedRecoveryResult, RecoveryPrimitiveError, recoveryFailure } from './errors.js';
-import {
-  createRecoveryFileStore,
-  normalizeResourceId,
-  parseRecoveryState,
-  sameState,
-  stateIdentity,
-  statTree,
-  type RecoveryFileStore,
-  type RecoveryIdentity,
-  type RecoveryState,
-} from './journal-files.js';
+import { normalizeResourceId, parseRecoveryState, sameState, stateIdentity, statTree, type RecoveryFileStore, type RecoveryIdentity, type RecoveryState } from "./journal-files.js";
+import { createRecoveryFileStore } from "./file-store.test-helper.js";
 import {
   createRecoveryLocationRegistry,
   readRecoveryJsonAtomic,

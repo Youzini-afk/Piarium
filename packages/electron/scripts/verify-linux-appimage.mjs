@@ -13,7 +13,7 @@ const ELF_MACHINE = { x64: 62, arm64: 183 };
 // sherpa-onnx-node loads this Node-API addon from its platform-specific prebuilt
 // package in the separate server worker, so verify its architecture here rather
 // than Electron-rebuilding it with the source-built modules.
-const REQUIRED_NATIVE_MODULES = ['pty.node', 'sherpa-onnx.node'];
+const REQUIRED_NATIVE_MODULES = ['sherpa-onnx.node'];
 
 /** electron-builder AppImage arch token: x64 → x86_64, arm64 → arm64 */
 export const linuxAppImageArchSuffix = (architecture) => (
@@ -87,10 +87,9 @@ export const verifyExtractedPayload = ({
     return normalizedPath.includes(`/prebuilds/linux-${targetArchitecture}/`)
       || normalizedPath.endsWith(`/prebuilds/linux-${targetArchitecture}.node`);
   });
-  const betterSqlitePrebuild = `/better-sqlite3/prebuilds/linux-${targetArchitecture}.node`;
-  if (!nativeModules.some((modulePath) => modulePath.split(path.sep).join('/').endsWith(betterSqlitePrebuild))) {
-    throw new Error(`Missing packaged native module: ${path.basename(betterSqlitePrebuild)}`);
-  }
+  assertElfArchitecture(path.join(root, 'resources/kernel/piarium-kernel'), targetArchitecture, 'Rust kernel');
+  const triviumName = 'triviumdb.linux-' + targetArchitecture + '-gnu.node';
+  if (!nativeModules.some(modulePath => path.basename(modulePath) === triviumName)) throw new Error('Missing packaged native module: ' + triviumName);
   for (const requiredName of REQUIRED_NATIVE_MODULES) {
     if (!nativeModules.some((modulePath) => path.basename(modulePath) === requiredName)) {
       throw new Error(`Missing packaged native module: ${requiredName}`);

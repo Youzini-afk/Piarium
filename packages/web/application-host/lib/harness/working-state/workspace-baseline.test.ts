@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
 import { WorkingStateStore } from "./working-state-store.js";

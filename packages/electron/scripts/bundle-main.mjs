@@ -4,13 +4,8 @@
  * (@piarium/web) and native modules — stays external so it resolves
  * from node_modules at runtime inside the packaged app.
  *
- * Why external matters: packages/web/server pulls in bun-pty, which has
- * a top-level `import { dlopen } from "bun:ffi"`. If we inline it here,
- * Node's ESM loader sees `bun:ffi` at package load time and crashes with
- * ERR_UNSUPPORTED_ESM_URL_SCHEME before any runtime guard can skip it.
- * Leaving @piarium/web external means the conditional
- * `if (isBunRuntime) await import('bun-pty')` stays dynamic and is never
- * reached under Electron.
+ * The Host remains external so packaged assets, Pi workers and the Rust
+ * executable resolve through their release layout, not the bundler cwd.
  */
 import path from 'node:path';
 import fs from 'node:fs';
@@ -39,9 +34,6 @@ const result = await Bun.build({
     '@piarium/pi-host/*',
     '@piarium/runtime-broker',
     '@piarium/runtime-broker/*',
-    'bun-pty',
-    'node-pty',
-    'better-sqlite3',
   ],
   minify: false,
   sourcemap: 'none',

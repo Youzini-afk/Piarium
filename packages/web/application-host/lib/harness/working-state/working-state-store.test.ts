@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { objectPath, openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { WorkingStateStore } from "./working-state-store.js";
 import { createHash } from "node:crypto";
 import type { HostResourceOperation } from "../../recovery/durable-file-operation.js";

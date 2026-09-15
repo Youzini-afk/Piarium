@@ -5,7 +5,7 @@ import { handleFsBridgeMessage } from './bridge-fs-runtime';
 import { handleDocumentsBridgeMessage } from './documents-bridge-runtime';
 import { handleWorkspaceSearchBridgeMessage } from './bridge-search-runtime';
 import { handleNativeVSCodeBridgeMessage } from './bridge-vscode-runtime';
-import { getVSCodeDocuments, handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
+import { getVSCodeDocuments, getVSCodeWorkspaceSearch, handleExtensionsBridgeMessage } from './bridge-extensions-runtime';
 import type { VSCodePiRuntime } from './piRuntime';
 import {
   DEFAULT_GITHUB_CLIENT_ID,
@@ -455,10 +455,10 @@ export async function handleBridgeMessage(message: BridgeRequest, ctx?: BridgeCo
     }
 
     if (type === 'api:workspace:search-content' && ctx?.context) {
-      const documents = await getVSCodeDocuments(ctx.context, ctx.piRuntime);
+      const search = await getVSCodeWorkspaceSearch(ctx.context, ctx.piRuntime);
       const searchResponse = await handleWorkspaceSearchBridgeMessage(
         { id, type, payload },
-        { documents },
+        { search },
       );
       if (searchResponse) return searchResponse;
     }

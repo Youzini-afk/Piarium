@@ -147,6 +147,34 @@ describe('createWebDocumentsAPI', () => {
     }));
   });
 
+  it('delivers surface operations without consuming or resetting file-event positions', async () => {
+    const { createWebDocumentsAPI } = await import('./documents');
+    const workspaceId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const changed = (sequence: number) => ({
+      kind: 'changed', sourceId: 'source-1', generation: 1, sequence,
+      resource: { workspaceId, resourceId: 'draft.txt' },
+    });
+    const controls = ['capture', 'apply', 'undo'].map((action) => ({
+      kind: 'surface-operation', action, requestId: `request-${action}`,
+      operationId: 'operation-1', workspaceId,
+    }));
+    const sent = [changed(1), ...controls, changed(2)];
+    runtimeFetchMock.mockResolvedValueOnce(new Response(new ReadableStream({
+      start(controller) {
+        for (const event of sent) controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`));
+      },
+    }), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
+    const events: unknown[] = [];
+    const subscription = createWebDocumentsAPI().watch(workspaceId, (event) => events.push(event), {
+      dirtyOwner: { generation: 1, ownerId: 'surface-1' },
+    });
+    try {
+      await vi.waitFor(() => expect(events).toEqual(sent));
+    } finally {
+      subscription.close();
+    }
+  });
+
   it('reconnects an ended watch and tells consumers to resynchronize', async () => {
     const { createWebDocumentsAPI } = await import('./documents');
     const api = createWebDocumentsAPI();

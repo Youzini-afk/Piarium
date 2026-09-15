@@ -46,6 +46,7 @@ import type { Zone2Material } from "../../../web/application-host/lib/harness/zo
 import { createExploreFileReader } from "../../../web/application-host/lib/harness/explore-file-reader.js";
 import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
 import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
+import { createNativeComputeTestHarness } from "../../../web/application-host/lib/kernel/compute.test-helper.js";
 import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";
 import { createRemoteEmbedder } from "../../../web/application-host/lib/knowledge/semantic/remote-embedder.js";
 import { createSemanticIndexRuntime } from "../../../web/application-host/lib/knowledge/semantic/runtime.js";
@@ -1181,7 +1182,7 @@ describe("session e2e — configured web search", () => {
 // ── Explore ─────────────────────────────────────────────────────────
 
 /**
- * Connect the real Documents reader and ripgrep search to setupSession. The
+ * Connect the real Documents reader and release Rust search to setupSession. The
  * regular session fixture intentionally has an empty search provider, so these
  * tests opt into the same Host-side services used by the application host.
  */
@@ -1199,8 +1200,11 @@ async function createExploreFixture(root: string) {
     authorityId: "explore-session-e2e-authority",
     documents,
   });
-  const search = createWorkspaceContentSearch({ documents, pathModule: path, spawn });
-  return { documents, identity, paths, search, workspaceRoot };
+  const compute = createNativeComputeTestHarness();
+  const search = createWorkspaceContentSearch({ documents, pathModule: path, compute });
+  return { documents, identity, paths, search, workspaceRoot, compute,
+    async dispose() { try { await compute.dispose(); } finally { await documents.dispose(); } },
+  };
 }
 
 describe("session e2e — explore", () => {
@@ -1255,7 +1259,7 @@ describe("session e2e — explore", () => {
         assert.match(stored.slice.text, /target\.ts:1-4/);
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1325,7 +1329,7 @@ describe("session e2e — explore", () => {
         );
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1379,7 +1383,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"handle":"out_[A-Za-z0-9_-]+"/);
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1432,7 +1436,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"handle":"out_[A-Za-z0-9_-]+"/);
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1474,7 +1478,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"anchors":\["uniqueAnchor"\]|"supplied":\["uniqueAnchor"\]/);
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1546,7 +1550,7 @@ describe("session e2e — explore", () => {
         assert.match(exploreResult, /"select":"used"/);
       } finally {
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1620,7 +1624,7 @@ describe("session e2e — explore", () => {
         dataDir: join(root, "semantic-data"),
         hostId: "explore-remote-e2e",
         documents: fixture.documents,
-        structureSource: createStructureSource([createTreeSitterStructureProvider({ parseBudgetMs: 10_000 })]),
+        structureSource: createStructureSource([createTreeSitterStructureProvider({ compute: fixture.compute, parseBudgetMs: 10_000 })]),
         searchFilesystemFiles: async () => [{
           name: "remote.ts",
           path: join(fixture.workspaceRoot, "remote.ts"),
@@ -1712,7 +1716,7 @@ describe("session e2e — explore", () => {
       } finally {
         await runtime.dispose();
         await session.dispose();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });
@@ -1777,7 +1781,7 @@ describe("session e2e — related", () => {
       } finally {
         await session.dispose();
         await store.close();
-        await fixture.documents.dispose();
+        await fixture.dispose();
         faux.unregister();
       }
     });

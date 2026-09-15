@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
-import { createRecoveryFileStore } from "../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime } from "./thread-runtime.js";
 import { IntegrationCoordinator } from "./working-state/integration-coordinator.js";

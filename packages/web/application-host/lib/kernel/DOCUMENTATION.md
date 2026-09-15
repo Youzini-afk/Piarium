@@ -4,14 +4,14 @@ The Application Host owns one `KernelClient` for its lifetime. `KernelClient.sta
 real `piarium-kernel` executable, performs the build/protocol/epoch/grant handshake, and keeps the private
 length-framed stdin/stdout transport separate from stderr. The kernel reports a compiled build identity and
 target; packaged Hosts verify the adjacent manifest, executable SHA-256 and actual PE/ELF/Mach-O architecture before spawning it. Large blob
-uploads and branch create/write batches use ordered chunks through a single-envelope request/response handoff; `AbortSignal` cancellation
-stops admission or the active kernel operation. `stop()` sends the ordered shutdown request and waits for the
+uploads and branch create/write batches use acknowledged request chunks through the handshake's request-credit window; `AbortSignal` cancellation
+stops queued admission or signals the active kernel operation without returning its credit before native acknowledgement. `close()` drains admitted work, sends shutdown when possible, and waits for the
 child to exit. A missing executable, protocol mismatch, malformed response, revoked grant, or child exit is
 an explicit Host failure; it never selects the old backend as a fallback.
 
 ## Responsibility table
 
-| Resource | Current authority | Kernel boundary through R5 |
+| Resource | Current authority | Kernel boundary after Stage R |
 | --- | --- | --- |
 | Thread/Run product catalog | TS `ThreadRegistry` | remains TS; kernel receives an actor/grant and operation IDs |
 | Pi sessions, models, credentials, extensions | Pi worker/native Pi | remains Pi; kernel never reads provider secrets |
@@ -33,8 +33,9 @@ entries. Blob bytes can only be read through a branch/pin path that resolves to 
 the exact temporary owner returned to the uploading grant. `KernelClient.scoped(handle)` injects that same explicit handle into each
 domain method; it is not a mutable global identity.
 
-R0 is wired from `application-host/index.ts` for Web/serve and Electron's embedded Host. Electron
-stages the executable outside `app.asar`; Web packaging stages it in the package `kernel/` directory.
+The R0 production assembly starts from `application-host/index.ts` for Web/serve and Electron's embedded Host.
+Electron stages the executable outside `app.asar`; Web/cloud stage it in package `kernel/`, and VS Code uses
+its own `dist/kernel` release resource.
 The private storage root is `<PIARIUM_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
 diagnostic record is not the lock) preventing two Hosts from writing it at once. Built-in Recovery shares
 this root and reports `application-data` with `storageManagement: false`; it is not independently relocatable.
@@ -59,8 +60,8 @@ durable `baseStates/pathStates` payloads or a Host-side compatibility projection
 
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with
-`node scripts/generate-kernel-protocol.mjs --check`. Request, cancel, and ordered data frames have
-separate envelopes, and Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v10; startup validates
+`node scripts/generate-kernel-protocol.mjs --check`. Request/response and cancel have separate envelopes; upload chunks are typed, sequenced
+requests and receive ordinary acknowledgements. Rust rejects unknown envelope/method fields before dispatch. The current storage/catalog format is v10; startup validates
 its schema fingerprint plus the complete table/index/column shape and never upgrades or repairs a mismatched catalog.
 
 The old TS `WorkingStateStore` remains only for unit fixtures. Application Host production assembly uses
@@ -69,6 +70,14 @@ Virtual publish pins one exact root through diff/read/publish, and scoped subtre
 Combined Recovery/Integration/agent-mutation uses `KernelRecoveryStore` directly; intent and file/terminal CAS are awaited before
 side effects or public completion. The old local SQLite recovery engine is a test helper and is unreachable from production imports.
 There is no transient close-time flush, WorkingState fallback, or optional durable dual-write path.
+
+R0/R6 release closure uses the same boundary in every shipped Host. Web/cloud stage `kernel/{manifest,binary}`;
+Electron places it at `resources/kernel`; the VS Code companion places it at `dist/kernel` and routes workspace
+content search through it. Release smoke starts emitted Host JavaScript and the executable from an unrelated cwd,
+copies the installation and reopens the same catalog under a new epoch, and rejects a bad manifest. Electron no
+longer ships or rebuilds `better-sqlite3`, `node-pty`, or `bun-pty`; target TriviumDB and sherpa binaries retain
+their own package checks. The emitted Application Host import graph rejects a reachable legacy/test implementation
+and prunes unreachable helpers before publication. See D-282 and the status matrix for measured evidence.
 
 R2 adds `fileResources` without exposing a generic arbitrary-filesystem escape hatch. The Host registers a
 Documents-authorized canonical execution root for an owning/execution workspace pair, then Rust resolves every
@@ -150,11 +159,10 @@ an unbound file store or Documents resource gate fails instead of writing the ke
 
 ## D-278 authority audit and acceptance boundary
 
-The independent audit is recorded in [rust-kernel-audit.md](../../../../../docs/rust-kernel-audit.md).
-R1 core storage cutover remains complete after GC/owner/pin repairs. R2/R3 retain their production primitives,
-but full recovery/lifecycle acceptance is reopened: unresolved low-level file operations must become visible Host
-state, and kernel promotion must be durably joined to Git executionBaseline and Thread Registry/view binding.
-Do not treat a helper suite or an optional legacy seam as proof of that native transition.
+The independent D-278 audit is recorded in [rust-kernel-audit.md](../../../../../docs/rust-kernel-audit.md).
+It historically reopened R2/R3 after GC/owner/pin repairs. D-279 closed those findings by exposing pending file
+operation disposition/reconcile and durably joining kernel promotion to Git executionBaseline and Thread Registry/
+view binding. The audit remains evidence provenance, not the current delivery status.
 
 Physical lease overlap now lives in Rust `storage/file_resource_leases.rs`, across all registered roots. Grant/root
 ownership still authorizes access; directional coverage alone authorizes use of an existing lease. Both nested
@@ -172,7 +180,9 @@ fingerprint and fail on drift; the implementation still rescans each page and ma
 Run `bun run test:kernel` from the repository root (or invoke its script by absolute path). The dedicated command
 requires a release binary and runs Node-only transport tests separately from Vitest authority/adapter/recovery tests.
 CI uses `node scripts/test-kernel-authority.mjs --build` in the existing Linux/Windows jobs. Generic tests may skip
-native cases in an unbuilt checkout; the dedicated acceptance command cannot silently skip them.
+native cases in an unbuilt checkout; the dedicated acceptance command cannot silently skip them. At D-282 the
+command passes 25 Node release-process cases and 70 native Vitest cases, including request-window saturation and
+truncated-input restart.
 
 ## Native process adapter
 

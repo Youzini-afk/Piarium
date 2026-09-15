@@ -5,6 +5,8 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
+pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(transparent)]
 pub(crate) struct RequiredNullable<T>(pub(crate) Option<T>);
@@ -135,6 +137,14 @@ pub(crate) struct KernelPutBlobBeginParams {
     pub(crate) byte_length: i64,
     pub(crate) expected_hash: Option<String>,
     pub(crate) workspace_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelPutBlobChunkParams {
+    pub(crate) stream_id: String,
+    pub(crate) sequence: i64,
+    pub(crate) bytes_base64: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -1184,6 +1194,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map_err(|error| error.to_string()),
         "storage.putBlob.begin" => {
             serde_json::from_value::<KernelPutBlobBeginParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "storage.putBlob.chunk" => {
+            serde_json::from_value::<KernelPutBlobChunkParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

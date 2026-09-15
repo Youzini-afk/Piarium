@@ -19,6 +19,7 @@ const smokePiPackageRoot = path.resolve(
   'pi-coding-agent',
 );
 const packagedResourcesRoot = path.join(path.dirname(appPath), 'resources');
+const packagedNodeModulesRoot = path.join(packagedResourcesRoot, 'app.asar.unpacked', 'node_modules');
 const packagedWebServerRoot = path.join(
   packagedResourcesRoot,
   'app.asar.unpacked',
@@ -27,6 +28,8 @@ const packagedWebServerRoot = path.join(
   'web',
   'server',
 );
+const packagedWebRoot = path.dirname(packagedWebServerRoot);
+const packagedKernelRoot = path.join(packagedResourcesRoot, 'kernel');
 const packagedTransformersRoot = path.join(
   packagedResourcesRoot,
   'app.asar.unpacked',
@@ -50,6 +53,21 @@ if (!existsSync(appPath)) {
 }
 if (!existsSync(path.join(smokePiPackageRoot, 'package.json'))) {
   throw new Error(`Missing Pi package used by the packaged Host smoke at ${smokePiPackageRoot}`);
+}
+
+const packagedWebManifest = JSON.parse(readFileSync(path.join(packagedWebRoot, 'package.json'), 'utf8'));
+for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
+  if (packagedWebManifest.dependencies?.[legacy] || existsSync(path.join(packagedNodeModulesRoot, legacy))) {
+    throw new Error(`Obsolete native authority entered the unpacked Windows application: ${legacy}`);
+  }
+}
+const packagedTrivium = path.join(packagedNodeModulesRoot, 'triviumdb', `triviumdb.win32-${process.arch}-msvc.node`);
+if (!existsSync(packagedTrivium)) throw new Error(`Missing packaged TriviumDB native binary at ${packagedTrivium}`);
+for (const required of [path.join(packagedKernelRoot, 'piarium-kernel.exe'), path.join(packagedKernelRoot, 'manifest.json')]) {
+  if (!existsSync(required) || statSync(required).size === 0) throw new Error(`Missing packaged Rust kernel resource at ${required}`);
+}
+if (!existsSync(path.join(packagedWebServerRoot, 'production-boundary.json'))) {
+  throw new Error('Packaged Host is missing its production-boundary audit manifest.');
 }
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -186,7 +204,7 @@ const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
     throw new Error(`Packaged semantic source marker does not match recipe at ${markerPath}`);
   }
 
-  const [documentsModule, fsSearchModule, structureSourceModule, treeSitterModule, semanticModule, minilmModule, identityModule] = await Promise.all([
+  const [documentsModule, fsSearchModule, structureSourceModule, treeSitterModule, semanticModule, minilmModule, identityModule, kernelClientModule, computeServiceModule] = await Promise.all([
     importPackagedServerModule('lib/documents/authority.js'),
     importPackagedServerModule('lib/fs/search.js'),
     importPackagedServerModule('lib/structure/source.js'),
@@ -194,7 +212,18 @@ const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
     importPackagedServerModule('lib/knowledge/semantic/runtime.js'),
     importPackagedServerModule('lib/knowledge/semantic/minilm.js'),
     importPackagedServerModule('lib/knowledge/semantic/identity.js'),
+    importPackagedServerModule('lib/kernel/kernel-client.js'),
+    importPackagedServerModule('lib/kernel/compute-service.js'),
   ]);
+  const webVersion = JSON.parse(readFileSync(path.join(packagedWebRoot, 'package.json'), 'utf8')).version;
+  const kernel = kernelClientModule.createKernelClient({
+    hostId: 'packaged-semantic-smoke',
+    storageRoot: path.join(semanticDataDir, 'kernel'),
+    kernelPath: path.join(packagedKernelRoot, 'piarium-kernel.exe'),
+    buildVersion: webVersion,
+    requireKernelManifest: true,
+    allowCargoDevRunner: false,
+  });
   const documents = documentsModule.createDocumentAuthority({
     hostId: 'packaged-semantic-smoke',
     dataDir: semanticDataDir,
@@ -204,16 +233,27 @@ const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
     isTrusted: async () => true,
   });
   let runtime;
+  let compute;
   try {
+    await kernel.start();
     const identity = await documents.resolveWorkspace({ path: workspaceRoot });
+    compute = computeServiceModule.createKernelComputeService({
+      client: kernel,
+      resolveIdentity: async (cwd) => {
+        const resolved = await documents.resolveWorkspace({ path: cwd });
+        const inspected = await documents.inspectWorkspace(resolved.workspaceId);
+        return {
+          workspaceId: resolved.workspaceId,
+          executionWorkspaceId: resolved.workspaceId,
+          canonicalRoot: inspected.root,
+        };
+      },
+    });
     const fileSearch = fsSearchModule.createFsSearchRuntime({
-      fsPromises: fsp,
-      path,
-      spawn,
-      resolveGitBinaryForSpawn: () => 'git',
+      compute,
     });
     const structureSource = structureSourceModule.createStructureSource([
-      treeSitterModule.createTreeSitterStructureProvider(),
+      treeSitterModule.createTreeSitterStructureProvider({ compute, parseBudgetMs: 10_000 }),
     ]);
     runtime = semanticModule.createSemanticIndexRuntime({
       dataDir: semanticDataDir,
@@ -266,6 +306,8 @@ const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
     };
   } finally {
     await runtime?.dispose().catch(() => {});
+    await compute?.dispose().catch(() => {});
+    await kernel.close().catch(() => {});
     await documents.dispose?.().catch(() => {});
   }
 };

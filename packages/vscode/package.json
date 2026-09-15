@@ -212,7 +212,7 @@
   },
   "scripts": {
     "vscode:prepublish": "bun run build",
-    "build": "bun run prepare:pi-runtime && bun run prepare:extension-host && bun run build:extension && bun run build:webview",
+    "build": "bun run --cwd ../web build:application-host && bun run prepare:kernel && bun run prepare:pi-runtime && bun run prepare:extension-host && bun run build:extension && bun run build:webview",
     "prepare:pi-runtime": "bun run --cwd ../settings-store build && bun run --cwd ../runtime-broker build && node scripts/prepare-pi-runtime.mjs",
     "prepare:extension-host": "bun run --cwd ../extension-host build && bun run --cwd ../extension-loader build && node scripts/prepare-extension-host.mjs",
     "test:pi-runtime": "node scripts/test-pi-runtime.mjs",
@@ -225,7 +225,9 @@
     "watch:webview": "vite build --watch",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "lint": "bun x eslint --ext .ts,.tsx src webview",
-    "package": "vsce package --no-dependencies"
+    "package": "vsce package --no-dependencies",
+    "prepare:kernel": "node ../../scripts/build-kernel.mjs --stage dist/kernel",
+    "test:native-search": "node scripts/test-native-search.mjs"
   },
   "devDependencies": {
     "@types/vscode": "1.85.0",

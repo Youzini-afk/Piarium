@@ -9,7 +9,7 @@ import type {
   RecoveryState,
   ResolvedPath,
 } from "../recovery/journal-files.js";
-import { createRecoveryFileStore, normalizeResourceId, parseRecoveryState } from "../recovery/journal-files.js";
+import { createRecoveryFileReader, normalizeResourceId, parseRecoveryState } from "../recovery/journal-files.js";
 import type { HostResourceOperation, HostResourceOperationGate } from "../recovery/durable-file-operation.js";
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from "./storage-adapter.js";
 
@@ -68,7 +68,7 @@ const parseCaptured = (value: Record<string, unknown>): CapturedState => {
 };
 
 export class KernelFileResourceBackend implements RecoveryFileStore {
-  private readonly helper = createRecoveryFileStore();
+  private readonly helper = createRecoveryFileReader();
   private readonly leaseContext = new AsyncLocalStorage<LeaseContext>();
   private readonly busyRetryMs: number;
 

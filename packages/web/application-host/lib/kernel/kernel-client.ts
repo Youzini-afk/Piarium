@@ -1,17 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { once } from "node:events";
+import { KernelRequestWindow } from "./request-window.js";
 import fs from "node:fs";
 import path from "node:path";
 import type { Writable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import {
   KERNEL_PROTOCOL_VERSION,
+  KERNEL_REQUEST_WINDOW,
   type KernelBranchReadResult,
   type KernelBranchChange,
   type KernelCreateEntry,
   type KernelError,
   type KernelHandshakeResult,
+  type KernelGrantIssueParams,
   type KernelHealthResult,
   type KernelGetBlobParams,
   type KernelMethod,
@@ -47,6 +49,10 @@ export interface KernelClientOptions {
   requireKernelManifest?: boolean;
   onExit?: (error: Error) => void;
 }
+
+export type KernelGrantIssueInput = Pick<KernelGrantIssueParams, "grantId" | "capabilities" | "pathScopes"> & {
+  [K in Exclude<keyof KernelGrantIssueParams, "grantId" | "capabilities" | "pathScopes">]?: KernelGrantIssueParams[K] | undefined;
+};
 
 export type KernelBlobReadSource =
   | { branchId: string; path: string; revision?: number }
@@ -389,6 +395,8 @@ export class KernelScopedClient {
 }
 
 interface PendingRequest {
+  release(): void;
+  cancel(): void;
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
   grantId?: string | undefined;
@@ -495,6 +503,9 @@ export class KernelClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private buffer = Buffer.alloc(0);
   private readonly pending = new Map<string, PendingRequest>();
+  private window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+  private closePromise: Promise<void> | undefined;
+  private readonly revokedGrants = new Set<string>();
   private started = false;
   private readonly exitListeners = new Set<(error: Error) => void>();
   private closed = false;
@@ -595,6 +606,8 @@ export class KernelClient {
     } else if (this.options.requireKernelManifest ?? process.env.NODE_ENV === "production") {
       throw new KernelClientError({ code: "kernel-manifest-missing", message: "Rust kernel manifest is required for this Host", retryable: false });
     }
+    this.window = new KernelRequestWindow(KERNEL_REQUEST_WINDOW);
+    this.revokedGrants.clear();
     const child = this.spawnProcess(command.command, [...command.args, "--stdio"], {
       cwd: this.options.cwd ?? process.cwd(),
       env: {
@@ -606,7 +619,7 @@ export class KernelClient {
       windowsHide: true,
     });
     this.child = child;
-    child.stdout.on("data", (chunk: Buffer | string) => this.consume(chunk));
+    child.stdout.on("data", (chunk: Buffer | string) => { if (this.child === child) this.consume(chunk); });
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
       // request responses; the Host can attach a logger at the process layer.
@@ -614,6 +627,7 @@ export class KernelClient {
     });
     child.once("error", (error) => this.failAll(new KernelClientError({ code: "kernel-spawn-failed", message: error.message, retryable: true })));
     child.once("exit", (code, signal) => {
+      if (this.child !== child) return;
       const error = new KernelClientError({
         code: "kernel-exited",
         message: `Rust kernel exited (${signal ?? code ?? "unknown"})`,
@@ -638,7 +652,7 @@ export class KernelClient {
     }
     const requiredCapabilities = ["storage", "workingState", "recovery", "branchCas", "pins", "gc"];
     const expectedHostGeneration = this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`;
-    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || !result.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
+    if (result.protocolVersion !== KERNEL_PROTOCOL_VERSION || result.requestWindow !== KERNEL_REQUEST_WINDOW || !result.kernelEpoch || result.applicationBuildVersion !== this.options.buildVersion
       || result.buildVersion !== result.kernelBuildIdentity
       || (manifest && (result.kernelBuildIdentity !== manifest.buildIdentity || result.targetTriple !== manifest.targetTriple || result.arch !== manifest.arch))
       || (this.options.kernelBuildIdentity !== undefined && result.kernelBuildIdentity !== this.options.kernelBuildIdentity)
@@ -688,6 +702,7 @@ export class KernelClient {
       const pending = this.pending.get(response.id);
       if (!pending) continue;
       this.pending.delete(response.id);
+      pending.release();
       if (response.ok) pending.resolve(response.result);
       else {
         pending.reject(new KernelClientError(response.error ?? { code: "kernel-error", message: "Rust kernel request failed" }));
@@ -696,7 +711,8 @@ export class KernelClient {
   }
 
   private failAll(error: Error, terminate = false): void {
-    for (const pending of this.pending.values()) pending.reject(error);
+    this.window.close(error);
+    for (const pending of this.pending.values()) { pending.reject(error); pending.release(); }
     this.pending.clear();
     for (const listener of this.exitListeners) {
       try { listener(error); } catch { /* A projection cannot prevent other handle invalidations. */ }
@@ -713,53 +729,54 @@ export class KernelClient {
     const stdin = this.child?.stdin;
     if (!stdin || stdin.destroyed) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel stdin is unavailable", retryable: true });
     const writable = stdin as Writable;
-    if (!writable.write(frame(JSON.stringify(request)))) await once(writable, "drain");
+    // The callback settles on delivery or stream failure, including destruction
+    // while backpressured. Waiting only for 'drain' can hang after disconnect.
+    await new Promise<void>((resolve, reject) => writable.write(frame(JSON.stringify(request)), error => error ? reject(error) : resolve()));
   }
 
   private async requestRaw<T, M extends KernelMethod = KernelMethod>(method: M, params: KernelMethodParams[M], options: { signal?: AbortSignal | undefined; grant?: KernelGrantHandle | undefined; allowBootstrap?: boolean | undefined } = {}): Promise<T> {
-    const id = randomUUID();
-    const grant = options.grant
-      ? this.assertGrant(options.grant)
-      : this.isManagementMethod(method)
-        ? this.managementGrant
-        : null;
-    if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke") {
-      throw new KernelClientError({ code: "kernel-grant-required", message: `A scoped grant is required for ${method}`, retryable: false });
-    }
-    const request = {
-      v: KERNEL_PROTOCOL_VERSION,
-      kind: "request",
-      id,
-      method,
-      params,
-      ...(this.epoch ? { epoch: this.epoch } : {}),
-      ...(grant ? { grantId: grant.grantId } : {}),
-    } as KernelRequest;
-    let rejectPending: ((error: unknown) => void) | undefined;
-    const promise = new Promise<T>((resolve, reject) => {
-      rejectPending = reject;
-      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, grantId: grant?.grantId });
-    });
-    // Abort can fire while stdin is blocked on drain. Attach a handler before
-    // awaiting the write so Node never observes the pending request as an
-    // unhandled rejection during genuine transport backpressure.
-    void promise.catch(() => undefined);
-    const abort = () => {
-      if (!this.pending.delete(id)) return;
-      rejectPending?.(new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }));
-      void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) }).catch(() => undefined);
-    };
-    const signal = options.signal;
-    if (signal?.aborted) { abort(); throw new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true }); }
-    signal?.addEventListener("abort", abort, { once: true });
+    const cancelled = () => new KernelClientError({ code: "cancelled", message: "Kernel request cancelled", retryable: true });
+    const release = this.closed && method === "kernel.shutdown" ? () => undefined : await this.window.acquire(options.signal, cancelled);
+    let admitted = false;
     try {
-      await this.write(request);
-      return await promise;
-    } catch (error) {
-      this.pending.delete(id);
-      throw error;
+      if (this.closed && method !== "kernel.shutdown") throw new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closed" });
+      if (options.signal?.aborted) throw cancelled();
+      const id = randomUUID();
+      const grant = options.grant ? this.assertGrant(options.grant) : this.isManagementMethod(method) ? this.managementGrant : null;
+      if (grant && this.revokedGrants.has(grant.grantId)) throw new KernelClientError({ code: "forbidden", message: "Kernel grant was revoked" });
+      if (this.epoch && !grant && !options.allowBootstrap && method !== "kernel.handshake" && method !== "authority.grant.issue" && method !== "authority.grant.revoke") {
+        throw new KernelClientError({ code: "kernel-grant-required", message: "A scoped grant is required for " + method, retryable: false });
+      }
+      const identity = { ...(this.epoch ? { epoch: this.epoch } : {}), ...(grant ? { grantId: grant.grantId } : {}) };
+      const request = { v: KERNEL_PROTOCOL_VERSION, kind: "request", id, method, params, ...identity } as KernelRequest;
+      let rejectPending!: (error: unknown) => void;
+      let cancelSent = false;
+      const abort = () => {
+        if (!this.pending.has(id) || cancelSent) return;
+        cancelSent = true;
+        rejectPending(cancelled());
+        // Keep the ledger entry/credit until Rust acknowledges the actual stop.
+        // Control frames bypass the ordinary request window.
+        void this.write({ v: KERNEL_PROTOCOL_VERSION, kind: "cancel", id, ...identity }).catch(error => this.failAll(error instanceof Error ? error : new Error(String(error)), true));
+      };
+      const promise = new Promise<T>((resolve, reject) => {
+        rejectPending = reject;
+        this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, release, cancel: abort, grantId: grant?.grantId });
+      });
+      admitted = true;
+      void promise.catch(() => undefined);
+      options.signal?.addEventListener("abort", abort, { once: true });
+      try {
+        await this.write(request);
+        return await promise;
+      } catch (error) {
+        if (!cancelSent && this.pending.has(id)) this.failAll(error instanceof Error ? error : new Error(String(error)), true);
+        throw error;
+      } finally {
+        options.signal?.removeEventListener("abort", abort);
+      }
     } finally {
-      signal?.removeEventListener("abort", abort);
+      if (!admitted) release();
     }
   }
 
@@ -796,7 +813,10 @@ export class KernelClient {
       for (let offset = 0; offset < source.byteLength; offset += chunkSize) {
         signal?.throwIfAborted();
         const chunk = source.subarray(offset, Math.min(offset + chunkSize, source.byteLength));
-        await this.writeDataFrame(streamId, sequence, chunk, scoped);
+        const receipt = await this.requestRaw<{ sequence: number }>("storage.putBlob.chunk", {
+          streamId, sequence, bytesBase64: chunk.toString("base64"),
+        }, { signal, grant: scoped });
+        if (receipt.sequence !== sequence) throw new Error("Kernel acknowledged a different upload sequence");
         sequence += 1;
       }
       return await this.requestRaw<KernelPutBlobResult>("storage.putBlob.finish", {
@@ -813,19 +833,6 @@ export class KernelClient {
       }, { grant: scoped }).catch(() => undefined);
       throw error;
     }
-  }
-
-  private async writeDataFrame(streamId: string, sequence: number, bytes: Uint8Array, grant: InternalGrantHandle): Promise<void> {
-    await this.write({
-      v: KERNEL_PROTOCOL_VERSION,
-      kind: "data",
-      id: streamId,
-      streamId,
-      sequence,
-      bytesBase64: Buffer.from(bytes).toString("base64"),
-      epoch: this.epoch ?? grant.kernelEpoch,
-      grantId: grant.grantId,
-    });
   }
 
   async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
@@ -1093,20 +1100,31 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("recovery.operation.release", params, { signal, grant });
   }
 
-  async issueGrant(params: Record<string, unknown>, signal?: AbortSignal): Promise<KernelGrantHandle> {
+  async issueGrant(params: KernelGrantIssueInput, signal?: AbortSignal): Promise<KernelGrantHandle> {
     if (!this.handshakeResult) await this.start();
     const grant = await this.requestRaw<Record<string, unknown>>("authority.grant.issue", {
-      ...params,
+      grantId: params.grantId,
+      capabilities: params.capabilities,
+      pathScopes: params.pathScopes,
+      sessionId: params.sessionId ?? null,
+      threadId: params.threadId ?? null,
+      runId: params.runId ?? null,
+      owningWorkspace: params.owningWorkspace ?? null,
+      executionWorkspace: params.executionWorkspace ?? null,
+      storageIdentity: params.storageIdentity ?? this.handshakeResult!.storageRoot,
       hostGeneration: params.hostGeneration ?? this.options.hostGeneration ?? `${this.options.hostId}:${process.pid}`,
-      ...(params.storageIdentity === undefined && this.handshake?.storageRoot
-        ? { storageIdentity: this.handshake.storageRoot }
-        : {}),
+      ...(params.authorityInstanceId === undefined ? {} : { authorityInstanceId: params.authorityInstanceId }),
+      ...(params.workerId === undefined ? {} : { workerId: params.workerId }),
+      ...(params.workerGeneration === undefined ? {} : { workerGeneration: params.workerGeneration }),
     }, { signal });
+    this.revokedGrants.delete(String(grant.grant_id));
     return this.grantFromResponse(grant);
   }
 
   async revokeGrant(grantId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     if (!this.handshakeResult) await this.start();
+    this.revokedGrants.add(grantId);
+    for (const pending of this.pending.values()) if (pending.grantId === grantId) pending.cancel();
     return this.requestRaw<Record<string, unknown>>("authority.grant.revoke", { grantId }, { signal });
   }
 
@@ -1157,37 +1175,40 @@ export class KernelClient {
     return this.requestRaw<Record<string, unknown>>("storage.record.release", params, { signal, grant });
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    this.closePromise ??= this.closeInternal().catch(error => { this.closePromise = undefined; throw error; });
+    return this.closePromise;
+  }
+
+  private async closeInternal(): Promise<void> {
     this.closed = true;
-    if (this.handshakeResult && this.child && !this.child.killed) {
-      await this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }).catch(() => undefined);
-    }
+    this.window.close(new KernelClientError({ code: "kernel-client-closed", message: "Kernel client is closing" }));
+    for (const pending of this.pending.values()) pending.cancel();
     const child = this.child;
-    this.child = null;
     if (!child) return;
-    const waitForExit = (): Promise<boolean> => new Promise((resolve) => {
-      if (child.exitCode !== null || child.signalCode !== null) {
-        resolve(true);
-        return;
-      }
-      const onExit = () => {
-        clearTimeout(timer);
-        resolve(true);
-      };
-      const timer = setTimeout(() => {
-        child.removeListener("exit", onExit);
-        resolve(false);
-      }, 5_000);
+    const bounded = async (work: Promise<unknown>): Promise<boolean> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
+      } finally { if (timer) clearTimeout(timer); }
+    };
+    if (await bounded(this.window.whenIdle()) && this.handshakeResult && !child.killed) {
+      await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
+    }
+    const waitForExit = (): Promise<boolean> => new Promise(resolve => {
+      if (child.exitCode !== null || child.signalCode !== null) { resolve(true); return; }
+      const onExit = () => { clearTimeout(timer); resolve(true); };
+      const timer = setTimeout(() => { child.removeListener("exit", onExit); resolve(false); }, 5_000);
       child.once("exit", onExit);
     });
-    if (child.exitCode !== null || child.signalCode !== null) return;
-    if (!child.killed) child.stdin.end();
-    const stopped = await waitForExit();
-    if (stopped) return;
-    child.kill();
-    const killed = await waitForExit();
-    if (!killed) throw new KernelClientError({ code: "kernel-stop-failed", message: "Rust kernel did not exit after termination", retryable: true });
+    if (child.exitCode === null && child.signalCode === null) {
+      if (!child.stdin.destroyed && !child.stdin.writableEnded) child.stdin.end();
+      if (!await waitForExit()) {
+        child.kill();
+        if (!await waitForExit()) throw new KernelClientError({ code: "kernel-stop-failed", message: "Rust kernel did not exit after termination", retryable: true });
+      }
+    }
+    if (this.child === child) this.child = null;
   }
 }
 

@@ -1,4 +1,3 @@
-import path from 'node:path';
 import ts from 'typescript';
 
 const compilerOptions: ts.CompilerOptions = {

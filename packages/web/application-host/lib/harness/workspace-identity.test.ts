@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HarnessActorContext, HarnessServiceMap, SessionSnapshot, SessionStats } from "@piarium/protocol";
 import { createDocumentAuthority } from "../documents/authority.js";
-import { createRecoveryFileStore } from "../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { createObservationCursorStore } from "./observation-cursors.js";

@@ -326,6 +326,7 @@ export class DocumentRegistry {
   private readonly workspaceEditUndoGroups = new Map<string, WorkspaceEditUndoGroup>();
   private readonly dirtyBarriers = new Map<string, DirtyBarrierHold>();
   private disposed = false;
+  private disposePromise: Promise<void> | null = null;
 
   constructor(options: RegistryOptions) {
     this.documents = options.documents;
@@ -1252,8 +1253,9 @@ export class DocumentRegistry {
     if (failures.length > 0) throw new AggregateError(failures, 'Failed to persist document recovery journals');
   }
 
-  dispose(): void {
-    if (this.disposed) return;
+  dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    const pendingPublications: Promise<unknown>[] = [];
     const dirtyRecords = [...this.records.values()].filter((record) => record.dirty);
     const dirtyWorkspaces = [...this.dirtyIdsByWorkspace.keys()];
     this.disposed = true;
@@ -1282,13 +1284,17 @@ export class DocumentRegistry {
     for (const workspaceId of dirtyWorkspaces) {
       const previous = this.dirtyPublicationTails.get(workspaceId) ?? Promise.resolve();
       const generation = this.getGeneration();
-      void previous.catch(() => undefined).then(() => this.documents.clearDirtyBuffers({
+      pendingPublications.push(previous.catch(() => undefined).then(() => this.documents.clearDirtyBuffers({
         generation,
         ownerId: this.dirtyOwnerId,
         workspaceId,
-      })).catch(() => undefined);
+      })).catch(() => undefined));
     }
     this.dirtyPublicationTails.clear();
+    // Callers sharing the Host process must observe final journal/dirty-owner
+    // delivery before disposing the authority it writes to.
+    this.disposePromise = Promise.allSettled([...this.journalOperations.values(), ...pendingPublications]).then(() => undefined);
+    return this.disposePromise;
   }
 
   private commit(record: DocumentRecord): void {

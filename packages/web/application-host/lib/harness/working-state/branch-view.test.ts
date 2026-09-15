@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { listBranchTextFiles, listBranchView, readBranchFile } from "./branch-view.js";
 import { WorkingStateStore } from "./working-state-store.js";
 import { asTestWorkingStateRootStore } from "./working-state-root-adapter.test-helper.js";

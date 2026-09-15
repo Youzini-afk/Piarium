@@ -54,14 +54,11 @@
         "@piarium/runtime-broker": "workspace:*",
         "@piarium/settings-store": "workspace:*",
         "@piarium/web": "workspace:*",
-        "better-sqlite3": "^13.0.3",
         "electron-context-menu": "^4.1.2",
         "electron-log": "^5.4.3",
         "electron-updater": "^6.8.9",
-        "node-pty": "1.2.0-beta.15",
       },
       "devDependencies": {
-        "@electron/rebuild": "^4.2.0",
         "electron": "^43.3.0",
         "electron-builder": "^26.15.7",
         "node-abi": "^4.33.0",
@@ -364,8 +361,6 @@
         "@piarium/settings-store": "workspace:*",
         "@simplewebauthn/server": "13.3.2",
         "adm-zip": "^0.6.0",
-        "better-sqlite3": "^13.0.3",
-        "bun-pty": "^0.4.5",
         "compression": "^1.8.1",
         "cron-parser": "^4.9.0",
         "diff": "9.0.0",
@@ -377,7 +372,6 @@
         "linkedom": "0.18.13",
         "luxon": "^3.5.0",
         "multer": "^2.1.1",
-        "node-pty": "1.2.0-beta.15",
         "openai": "^4.79.0",
         "picomatch": "4.0.5",
         "qrcode-terminal": "^0.12.0",
@@ -413,6 +407,7 @@
         "@types/ws": "^8.18.1",
         "@types/yazl": "^3.3.1",
         "@vitejs/plugin-react": "^5.0.0",
+        "better-sqlite3": "^13.0.3",
         "eslint": "^9.33.0",
         "nodemon": "^3.1.7",
         "supertest": "^7.2.2",
@@ -1790,8 +1785,6 @@
 
     "builder-util-runtime": ["builder-util-runtime@9.7.0", "", { "dependencies": { "debug": "^4.3.4", "sax": "^1.2.4" } }, "sha512-g/kR520giAFYkSXTzcmF3kqQq7wi8F6N6SzeDgZrqTBN+VHdmgWOyTdD1yD7AATDId/yXLvuP34CxW46/BwCdw=="],
 
-    "bun-pty": ["bun-pty@0.4.10", "", {}, "sha512-7WFtCw9MwG9gMMvkX+pwUOavNbgmfL+masMWmO9d/HdFCz8VdR+5G4Q3UCLhy2OJ/ImbWuJ1FHFmm0KdgW102w=="],
-
     "bundle-name": ["bundle-name@4.1.0", "", { "dependencies": { "run-applescript": "^7.0.0" } }, "sha512-tjwM5exMg6BGRI+kNmTntNsvdZS1X8BFYS6tnJ2hdH0kVxM6/eVZ2xy+FqStSWvYmtfFMDLIxurorHwDKfDz5Q=="],
 
     "busboy": ["busboy@1.6.0", "", { "dependencies": { "streamsearch": "^1.1.0" } }, "sha512-8SFQbg/0hQ9xy3UNTB0YEnsNBbWfhf7RtnzpL7TkBiTBRfrQ9Fxcnz7VJsleJpyp6rVLvXiuORqjlHi5q+PYuA=="],
@@ -2625,8 +2618,6 @@
     "node-gyp-build": ["node-gyp-build@4.8.4", "", { "bin": { "node-gyp-build": "bin.js", "node-gyp-build-optional": "optional.js", "node-gyp-build-test": "build-test.js" } }, "sha512-LA4ZjwlnUblHVgq0oBF3Jl/6h/Nvs5fzBLwdEF4nuxnFdsfajde4WfxtJr3CaiH+F6ewcIB/q4jQ4UzPyid+CQ=="],
 
     "node-int64": ["node-int64@0.4.0", "", {}, "sha512-O5lz91xSOeoXP6DulyHfllpq+Eg00MWitZIbtPfoSEvqIHdl5gfcY6hYzDWnj0qD5tz52PI08u9qUvSVeUBeHw=="],
-
-    "node-pty": ["node-pty@1.2.0-beta.15", "", { "dependencies": { "node-addon-api": "^7.1.0" } }, "sha512-vORSzHXi4Ofl7HemVWpuudLqCPdaQb4LfpRCUpE5HPxhp4JYscl8zZwxh11p26v2wvW24WMwnMfLjhRLixrfxA=="],
 
     "node-releases": ["node-releases@2.0.51", "", {}, "sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ=="],
 

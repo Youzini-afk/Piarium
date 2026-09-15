@@ -21,10 +21,11 @@ const createPayload = () => {
   ].join('\n'));
   writeElf(path.join(root, 'piarium'), 'x64');
   writeElf(
-    path.join(root, 'resources/app.asar.unpacked/node_modules/better-sqlite3/prebuilds/linux-x64.node'),
+    path.join(root, 'resources/app.asar.unpacked/node_modules/triviumdb/triviumdb.linux-x64-gnu.node'),
     'x64',
   );
-  for (const name of ['pty.node', 'sherpa-onnx.node']) {
+  writeElf(path.join(root, 'resources/kernel/piarium-kernel'), 'x64');
+  for (const name of ['sherpa-onnx.node']) {
     writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules', name), 'x64');
   }
   return root;
@@ -54,7 +55,7 @@ test('verifies identity and native payload architecture', () => {
       root,
       targetArchitecture: 'x64',
     });
-    assert.equal(result.nativeModuleCount, 3);
+    assert.equal(result.nativeModuleCount, 2);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -63,11 +64,11 @@ test('verifies identity and native payload architecture', () => {
 test('fails on a missing native module', () => {
   const root = createPayload();
   try {
-    fs.rmSync(path.join(root, 'resources/app.asar.unpacked/node_modules/pty.node'));
+    fs.rmSync(path.join(root, 'resources/app.asar.unpacked/node_modules/sherpa-onnx.node'));
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',
-    }), /Missing packaged native module: pty\.node/);
+    }), /Missing packaged native module: sherpa-onnx\.node/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -76,7 +77,7 @@ test('fails on a missing native module', () => {
 test('fails on wrong native architecture', () => {
   const root = createPayload();
   try {
-    writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules/pty.node'), 'arm64');
+    writeElf(path.join(root, 'resources/app.asar.unpacked/node_modules/sherpa-onnx.node'), 'arm64');
     assert.throws(() => verifyExtractedPayload({
       root,
       targetArchitecture: 'x64',

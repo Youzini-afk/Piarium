@@ -47,29 +47,13 @@ module.exports = (context) => {
     || kernelManifest.kernelVersion !== '0.1.0') {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
-  const betterSqliteDir = path.dirname(require.resolve('better-sqlite3/package.json'));
-  const betterSqlitePrebuildName = `${context.electronPlatformName}-${targetArchitecture}.node`;
-  const betterSqliteBinary = path.join(betterSqliteDir, 'prebuilds', betterSqlitePrebuildName);
-  if (!fs.existsSync(betterSqliteBinary)) {
-    throw new Error(`Missing better-sqlite3 prebuild at ${betterSqliteBinary}`);
-  }
-  const packagedBetterSqliteBinary = path.join(
-    unpackedNodeModulesPath,
-    'better-sqlite3',
-    'prebuilds',
-    betterSqlitePrebuildName,
-  );
-  fs.mkdirSync(path.dirname(packagedBetterSqliteBinary), { recursive: true });
-  fs.copyFileSync(betterSqliteBinary, packagedBetterSqliteBinary);
-
-  const packagedBetterSqliteDir = path.join(unpackedNodeModulesPath, 'better-sqlite3');
-  for (const entry of fs.readdirSync(path.join(packagedBetterSqliteDir, 'prebuilds'))) {
-    if (entry !== betterSqlitePrebuildName) {
-      fs.rmSync(path.join(packagedBetterSqliteDir, 'prebuilds', entry), { recursive: true, force: true });
-    }
-  }
-  for (const buildOnlyPath of ['build', 'deps', 'src', 'binding.gyp']) {
-    fs.rmSync(path.join(packagedBetterSqliteDir, buildOnlyPath), { recursive: true, force: true });
+  const trivium = path.join(unpackedNodeModulesPath, 'triviumdb');
+  const suffix = context.electronPlatformName === 'win32' ? '-msvc' : context.electronPlatformName === 'linux' ? '-gnu' : '';
+  const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';
+  if (!fs.existsSync(path.join(trivium, triviumBinary))) throw new Error('Missing target TriviumDB binary: ' + triviumBinary);
+  for (const name of fs.readdirSync(trivium)) if (name.endsWith('.node') && name !== triviumBinary) fs.rmSync(path.join(trivium, name));
+  for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
+    if (fs.existsSync(path.join(unpackedNodeModulesPath, legacy))) throw new Error('Obsolete native authority entered release: ' + legacy);
   }
 
   const packagedWebDistPath = path.join(resourcesPath, 'web-dist');

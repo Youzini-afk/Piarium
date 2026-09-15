@@ -13,7 +13,7 @@ import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./w
 import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
-import { createRecoveryFileStore } from "../recovery/journal-files.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createDocumentAuthority } from "../documents/authority.js";
 import { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import { createThreadWorktreeRuntime } from "./thread-worktree.js";
