@@ -392,7 +392,8 @@ export interface Thread {
   workspaceId: string;
   forkPoint: { entryId: string } | null;
   brief: string;
-  role: string | null;
+  /** Execution preset the Thread was dispatched with, if any (D-285). */
+  preset: string | null;
   model: import("./harness-settings.js").ModelSelection | null;
   manifest: ThreadLaunchManifest;
   createdBy: ThreadCreatedBy;
@@ -530,6 +531,28 @@ export interface ThreadReviewOf {
   resultRevision: number;
 }
 
+/**
+ * Execution configuration frozen at Run start (D-285): the model, tool
+ * allowlist, permission overlay, scope, worktree mode, prompt fragment, and
+ * input origin this Run actually runs with. Later Runs on the same Thread
+ * may freeze different values; the Thread manifest projects the latest.
+ */
+export interface ThreadRunFrozenConfig {
+  model: import("./harness-settings.js").ModelSelection | null;
+  tools: string[];
+  permissions?: PermissionPolicy;
+  scope: string[];
+  worktree: "none" | "shared" | "isolated";
+  systemPromptFragment: string | null;
+  /**
+   * Where this Run's input came from (D-285.4): `task` is a fresh task brief;
+   * `inherit` retains existing session content (e.g. a discussion converted
+   * into an implementation Run). `continue`/`fresh` arrive with the settled
+   * rerun path.
+   */
+  inputOrigin: "task" | "inherit";
+}
+
 export interface ThreadRun {
   id: string;
   threadId: string;
@@ -538,6 +561,8 @@ export interface ThreadRun {
   sessionId: string | null;
   /** Last published resultRevision known when this Run started, if any. */
   inputRevision?: number;
+  /** Frozen execution configuration for this Run (absent on pre-D-285 records). */
+  frozen?: ThreadRunFrozenConfig;
   workerState: ThreadRunWorkerState;
   outcome: ThreadRunOutcome | null;
   exitReason: string | null;
@@ -593,7 +618,7 @@ export interface ThreadListItem {
   integration: ThreadIntegration;
   brief: string;
   createdAt: string;
-  role: string | null;
+  preset: string | null;
   updatedAt: string;
   activeRun: ThreadRun | null;
   waitingFor: ThreadWaitingFor | null;
@@ -780,11 +805,30 @@ export interface ThreadKillResult {
 export interface ThreadDispatchParams {
   /** Frozen parent-session setting; not exposed as a model tool argument. */
   concurrency?: number;
-  role: string;
   task: string;
+  /**
+   * Optional execution preset id. Absent = normal dispatch on the caller's
+   * current model and authorized tools (D-285).
+   */
+  preset?: string;
   scope?: string[];
-  /** Resolved by pi-host from the session's frozen role catalog. */
+  /**
+   * Explicit shared WorkingState opt-in. Default for write-capable work is
+   * an isolated WorkingState materialized on demand; presets no longer force
+   * `shared` (D-285).
+   */
+  worktree?: "shared";
+  /**
+   * Resolved by pi-host: the preset's model (slot or explicit inherit), or
+   * the dispatching session's current model for a normal dispatch.
+   */
   model?: import("./harness-settings.js").ModelSelection;
+  /**
+   * Resolved by pi-host for a preset-less dispatch: the dispatching
+   * session's active tool names. The Host clamps it to the owning Thread's
+   * frozen allowlist; presets use their declared tool list instead.
+   */
+  tools?: string[];
 }
 
 export interface ThreadFactsSetParams {

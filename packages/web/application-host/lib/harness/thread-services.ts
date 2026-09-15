@@ -17,7 +17,7 @@ import { validateRetrievalEvidence } from "./retrieval-evidence.js";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
-import { ROLE_DEFINITIONS } from "./roles.js";
+import { EXECUTION_PRESETS } from "./presets.js";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
@@ -109,7 +109,7 @@ const formatThreadLine = (snapshot: ThreadSnapshot, cursor: ThreadViewCursor | n
     : "…";
   const steps = activeRun?.steps ?? 0;
   const lastActivityAt = activeRun?.lastActivityAt ?? thread.updatedAt;
-  let line = `${icon} ${thread.id} (${thread.role ?? "user thread"}) ${state}`;
+  let line = `${icon} ${thread.id} (${thread.preset ?? "user thread"}) ${state}`;
   if (cursor && cursorChanged(snapshot, cursor)) line += " (changed)";
   if (full || !cursor || steps > 0) line += ` · ${full || !cursor ? steps : `+${steps}`} steps`;
   line += ` · last activity ${lastActivityAt}`;
@@ -189,12 +189,22 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (!registry || !host.threadSpawnSession) {
         throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       }
-      const role = ROLE_DEFINITIONS[params.role as keyof typeof ROLE_DEFINITIONS];
-      if (!role) {
-        throw new HarnessServiceError("invalid-params", `Unknown role: ${params.role}. Available roles: ${Object.keys(ROLE_DEFINITIONS).join(", ")}`);
+      // Task-centered dispatch (D-285): `preset` is optional. Without one the
+      // child runs on the caller's model and the tools the worker resolved
+      // from its own active set — clamped below to the owning Thread's frozen
+      // allowlist. A preset freezes its declared tools; retrieval still
+      // requires its configured slot (never the main model silently).
+      const preset = params.preset === undefined
+        ? null
+        : EXECUTION_PRESETS[params.preset as keyof typeof EXECUTION_PRESETS] ?? null;
+      if (params.preset !== undefined && !preset) {
+        throw new HarnessServiceError("invalid-params", `Unknown preset: ${params.preset}. Available presets: ${Object.keys(EXECUTION_PRESETS).join(", ")}`);
       }
-      if (role.id === "retrieval" && !params.model) {
+      if (preset?.id === "retrieval" && !params.model) {
         throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");
+      }
+      if (!preset && !params.model) {
+        throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
       assertOwnerTool(owner, "dispatch");
@@ -238,25 +248,45 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           `Thread scope cannot expand the parent Run authorization: ${nestedScope.expanded.join(", ")}`,
         );
       }
+      // A preset's declared tool set is its fixed contract; the Host validates
+      // and freezes it wholesale (§9.2.2). A preset-less dispatch instead
+      // inherits the caller's ordinary capabilities, so its claimed set must
+      // stay inside the owning Run's frozen allowlist; a root session's
+      // worker-resolved set is its own tools, which it already holds.
+      const tools = preset?.tools ?? params.tools ?? [];
+      if (owner && !preset) {
+        const denied = tools.filter((tool) => !owner.manifest.tools.includes(tool));
+        if (denied.length > 0) {
+          await captured.cleanup().catch(() => undefined);
+          throw new HarnessServiceError(
+            "denied",
+            `Thread tools cannot exceed the parent Run authorization: ${denied.join(", ")}`,
+          );
+        }
+      }
+      // `shared` is an explicit opt-in only; write-capable work defaults to an
+      // isolated WorkingState materialized on demand (D-285).
+      const worktree = params.worktree === "shared"
+        ? "shared" as const
+        : captured.draftBaselineId || (preset?.id === "retrieval" && parent.kind === "thread")
+          ? "isolated" as const
+          : preset?.worktree === "none" ? "none" as const : "isolated" as const;
       const input = {
         workspaceId,
         parent,
         brief: params.task,
-        role: params.role,
+        ...(preset ? { preset: preset.id } : {}),
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency,
         autoRun: true,
-        worktree: captured.draftBaselineId || (role.id === "retrieval" && parent.kind === "thread") ? "isolated" as const
-          : role.worktree === "none" ? "none" as const
-            : role.worktree === "shared" ? "shared" as const
-              : "isolated" as const,
+        worktree,
         ...(captured.draftBaselineId ? { draftBaselineId: captured.draftBaselineId } : {}),
-        tools: role.tools,
+        tools,
         permissions: normalizeFrozenHarnessPermissions(owner?.manifest.permissions),
         ...(params.model ? { model: params.model } : {}),
-        systemPromptFragment: role.systemPromptFragment,
-        ...(role.id === "retrieval" ? { carryBlocks: false } : {}),
+        ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
+        ...(preset?.id === "retrieval" ? { carryBlocks: false } : {}),
         ...(nestedScope.scope.length > 0 ? { scope: nestedScope.scope } : {}),
       };
       let thread: Thread;
@@ -311,7 +341,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       if (isQueued) {
         return {
-          text: `queued as ${thread.id} (${params.role}) — concurrency is full`,
+          text: `queued as ${thread.id}${preset ? ` (${preset.id})` : ""} — concurrency is full`,
           threadId: thread.id,
           queued: true,
         };
@@ -333,7 +363,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
           error instanceof Error ? error.message : String(error),
         ).catch(() => undefined);
       });
-      return { text: `dispatched ${thread.id} (${params.role})`, threadId: thread.id, queued: false };
+      return { text: `dispatched ${thread.id}${preset ? ` (${preset.id})` : ""}`, threadId: thread.id, queued: false };
     },
   };
 }
@@ -360,7 +390,7 @@ export function createThreadFactsSetService(host: HarnessServiceHost): HarnessSe
       if (!thread) {
         throw new HarnessServiceError("denied", "Thread session binding does not match a catalog Thread");
       }
-      if (thread.role !== "retrieval") {
+      if (thread.preset !== "retrieval") {
         throw new HarnessServiceError("denied", "submit_facts is only available on a retrieval thread");
       }
       if (!thread.manifest.tools.includes("submit_facts")) {
@@ -468,7 +498,7 @@ export function createThreadListService(host: HarnessServiceHost): HarnessServic
           integration: thread.integration,
           brief: thread.brief,
           createdAt: thread.createdAt,
-          role: thread.role,
+          preset: thread.preset,
           updatedAt: thread.updatedAt,
           activeRun,
           waitingFor: thread.waitingFor,
@@ -539,19 +569,19 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
       for (const snapshot of done) {
         const { thread } = snapshot;
         if (thread.report) {
-          lines.push(`✔ ${thread.id} (${thread.role ?? "unknown"}) — ${thread.report.conclusion.split("\n")[0] ?? "completed"}`);
+          lines.push(`✔ ${thread.id} (${thread.preset ?? "unknown"}) — ${thread.report.conclusion.split("\n")[0] ?? "completed"}`);
           lines.push(`  files: ${thread.report.changedFiles.join(", ") || "(none)"} · confidence ${thread.report.confidence}`);
           lines.push(`  deviations from brief: ${thread.report.deviations.join("; ") || "none"}`);
           lines.push(`  unresolved: ${thread.report.unresolved.join("; ") || "none"} · notes: read_thread("${thread.id}") · trace: read_thread("${thread.id}", "steps")`);
         } else {
-          lines.push(`✔ ${thread.id} (${thread.role ?? "unknown"}) — ${threadState(snapshot)}`);
+          lines.push(`✔ ${thread.id} (${thread.preset ?? "unknown"}) — ${threadState(snapshot)}`);
         }
       }
       for (const snapshot of [...running, ...waiting]) {
         lines.push(formatThreadLine(snapshot, registry.getCursor(observer, snapshot.thread.id), false));
       }
       for (const snapshot of queued) {
-        lines.push(`⏳ ${snapshot.thread.id} (${snapshot.thread.role ?? "unknown"}) · queued`);
+        lines.push(`⏳ ${snapshot.thread.id} (${snapshot.thread.preset ?? "unknown"}) · queued`);
       }
       deferCursorAdvancement(ctx, observer, targets, registry);
       return {
@@ -608,7 +638,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
       const what: ThreadReadWhat = params.what ?? "blocks";
       const lines: string[] = [];
       if (what === "blocks") {
-        lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — ${threadState({ thread, activeRun: run })}`);
+        lines.push(`Thread ${thread.id} (${thread.preset ?? "unknown"}) — ${threadState({ thread, activeRun: run })}`);
         lines.push(`Brief: ${thread.brief}`);
         lines.push(`Steps: ${run?.steps ?? 0} · Last activity: ${run?.lastActivityAt ?? thread.updatedAt}`);
         if (run?.lastToolCall) lines.push(`Last tool: ${run.lastToolCall.name} at ${run.lastToolCall.at}`);
@@ -651,7 +681,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
           const page = await readRetrievalReportPage({
             host,
             workspaceId,
-            heading: `Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`,
+            heading: `Thread ${thread.id} (${thread.preset ?? "unknown"}) — Report`,
             evidence: report.evidence,
             offset: params.offset ?? 0,
             length: params.length ?? visibleBytes,
@@ -664,7 +694,7 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
             eof: page.eof,
           };
         } else {
-          lines.push(`Thread ${thread.id} (${thread.role ?? "unknown"}) — Report`);
+          lines.push(`Thread ${thread.id} (${thread.preset ?? "unknown"}) — Report`);
           lines.push(`Conclusion: ${report.conclusion}`);
           lines.push(`Changed files: ${report.changedFiles.join(", ") || "(none)"}`);
           lines.push(`Deviations from brief: ${report.deviations.join("; ") || "none"}`);

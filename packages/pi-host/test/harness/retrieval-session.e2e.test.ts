@@ -393,7 +393,7 @@ describe("retrieval thread public slice", () => {
       parentPhase += 1;
       if (parentPhase === 1) {
         return fauxAssistantMessage([fauxToolCall("dispatch", {
-          role: "retrieval",
+          preset: "retrieval",
           task: "Where is login implemented?",
           scope: ["src", "only-in-parent.ts"],
         })]);
@@ -408,7 +408,7 @@ describe("retrieval thread public slice", () => {
         workspaceId: identity.workspaceId,
         parent: { kind: "session", id: parent.sessionId },
         brief: "Parent implementation view",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 1,
@@ -462,12 +462,12 @@ describe("retrieval thread public slice", () => {
           }
         }
         const threads = await registry.listThreads(identity.workspaceId, { kind: "thread", id: parentThread.id });
-        const retrieval = threads.find((thread) => thread.role === "retrieval");
+        const retrieval = threads.find((thread) => thread.preset === "retrieval");
         return retrieval?.lifecycle === "settled";
       });
 
       const threads = await registry.listThreads(identity.workspaceId, { kind: "thread", id: parentThread.id });
-      const retrieval = threads.find((thread) => thread.role === "retrieval");
+      const retrieval = threads.find((thread) => thread.preset === "retrieval");
       assert.ok(retrieval);
       assert.equal(retrieval.manifest.carryBlocks, false);
       assert.deepEqual(childScope, ["src", "only-in-parent.ts"]);

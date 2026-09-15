@@ -65,16 +65,16 @@ describe("evaluateGate", () => {
       mode: "normal",
       rules: defaultRules("normal", { "hard-implement": true }),
     };
-    expect(evaluateGate("dispatch", { role: "hard-implement" }, policy).decision).toBe("ask");
+    expect(evaluateGate("dispatch", { preset: "hard-implement" }, policy).decision).toBe("ask");
   });
 
-  it("treats askBefore role names as literals rather than regular expressions", () => {
+  it("treats askBefore preset names as literals rather than regular expressions", () => {
     const policy: PermissionPolicy = {
       mode: "normal",
       rules: defaultRules("normal", { "review.*": true }),
     };
-    expect(evaluateGate("dispatch", { role: "review.*" }, policy).decision).toBe("ask");
-    expect(evaluateGate("dispatch", { role: "review-fast" }, policy).decision).toBe("allow");
+    expect(evaluateGate("dispatch", { preset: "review.*" }, policy).decision).toBe("ask");
+    expect(evaluateGate("dispatch", { preset: "review-fast" }, policy).decision).toBe("allow");
   });
 
   it("rules evaluated top-down, first match wins", () => {

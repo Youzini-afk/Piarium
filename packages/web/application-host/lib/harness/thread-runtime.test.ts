@@ -99,7 +99,7 @@ const createInput = (): CreateThreadInput => ({
   workspaceId: WORKSPACE,
   parent: PARENT,
   brief: "Implement the feature",
-  role: "hard-implement",
+  preset: "hard-implement",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,
@@ -197,7 +197,7 @@ describe("thread runtime", () => {
     return { input, thread, run };
   };
 
-  it("creates a real child session, selects its role model, and starts the Run", async () => {
+  it("creates a real child session, selects its preset model, and starts the Run", async () => {
     const { thread, run } = await start();
     expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({
       cwd: "/workspace/thread",
@@ -238,7 +238,7 @@ describe("thread runtime", () => {
     const input: CreateThreadInput = {
       ...createInput(),
       brief: "Find a fact",
-      role: "retrieval",
+      preset: "retrieval",
       tools: ["read", "symbols", "submit_facts"],
     };
     try {
@@ -2799,7 +2799,7 @@ describe("thread runtime", () => {
 
   it("binds recorded commands to a published result and reviews that revision once", async () => {
     const { createVerificationCoordinator } = await import("./verification-coordinator.js");
-    const { resolveRoles } = await import("./roles.js");
+    const { resolvePresets } = await import("./presets.js");
     const verification = createVerificationCoordinator();
     let created = 0;
     let failNextReviewStart = false;
@@ -2822,7 +2822,7 @@ describe("thread runtime", () => {
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => WORKSPACE,
       resolveReviewSettings: () => ({ enabled: true, gate: true }),
-      resolveReviewRole: () => resolveRoles({}, { providerId: "test-provider", modelId: "test-model" }).find((role) => role.id === "review") ?? null,
+      resolveReviewPreset: () => resolvePresets({}, { providerId: "test-provider", modelId: "test-model" }).find((role) => role.id === "review") ?? null,
       worktrees: {
         prepare: prepareWorktree,
         snapshot: async (worktree) => ({ ...worktree, resultCommit: "result" }),

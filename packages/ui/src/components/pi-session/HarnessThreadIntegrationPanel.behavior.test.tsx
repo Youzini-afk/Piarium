@@ -17,7 +17,7 @@ import { runtimeFetch } from '@piarium/application-client';
 
 const makeThread = (): Thread => ({
   id: 'thread-1', parent: { kind: 'session', id: 'parent-1' }, workspaceId: 'workspace-1',
-  forkPoint: null, brief: 'Implement this change', role: null, model: null,
+  forkPoint: null, brief: 'Implement this change', preset: null, model: null,
   manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'shared' },
   createdBy: 'agent', kind: 'implementation', worktree: null, lifecycle: 'settled', attention: 'none',
   waitingFor: null, integration: 'dirty', diffStats: null, report: null, activeRunId: null,

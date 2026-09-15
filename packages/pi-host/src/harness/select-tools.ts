@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HarnessSettings, ResolvedRole } from "@piarium/protocol";
+import type { HarnessSettings, ResolvedPreset } from "@piarium/protocol";
 import { createBashTool } from "./bash-tool.js";
 import { createGrepTool } from "./grep-tool.js";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
@@ -56,8 +56,10 @@ export interface SelectHarnessToolsDeps {
   /** Whether the host provides a thread runtime (thread registry + spawn).
    * When false, thread tools are not registered. */
   threadRuntimeAvailable?: boolean;
-  /** Roles whose model slot resolves — dispatch lists and accepts only these. */
-  resolvedRoles?: readonly ResolvedRole[];
+  /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
+  resolvedPresets?: readonly ResolvedPreset[];
+  /** Active tool names of the dispatching session; the normal-dispatch tool default. */
+  getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
   sessionToolAllowlist?: readonly string[];
 }
@@ -95,7 +97,8 @@ export function selectHarnessTools(
     readPage,
     webSearchAvailable,
     threadRuntimeAvailable,
-    resolvedRoles,
+    resolvedPresets,
+    getActiveToolNames,
     sessionToolAllowlist,
   } = deps;
   const result: ToolDefinition[] = [];
@@ -170,8 +173,9 @@ export function selectHarnessTools(
   // thread runtime (thread registry + spawn capability).
   if (threadRuntimeAvailable) {
     if (tools.dispatch !== false) {
-      result.push(createDispatchTool(bridge, sessionId, resolvedRoles ?? [], {
+      result.push(createDispatchTool(bridge, sessionId, resolvedPresets ?? [], {
         concurrency: settings.dispatch.concurrency,
+        ...(getActiveToolNames ? { getActiveToolNames } : {}),
       }));
     }
     if (tools.threads !== false) {

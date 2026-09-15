@@ -78,7 +78,7 @@ export interface Zone2ContextUsage {
 export interface Zone2Thread {
   id: string;
   brief: string;
-  role: string | null;
+  preset: string | null;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   integration: ThreadIntegration;
@@ -172,7 +172,7 @@ function formatThread(thread: Zone2Thread, now: number): string {
               ? "archived"
               : thread.workerState ?? "active";
   const parts = [
-    `${thread.id}${thread.role ? ` [${thread.role}]` : ""}: ${state}`,
+    `${thread.id}${thread.preset ? ` [${thread.preset}]` : ""}: ${state}`,
     `${thread.steps} steps`,
     Number.isFinite(activityAt) ? `last activity ${formatTimeAgo(activityAt, now)}` : "activity time unavailable",
   ];

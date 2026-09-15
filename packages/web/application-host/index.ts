@@ -86,7 +86,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolveRoles } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
@@ -1618,10 +1618,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           {},
         ).review;
       } catch {
-        return { enabled: true, gate: false };
+        return { enabled: false, gate: false };
       }
     },
-    resolveReviewRole: async (workspaceId, parent) => {
+    resolveReviewPreset: async (workspaceId, parent) => {
       const sessionId = parent.kind === 'session'
         ? parent.id
         : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
@@ -1639,7 +1639,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const main = model && typeof recordOf(model).provider === 'string' && typeof recordOf(model).id === 'string'
         ? { providerId: recordOf(model).provider as string, modelId: recordOf(model).id as string }
         : null;
-      return resolveRoles(merged.models, main).find((role) => role.id === 'review') ?? null;
+      return resolvePresets(merged.models, main).find((preset) => preset.id === 'review') ?? null;
     },
     recallProjectKnowledge: async (workspaceId, query) => {
       const store = await getKnowledgeStoreForWorkspace(workspaceId);

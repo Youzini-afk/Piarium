@@ -3,7 +3,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
-  ResolvedRole,
+  ResolvedPreset,
   ThreadDispatchResult,
   ThreadListResult,
   ThreadWaitResult,
@@ -31,8 +31,9 @@ function threadErrorResult(toolName: string, error: unknown): { content: Array<{
 }
 
 const DispatchParams = Type.Object({
-  role: Type.String(),
   task: Type.String(),
+  preset: Type.Optional(Type.String()),
+  worktree: Type.Optional(Type.Literal("shared")),
   scope: Type.Optional(Type.Array(Type.String())),
 });
 
@@ -82,52 +83,78 @@ const ThreadKillParams = Type.Object({
 });
 
 /**
- * `dispatch` presents the roles as a team (§9.2.4). Only roles whose model
- * slot resolves are listed and accepted: an unconfigured slot means the
- * capability is not registered rather than silently borrowing the main
- * model (invariant 6). The team prompt is generated from that role set at
- * session creation, so it is static for the session and does not invalidate
- * the prefix cache.
+ * `dispatch` is task-centered (D-285): `task` is the core input and `preset`
+ * is optional. A normal dispatch resolves the model from the session's
+ * current model and the tool list from the session's active tools — the
+ * child inherits the caller's ordinary authorized capabilities. A preset
+ * freezes its declared tool list and a model resolved from the user slot or
+ * an explicit inherit; presets whose slot is unconfigured are omitted from
+ * the team prompt and rejected rather than silently borrowing the main
+ * model. The team prompt is generated from that preset set at session
+ * creation, so it is static for the session and does not invalidate the
+ * prefix cache.
  */
 export function createDispatchTool(
   bridge: HostServicesBridge,
   _sessionId: string,
-  roles: readonly ResolvedRole[] = [],
-  options: { concurrency?: number } = {},
+  presets: readonly ResolvedPreset[] = [],
+  options: {
+    concurrency?: number;
+    /** Active tool names of the dispatching session (normal-dispatch default). */
+    getActiveToolNames?: () => string[];
+  } = {},
 ): ToolDefinition {
-  const available = roles.map((r) => r.id);
-  const teamPrompt = buildTeamPrompt([...roles]);
+  const available = presets.map((p) => p.id);
+  const teamPrompt = buildTeamPrompt([...presets]);
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
-    description: "Dispatch a sub-agent thread with a role and task. Asynchronous — returns immediately, never blocks.",
-    promptSnippet: "dispatch: spawn a sub-agent thread with a role and task",
+    description: "Dispatch a sub-agent thread for a task. Optional preset picks a fixed execution configuration. Asynchronous — returns immediately, never blocks.",
+    promptSnippet: "dispatch: spawn a sub-agent thread for a task",
     promptGuidelines: [
       "Dispatch is asynchronous. Use wait to block until something changes; threads is a quick non-blocking glance — do not call it in a loop.",
       "Teammates report deviations from your brief; trust the report over your assumptions.",
       "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
-      ...(teamPrompt ? [teamPrompt] : []),
+      teamPrompt,
     ],
     parameters: DispatchParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
-      if (!available.includes(params.role as ResolvedRole["id"])) {
-        return {
-          content: [{
-            type: "text" as const,
-            text: `unknown role: ${params.role}. Available roles: ${available.join(", ") || "(none configured)"}`,
-          }],
-          isError: true,
-          details: { code: "invalid-params", availableRoles: available },
-        };
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
+      let model: { providerId: string; modelId: string } | undefined;
+      let tools: string[] | undefined;
+      if (params.preset !== undefined) {
+        const preset = presets.find((p) => p.id === params.preset);
+        if (!preset) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `unknown preset: ${params.preset}. Available presets: ${available.join(", ") || "(none configured)"}`,
+            }],
+            isError: true,
+            details: { code: "invalid-params", availablePresets: available },
+          };
+        }
+        model = preset.model;
+      } else {
+        const current = ctx?.model;
+        if (!current) {
+          return {
+            content: [{ type: "text" as const, text: "dispatch failed: no current model is selected for this session" }],
+            isError: true,
+            details: { code: "unavailable" },
+          };
+        }
+        model = { providerId: current.provider, modelId: current.id };
+        tools = options.getActiveToolNames?.();
       }
       try {
-        const selectedRole = roles.find((role) => role.id === params.role)!;
         const result = await bridge.request<"thread.dispatch">("thread.dispatch", {
           ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
-          role: params.role,
           task: params.task,
-          model: selectedRole.model,
+          ...(params.preset !== undefined ? { preset: params.preset } : {}),
+          ...(params.worktree !== undefined ? { worktree: params.worktree } : {}),
+          model,
+          ...(tools !== undefined ? { tools } : {}),
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
         });
         const typed = result as ThreadDispatchResult;

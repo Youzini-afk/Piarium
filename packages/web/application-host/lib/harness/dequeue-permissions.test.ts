@@ -57,7 +57,7 @@ const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadIn
   workspaceId: WORKSPACE,
   parent: PARENT,
   brief: "queued work",
-  role: "hard-implement",
+  preset: "hard-implement",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 1,

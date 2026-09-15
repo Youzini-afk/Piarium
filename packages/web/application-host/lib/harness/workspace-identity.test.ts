@@ -154,7 +154,7 @@ describe("owning vs execution workspace identity", () => {
       workspaceId: owning.workspaceId,
       parent,
       brief: "parent implementer",
-      role: "hard-implement",
+      preset: "hard-implement",
       kind: "implementation" as const,
       createdBy: "agent" as const,
       concurrency: 4,
@@ -232,7 +232,7 @@ describe("owning vs execution workspace identity", () => {
     };
 
     try {
-      const dispatched = await request("thread.dispatch", { role: "check", task: "Inspect the parent branch" });
+      const dispatched = await request("thread.dispatch", { preset: "check", task: "Inspect the parent branch" });
       expect(dispatched).toMatchObject({ ok: true, result: { queued: false } });
       if (!dispatched.ok) throw new Error(dispatched.error.message);
       const grandchildId = dispatched.result.threadId;

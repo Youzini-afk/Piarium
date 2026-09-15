@@ -167,7 +167,7 @@ describe("harness router", () => {
     });
     router.register("thread.dispatch", { handle });
     await router.processEvent(harnessEvent("thread.dispatch", {
-      role: "check",
+      preset: "check",
       task: "inspect",
       scope: ["src/new-file.ts", "../outside"],
     }));

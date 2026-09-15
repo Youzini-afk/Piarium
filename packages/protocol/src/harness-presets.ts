@@ -1,18 +1,20 @@
 /**
- * Role catalog — the six sub-agent roles of the code profile.
+ * Execution presets — named, fixed configurations a dispatch can opt into.
  *
- * Design: agent-harness.md §9.2.2
- * Plan: agent-harness-plan.md §3.6
+ * Design: agent-harness.md §9.2.2 / D-285
+ * Plan: agent-harness-plan.md §3.18A
+ *
+ * Dispatch is task-centered: `task` is the core input and `preset` is
+ * optional. A normal dispatch runs on the caller's current model and its
+ * authorized tool set; a preset freezes a declared tool list, prompt
+ * fragment, and a model resolved from the user-configured slot or an
+ * explicit inherit. Unconfigured presets are omitted from the catalog and
+ * rejected — they never borrow the main model silently.
  *
  * The catalog is a pure static table with no host dependencies, so it lives
- * in the protocol package: the host needs it to build a thread from a role,
- * and pi-host needs it to build the `dispatch` tool's team prompt and to
- * reject roles whose model slot is not configured.
- *
- * A role whose slot is unconfigured is omitted from the catalog entirely —
- * it is not listed in the team prompt and `dispatch` rejects it. Roles never
- * fall back to the main model silently (invariant 6); `hardImplement` and
- * `review` resolve to the main model by design, which is explicit.
+ * in the protocol package: the host needs it to build a thread from a
+ * preset, and pi-host needs it to build the `dispatch` tool's team prompt
+ * and to reject presets whose model slot is not configured.
  */
 
 import type { HarnessModelRole, ModelSelection } from "./harness-settings.js";
@@ -20,7 +22,7 @@ import { resolveHarnessModelSlot } from "./harness-model-slots.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type RoleId =
+export type PresetId =
   | "quick-implement"
   | "hard-implement"
   | "frontend"
@@ -28,48 +30,54 @@ export type RoleId =
   | "check"
   | "retrieval";
 
-export type WorktreeMode = "shared" | "isolated-when-parallel" | "none";
+/**
+ * Preset materialization policy. Write-capable work defaults to an
+ * isolated WorkingState; `shared` is never preset-forced — it is an
+ * explicit dispatch-time choice (D-285). `none` marks read-only presets
+ * that need no WorkingState materialization at all.
+ */
+export type PresetWorktree = "isolated" | "none";
 
-export interface RoleDefinition {
-  id: RoleId;
+export interface ExecutionPreset {
+  id: PresetId;
   slot: HarnessModelRole;
   tools: string[];
-  worktree: WorktreeMode;
+  worktree: PresetWorktree;
   /** Appended to the end of the thread's system prompt (Zone 0 stays shared). */
   systemPromptFragment: string;
-  /** One clause describing the teammate, used to build the team prompt. */
+  /** One clause describing the preset, used to build the team prompt. */
   teamDescription: string;
   resultSchema: unknown;
 }
 
-// ── Role definitions ───────────────────────────────────────────────
+// ── Preset definitions ─────────────────────────────────────────────
 
-export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
+export const EXECUTION_PRESETS: Readonly<Record<PresetId, ExecutionPreset>> = {
   "quick-implement": {
     id: "quick-implement",
     slot: "quickImplement",
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
-    worktree: "shared",
+    worktree: "isolated",
     systemPromptFragment:
       "You are a quick implementation agent. Make mechanical, well-specified changes efficiently.",
-    teamDescription: "cheap model; mechanical, well-specified changes",
+    teamDescription: "mechanical, well-specified changes",
     resultSchema: { changedFiles: "string[]", conclusion: "string" },
   },
   "hard-implement": {
     id: "hard-implement",
     slot: "hardImplement",
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "recall", "todo", "dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"],
-    worktree: "isolated-when-parallel",
+    worktree: "isolated",
     systemPromptFragment:
       "You are a hard implementation agent. Handle ambiguous or cross-cutting work that requires deeper reasoning.",
-    teamDescription: "strong model; ambiguous or cross-cutting work",
+    teamDescription: "ambiguous or cross-cutting work",
     resultSchema: { changedFiles: "string[]", conclusion: "string", unresolved: "string[]" },
   },
   "frontend": {
     id: "frontend",
     slot: "frontend",
     tools: ["read", "edit", "write", "apply_patch", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell", "explore", "dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"],
-    worktree: "isolated-when-parallel",
+    worktree: "isolated",
     systemPromptFragment:
       "You are a frontend specialist. Focus on UI components, styles, and user-facing behavior.",
     teamDescription: "UI specialist",
@@ -81,17 +89,17 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
     tools: ["read", "grep", "glob", "bash", "get_output", "write_to_process", "kill_shell"],
     worktree: "none",
     systemPromptFragment: "You have not seen the conversation; review the diff on its own merits.",
-    teamDescription: "strong model; independent review of a diff",
+    teamDescription: "independent review of a diff",
     resultSchema: { conclusion: "string", issues: "string[]", severity: "string" },
   },
   "check": {
     id: "check",
     slot: "check",
     tools: ["read", "bash", "grep", "glob", "get_output", "write_to_process", "kill_shell"],
-    worktree: "shared",
+    worktree: "isolated",
     systemPromptFragment:
       "You are a check agent. Run tests and lint, report results. Do not make changes.",
-    teamDescription: "cheap model; run tests/lint and report",
+    teamDescription: "run tests/lint and report",
     resultSchema: { conclusion: "string", passed: "boolean", output: "string" },
   },
   "retrieval": {
@@ -120,7 +128,7 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
       + "Do not edit, write, or run shell commands. Cite local paths with compact line ranges or stored URL receipts. "
       + "The Host can mark a source source-checked or source-valid; it cannot prove a claim is true. "
       + "Record material you tried and could not obtain as unknown.",
-    teamDescription: "cheap model; multi-step fact retrieval",
+    teamDescription: "multi-step fact retrieval",
     resultSchema: {
       question: "string",
       scope: "string[]",
@@ -132,26 +140,26 @@ export const ROLE_DEFINITIONS: Readonly<Record<RoleId, RoleDefinition>> = {
   },
 };
 
-export function isRoleId(value: string): value is RoleId {
-  return Object.prototype.hasOwnProperty.call(ROLE_DEFINITIONS, value);
+export function isPresetId(value: string): value is PresetId {
+  return Object.prototype.hasOwnProperty.call(EXECUTION_PRESETS, value);
 }
 
 // ── Catalog resolution ─────────────────────────────────────────────
 
-export interface ResolvedRole {
-  id: RoleId;
+export interface ResolvedPreset {
+  id: PresetId;
   model: ModelSelection;
-  definition: RoleDefinition;
+  definition: ExecutionPreset;
 }
 
-export function resolveRoles(
+export function resolvePresets(
   slots: Partial<Record<HarnessModelRole, ModelSelection | null>>,
   mainModel: ModelSelection | null,
-): ResolvedRole[] {
-  const resolved: ResolvedRole[] = [];
-  for (const role of Object.values(ROLE_DEFINITIONS)) {
-    const model = resolveHarnessModelSlot(role.slot, slots, mainModel);
-    if (model) resolved.push({ id: role.id, model, definition: role });
+): ResolvedPreset[] {
+  const resolved: ResolvedPreset[] = [];
+  for (const preset of Object.values(EXECUTION_PRESETS)) {
+    const model = resolveHarnessModelSlot(preset.slot, slots, mainModel);
+    if (model) resolved.push({ id: preset.id, model, definition: preset });
   }
   return resolved;
 }
@@ -159,17 +167,20 @@ export function resolveRoles(
 // ── Team prompt ────────────────────────────────────────────────────
 
 /**
- * The team prompt is static for a given role set, so it can live in the
+ * The team prompt is static for a given preset set, so it can live in the
  * `dispatch` tool's promptGuidelines without invalidating the prefix cache
  * mid-session.
  */
-export function buildTeamPrompt(roles: ResolvedRole[]): string {
-  if (roles.length === 0) return "";
-  const roleList = roles
-    .map((r) => `${r.definition.id} (${r.definition.teamDescription})`)
+export function buildTeamPrompt(presets: ResolvedPreset[]): string {
+  const presetList = presets
+    .map((p) => `${p.definition.id} (${p.definition.teamDescription})`)
     .join(", ");
+  const base =
+    "You can hand work to a sub-agent thread with dispatch(task). Without a preset it runs on your " +
+    "current model and tools; an optional preset picks a fixed execution configuration.";
+  const list = presetList ? ` Available presets: ${presetList}.` : "";
   return (
-    `You can hand work to teammates with dispatch(role, task). Teammates: ${roleList}. ` +
+    `${base}${list} ` +
     "Judge by time and cost: if you can finish in a few tool calls yourself, do it yourself. " +
     "Dispatch is asynchronous: wait blocks until a teammate changes state, threads is a quick glance, " +
     "send passes a teammate new information, read_thread shows their notes. " +

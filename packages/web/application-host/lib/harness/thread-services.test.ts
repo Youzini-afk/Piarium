@@ -52,7 +52,7 @@ describe("thread services", () => {
     try {
       const result = await service.handle({
         concurrency: 1,
-        role: "hard-implement",
+        preset: "hard-implement",
         task: "Implement the vertical slice",
         model: { providerId: "openai", modelId: "gpt-test" },
       }, {
@@ -80,7 +80,7 @@ describe("thread services", () => {
       });
       const queued = await service.handle({
         concurrency: 1,
-        role: "hard-implement",
+        preset: "hard-implement",
         task: "Wait for the slot",
         model: { providerId: "openai", modelId: "gpt-test" },
       }, {
@@ -106,7 +106,7 @@ describe("thread services", () => {
     }
   });
 
-  it.each(["quick-implement", "retrieval"])("promotes %s to an isolated launch when dirty drafts are captured", async (role) => {
+  it.each(["quick-implement", "retrieval"])("promotes %s to an isolated launch when dirty drafts are captured", async (preset) => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-draft-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const spawn = vi.fn(async () => ({ sessionId: "child" }));
@@ -125,9 +125,9 @@ describe("thread services", () => {
     };
     try {
       const result = await service.handle(
-        role === "retrieval"
-          ? { role, task: "Use the draft", model: { providerId: "anthropic", modelId: "haiku" } }
-          : { role, task: "Use the draft" },
+        preset === "retrieval"
+          ? { preset, task: "Use the draft", model: { providerId: "anthropic", modelId: "haiku" } }
+          : { preset, task: "Use the draft" },
         serviceContext(inputContext),
       );
       const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
@@ -150,7 +150,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      const result = await service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
+      const result = await service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
         source: "surface",
         workspaceId: "workspace-1",
         dirtyPaths: ["draft.ts"],
@@ -179,7 +179,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     try {
-      await expect(service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
+      await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
         source: "surface",
         workspaceId: "workspace-1",
         dirtyPaths: ["draft.ts"],
@@ -192,7 +192,7 @@ describe("thread services", () => {
     }
   });
 
-  it("keeps the role worktree policy for a validated empty surface snapshot", async () => {
+  it("keeps the preset worktree policy for a validated empty surface snapshot", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-empty-surface-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const capture = vi.fn(async () => ({ draftBaselineId: null, cleanup: async () => undefined }));
@@ -204,7 +204,7 @@ describe("thread services", () => {
     } as never);
     try {
       const result = await service.handle({
-        role: "retrieval",
+        preset: "retrieval",
         task: "Inspect state",
         model: { providerId: "anthropic", modelId: "haiku" },
       }, serviceContext({
@@ -229,7 +229,7 @@ describe("thread services", () => {
     }
   });
 
-  it("refuses retrieval dispatch when the role slot is not configured", async () => {
+  it("refuses retrieval dispatch when the preset slot is not configured", async () => {
     const service = createThreadDispatchService({
       threadRegistry: {
         maxConcurrency: 12,
@@ -238,10 +238,138 @@ describe("thread services", () => {
       },
       threadSpawnSession: vi.fn(),
     } as never);
-    await expect(service.handle({ role: "retrieval", task: "Inspect state" }, serviceContext())).rejects.toMatchObject({
+    await expect(service.handle({ preset: "retrieval", task: "Inspect state" }, serviceContext())).rejects.toMatchObject({
       harnessCode: "unavailable",
       message: expect.stringContaining("models.retrievalAgent"),
     });
+  });
+
+  it("runs a preset-less dispatch on the caller's resolved model and tools", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-plain-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const result = await service.handle({
+        task: "Summarize the diff",
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        tools: ["read", "grep", "bash"],
+      }, serviceContext());
+      expect(result.queued).toBe(false);
+      const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
+      expect(thread).toMatchObject({
+        preset: null,
+        brief: "Summarize the diff",
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        manifest: { tools: ["read", "grep", "bash"], worktree: "isolated", systemPromptFragment: null },
+      });
+      const run = await registry.getActiveRun("workspace-1", result.threadId);
+      expect(run?.frozen).toMatchObject({
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        tools: ["read", "grep", "bash"],
+        worktree: "isolated",
+        inputOrigin: "task",
+      });
+      expect(spawn).toHaveBeenCalledWith(expect.objectContaining({
+        tools: ["read", "grep", "bash"],
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+      }));
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("honors an explicit shared worktree only when asked", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-shared-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "child" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const result = await service.handle({
+        task: "Patch the live tree",
+        worktree: "shared",
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        tools: ["read", "edit"],
+      }, serviceContext());
+      const thread = await registry.getThread("workspace-1", { kind: "session", id: "parent-1" }, result.threadId);
+      expect(thread?.manifest.worktree).toBe("shared");
+      expect(prepareIsolatedBranch).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a preset-less dispatch without a resolved model and an unknown preset", async () => {
+    const service = createThreadDispatchService({
+      threadRegistry: {
+        maxConcurrency: 12,
+        countActive: vi.fn(async () => 0),
+        createThread: vi.fn(),
+      },
+      threadSpawnSession: vi.fn(),
+    } as never);
+    await expect(service.handle({ task: "No model resolved" }, serviceContext())).rejects.toMatchObject({
+      harnessCode: "invalid-params",
+    });
+    await expect(service.handle({ preset: "does-not-exist", task: "Bad preset" }, serviceContext())).rejects.toMatchObject({
+      harnessCode: "invalid-params",
+      message: expect.stringContaining("Unknown preset"),
+    });
+  });
+
+  it("denies a nested preset-less dispatch claiming tools outside the owning Run", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-nested-tools-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: vi.fn(async () => ({ sessionId: "grandchild" })),
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      const parent = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "root-session" },
+        brief: "limited parent",
+        preset: null,
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 2,
+        autoRun: true,
+        worktree: "isolated",
+        tools: ["read", "dispatch"],
+        permissions: {},
+      });
+      const run = await registry.startRun("workspace-1", parent.id);
+      await registry.markRunRunning("workspace-1", parent.id, run.id, "limited-session");
+      const ctx = {
+        ...serviceContext(),
+        sessionId: "limited-session",
+        actor: { ...serviceContext().actor, sessionId: "limited-session" },
+      };
+      await expect(service.handle({
+        task: "Write beyond the parent",
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        tools: ["read", "write"],
+      }, ctx)).rejects.toMatchObject({ harnessCode: "denied" });
+      const allowed = await service.handle({
+        task: "Read within the parent",
+        model: { providerId: "anthropic", modelId: "claude-sonnet-4" },
+        tools: ["read"],
+      }, ctx);
+      expect(allowed.queued).toBe(false);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
   });
 
   it("cleans a captured draft baseline when Thread creation fails", async () => {
@@ -256,7 +384,7 @@ describe("thread services", () => {
       threadCaptureDraftBaseline: vi.fn(async () => ({ draftBaselineId: "draft-orphan", cleanup })),
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
-    await expect(service.handle({ role: "hard-implement", task: "Use the draft" }, serviceContext({
+    await expect(service.handle({ preset: "hard-implement", task: "Use the draft" }, serviceContext({
       source: "surface",
       workspaceId: "workspace-1",
       dirtyPaths: ["draft.ts"],
@@ -279,7 +407,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "parent implementer",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 1,
@@ -296,11 +424,11 @@ describe("thread services", () => {
         workspaceId: "execution-ws",
         actor: { ...serviceContext().actor, sessionId: "child-session", workspaceId: "execution-ws" },
       };
-      const first = await service.handle({ concurrency: 1, role: "check", task: "Run the suite" }, nestedCtx);
-      const queued = await service.handle({ concurrency: 1, role: "check", task: "Second check" }, nestedCtx);
+      const first = await service.handle({ concurrency: 1, preset: "check", task: "Run the suite" }, nestedCtx);
+      const queued = await service.handle({ concurrency: 1, preset: "check", task: "Second check" }, nestedCtx);
       const queuedRetrieval = await service.handle({
         concurrency: 1,
-        role: "retrieval",
+        preset: "retrieval",
         task: "Read the parent-frozen fact",
         model: { providerId: "test", modelId: "retrieval" },
       }, nestedCtx);
@@ -320,7 +448,7 @@ describe("thread services", () => {
       }));
       expect(await registry.getThread("workspace-1", { kind: "thread", id: parent.id }, first.threadId)).toMatchObject({
         parent: { kind: "thread", id: parent.id },
-        role: "check",
+        preset: "check",
         manifest: { permissions: { mode: "accept-edits" } },
       });
       expect(await registry.listThreads("workspace-1", { kind: "session", id: "root-session" })).toEqual([
@@ -346,7 +474,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -359,7 +487,7 @@ describe("thread services", () => {
       const scopedRun = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, scopedRun.id, "scoped-session");
       await expect(service.handle({
-        role: "check",
+        preset: "check",
         task: "Leave src",
         scope: ["docs"],
       }, { ...serviceContext(), sessionId: "scoped-session", actor: { ...serviceContext().actor, sessionId: "scoped-session" } }))
@@ -369,7 +497,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "review parent",
-        role: "review",
+        preset: "review",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -381,7 +509,7 @@ describe("thread services", () => {
       const reviewRun = await registry.startRun("workspace-1", review.id);
       await registry.markRunRunning("workspace-1", review.id, reviewRun.id, "review-session");
       await expect(service.handle({
-        role: "hard-implement",
+        preset: "hard-implement",
         task: "Should not nest",
       }, { ...serviceContext(), sessionId: "review-session", actor: { ...serviceContext().actor, sessionId: "review-session" } }))
         .rejects.toMatchObject({ harnessCode: "denied" });
@@ -405,7 +533,7 @@ describe("thread services", () => {
     try {
       await expect(service.handle({
         concurrency: 1,
-        role: "hard-implement",
+        preset: "hard-implement",
         task: "Capture must finish",
       }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
       expect(spawn).not.toHaveBeenCalled();
@@ -434,7 +562,7 @@ describe("thread services", () => {
     try {
       await expect(service.handle({
         concurrency: 1,
-        role: "hard-implement",
+        preset: "hard-implement",
         task: "Capture must stay honest",
       }, serviceContext())).rejects.toMatchObject({
         harnessCode: "unavailable",
@@ -528,7 +656,7 @@ describe("thread services", () => {
     } as never);
     try {
       const result = await service.handle({
-        role: "check",
+        preset: "check",
         task: "Names with dots",
         scope: ["src/foo..bar", "version...txt"],
       }, serviceContext());
@@ -539,7 +667,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -552,7 +680,7 @@ describe("thread services", () => {
       const run = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, run.id, "dotted-parent");
       const nested = await service.handle({
-        role: "check",
+        preset: "check",
         task: "Nested dotted name",
         scope: ["src/foo..bar"],
       }, {
@@ -584,7 +712,7 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "scoped parent",
-        role: "hard-implement",
+        preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,
@@ -597,7 +725,7 @@ describe("thread services", () => {
       const run = await registry.startRun("workspace-1", scoped.id);
       await registry.markRunRunning("workspace-1", scoped.id, run.id, "scoped-session");
       await expect(service.handle({
-        role: "check",
+        preset: "check",
         task: "Leave src",
         scope: ["docs"],
       }, {
@@ -704,7 +832,7 @@ describe("thread services", () => {
       workspaceId: "workspace-1",
       parent,
       brief,
-      role: "hard-implement" as const,
+      preset: "hard-implement" as const,
       kind: "implementation" as const,
       createdBy: "agent" as const,
       concurrency: 2,
@@ -762,7 +890,7 @@ describe("thread services", () => {
       threadPrepareIsolatedBranch: prepareIsolatedBranch,
     } as never);
     await expect(service.handle({
-      role: "check",
+      preset: "check",
       task: "Should not skip the owner allowlist",
     }, {
       ...serviceContext(),

@@ -153,7 +153,7 @@ describe("thread runtime with real Pi sessions", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session" as const, id: parent.sessionId },
         brief: "Check the implementation",
-        role: "check",
+        preset: "check",
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency: 12,
@@ -626,7 +626,7 @@ describe("thread runtime with native working-state integration", () => {
       parentFirstRoundTools += 1;
       if (parentFirstRoundTools === 1) {
         return fauxAssistantMessage([fauxToolCall("dispatch", {
-          role: "hard-implement",
+          preset: "hard-implement",
           task: "Write child-result.txt with the first child result.",
         })]);
       }

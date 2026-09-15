@@ -22,7 +22,7 @@ const createInput = (overrides: Partial<CreateThreadInput> = {}): CreateThreadIn
   workspaceId: WORKSPACE,
   parent: PARENT,
   brief: "write tests",
-  role: "check",
+  preset: "check",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,
@@ -471,7 +471,7 @@ describe("thread registry", () => {
 
   it("reads schema v3 threads by deriving their frozen launch manifest", async () => {
     const thread = await registry.createThread(createInput({
-      role: "check",
+      preset: "check",
       scope: ["packages/web"],
       tools: ["read"],
       worktree: "shared",
@@ -490,7 +490,9 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
       carryBlocks: true,
       tools: expect.arrayContaining(["read", "bash", "grep"]),
-      worktree: "shared",
+      // The stripped manifest cannot recover the explicit shared choice, so the
+      // v3 derivation falls back to the preset's isolated default (D-285).
+      worktree: "isolated",
     });
   });
 

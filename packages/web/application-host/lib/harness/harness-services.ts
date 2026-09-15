@@ -745,7 +745,7 @@ export function registerHarnessServices(
           : null;
         const issueReceipt = Boolean(
           binding
-          && owner?.role === "retrieval"
+          && owner?.preset === "retrieval"
           && owner.activeRunId === binding.runId
           && owner.lifecycle === "active",
         );

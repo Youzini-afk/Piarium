@@ -11,7 +11,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { basename, join } from "node:path";
 import {
   normalizeFrozenHarnessPermissions,
-  ROLE_DEFINITIONS,
+  EXECUTION_PRESETS,
   sealRetrievalEvidence,
   summarizeRetrievalEvidence,
 } from "@piarium/protocol";
@@ -149,7 +149,7 @@ export interface CreateThreadInput {
   workspaceId: string;
   parent: ThreadParent;
   brief: string;
-  role?: string;
+  preset?: string;
   kind: ThreadKind;
   createdBy: ThreadCreatedBy;
   forkPoint?: { entryId: string };
@@ -517,6 +517,15 @@ const migrateThreadEvidence = (thread: Thread): Thread => {
   return next;
 };
 
+/** Normalize records written before the `role` → `preset` rename (D-285). */
+const normalizeThreadPreset = (thread: Thread): Thread => {
+  const legacy = (thread as { role?: string | null }).role;
+  if (thread.preset !== undefined && legacy === undefined) return thread;
+  const next = { ...thread, preset: thread.preset ?? legacy ?? null };
+  delete (next as { role?: string | null }).role;
+  return next;
+};
+
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
   && typeof value.carryBlocks === "boolean"
@@ -593,7 +602,9 @@ const isThread = (value: unknown): value is Thread => {
     && isString(value.workspaceId)
     && (value.forkPoint === null || (isRecord(value.forkPoint) && isString(value.forkPoint.entryId)))
     && isString(value.brief)
-    && isNullableString(value.role)
+    // Records written before the preset rename carry `role`; both keys load
+    // and are normalized to `preset` below (durability within the format).
+    && (value.preset === undefined ? isNullableString(value.role) : isNullableString(value.preset))
     && (value.model === null || (isRecord(value.model) && isString(value.model.providerId) && isString(value.model.modelId)))
     && isLaunchManifest(value.manifest)
     && (value.manifest.draftBaselineId === null || value.manifest.worktree === "isolated")
@@ -640,12 +651,15 @@ const isThread = (value: unknown): value is Thread => {
 };
 
 const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManifest => {
-  const role = typeof value.role === "string" && Object.hasOwn(ROLE_DEFINITIONS, value.role)
-    ? ROLE_DEFINITIONS[value.role as keyof typeof ROLE_DEFINITIONS]
+  const presetId = typeof (value.preset ?? value.role) === "string"
+    ? (value.preset ?? value.role) as string
     : null;
-  const configuredWorktree = role?.worktree === "shared"
-    ? "shared" as const
-    : role?.worktree === "none"
+  const preset = presetId !== null && Object.hasOwn(EXECUTION_PRESETS, presetId)
+    ? EXECUTION_PRESETS[presetId as keyof typeof EXECUTION_PRESETS]
+    : null;
+  const configuredWorktree = value.worktree && typeof value.worktree === "object"
+    ? "isolated" as const
+    : preset?.worktree === "none"
       ? "none" as const
       : "isolated" as const;
   return {
@@ -653,9 +667,9 @@ const legacyLaunchManifest = (value: Record<string, unknown>): ThreadLaunchManif
     concurrency: 12,
     draftBaselineId: null,
     scope: [],
-    systemPromptFragment: role?.systemPromptFragment ?? null,
-    tools: [...(role?.tools ?? [])],
-    worktree: value.worktree && typeof value.worktree === "object" ? "isolated" : configuredWorktree,
+    systemPromptFragment: preset?.systemPromptFragment ?? null,
+    tools: [...(preset?.tools ?? [])],
+    worktree: configuredWorktree,
     permissions: { mode: "normal", rules: [] },
   };
 };
@@ -686,6 +700,17 @@ const isThreadV6 = (value: unknown): value is LegacyDraftlessThread => (
   && isThread({ ...value, manifest: { ...value.manifest, draftBaselineId: null } })
 );
 
+const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["frozen"]> => (
+  isRecord(value)
+  && (value.model === null || (isRecord(value.model) && isString(value.model.providerId) && isString(value.model.modelId)))
+  && Array.isArray(value.tools) && value.tools.every(isString)
+  && (value.permissions === undefined || isRecord(value.permissions))
+  && Array.isArray(value.scope) && value.scope.every(isString)
+  && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
+  && isNullableString(value.systemPromptFragment)
+  && (value.inputOrigin === "task" || value.inputOrigin === "inherit")
+);
+
 const isThreadRun = (value: unknown): value is ThreadRun => {
   if (!isRecord(value)) return false;
   return isString(value.id)
@@ -695,6 +720,7 @@ const isThreadRun = (value: unknown): value is ThreadRun => {
     && isString(value.runtimeId)
     && isNullableString(value.sessionId)
     && (value.inputRevision === undefined || (Number.isSafeInteger(value.inputRevision) && Number(value.inputRevision) > 0))
+    && (value.frozen === undefined || isFrozenRunConfig(value.frozen))
     && WORKER_STATES.has(value.workerState as ThreadRun["workerState"])
     && (value.outcome === null || OUTCOMES.has(value.outcome as ThreadRunOutcome))
     && isNullableString(value.exitReason)
@@ -951,7 +977,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       threads: current.threads.map((thread) => normalizeWorktreePreparation(structuredClone(thread))),
     };
   }
-  catalog.threads = catalog.threads.map((thread) => migrateThreadEvidence(normalizeWorktreePreparation(thread)));
+  catalog.threads = catalog.threads.map((thread) => migrateThreadEvidence(normalizeWorktreePreparation(normalizeThreadPreset(thread))));
   const threadIds = new Set<string>();
   for (const thread of catalog.threads) {
     if (thread.workspaceId !== catalog.workspaceId || threadIds.has(thread.id)) {
@@ -1043,7 +1069,7 @@ const convertLegacy = (workspaceId: string, records: LegacyThreadRecord[]): { th
       workspaceId,
       forkPoint: legacy.forkPoint ?? null,
       brief: legacy.brief,
-      role: legacy.role ?? null,
+      preset: legacy.role ?? null,
       model: null,
       manifest: legacyLaunchManifest(legacy as unknown as Record<string, unknown>),
       createdBy: legacy.createdBy === "user" ? "user" : "agent",
@@ -1626,7 +1652,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         workspaceId: input.workspaceId,
         forkPoint: input.forkPoint ?? null,
         brief: input.brief,
-        role: input.role ?? null,
+        preset: input.preset ?? null,
         model: input.model ?? null,
         manifest: {
           carryBlocks: input.carryBlocks ?? true,
@@ -1803,6 +1829,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         runtimeId,
         sessionId: null,
         ...(inputRevision ? { inputRevision } : {}),
+        frozen: {
+          model: thread.model,
+          tools: [...thread.manifest.tools],
+          ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
+          scope: [...thread.manifest.scope],
+          worktree: thread.manifest.worktree,
+          systemPromptFragment: thread.manifest.systemPromptFragment,
+          inputOrigin: "task",
+        },
         workerState: "starting",
         outcome: null,
         exitReason: null,
@@ -1893,7 +1928,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       thread.lifecycle = outcome === "lost" ? "active" : "settled";
       // Lost is not settlement. Keep pendingEvidence for Zone 2 until the
       // existing resume path starts a new Run, which clears it.
-      if (thread.role === "retrieval" && outcome !== "lost") {
+      if (thread.preset === "retrieval" && outcome !== "lost") {
         const evidence = sealRetrievalEvidence(thread.pendingEvidence, {
           brief: thread.brief,
           scope: thread.manifest.scope,
@@ -2149,7 +2184,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   ): Promise<Thread> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-    if (thread.role !== "retrieval") throw new Error(`Thread is not a retrieval role: ${threadId}`);
+    if (thread.preset !== "retrieval") throw new Error(`Thread is not a retrieval preset: ${threadId}`);
     const run = catalog.runs.find((candidate) => candidate.id === runId && candidate.threadId === threadId);
     if (!run || thread.activeRunId !== runId || run.outcome !== null) {
       throw new Error(`Retrieval evidence run is not active: ${runId}`);
@@ -2404,6 +2439,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // Persisting its id here also makes a host crash in the conversion window
       // recoverable through the ordinary lost-Run reconciliation path.
       sessionId: previous.sessionId,
+      frozen: {
+        model: input.model ?? thread.model,
+        tools: [...new Set(input.tools)],
+        ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
+        scope: [...input.scope],
+        worktree: "isolated",
+        systemPromptFragment: input.systemPromptFragment ?? null,
+        inputOrigin: "inherit",
+      },
       workerState: "starting",
       outcome: null,
       exitReason: null,

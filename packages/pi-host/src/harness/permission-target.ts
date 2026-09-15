@@ -132,11 +132,11 @@ function networkOrigins(toolName: string, params: Record<string, unknown>): stri
 
 function threadScopes(toolName: string, params: Record<string, unknown>): string[] {
   if (toolName !== "dispatch") return [];
-  const role = typeof params.role === "string" ? params.role.trim() : "";
+  const preset = typeof params.preset === "string" ? params.preset.trim() : "";
   const scope = Array.isArray(params.scope)
     ? params.scope.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
-  return [...new Set([...(role ? [`role:${role}`] : []), ...scope.map((item) => `scope:${item}`)])];
+  return [...new Set([...(preset ? [`preset:${preset}`] : []), ...scope.map((item) => `scope:${item}`)])];
 }
 
 export function buildPermissionInspection(input: {
@@ -158,8 +158,7 @@ export function buildPermissionInspection(input: {
   const scopes = threadScopes(input.toolName, input.params);
   const evidenceComplete = shell.complete
     && action !== "unknown"
-    && (input.toolName !== "webfetch" || networkTargets.length === 1)
-    && (input.toolName !== "dispatch" || scopes.some((scope) => scope.startsWith("role:")));
+    && (input.toolName !== "webfetch" || networkTargets.length === 1);
   return {
     tool: input.toolName,
     source,

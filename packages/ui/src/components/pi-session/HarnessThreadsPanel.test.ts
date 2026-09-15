@@ -15,7 +15,7 @@ const thread = (overrides: Partial<Thread> = {}): Thread => ({
   workspaceId: 'workspace-1',
   forkPoint: null,
   brief: 'Check the implementation',
-  role: 'check',
+  preset: 'check',
   model: null,
   manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: 'Run checks.', tools: ['read', 'bash'], worktree: 'shared' },
   createdBy: 'agent',

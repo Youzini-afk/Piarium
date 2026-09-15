@@ -1895,7 +1895,8 @@ attention——实践里最常见的"卡死"其实
 - `merge(id, resultRevision?)`：沿现有 Integration 消费固定成果；依赖线程纳入父变化是明确的工作状态更新，不靠 send 模拟。
 - `kill(id)`：停止执行并保留已发布结果，目录按真实 writer 与保留责任回收；普通通知不复活已取消/归档工作。
 
-这些是 D-285 的目标语义；当前 role-required dispatch、仅直接子 active/running 可收 send、per-parent slot 都需要实际改造。
+这些是 D-285 的目标语义；3.18A 的任务中心派发与可选预设已实施，仅直接子 active/running 可收 send、per-parent slot、
+continue/fresh 与分段成果仍需要实际改造。
 无需先建设任务市场或通用工作流，公开入口必须能完成“派发—解决依赖—交付—使用—同线程续做”的一条纵切。
 
 #### 9.3.7 增量视图与送达

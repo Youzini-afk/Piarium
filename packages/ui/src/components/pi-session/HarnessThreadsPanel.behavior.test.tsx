@@ -29,7 +29,7 @@ vi.mock('@/components/ui/MobileOverlayPanel', () => ({ MobileOverlayPanel: () =>
 const snapshot = (): HarnessThreadSnapshot => ({
   thread: {
     id: 'thread-1', parent: { kind: 'session', id: 'parent-1' }, workspaceId: 'workspace-1',
-    forkPoint: null, brief: 'Continue the implementation', role: null, model: null,
+    forkPoint: null, brief: 'Continue the implementation', preset: null, model: null,
     manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: ['src'], systemPromptFragment: null, tools: ['read'], worktree: 'isolated' },
     createdBy: 'agent', kind: 'implementation', lifecycle: 'settled', attention: 'none',
     worktree: { path: '/old-cwd', base: 'base', materialized: false },

@@ -16,7 +16,7 @@ const input = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput =>
   workspaceId: WORKSPACE,
   parent: PARENT,
   brief: "verify the implementation",
-  role: "check",
+  preset: "check",
   kind: "implementation",
   createdBy: "agent",
   concurrency: 12,

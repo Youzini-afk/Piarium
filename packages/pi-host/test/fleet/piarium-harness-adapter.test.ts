@@ -18,7 +18,7 @@ describe("Piarium harness Fleet adapter", () => {
               integration: "dirty",
               brief: "Run checks",
               createdAt: "2026-09-04T00:00:00.000Z",
-              role: "check",
+              preset: "check",
               updatedAt: "2026-09-04T00:00:01.000Z",
               activeRun: {
                 id: "run-1",
