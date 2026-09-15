@@ -224,7 +224,11 @@ describe("production shell assembly", () => {
     });
     const ctx = serviceContext("session-attach", "ws-attach");
     const started = await createShellExecService(host).handle(
-      { command: "printf 'ready\\n'; IFS= read -r line; printf 'got:%s\\n' \"$line\"", cwd: workspace, waitMs: 400 },
+      {
+        command: "node -e \"process.stdin.setRawMode(true); process.stdin.resume(); console.log('ready'); process.stdin.once('data', data => { console.log('got:' + data.toString().trim()); setInterval(() => {}, 1000); })\"",
+        cwd: workspace,
+        waitMs: 400,
+      },
       ctx,
     );
     expect(started.kind).toBe("background");
