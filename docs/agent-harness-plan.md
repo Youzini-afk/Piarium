@@ -64,7 +64,7 @@ Last updated: 2026-09-15
 4. 限制对应真实问题；权限/路径是边界，调度是背压，输出/磁盘预算是配置策略，没有定标不猜硬拒绝数值。
 5. 正文不进日志、广播事件或 URL，经已授权的正文/工具通道传递。
 6. 模型槽位 user-owned；仅 hardImplement/review 默认主模型，其他未配不回退，memory 是活动模型的明示例外。
-7. web/权限让位沿公开契约，不复制模型凭据、Pi 会话或插件配置权威。
+7. 用户确认由 Piarium 原生 `tool_call` 门统一拥有，Host 只做不交互的身份/能力/路径强制；原生 web 工具不会因检测到插件而自动让位，替换能力必须由用户显式关闭原生工具。
 8. 主 agent 对记忆维护零义务，keeper 只标 plan 状态；块写保持分支、版本与原子冲突检查。
 9. 压缩使用 Pi 安全切点，覆盖与必要来源满足才接管；不再追加模型效果回放门禁。
 10. 损坏、权限错误、未来格式不读成空；新记录发布后切换，失败迁移不覆盖旧数据。
@@ -94,8 +94,12 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 
 **2026-09-15 的推进状态（D-252 / D-282）：** D-246–D-251 的返工基线已被阶段 R 的 R0–R6 完整接管并验收。
 工作状态/恢复、文件/物化、进程/PTY、文件与结构计算的生产权威都已迁入 Rust kernel，旧生产 writer 与发行依赖已清理；TS 保留
-产品与 Agent 编排，Pi 保留 Agent loop/provider/session。后续外部 MCP/ACP、research profile 和新模型沿该边界发展，不再重复建设
-TS 系统内核。未测平台、真实 provider 与真实 CoW 的观察继续如实登记，但不把它们改写成已完成平台的功能禁用。
+产品与 Agent 编排，Pi 保留 Agent loop/provider/session。未测平台、真实 provider 与真实 CoW 的观察继续如实登记，但不把它们
+改写成已完成平台的功能禁用。
+
+**下一实施主线是现有 Harness 收口（D-283），不是外部 MCP/ACP。** 先由 Piarium 原生权限门完整接管 Harness、Pi 内置、MCP、
+Pi 包工具和嵌套线程的用户确认，再删除 foundational `pi-permission-system` 及其设置/让位双轨；随后收口原生 `webfetch` /
+`websearch` 的配置代际、域名策略、渲染选择与插件替换语义。外部 Agent runtime 和 research profile 在这两项完成后再排。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
@@ -131,6 +135,8 @@ TS 系统内核。未测平台、真实 provider 与真实 CoW 的观察继续�
    explore 负责快速提供当前代码，较长开放追踪由 retrieval 承担；扩散模型与后训练留待后续。
    3.17 的命令输出整理已交付（D-197/D-199）。完成能力即按有效配置提供，缺某一路不丢弃其他材料。
 4. **其余产品面**：知识全量管理、自动 review、后台终端 tab 与 bundled Pi 默认已交付，并经 D-209–D-211 补正身份、并发和退出契约；知识语义召回已沿远程 embedding 接线（D-196）。重叠提示与合并预览随线程服务实现，不设独立收益审批。
+5. **当前 Harness 收口（1b.7 / 3b，D-283）**：先完成原生权限唯一权威，再完成 web 配置与替换语义。两项共享会话工具装配与
+   Settings 边界，按此顺序串行整合；不并行修改同一 tool registry、配置合并和会话冻结契约。
 
 TriviumDB 优先保留，不启动 SQLite 迁移；Windows 沙箱排除。平台与外部 provider 的未验证范围如实报告，不把缺另一平台机器
 写成已验证平台的禁用条件。不自行发起付费记忆实验；完成一个切片后按本节顺序继续，不把文档同步解释为停工点。
@@ -171,6 +177,28 @@ Host 规范化、完整批次全序获取 owner-bound lease；只保证该 Host 
 Windows 生产发现与按工作区 `harness.shell` 接线已由 D-200 交付；后台 shell 与 terminal runtime 共用真实进程、全局身份及退出/写者
 生命周期已由 D-206/D-209 收口。
 websearch provider 当前变更需重启 Host，后续新会话使用新的能力世代，旧会话保持配置；不注册不存在的 provider。
+
+### 1b.7 原生 Web 能力收口（D-283）
+
+现有 `webfetch`、`websearch`、Host SSRF fetch、Brave/Exa/Tavily/Jina/SearXNG provider、search-only Pi auth 凭据和来源面板
+保留为正式实现。当前代码已经能执行真实搜索；本阶段解决配置和所有权没有收口的问题，不重做搜索引擎，也不新增第二套抓取服务。
+
+1. 删除按 `pi-web-access` 包名/启用状态自动让出 `webfetch` / `websearch` 的会话装配路径。原生工具按 Harness 设置提供；用户要使用
+   第三方同名工具时，显式关闭对应原生工具。包的存在本身不改变运行行为，也不保留自动让位兼容分支。
+2. 把 provider 与凭据解析做成 Host 管理的配置代际。设置或 credential 改变后，未来创建的会话直接取得新的 provider identity 与
+   工具可用性，无需重启应用；已创建会话的工具集和绑定保持冻结。凭据被撤销后，旧调用明确返回 unavailable，不缓存旧密钥或
+   静默切换 provider。
+3. 为 fetch 与 search 接通同一套 user/workspace 域名策略。workspace 只能收紧；工具参数中的 allowed/blocked domains 与配置求交，
+   不能扩大持久策略。Host 在发请求和接受重定向前执行实际策略，来源面板只展示已经通过策略的 URL。
+4. `web.render` 必须真实控制 Electron 离屏渲染选择：关闭时不启动 renderer；开启而当前 Host 无 renderer 时明确 unavailable，不能把
+   未渲染的 SPA 当成功。Web/云 Host 继续如实声明自身能力。
+5. 删除没有生产消费者的 `maxFetchesPerTurn` 配置、UI 和文档。它没有对应的已定标失败模式，不能以未实施的硬次数预算冒充安全
+   边界；真实网络取消、provider 限流/错误、输出背压和 SSRF 继续各自表达。
+6. 当前单 provider 配置足以交付；本阶段不增加自动多 provider 并发、隐藏回退或模型包装。以后出现真实可用性需求时再扩展 provider
+   选择，不把功能数量当收口条件。
+
+验证沿公开 `websearch` / `webfetch` 工具到 Host HTTP adapter，覆盖配置变更后的新旧会话、credential 撤销、域名策略交集、跨域
+重定向、renderer unavailable 和显式关闭后的第三方替换。status 在生产消费者接通前保持当前交付事实，不用本计划提前标完成。
 
 ## 阶段 2：上下文与知识
 
@@ -681,14 +709,36 @@ OutputStore / 后台 buffer；显式分页读原始字节。`tool_result` 只对
 （声明式规则、附加模型总结）未做。**不用小模型总结替代**（漏一个失败是静默的）；模型总结只作非结构化输出上的附加，
 且要明确标注"这是模型挑的行，不是全部"。
 
-## 阶段 3b：权限与插件
+## 阶段 3b：原生权限唯一权威（D-283）
 
-T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fallback；Host 只验身份/能力/路径。这是实际能力范围决定
-的共存，不是暂不开原生能力。Smart 走配置的 permissionJudge；插件活跃走其公开 authorizerChain。
+当前交付事实仍是：foundational `@gotgenes/pi-permission-system` 发布 session-keyed service 时独占确认，Piarium 原生门只在插件缺席时
+覆盖 Harness 工具。原生设置页已有 `normal` / `accept-edits` / `bypass` / `smart`、用户规则和 `permissionJudge`，但插件活跃时这些
+设置不参与最终裁决。这是待替换的双轨，不再作为目标架构。
 
-原生权限按具体能力推进，替换时覆盖实际 Bash/路径/MCP/skill/子会话/审计消费者，不能只接 Harness 却删除其他保护。
-已有授权内无需重复形式审批，不静默降低用户权限或给未启用 authorizer 授权。测一次提示、跨会话/卸载、workspace 只收紧、
-高风险规则，不机械重复全量权限复审。
+本阶段完成以下纵切：
+
+1. pi-host 内置 `tool_call` extension 成为 Piarium 会话唯一的用户确认权威。它在会话构造时取得所有实际工具的稳定身份与来源，覆盖
+   Harness、Pi 内置、MCP、Pi 包工具和嵌套线程允许集；不能再以“非 Harness 工具”直接放行。Host 继续只验证 broker actor、冻结
+   capability、workspace/path scope 与资源 authority，不弹第二次确认，也不替 worker 内执行的工具假装做交互门。
+2. 工具装配生成规范化的权限对象：工具来源、动作类别、实际 cwd、命令、规范路径集合、网络目标和子线程范围。Harness/Pi 内置工具
+   使用项目维护的明确描述；MCP annotations 与第三方声明只作为输入证据，不能自行授予权限。缺少副作用描述的第三方工具按未知动作
+   询问，不能默认当只读。
+3. 命令与路径判断覆盖实际选择的 shell、命令组合、重定向和子进程入口；路径在确认前相对真实 execution cwd 解析，并核对规范路径、
+   符号链接/reparse 与工作区外目标。不能只靠当前关键字 regex 判断 `rm`、`git` 或敏感文件，也不能用提示词代替解析和 Host path
+   authority。
+4. 保留现有四种模式与从上到下的用户规则；workspace 仍只能追加 ask/deny、不能放宽用户策略。Smart 只在用户配置
+   `permissionJudge` 后参与普通 ask，高影响或证据不完整的动作仍走确定性策略；模型失败回到 ask，不借主模型。
+5. “本会话允许”绑定工具来源、动作类别、owning/execution workspace 与明确资源范围，UI 显示将被记住的范围；不能再只按 tool name
+   放行整个 `bash` 或未知工具。嵌套线程继承创建时冻结的 overlay，只能收紧；父会话之后切到 bypass 不放宽已运行子线程。
+6. 每次 allow/deny/ask、规则来源、规范化目标、用户选择和 policy generation 进入现有 session/Thread 事件与审计投影；敏感正文和凭据
+   不进入日志。不新建另一套 permission 数据库或把审计写进模型上下文。
+7. 单一 Piarium 权限 UI 负责确认卡片、会话授权撤销、模式与规则。完成覆盖后，从 foundational manifest 删除
+   `@gotgenes/pi-permission-system`，并删除 session service 让位、permission-system Plugin Settings/quick mode/status bridge、专属 i18n 与
+   测试路径；不保留默认关闭、旧配置 reader 或双重提示兼容层。
+
+验收以真实公开工具链的反例为准：组合 shell/外部路径/符号链接、MCP read 与 mutation、未知 Pi 包工具、会话授权范围、workspace
+收紧、嵌套冻结、Smart 失败、取消/关闭、审计和一次提示。先证明所有实际消费者已由原生门覆盖，再删除插件；删除后不得出现无门控
+窗口。status 的 3b.1–3b.3 在代码完成前继续描述现状，不能提前写成原生接管。
 
 ## 阶段 R：Rust 系统内核与 Host 分层（D-252）
 
@@ -832,7 +882,7 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 
 - 默认 runtime：直接交付 bundled Pi、Runtime Manager 默认选择与 Git Bash 就绪说明，保留自有 runtime；实际 Electron smoke。
   已有版本依赖明确，不等 harness 全部完成。
-- 外部 runtime：按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
+- 外部 runtime：排在 D-283 的原生权限与 web 收口之后；届时按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
 - research/文件知识工作：沿共享工具、存储、文档、验证器做文献/PDF/引用/notebook；按实际用途交付。第二个 profile 发展公共
   接口，不是允许建接口的前置。SaaS 连接器与 Windows 沙箱保持范围之外。
 

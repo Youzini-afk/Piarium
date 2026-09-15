@@ -6230,3 +6230,43 @@ Host 注入同一 native service 到用户终端、Harness shell、Thread setup�
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-282 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance |
+
+### D-283 · 2026-09-15 · 现有 Harness 优先收口：原生权限唯一权威与 Web 配置闭环
+
+类型：产品与实施顺序调整；本条定义下一阶段，不把未实施目标写成当前交付
+
+背景：阶段 R 已完成，继续优先建设对外 MCP/ACP 会绕开现有 Harness 的两个所有权缺口。权限方面，foundational
+`@gotgenes/pi-permission-system` 当前仍在会话发布 service 后独占用户确认，Piarium 原生门只覆盖 Harness 工具并让非 Harness 工具
+通过；因此原生权限设置通常只是 fallback，产品同时存在 Harness 权限与 Plugin Settings 两套入口。Web 方面，`webfetch` /
+`websearch` 已是可运行的 Host/Harness 原生实现，但启用 `pi-web-access` 会按包检测自动让位，搜索 provider 在 Host 启动时冻结且修改
+需要重启；文档承诺的域名策略未进入生产装配，`maxFetchesPerTurn` 已进入协议却没有消费者。
+
+决定：
+
+1. 外部 MCP façade、ACP host 与 research profile 暂不作为下一实施主线。先完成现有 Harness 的权限和 web 收口；它们完成后再按产品
+   价值选择外部 runtime 或新领域。
+2. Piarium 原生 pi-host `tool_call` 门成为唯一交互式权限权威，覆盖 Harness、Pi 内置、MCP、Pi 包工具与嵌套线程。Host 的
+   actor/capability/workspace/path enforcement 保持独立且不弹窗。工具来源与动作、命令、规范路径、网络目标和线程范围在真实工具
+   装配中形成权限对象；未知副作用不默认当只读，MCP/第三方 annotations 不能自行授予权限。
+3. 原生实现保留 `normal` / `accept-edits` / `bypass` / `smart`、用户规则、workspace 只收紧与可选 `permissionJudge`，并补齐实际
+   shell/路径解析、会话授权范围、嵌套冻结、撤销和审计。实现不得把 session grant 只绑定 tool name，也不得用 Host 静态 capability
+   代替用户确认。
+4. 原生覆盖所有真实消费者后，删除 permission-system foundational provision、session service 让位、插件专属设置/快捷模式/状态桥与
+   兼容路径。迁移过程不能先删门再补覆盖；最终生产只有一个确认 UI 和一份 Piarium policy authority。
+5. `webfetch` / `websearch` 保持原生默认，不再因 `pi-web-access` 存在而自动让位。第三方替换通过用户显式关闭原生工具完成。搜索
+   provider/credential 使用配置代际，使新会话无需重启取得新绑定，旧会话保持冻结；credential 撤销明确 unavailable。
+6. fetch/search 使用 user 与 trusted workspace 取更严格结果的域名策略，工具参数只能收紧；`web.render` 接到真实 renderer 选择。
+   删除未定标且未接线的 `maxFetchesPerTurn` 配置，不以硬次数预算冒充 SSRF、取消、provider 限流或输出背压。
+7. 本阶段不增加多 provider 并发/隐藏回退、第二套抓取服务、第二个 permission store 或新的 OS 沙箱。当前交付状态在生产消费者与
+   对应反例完成前不提升。
+
+影响：`agent-harness-plan.md` 0.4/0.7/1b.7/3b/阶段 4–6；后续实现将涉及 protocol permission/web settings、pi-host tool assembly 与
+permission gate、Application Host web runtime、foundational package provision、Harness/Plugin Settings UI、session/Thread 审计和相应
+文档。D-044 的历史共存理由保留为当时事实，其目标架构由本条取代。
+
+## D-283 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-044 | historical coexistence implementation retained until replacement lands; target architecture superseded | D-283 | plan 3b；status 3b.1–3b.3（现状） |
+| D-283 | accepted / implementation planned | — | plan 0.4/0.7/1b.7/3b/阶段 4–6；future design/status/code |
