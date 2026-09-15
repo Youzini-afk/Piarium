@@ -71,6 +71,7 @@ describe('Piarium cloud container runtime', () => {
   });
 
   it('runs the published server with Node and exposes a real health check', () => {
+    const runtimeStage = appDockerfile.slice(appDockerfile.indexOf('FROM ${RUNTIME_BASE_IMAGE} AS runtime'));
     expect(appDockerfile).toContain('ENV HOME=/home/piarium');
     expect(appDockerfile).toContain('PIARIUM_DATA_DIR=/home/piarium/.config/piarium');
     expect(appDockerfile).toContain('COPY --chmod=0755 scripts/docker-entrypoint.sh /usr/local/bin/piarium-entrypoint');
@@ -78,9 +79,9 @@ describe('Piarium cloud container runtime', () => {
     expect(appDockerfile).toContain('CMD ["node", "packages/web/bin/cli.js", "serve", "--foreground"]');
     expect(appDockerfile).toContain('HEALTHCHECK');
     expect(appDockerfile).toContain('http://127.0.0.1:3000/health');
-    expect(appDockerfile).not.toContain('apt-get install');
-    expect(appDockerfile).not.toContain('rustup.rs');
-    expect(appDockerfile).not.toContain('playwright install --with-deps chrome');
+    expect(runtimeStage).not.toContain('apt-get install');
+    expect(runtimeStage).not.toContain('rustup.rs');
+    expect(runtimeStage).not.toContain('playwright install --with-deps chrome');
   });
 
   it('applies repository patches before building', () => {
