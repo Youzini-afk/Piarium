@@ -1296,12 +1296,13 @@ describe("thread runtime", () => {
 
   it("marks an event-silent Run as stalled and clears it on the next observed event", async () => {
     await runtime.dispose();
+    let stalledAfterMs = 20;
     runtime = createThreadRuntime({
       registry,
       sessions: sessionAdapter,
       resolveWorkspaceRoot: async () => "/workspace",
       resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
-      stalledAfterMs: () => 20,
+      stalledAfterMs: () => stalledAfterMs,
       worktrees: {
         prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
         snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
@@ -1314,6 +1315,7 @@ describe("thread runtime", () => {
     await runtime.drain();
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ attention: "stalled" });
 
+    stalledAfterMs = 30_000;
     runtime.processEvent({
       kind: "host",
       sessionId: "child-1",
