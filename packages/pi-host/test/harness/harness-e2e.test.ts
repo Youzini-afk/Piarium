@@ -30,6 +30,7 @@ import { createDiagnosticsTool, createGetOutputTool } from "../../src/harness/ou
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { DiagnosticItem } from "@piarium/protocol";
 import type { DiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-service.js";
+import { createIsolatedTerminalSessionApi } from "../../../web/application-host/lib/terminal/isolated-session-api.test-helper.js";
 
 const SESSION_ID = "e2e-session";
 const WORKSPACE_ID = "e2e-workspace";
@@ -54,6 +55,7 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
   mkdirSync(join(workspaceRoot, "packages"), { recursive: true });
 
   // Host side: create service host with mock search (real shell + output store)
+  const terminal = createIsolatedTerminalSessionApi();
   const harnessServiceHost = createHarnessServiceHost({
     search: async (request, _options) => {
       // Simple mock search: read files and search for the pattern
@@ -96,6 +98,7 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
       hasPowerShell: process.platform === "win32",
       ...(process.platform === "win32" ? { gitBashPath: "C:\\Program Files\\Git\\bin\\bash.exe" } : {}),
     },
+    createTerminalSession: (input) => terminal.createTerminalSession(input),
   });
   harnessServiceHost.registerSession({ actor: ACTOR, grantedCapabilities: CAPABILITIES, workspaceId: WORKSPACE_ID, workspaceRoot });
 
@@ -129,7 +132,21 @@ async function setupE2E(options: { diagnosticsProvider?: DiagnosticsProvider } =
     defaultTimeoutMs: 30000,
   });
 
-  return { workspaceRoot, harnessServiceHost, router, bridge };
+  return {
+    workspaceRoot,
+    harnessServiceHost,
+    router,
+    bridge,
+    dispose: async () => {
+      bridge.dispose();
+      router.dispose();
+      try {
+        await harnessServiceHost.dispose();
+      } finally {
+        await terminal.shutdown();
+      }
+    },
+  };
 }
 
 async function executeTool(
@@ -142,22 +159,20 @@ async function executeTool(
 
 describe("harness e2e integration", () => {
   it("1. bash pwd outputs workspace root", async () => {
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E();
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const text = await executeTool(bashTool, { command: "pwd" });
       const dirName = workspaceRoot.split(/[\\/]/).pop();
       assert.ok(text.includes(dirName!), `bash pwd output should contain workspace dir name "${dirName}": got "${text}"`);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });
 
   it("2. bash cd packages then pwd outputs .../packages (two independent calls)", async () => {
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E();
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       // First call: cd packages
@@ -169,15 +184,13 @@ describe("harness e2e integration", () => {
       assert.ok(pwdLine, `pwd output should contain a line with "packages": got "${text}"`);
       assert.ok(pwdLine!.trim().endsWith("packages"), `pwd path should end with "packages": got "${pwdLine!.trim()}"`);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });
 
   it("3. background command + get_output retrieves output", async () => {
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E();
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
@@ -204,15 +217,13 @@ describe("harness e2e integration", () => {
       assert.match(reset, /initial read.*exited 0/s, `compaction should restore a full shell baseline with its exit state: got "${reset}"`);
       assert.match(reset, /done/, `the reset baseline should contain the complete shell output: got "${reset}"`);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });
 
   it("4. grep hit finds text and miss returns 0 hits", async () => {
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E();
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const grepTool = createGrepTool(bridge, SESSION_ID);
       const hitText = await executeTool(grepTool, { pattern: "hello", path: workspaceRoot });
@@ -221,15 +232,13 @@ describe("harness e2e integration", () => {
       const missText = await executeTool(grepTool, { pattern: "nonexistent_xyz123", path: workspaceRoot });
       assert.ok(missText.includes("0 hits (searched"), `grep miss should say "0 hits (searched": got "${missText}"`);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });
 
   it("5. read 5000-line file returns truncated text with get_output handle", async () => {
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E();
+    const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
@@ -246,9 +255,7 @@ describe("harness e2e integration", () => {
       const page2 = await executeTool(getOutputTool, { handle, offset: 1024, length: 1024 });
       assert.ok(page2.length > 0, `get_output page 2 should have content: got "${page2.slice(0, 120)}..."`);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });
@@ -298,7 +305,7 @@ describe("harness e2e integration", () => {
       getSnapshot: async () => "1",
       isAvailable: async () => true,
     };
-    const { workspaceRoot, bridge, harnessServiceHost, router } = await setupE2E({ diagnosticsProvider: provider });
+    const { workspaceRoot, bridge, dispose } = await setupE2E({ diagnosticsProvider: provider });
     try {
       const tool = createDiagnosticsTool(bridge, SESSION_ID);
       const first = await executeTool(tool, { path: join(workspaceRoot, "searchable.ts") });
@@ -310,9 +317,7 @@ describe("harness e2e integration", () => {
       const third = await executeTool(tool, { path: join(workspaceRoot, "searchable.ts") });
       assert.match(third, /no diagnostic changes/);
     } finally {
-      bridge.dispose();
-      router.dispose();
-      await harnessServiceHost.dispose();
+      await dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
     }
   });

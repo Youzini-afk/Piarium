@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -23,6 +23,11 @@ async function createSession(capabilities: { harnessLspNavigation?: boolean; har
   const agentDir = join(root, "agent");
   await Promise.all([mkdir(cwd), mkdir(agentDir)]);
   const transport = new MemoryHostTransport();
+  if (capabilities.harnessWebSearch) {
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: { web: { search: { provider: "searxng", endpoint: "https://search.example.test" } } },
+    }));
+  }
   const controller = new HostController({ agentDir, projectTrustOverride: true, transport });
   controller.start();
   try {

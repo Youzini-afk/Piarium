@@ -47,6 +47,8 @@ import { createExploreFileReader } from "../../../web/application-host/lib/harne
 import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
 import { createHarnessPathAuthority } from "../../../web/application-host/lib/harness/path-authority.js";
 import { createNativeComputeTestHarness } from "../../../web/application-host/lib/kernel/compute.test-helper.js";
+import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/file-store.test-helper.js";
+import { createInMemoryRecoveryDurablePort } from "../../../web/application-host/lib/recovery/recovery-durable-port.test-helper.js";
 import { createWorkspaceContentSearch } from "../../../web/application-host/lib/search/content.js";
 import { createRemoteEmbedder } from "../../../web/application-host/lib/knowledge/semantic/remote-embedder.js";
 import { createSemanticIndexRuntime } from "../../../web/application-host/lib/knowledge/semantic/runtime.js";
@@ -112,7 +114,21 @@ async function setupSession(options: {
     },
     resolveActor: (identity) => harnessServiceHost.resolveActor(identity),
     cancelExploreQuery: (actor, queryId) => harnessServiceHost.exploreQueryStore.cancel(actor, queryId),
-    ...(options.authorizeWorkspacePath ? { authorizeWorkspacePath: options.authorizeWorkspacePath } : {}),
+    authorizeWorkspacePath: options.authorizeWorkspacePath ?? (async (actor, inputPath, pathOptions) => {
+      if (actor.workspaceId !== workspaceId) return null;
+      const workspaceRoot = path.resolve(root);
+      const absolutePath = path.isAbsolute(inputPath) ? path.resolve(inputPath) : path.resolve(workspaceRoot, inputPath);
+      const relativePath = path.relative(workspaceRoot, absolutePath);
+      if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) return null;
+      if (!pathOptions.allowMissing && !existsSync(absolutePath)) return null;
+      return {
+        authorityId: "session-e2e-path-authority",
+        workspaceId,
+        inputPath,
+        resourceId: relativePath.split(path.sep).join("/"),
+        canonicalResourceId: absolutePath,
+      };
+    }),
   });
   registerHarnessServices(router, harnessServiceHost);
 
@@ -885,6 +901,20 @@ describe("session e2e — fixed surface read", () => {
 describe("session e2e — fixed surface edit", () => {
   it("edits the Host Document Registry buffer from a public Pi edit tool", async () => {
     const harness = await createDocumentAuthorityHarness();
+    const durableRecoveryStore = createInMemoryRecoveryDurablePort();
+    const inspected = await harness.authority.inspectWorkspace(harness.identity.workspaceId);
+    harness.authority.bindDurableMutationStorage(async (_workspaceId, operation) => operation({
+      durableRecoveryStore,
+      fileStore: createRecoveryFileStore(),
+      identity: {
+        authorityId: harness.authority.hostId,
+        canonicalRoot: inspected.root,
+        filesystemProfile: "test",
+        workspaceId: harness.identity.workspaceId,
+      },
+      resourceOperationGate: { run: (_resources, callback) => callback() },
+      root: join(harness.dataDir, "agent-mutation-objects"),
+    }));
     const live = new Map<string, LiveSurfaceBuffer>();
     const surface = attachLiveSurfaceCompleter(harness.authority, {
       generation: 1,
@@ -946,7 +976,7 @@ describe("session e2e — fixed surface edit", () => {
         faux,
         workspaceId: harness.identity.workspaceId,
         harnessDocumentRead: true,
-        answerDialog: () => "Allow for this session",
+        answerDialog: () => "Allow for this session scope",
         serviceHostOptions: {
           commitAgentInputContext: (sessionId, context) => (
             harness.authority.commitAgentInputSnapshot(sessionId, context)
@@ -1137,6 +1167,11 @@ describe("session e2e — session-local web reader", () => {
 describe("session e2e — configured web search", () => {
   it("carries a configured Host provider result through websearch into a real Pi turn", async () => {
     await withTempRoot("piarium-s-web-search-", async (root) => {
+      const agentDir = join(root, "agent");
+      await mkdir(agentDir, { recursive: true });
+      await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+        harness: { web: { search: { provider: "searxng", endpoint: "https://search.example.test" } } },
+      }), "utf8");
       const faux = registerFauxProvider();
       let finalToolResult = "";
       faux.setResponses([
@@ -2242,7 +2277,7 @@ describe("session e2e — permission gate extension", () => {
     });
   });
 
-  it("remembers 'allow for this session' but still asks for a high-risk path", async () => {
+  it("binds a session approval to one resource and always asks for a high-risk path", async () => {
     await withTempRoot("piarium-s-perm-session-", async (root) => {
       const faux = registerFauxProvider();
       faux.setResponses([
@@ -2255,7 +2290,9 @@ describe("session e2e — permission gate extension", () => {
       const session = await setupSession({
         root,
         faux,
-        answerDialog: (_request, index) => (index === 0 ? "Allow for this session" : "Deny"),
+        answerDialog: (_request, index) => (
+          index === 0 ? "Allow for this session scope" : index === 1 ? "Allow once" : "Deny"
+        ),
       });
 
       try {
@@ -2263,17 +2300,18 @@ describe("session e2e — permission gate extension", () => {
         await session.host.prompt(snapshot.sessionId, "write three files");
         await session.host.session.waitForIdle();
 
-        // First write asks and is granted for the session; the second write
-        // must not ask again; the third targets `.env`, which is high-risk
-        // and therefore asks despite the session grant (§3b.2).
+        // Session grants are bound to a normalized resource. The second file
+        // therefore asks independently, and `.env` remains high risk.
         assert.equal(
           session.uiRequests.length,
-          2,
-          `expected 2 dialogs (first write + high-risk .env), got ${session.uiRequests.length}: ${session.uiRequests.map((r) => r.title).join(" | ")}`,
+          3,
+          `expected one dialog per resource, got ${session.uiRequests.length}: ${session.uiRequests.map((r) => r.title).join(" | ")}`,
         );
-        assert.match(session.uiRequests[1]!.title, /\.env/, "the second dialog must be the .env write");
+        assert.match(session.uiRequests[0]!.title, /one\.txt/);
+        assert.match(session.uiRequests[1]!.title, /two\.txt/);
+        assert.match(session.uiRequests[2]!.title, /\.env/, "the final dialog must be the .env write");
         assert.ok(existsSync(join(root, "one.txt")), "first write was allowed");
-        assert.ok(existsSync(join(root, "two.txt")), "second write rode the session grant");
+        assert.ok(existsSync(join(root, "two.txt")), "second write was independently allowed");
         assert.ok(!existsSync(join(root, ".env")), "the high-risk write was denied");
       } finally {
         await session.dispose();

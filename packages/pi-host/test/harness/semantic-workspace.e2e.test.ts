@@ -32,6 +32,10 @@ import { createHashEmbedder } from "../../../web/application-host/lib/knowledge/
 import { createStructureSource } from "../../../web/application-host/lib/structure/source.js";
 import { createDocumentAuthority } from "../../../web/application-host/lib/documents/authority.js";
 import { createRecoveryTurnCoordinator } from "../../../web/application-host/lib/recovery/turn-coordinator.js";
+import { createNativeComputeTestHarness } from "../../../web/application-host/lib/kernel/compute.test-helper.js";
+import { createTreeSitterStructureProvider } from "../../../web/application-host/lib/structure/tree-sitter-provider.js";
+import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/file-store.test-helper.js";
+import { createInMemoryRecoveryDurablePort } from "../../../web/application-host/lib/recovery/recovery-durable-port.test-helper.js";
 import { SessionHost } from "../../src/session-host.js";
 
 type Workspace = { workspaceId: string; root: string };
@@ -95,16 +99,34 @@ async function createSemanticHarness(options: {
   await mkdir(childRoot, { recursive: true });
 
   const baseUrl = "https://models.example/v1";
+  let forwardDocumentMutation = (_event: Parameters<ReturnType<typeof createWorkspaceSemanticRuntime>["observeDocumentMutation"]>[0]): void => {};
   const documents = createDocumentAuthority({
     hostId: "semantic-public-e2e-host",
     dataDir,
     isAllowedRoot: async () => true,
     isTrusted: async () => true,
+    onMutation: (event) => forwardDocumentMutation(event),
   });
   const parentIdentity = await documents.resolveWorkspace({ path: parentRoot });
   const childIdentity = await documents.resolveWorkspace({ path: childRoot });
   const parent = { workspaceId: parentIdentity.workspaceId, root: parentRoot };
   const child = { workspaceId: childIdentity.workspaceId, root: childRoot };
+  const durableRecoveryStore = createInMemoryRecoveryDurablePort();
+  documents.bindDurableMutationStorage(async (workspaceId, operation) => {
+    const inspected = await documents.inspectWorkspace(workspaceId);
+    return operation({
+      durableRecoveryStore,
+      fileStore: createRecoveryFileStore(),
+      identity: {
+        authorityId: documents.hostId,
+        canonicalRoot: inspected.root,
+        filesystemProfile: "test",
+        workspaceId,
+      },
+      resourceOperationGate: { run: (_resources, callback) => callback() },
+      root: join(dataDir, "agent-mutation-objects"),
+    });
+  });
   const paths = createHarnessPathAuthority({
     authorityId: "semantic-public-e2e-authority",
     documents,
@@ -140,6 +162,7 @@ async function createSemanticHarness(options: {
     unwatchConfig: async () => ({ unwatched: true }),
   } as unknown as NonNullable<ReturnType<WorkspaceSemanticRuntimeOptions["getBroker"]>>;
 
+  const compute = createNativeComputeTestHarness();
   const semantic = createWorkspaceSemanticRuntime({
     dataDir,
     hostId: "semantic-public-e2e-host",
@@ -149,7 +172,9 @@ async function createSemanticHarness(options: {
       agentInputDraftPaths: documents.agentInputDraftPaths,
       readAgentInputSnapshot: documents.readAgentInputSnapshot,
     },
-    structureSource: createStructureSource([]),
+    structureSource: createStructureSource([
+      createTreeSitterStructureProvider({ compute, parseBudgetMs: 30_000 }),
+    ]),
     searchFilesystemFiles: async (workspaceRoot) => sourceFiles(workspaceRoot),
     isIndexablePath: async () => true,
     embedder: createHashEmbedder(),
@@ -158,6 +183,7 @@ async function createSemanticHarness(options: {
     workingBranches: { pinQuery: async () => null },
     onError: (error) => { semanticErrors.push(error); },
   });
+  forwardDocumentMutation = (event) => semantic.observeDocumentMutation(event);
 
   const serviceHost = createHarnessServiceHost({
     search: async () => ({ status: "empty" as const, generation: undefined }),
@@ -173,6 +199,9 @@ async function createSemanticHarness(options: {
     // The native journal asks this first. Returning disk makes the fixture use
     // the real Pi write tool and the real after-phase journal event.
     documentBranchWrite: async () => ({ status: "disk" as const }),
+    documentSurfaceWrite: (sessionId, workspaceId, context, changes, signal) => (
+      documents.applyAgentSurfaceWrite(sessionId, workspaceId, context, changes, signal)
+    ),
   });
 
   const runSession = async (
@@ -345,7 +374,10 @@ async function createSemanticHarness(options: {
         }), { status: 200, headers: { "Content-Type": "application/json" } });
       },
     });
-    if (sessionOptions.journal) host.setWorkspaceMutationJournalEnabled(true);
+    if (sessionOptions.journal) {
+      host.setHarnessDocumentReadEnabled(true);
+      host.setWorkspaceMutationJournalEnabled(true);
+    }
 
     const coordinator = createRecoveryTurnCoordinator({
       documents: { inspectMutation: documents.inspectMutation },
@@ -447,6 +479,7 @@ async function createSemanticHarness(options: {
     semanticErrors,
     cleanup: async () => {
       await semantic.dispose();
+      await compute.dispose();
       await serviceHost.dispose();
       await documents.dispose();
       await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
@@ -517,7 +550,7 @@ describe("public explore workspace semantic runtime", () => {
     }
   });
 
-  it("observes a native child write at the recovery ack boundary before the next public explore call", async () => {
+  it("observes a durable Host child write before the next public explore call", async () => {
     const harness = await createSemanticHarness();
     const faux = registerFauxProvider();
     const contexts: Context[] = [];
@@ -527,10 +560,9 @@ describe("public explore workspace semantic runtime", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("write", { path: "child.ts", content: "export function reconcileVault() { return \"updated-child\"; }\n" })]),
         async () => {
-          // observeToolWrite intentionally starts the reindex in the
-          // background. Let that production work settle between the native
-          // write result and the next tool call, while keeping both tools in
-          // the same real Pi agent run.
+          // Documents publishes the durable Host mutation before returning the
+          // write result, while semantic reindexing continues in the background.
+          // Let that work settle before the next tool call in the same Pi run.
           await harness.semantic.drain();
           return fauxAssistantMessage([fauxToolCall("explore", { question: "where is bookkeeping condensed before persistence" })]);
         },
@@ -552,7 +584,7 @@ describe("public explore workspace semantic runtime", () => {
         await session.prompt("write the latest child implementation, then locate the bookkeeping implementation");
         const result = lastToolMessage(contexts);
         assert.match(result, /child\.ts/);
-        assert.match(result, /reconcileVault|updated-child/);
+        assert.match(result, /reconcileVault|updated-child/, JSON.stringify(session.toolResults));
         const current = await harness.documents.read({ workspaceId: harness.child.workspaceId, resourceId: "child.ts" });
         assert.equal(current.status, "ready");
         if (current.status !== "ready") throw new Error("Expected updated child document");
@@ -562,11 +594,6 @@ describe("public explore workspace semantic runtime", () => {
         assert.ok(harness.embedBodies.some((batch) => batch.some((text) => text.includes("reconcileVault"))));
         const updated = await harness.semantic.semanticRecall(harness.child.workspaceId, "where is bookkeeping condensed before persistence", 5);
         assert.match(updated.hits[0]?.body ?? "", /updated-child/);
-        assert.ok(
-          session.observationOrder.indexOf("observe-tool-write") >= 0
-            && session.observationOrder.indexOf("observe-tool-write") < session.observationOrder.indexOf("ack-after"),
-          `native write observation must precede its mutation acknowledgement: ${session.observationOrder.join(",")}`,
-        );
         assert.ok(session.observationOrder.indexOf("explore-result") >= 0
           && session.observationOrder.indexOf("explore-result") < session.observationOrder.indexOf("turn-settled"),
         `explore must finish before recovery settles the turn: ${session.observationOrder.join(",")}`);
