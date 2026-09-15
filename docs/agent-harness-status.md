@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,10 @@ Last updated: 2026-09-15
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**D-284 上下文无感续接已采纳，尚未实现。** 下一主线为真实请求前预算 → 容量临近时后台准备固定摘要 → 前台继续追加 →
+需要空间时沿 Pi 切点提交，并补 history、Zone 2/线程/知识消费者收口。正常前台无明显整理停顿是目标，不退成默认同步摘要。
+本次只修改设计/计划；当前代码仍运行下方 D-081 的持续 keeper 与 takeover，2.4/2.6 的既有证据不能当作 D-284 证据。
 
 **D-282 已完成 R0/R6，并据此完成阶段 R。** R0–R6 的生产责任均已按各自可执行契约接管：Rust kernel 统一拥有工作状态/恢复元数据、文件资源与物化、受管进程/PTY、固定视图文件与结构计算；TypeScript Application Host 保留产品策略、公开 API、Documents/Registry 协调、知识与模型编排，Pi worker 保留 Agent loop、provider、会话和扩展。R0 的 request-credit、取消/断线和发行身份，R6 的 Desktop/Web/云/VS Code 产物、旧原生依赖与测试实现清理、真实 surface 纵切及资源测量均已进入默认生产/发行路径。阶段 R 不再是当前实施主线。
 
@@ -91,6 +95,7 @@ pi-host 计数器及 reader、Smart judge、正常 Harness counters 的定向测
 session-wide 持久模式覆盖已经接入。`off` 不再把旧 blocks 注入 Zone 2。接管同时核对实际 context entry 覆盖、完整活动分支和所有
 可见 block 修订；缺口、漂移或 Host 重启只让该次回到 Pi，自身摘要不会被阻断。运行模式与最近 keeper/compaction 失败投影到
 SessionSnapshot、Harness Settings 和 Context。证据与仍未提供的 facts 见 2.4/2.6。
+这是当前运行事实；默认持续维护与 coverage 接管的设计已被 D-284 取代，生产替换尚待实施。
 
 **D-082/D-085/D-086 已交付发起窗口草稿读取。** UI 输入自动把本窗口 dirty buffers 固化到 Application Host，不要求附件或绑定操作；runtime
 只传不透明引用。`explore`、`grep` 和 Host-capability 门控的同名 `read`/`find`/`ls` 在这些路径上读取同一固定草稿，后续编辑不污染结果，捕获失败
@@ -138,6 +143,8 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.8** 知识库语义召回（D-196 / D-198） | host knowledge | ✓ | ✓ | `knowledge-recall.test.ts`（向量命中、范围/状态/修订、完整长条目分块、换空间）；`vectors/acceptance.test.ts`（自动维度、绑定异常保留文本、不自循环重试、并发 bootstrap 不串 query、resolver 取消/关闭）；`knowledge-services.test.ts`（actor 工作区传递、公开 recall / Zone 2 取消）；知识库 134 项及新增边界/公开接线 9 项通过 | ✓（未配远程保持文本；有效配置启用派生向量） | failed/unavailable/partial/empty 分列，绑定解析异常也保留文本 | 复用共享代际库、chunker、缓存与调度；受影响 id 即时失效，配置刷新与关闭已接。证据来自真实模块和 faux provider，不证明完整桌面 IPC 或真实外部质量；权威 `.tdb` 不变，不回退 MiniLM |
 | **2.9** 普通模型槽位 | protocol / pi-host / ui | ✓ | ✓ | `protocol/test/harness-model-slots.test.ts`、`roles.test.ts`；`pi-host/test/harness/session-e2e.test.ts`（reader / permissionJudge 实际功能调用）；Harness Settings 生产入口 | ✓（依赖能力各自按配置启用） | 未配置辅助槽位不注册或走无 LLM 路径；仅 hardImplement / review 明示回退主模型 | 当前十个普通槽位不含 embedding/rerank；后者是独立配置种类（3.16B/E）。聊天模型列表仍依赖 Pi session。三套预设只填空槽位；D-080 的普通会话统计与 ThreadRun 记录保持 |
 | **2.10** `recall` | host / pi-host | ✓ | ✓ | `host/recall-tool.test.ts`（workspace + user 合并）；`store.test.ts`（停用后 reopen 不再召回旧正文）；`phase2-e2e.test.ts` | ✓ | 不注册 | Application Host 已懒加载 `user.tdb`；Settings 目录与公开 recall 共用同一权威。suggested/dismissed/retired 不进入有效召回 |
+| **2.4A/B（D-284）** 请求预算与后台摘要准备 | pi-host / protocol | — | — | 无；当前仅代码/设计对照，不复用 keeper 测试充当新链证据 | —（交付目标默认启用） | 拟由同一摘要机制在必要时等待，不保留旧 keeper 引擎 | 真实回合内请求预算、缓存友好请求派生、固定候选与前台并行尚未实现 |
+| **2.6A/B（D-284）** 按需切换、history 与旧消费者收口 | pi-host / host / ui | — | — | 无；设计/plan/决策同步不等于生产交付 | — | 拟保留原文，失败不提交；真实超窗明确处理 | 固定切点提交、准备期间新增原文、按需历史回读、观察基线保留、keeper/模式/线程/知识依赖清理尚未实现 |
 | **3.1** 符号图采集器与查询 | host knowledge | ✓ | ✓（defines + imports/connects/associates + 解析出的 references/calls；explore 路径候选 + 摘录注解 + `related`） | `knowledge/store.test.ts`（节点/边、代际、match、反向 import、紧凑候选 close/reopen 后补关系；resolved relation 行的固定/未固定、重解析替换、目标删除级联、staleTarget、generation 消亡；D-246 anchor 批次重解析两缩一缩空、不同 anchor 隔离）；`knowledge/relations.test.ts`（真 supervisor+fixture 的 collect→持久化、piggyback record、无库降级）；`import-resolve.test.ts`；`symbol-runtime.test.ts`；`catalog-scan.test.ts`（并发扫描合并、无事件正文修改后重扫、连接移除/恢复、不重采集消费文件）；`typescript-service.test.ts`（D-246：显式根、嵌套首文件 cross-file caller、无根回退 cwd 不猜、setWorkspaceRoot 生命周期）；`related-scope.test.ts`（D-246：scope 过滤定义/引用/importers/connections、anchor 外拒绝、partial 组合状态、pathInRoots 一致性） | ✓（随 Documents mutation + 打开后火忘冷扫描；resolved 行由查询期 collector 与 lsp 导航回写） | 未知语言只 touch file；结构 unavailable 保留最后图；范围绑定磁盘 revision，脏缓冲不入图——resolved 行同样只持久化磁盘绑定答案，跨文件站点一律 unpinned、目标 revision 移动报 staleTarget（D-240）。未确认关联仅存在 file metadata，不建 link 节点 | D-236 已移除同名闸门再访的重读/重解析；extractor 3 使旧目录下次重采集。当前 2520 文件冷建 185767.1 ms、显式未变重扫 10314.095 ms，详见下方观察；没有同语料改前对照。D-140/D-141 的 18.4/4.8 分钟保留为历史。仍不冷启 LSP——resolved 行只在真实查询驱动下由已运行的语言视图产生；目录限 TS/TSX/JS/JSX。D-237 已补完整重扫的外部删除对账：missing 确认、代际条件删除与排队取消；失败/截断/未知 inventory 保留旧图。D-240 已接 references/calls 边与 relation collector；D-246 返工修正 LSP 根推断（来自 initialize 而非首个文件父目录）、related/explore actor scope 贯穿、权威 anchor 批次重解析（清掉消失 site）、partial 组合状态、explore 公开链暴露 findReferences/findCallers/findCalls；PageRank/多跳仍未做。完整桌面冷建未实测 |
 | **3.15** 快速 explore：查询上下文、分组计划、成组选段与局部补查（D-175–D-189） | protocol / host / pi-host | ✓ | ✓ | `explore-query-run.test.ts`（start 到达即读、原问题词法与慢语义并行、同文件晚到语义重建、稳定 viewId、required 组、单元来源排名、来源终态与冻结）；`explore-query-services.test.ts`（固定来源、完整 actor、受限 scope、取消与响应未送达、fixed roots 传递）；`router.test.ts` / `service-host.test.ts`（授权 cancel、request actor key、session 换代清理）；`semantic/runtime.test.ts`（查询取消停止等待）；`explore-model.test.ts` / `explore-tool.test.ts` / `host-services-bridge.test.ts`（模型输入、Host accepted、补查失败保留首选、timeout/dispose 实传 cancel）；`session-e2e.test.ts`「runs plan expressions through ModelRuntime…」（公开 `explore` → `completeSimple` → 新表达搜索 → 最终原文）；`knowledge/store.test.ts` / `knowledge/semantic/store.test.ts`（scope 内 Top-K、`.` 快路径、文档更新删除） | ✓（公开 `explore` 默认；配置 `models.explore` 后同一路径启用模型，未配置保留算法/向量） | 未配置或调用失败保留已取得材料，不回退主模型；取消/失败/不可用/无命中/截止未完成分列 | 真实 `models.explore` 质量与墙钟未观察，不作为启用门。120s/8s 是尚未按真实 provider 定标的工作预算，不是 SLO。D-189 已让受限 scope 的图/向量后端在有效 roots 内计算 Top-K，reverse importer 在截断前过滤；`.` / 空 roots 保留未受限语义快路径。native ONNX 当前批不能被 JS signal 硬抢占，取消会停止等待并丢弃迟到结果。远程嵌入、向量复用、语义草稿覆盖与专用 reranker 见 3.16B–E；router 取消与超时目前同为 `timeout` 码；`harness-e2e` #3 是既有 D-103 |
 | **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（user/operator-only resolver、项目 provider 重定向隔离、binding 竞态、cancel→fetch、endpoint/credential space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`（旧手工 consumer 链）；`semantic-workspace.e2e.test.ts`（D-235：共用生产装配、真实 SessionHost/HTTP adapter、双执行目录路由、无效配置/失败状态）；`workspace-runtime.test.ts`（配置与取消生命周期） | ✓（未配置远程时本地 MiniLM；配置有效即走远程同一 space） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库语义召回已按 2.8 / D-196 单独接线，不回退 MiniLM。Host 从不接收或持久化 provider secret |
@@ -255,6 +262,16 @@ bytes、catalog 文件和 WAL 文件大小，并暴露 operation/temporary owner
 另一次临时真实 `startWebUiServer` smoke 在显式授权的独立工作区，通过 HTTP terminal create → native process inspection → DELETE/confirmed close → awaited Host stop/fixture cleanup；关闭 Pi warmup，无付费模型、无完整 Electron/browser 或 remote release CI 声明。fixture 完成后显式退出 Node，不以该 smoke 证明所有 incidental timer 均自动清空。过程中的未授权目录请求正确返回 400，没有通过放宽权限修复夹具。
 
 ## 当前缺口与后续顺序
+
+**先完成 D-284，再推进外部 runtime / research profile。** 实施顺序见 plan 2.4A → 2.4B → 2.6A → 2.6B。
+本轮核对的决定性入口：
+
+- `session-host.ts` 的 keeper 使用活动模型但传 `reasoning:minimal`；`memory-agent-extension.ts` 的输入工具集是 memory_edit。
+- 本机 Pi 0.84.3 默认 `keepRecentTokens:20000`，摘要使用独立 system、序列化 user 正文及 cacheRetention:none；自动压缩
+  从 prompt 前/agent_end 后进入，尚不能证明“回合内每次真实请求前检查”。实现时须重核选定的 Pi 版本与实际接缝。
+- Zone 2 已是尾部追加，当前仍每次组装 blocks/用量；`memoryMode:off` 清掉全部 blocks。`compaction.after` 清观察游标，
+  文件/技能重注入仅有 helper，不能把删除它宣称为已经移除生产调用。D-284 须保留计划与用户笔记，并按实际保留 entry 重建基线。
+- 未取得新方案的真实摘要耗时、缓存命中或首次续接延迟；75% 准备水位与 60% 压缩后目标是已明确的首版工程默认，不是测量结论。
 
 **3.15 A–D 已接入生产调用链（D-176–D-189）。** 公开入口仍是 pi-host `explore`。Host 持有短生命周期查询：开始时固定问题、
 范围与 `inputContext`，原问题词法/图/语义与计划模型并行；新表达真正执行搜索；候选模型看到最终挑选前的当前单元；Host

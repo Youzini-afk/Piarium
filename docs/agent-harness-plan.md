@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
@@ -63,10 +63,10 @@ Last updated: 2026-09-15
 3. 失败、空、不可用、过期、部分结果分别表达，缺用量不补零，缺来源不造正文。
 4. 限制对应真实问题；权限/路径是边界，调度是背压，输出/磁盘预算是配置策略，没有定标不猜硬拒绝数值。
 5. 正文不进日志、广播事件或 URL，经已授权的正文/工具通道传递。
-6. 模型槽位 user-owned；仅 hardImplement/review 默认主模型，其他未配不回退，memory 是活动模型的明示例外。
+6. 模型槽位 user-owned；仅 hardImplement/review 默认主模型，其他未配不回退；续接摘要沿活动会话请求配置派生，不新增凭据栈或槽位。
 7. 用户确认由 Piarium 原生 `tool_call` 门统一拥有，Host 只做不交互的身份/能力/路径强制；原生 web 工具不会因检测到插件而自动让位，替换能力必须由用户显式关闭原生工具。
-8. 主 agent 对记忆维护零义务，keeper 只标 plan 状态；块写保持分支、版本与原子冲突检查。
-9. 压缩使用 Pi 安全切点，覆盖与必要来源满足才接管；不再追加模型效果回放门禁。
+8. 主 agent 对上下文维护零义务。plan/todo、用户笔记和 accepted knowledge 独立保留；停止 keeper 不删除或隐藏它们。
+9. 摘要准备不改历史；提交使用 Pi 安全切点，摘要与固定收束范围一起发布，保留准备期间新增原文。回合内每次模型请求前检查预算，不能用摘要丢失 B/N 来凑比例（D-284）。
 10. 损坏、权限错误、未来格式不读成空；新记录发布后切换，失败迁移不覆盖旧数据。
 11. 分支读固定基线加自身修改，shared 才读写 live 父目录；物化修改收集后才发布结果并允许回收。
 12. 集成消费选定结果修订，写前检查父相关状态；应用/冲突/补偿可追溯，不覆盖后续用户修改。
@@ -79,7 +79,7 @@ Last updated: 2026-09-15
 | 会话装配/配置 | packages/pi-host/src/session-host.ts；runtime-broker session launch |
 | Pi 写入包装 | packages/pi-host/src/workspace-mutation-journal.ts |
 | 协议/工具/角色 | packages/protocol/src/harness.ts、harness-tools.ts、harness-roles.ts、harness-threads.ts |
-| worker harness | packages/pi-host/src/harness/README.md；select-tools、memory-agent-extension、compaction-extension |
+| worker harness | packages/pi-host/src/harness/README.md；select-tools、compaction-extension；memory-agent-extension 是 D-284 要替换的旧入口 |
 | Host harness | packages/web/application-host/lib/harness/DOCUMENTATION.md；router、service-host、harness-services、thread-services |
 | 线程与物化 | 同目录 thread-runtime.ts、thread-worktree.ts、thread-registry.ts |
 | 知识与观察 | packages/web/application-host/lib/knowledge/DOCUMENTATION.md；store.ts、context-runtime.ts |
@@ -99,7 +99,11 @@ P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合�
 
 **现有 Harness 收口（D-283）已完成。** Piarium 原生权限门已经接管 Harness、Pi 内置、MCP、Pi 包工具和嵌套线程的用户确认，
 foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 `webfetch` / `websearch` 的配置代际、域名策略、渲染选择与
-插件替换语义也已收口。后续回到外部 Agent runtime / research profile 等尚未交付主线，不再重开权限/Web 双轨。
+插件替换语义也已收口，不再重开权限/Web 双轨。
+
+**下一主线是 D-284 上下文无感续接（已采纳、待实施）。** 保留正常前台没有明显整理窗口期的目标，把持续 keeper 改为按容量
+提前生成固定摘要、前台继续追加、需要空间才切换。按 **2.4A → 2.4B → 2.6A → 2.6B** 串行推进，同阶段完成相关消费者替换，
+再进入外部 runtime / research profile。本文更新不代表代码已切换；status 保留 D-081 当前运行事实。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
@@ -126,8 +130,8 @@ foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 
    zsh/macOS/Linux 真机用户终端与完整桌面重启仅未实测。
    D-227 / D-230 / D-234 已把 `thread.dispatch(role: "retrieval")` 做成可等待的事实检索 Thread：冻结 retrieval 槽位/工具/scope，
    Host 校验 `submit_facts`，Run-bound receipt 与 artifact 持久保护正文，报告经 wait / 支持字节分页的 read_thread / Zone 2 可见。
-2. **默认记忆与配置（2.4/2.6，D-081 已交付）**：默认 `takeover`、旧设置迁移、实时全局/单会话模式、失败投影，以及 entry/
-   分支/block 修订绑定的逐次接管已接线；证据不足或 Host 重启时仅本次回到 Pi。`record-only` 仍非前置。
+2. **上下文后台准备与续接（2.4/2.6，D-284 待实施）**：D-081 的 `takeover` 和 keeper coverage 仍是当前生产行为，完成新链时
+   一并删除。新链包括真实请求前预算、固定前缀后台摘要、按需提交、近期原文、history 与 UI/线程/知识消费者收口，不能只把旧 mode 改成 off。
 3. **已接线的快速检索（3.2/3.15/3.16，D-173–D-193）**：固定窗口来源、结构切片、图查询、本地语义召回与工具链已接。
    3.15 A–D 已接入公开 `explore`；独立验收补齐 actor scope、取消/截止、真实来源状态、终态、稳定视图、单元排名、required 组、到达即读与 scope 内 Top-K，见 status 3.15 与 D-182–D-189。
    3.16A 已提交（`37b12e8e`、`8752e039`）。3.16B–E 已接入生产链（D-190–D-193）：远程 embedding 绑定、向量复用与前台优先、
@@ -211,8 +215,10 @@ websearch provider / render / domain policy 现在按 worker generation 冻结�
 
 ### 2.2 Zone 2
 
-沿 zone2.assemble 和隐藏 piarium-context 消息追加用户编辑/命令/诊断/Git/知识/计划/线程状态，不重复 agent 已见材料。
-保留 event cursor 和送达后游标提交；无材料不造消息。沿现有 zone2.budgetTokens 汇总/折叠，估算明示；不新增固定文件数配额。
+现有 zone2.assemble / 隐藏 piarium-context 追加通道保留。D-284 只投递新事实、用户修改与相关的新知识指针，不每轮复制全部
+blocks/计划/用量面板；agent 自己的编辑、命令和 todo 已在工具结果中。用量 UI 保留，不为变化的使用率单独追加消息。
+保留 event cursor 与送达提交；无材料不造消息。去重绑定来源/修订及其是否仍在保留原文中；压缩实际切点丢失基线才重建
+对应观察，不在候选准备时重置。沿现有呈现预算汇总明确机械重复，正常 read 不因读过或临近容量缩短，估算明示。
 User terminal 段只投影 `source !== agent` 且带 command+exitCode 的事件；cwd 有则写入。每个目标 Pi session 单独写 event 并推进自己的游标，
 幂等键包含目标 session 与终端 commandId。无 integration 不造伪命令。
 
@@ -221,49 +227,88 @@ User terminal 段只投影 `source !== agent` 且带 command+exitCode 的事件�
 Documents post-commit、用户修改后的 LSP 和现有 Git 刷新已接。逐命令终端信息用真实 OSC 133/633 shell integration，
 不把 PTY 退出当成命令完成、不按终端文本或提示符正则猜命令。只对 user 会话注入；Harness spawn 不注入、不解析。
 观察失败不反噬已经成功的写入/HTTP/终端，具体来源不可用要可见。`targetPiSessionId + commandId` 去重，不重放 history、不倒退 Zone 2 游标。
+用户终端、steering、计划修改和子返回的事实送达保留；D-284 删除为持续 keeper 发送 `memory.nudge` 的模型调度依赖。
+事件实际带来的新内容计入下次请求预算，事件名称/完成/缓存 TTL 本身不触发摘要。
 
-### 2.4 记忆 agent：默认维护
+### 2.4 后台摘要准备（D-284，待实施）
 
-模型调度在 pi-host，Host memory-agent/KnowledgeStore 校验写块。保持活动模型与 memory_edit，不建第二个凭据栈。
-复用 D-076 最近祖先/COW/tombstone/CAS/修订前传和实际 entry 覆盖，keeper 只 mark_plan，主 agent 无维护义务。
+正常路径无明显整理停顿是本阶段的产品目标。后台只为下一次压缩生成固定历史摘要，不持续维护工作块；候选 ready 不提前
+提交，前台正常新增 entry 不使候选失效。术语、默认和失败语义统一见设计 8.4。
 
-现行设置区分 `off/assist/takeover`，缺省 `takeover`。`off` 不维护或注入 memory blocks，`assist` 维护并注入但由 Pi 压缩，
-`takeover` 在同一路径上通过 2.6 的逐次检查后接管。旧 `shadowMode:false/true` 分别迁移为 `off/assist`，显式 mode 优先；错误值
-拒绝而非猜测。memory 是 user-only；全局值对继承中的活动会话实时生效，session-wide 覆盖独立持久并可恢复继承，不暗改全局设置。
-`record-only` 可按实际诊断需求后补，不是现行模式或前置。
+#### 2.4A 真实请求预算与摘要请求派生
 
-SessionSnapshot 与 Context 已显示配置/有效模式、session override 和最近 keeper/compaction 失败；Host 拒绝原因进入失败信息，
-Settings 可修复坏配置。不新增辅助费用或 Token 看板，普通会话已有费用/Token 展示保留（D-080）。
-不承诺相同模型就命中缓存。事件加速已接真实用户命令完成，以及已接受的 steering、用户已保存的计划编辑和本次 Run 的新返回报告
-（D-238，Host `memory.nudge` → 现有 keeper）。沿已有 token 增长/单个在飞/cooldown 调度，等待期间保留材料，重复事件不启动
-空调用；嵌套结果只到仍存活的父会话，不把 execution workspace 当成知识所有者。用户“记住这个”不被普通去抖忽略。
+- 入口是 session-host/ModelRuntime 与 Pi 的真实模型请求构造，不仅是 `session_before_compact`。覆盖一个回合内工具执行后的
+  每次模型继续；现有 Pi prompt 前/agent_end 后的自动摘要不能并行成为第二个调度 owner，也不在已结束任务后做收费整理。
+- 有效窗口来自模型/provider 与用户覆盖；读取本次真实输出/推理参数，估算 system/tools、保留消息、新工具结果和用户输入，
+  按 provider usage 校正。换模型、压缩后计数重新建立，cache 字段不重复相加；显式自动压缩开关和原文保留量仍有效。
+- 从活动主请求派生摘要请求：稳定 system/tools/原消息与适用缓存参数，尾部增加固定范围的总结要求。摘要无工具执行器，
+  无 memory_edit，无新槽位/密钥；不自动换 minimal、toolChoice:none 或 cacheRetention:none 后仍宣称共享完整前缀。
+- 复用 Pi 会话/切点/compaction entry。若 SDK 接缝不足，在受版本管理的依赖/适配层完成所需接缝；不热改 node_modules、
+  不复制新 Agent loop、不靠 UI 隐藏阻塞。将实际入口和支持的 Pi 契约写进模块文档。
 
-版本/分支/CAS、partial apply、主历史无 memory_edit、默认/关闭/assist、实时模式与失败投影已由 protocol、Host 和真 Pi
-faux-provider 测试覆盖。剩余触发优化随实际事件入口推进，不做付费协议/缓存对照，不等测试者批准。
+验收针对真正出站请求：公开会话一次回合内有连续工具调用，新工具结果参与下一请求检查；摘要请求形状、输出预留、usage
+可观察且不会执行返回的工具调用。沿已有真 Pi/faux provider 纵切验证，不先建立外部质量评测平台。
+
+#### 2.4B 固定候选与前台并行
+
+- 固定 `(session, 现有 compaction 边界, 被收束前缀, 输入末端, firstKeptEntryId)`，先决定摘要范围，再调用模型。记录调用配置与
+  摘要用量；同一压缩周期复用在飞任务/候选。前台 B+N 原文继续追加，不因正常 steering 或几条新消息重新生成。
+- 准备首轮采用约 75% 可用输入的可配置软水位；有同配置的摘要耗时后结合近期增长调整提前量。保留量未显式配置时，以约
+  60% 可用输入作为压缩后总目标，预留摘要与准备期间新增尾段空间。两者不是运行硬上限或已经测得的最优比例。
+- 主请求在可控制的队列中优先，不用本地串行 ModelRuntime 锁把前台卡在后台摘要后。任务结束不新开准备；关闭/取消/来源
+  失效终止无用任务，分支导航取消不适用候选。模型变化重核预算与配置；同分支正常追加不是失效。
+- 候选在 worker 内暂存，重启时完整 Pi 历史仍在；不增加候选数据库或持久 daemon。手动压缩复用适用候选，明确不同重点时
+  才替换，旧迟到结果不能被提交。
+
+验收用受控延迟的摘要响应证明前台仍完成后续步骤，候选只生成一次，候选 ready 时历史尚未改变；分支导航、取消和新消息
+分别核对实际来源与尾段。不能把“异步函数已返回”当作前台不被阻塞的证据。
 
 ### 2.5 todo 与计划面板
 
-保留整表替换 plan、来源和用户版本冲突。confidence 只作信息，不默认因低于 0.6 弹确认；用户明确配置审批或 plan mode 才等。
-修改当前自动确认与设置迁移，验证普通计划不中断、显式审批、取消不误写与冲突。不增加记忆维护义务。
+保留已交付的整表替换 plan、来源和用户版本冲突。confidence 只作信息，用户明确配置审批或 plan mode 才等；
+普通计划不中断、显式审批与取消/冲突的既有边界保持，不重新增加记忆维护义务。
+停止 keeper 后 plan/todo、用户编辑与笔记继续可见可写；不得沿旧 `memoryMode:off → blocks:[]` 将这些能力一并屏蔽。
 
-### 2.6 压缩默认接线
+### 2.6 按需切换与消费者收口（D-284，待实施）
 
-D-022 已验证 Pi 消费扩展 compaction 并跳过默认摘要。当前实现沿 compaction.before/after 和 Pi preparation 安全切点推导
-实际 removedEntryIds；已接受 keeper 更新的 context entry、完整分支祖先路径与所有可见 block 修订必须同时匹配，才组装接管结果。
-缺失、不连续、错分支或修订漂移只让该次交还 Pi，不拆 tool call/result。
+#### 2.6A 提交、异常容量与历史回读
 
-D-076 水位留在 Host 内存，重启后本次使用 Pi，下一次 material keeper 更新重新建立证据，不先建伪持久 checkpoint。
-Host facts 只采事件 authority 能可靠证明的 touched files；诊断没有 resolution authority、恢复没有 session checkpoint 查询时返回空，
-不冒充当前事实。`off/assist` 明确不接管，默认 `takeover` 与配置/UI 已接。覆盖缺口、连续压缩、block 修订漂移、错分支、Host 重启、
-用户模式和 Pi fallback 已有定向验证；来源恢复能力随真实消费者继续，OutputRef 过期不能当正文，TranscriptRef 不保证截断全文。
-没有 T4 门槛。
-provider 原生上下文编辑按实际 API 使用，缺能力不阻塞本地压缩。
+- 在下一模型请求前，沿 Pi 安全边界核对候选来源、工具配对与当前预算，发布摘要和 firstKeptEntryId，再构造
+  `P + S1 + B + N`。保留准备期间新增的用户消息、工具结果和待处理 steering/follow-up，不覆盖或重复重放。
+- 切点不能在摘要后向后移动，导致未被收束的原文消失；摘要较短可向前多保留原文。候选偏离 60% 但下一请求可用时直接采纳，
+  不为了比例重做摘要。连续压缩替换一份活跃摘要，原始 Pi entry 留存。
+- 新材料/窗口缩小导致超窗时，摘要调用自己也要有可用预算：按配对边界分次收束可容纳的旧前缀，保留最新原文。候选未完成
+  则复用并等待同一次调用；失败或失效走同一摘要实现，不回到 keeper。每次扩大收束须有进展，单份材料本身超窗要明确
+  分页/读取入口或容量错误，不静默裁掉正常结果。
+- 公开 `history` 工具复用当前 Pi session/branch 的查找与 entry 读取，支持关键词、路径、entry 与相邻原文；继承 actor
+  和父子权限，不向子暴露父完整对话。大输出沿现有分页和保留责任，临时句柄失效与真正全文可读分开表达。
+
+验收沿一条真实会话证明“后台准备 → 前台新增 → 容量切换 → 下一次请求 → history 回读”；结合来源漂移/取消、超大新结果、
+模型变小与再次压缩的实际反例。候选失败不能先截历史，退出任务无新增总结调用。共享场景合并验证，不按字段机械堆测试。
+
+#### 2.6B 默认切换、UI 与旧依赖删除
+
+- 以新链完整替换持续 keeper：删除 memory-agent 调度与专用 memory_edit/coverage/compaction.before 组块路径，删除
+  off/assist/takeover 和 shadow 运行分支、专属状态/UI。保留有实际用户/计划消费者的 block 读写，不按名字删整个知识模块。
+- 联动 2.2/2.3：真实事件照常送达，移除 keeper nudge；不重复注入全部 blocks/用量。观察基线绑定交付 entry，只有实际退出
+  保留原文的基线才重建；候选 ready 不重置。删除未接线的文件/技能重注入 helper，不再按压缩次数推委派。
+- 联动线程：dispatch carryBlocks 只携带计划/用户笔记；read_thread/Zone 2 优先展示真实状态与报告；报告偏离从明确报告字段
+  取得，缺失明示。删除依赖 decisions 块的自动报告/建议来源，不另起模型补齐；accepted knowledge 与已有建议保留。
+- 自动压缩沿 Pi 开关，后台准备默认启用且 user-owned，可单独关闭并保留必要时的同一同步摘要路径。删除旧引擎，不静默
+  改写外部 Pi 配置；旧 memory 字段提示退役，明确关闭后台维护的用户选择继续阻止提前调用，不能误当自动压缩开关。
+- UI 在实际提交时展示边界，可展开摘要、前后规模和保留原文；准备不锁 composer，只有实际等待才显示等待。保持正常 token/
+  缓存/费用 UI；准备耗时、采纳、等待、真实 usage 与首次续接延迟沿现有诊断记录，不建辅助费用看板。
+
+接通新会话控制器时保证同一次压缩只有一个调度/摘要 owner；最终交付前删除旧 keeper 及无消费者的相关协议、测试和文档。
+最后以公开消费者验证计划/用户笔记、知识、线程返回仍可用，未到准备水位的正常短任务没有新增摘要调用。真实缓存率与质量
+在实际使用中观察，不用测试数冒充结果，也不以付费模型对照作为上线前置。
 
 ### 2.7 知识建议与管理
 
-人工标记、memory decisions、suggestions 槽位的用户消息提议和 Settings 全量列表/取代链均已接（D-208/D-211）；未配走已有
+人工标记、suggestions 槽位的用户消息提议和 Settings 全量列表/取代链均已接（D-208/D-211）；未配走已有
 无模型路径。Settings 的编辑/接受/驳回/停用以打开时完整修订在同一写队列 CAS，同 scope 预检后提交，旧历史保留；模型提议的
 scope/source 由 Host actor 固定，相同正文的历史查重与插入原子完成。自动接受仍按用户显式 scope 设置。
+当前代码还含 keeper decisions 来源，D-284 的 2.6B 将其移除；不从续接摘要追加自动提炼调用，已有知识/建议不删除。
 
 ### 2.8 embedding
 

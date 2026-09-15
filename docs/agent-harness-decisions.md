@@ -30,7 +30,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 15 |
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 32 |
-| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、memory keeper、压缩接管、建议/审阅、模型槽位与召回。 | 27 |
+| [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 28 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 60 |
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 51 |
@@ -119,12 +119,12 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-073 | 2026-09-05 | TriviumDB 问题按数据库职责报告 | folded-in（用户补充；仅文档） | — | agent-harness 7.5、plan 2.1 | [context-knowledge](decisions/context-knowledge.md) |
 | D-074 | 2026-09-05 | 记忆版本/分支、压缩覆盖、证据标记、观察游标延迟推进 | superseded in part（首个实现候选） | D-075 / D-076 | plan 0.7 step 1；原始失败形状保留 | [context-knowledge](decisions/context-knowledge.md) |
 | D-075 | 2026-09-05 | D-074 第一轮验收返工 | superseded（第二个实现候选未通过验收） | D-076 | D-076 回归用例 | [context-knowledge](decisions/context-knowledge.md) |
-| D-076 | 2026-09-05 | 分支块、覆盖水位与送达游标的最终修正 | implementation | — | agent-harness 8.4/8.7、status 2.4/2.6/3.9；protocol / pi-host / Host | [context-knowledge](decisions/context-knowledge.md) |
+| D-076 | 2026-09-05 | 分支块、覆盖水位与送达游标的最终修正 | superseded in part（keeper coverage 目标退出；block 分支/CAS 与送达边界保留，当前代码尚未替换） | D-284 | agent-harness 8.4/8.7、status 2.4/2.6/3.9；protocol / pi-host / Host | [context-knowledge](decisions/context-knowledge.md) |
 | D-077 | 2026-09-05 | 3.4（worktree 生命周期：setup 命令、目录即缓存、磁盘预算；取代 D-057 的"暂不回收"） | superseded in part（生命周期保留；补原生状态/实际写者/ignored 保留，撤销猜测默认） | D-078 | agent-harness 9.2.5b/9.3.4；plan 3.4；status | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-078 | 2026-09-05 | 正式实施、默认交付与工作状态架构（用户重新授权） | folded-in（用户重新授权；正式实施与默认交付） | — | agent-harness 1.3/2/6/8/9/12；plan 0.1/0.7/2/3；status；architecture | [foundation-governance](decisions/foundation-governance.md) |
 | D-079 | 2026-09-05 | 修复工作状态、集成恢复与检索正文的真实调用链 | implementation（修复实际调用与数据正确性） | — | Host working-state/thread/recovery/explore；status | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-080 | 2026-09-06 | 取消辅助模型分项统计，保留正常会话统计 | implementation（取消辅助分项统计，保留会话统计） | — | protocol / pi-host / UI；设计 8.4–8.6、plan、status | [context-knowledge](decisions/context-knowledge.md) |
-| D-081 | 2026-09-06 | 2.4 / 2.6（默认记忆与逐次压缩接管） | implementation（默认记忆、动态模式与逐次压缩接管） | — | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture | [context-knowledge](decisions/context-knowledge.md) |
+| D-081 | 2026-09-06 | 2.4 / 2.6（默认记忆与逐次压缩接管） | design superseded（当前 keeper/takeover 代码仍运行，新链待实施） | D-284 | protocol / pi-host / Host / UI；设计 8.4、plan 2.4/2.6、status、architecture | [context-knowledge](decisions/context-knowledge.md) |
 | D-082 | 2026-09-06 | 3.2（发起窗口快照与 draft-aware explore） | implementation（自动 surface snapshot 与 draft-aware explore） | — | protocol / UI / broker / pi-host / Documents / Host explore；设计 6.1、plan 3.2、status、architecture | [retrieval](decisions/retrieval.md) |
 | D-083 | 2026-09-06 | thread.dispatch 持久草稿基线与 surface 集成边界 | implementation（dispatch 持久草稿基线与 surface 集成边界） | — | protocol / UI Documents / Host Thread+WorkingState+Integration；设计 6.1/9.2.5b、plan 3.2/3.4/3.5、status、architecture | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-084 | 2026-09-06 | copyIgnored 成为持久结果捕获范围 | implementation（copyIgnored 持久 captureScopes 与结果发布） | — | Host WorkingState/Thread runtime；设计 9.2.5b、plan 3.4、status、architecture | [workingstate-threads](decisions/workingstate-threads.md) |
@@ -263,7 +263,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-223 | 2026-09-11 | 3.4 / 3.4a / 3.6（级联生命周期 serialization 与 scope 完整段） | superseded in part（registry 级 cascade admission、dispatch cleanup 与 binding current-owner 由 D-224 补齐） | D-224 | architecture 6.1；plan/status 3.4/3.4a/3.6 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-224 | 2026-09-11 | 3.4 / 3.4a / 3.6（集成撤销权威、级联准入与结果身份） | implementation | — | agent-harness 9.2.5b/9.3；plan/status 3.4/3.4a/3.6；architecture 6.1 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-225 | 2026-09-11 | 3.2（根会话 edit 消费未保存缓冲） | superseded in part（正文身份、grouped undo、耐久 agent-mutation 补偿与 apply_patch 读源由 D-228 纠正；写回同一缓冲的产品方向保留） | D-228 | agent-harness 5.4/6.1、plan 0.7/3.2、status 窗口读取/3.2；Documents / recovery / pi-host apply_patch | [workingstate-threads](decisions/workingstate-threads.md) |
-| D-226 | 2026-09-11 | 2.2 / 2.3 / 2.4（用户终端事件与 memory 加速） | superseded in part（PowerShell 退出码、restart 代际、sh 非 Bash、用户 shell 保留、代际 OSC、Zone 2/keeper 编码与持久 commandId 幂等由 D-229 纠正；用户命令进 Zone 2 与 nudge 的产品方向保留） | D-229 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
+| D-226 | 2026-09-11 | 2.2 / 2.3 / 2.4（用户终端事件与 memory 加速） | superseded in part（命令事实由 D-229/D-233 纠正并保留；keeper nudge 目标由 D-284 取代，生产替换待实施） | D-229 / D-233 / D-284 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
 | D-227 | 2026-09-11 | 3.6（事实检索 Thread） | superseded in part（事实名称、delivery、run 绑定 pending、耐久证据、URL receipt 与嵌套只读基线由 D-230 纠正；retrieval 为可等待 Thread 的产品方向保留） | D-230 | 设计 6.1/9.2.2/9.3.5；plan 0.7/3.6；status 3.6 retrieval；architecture 4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-228 | 2026-09-12 | 3.2（纠正 D-225 正文身份、grouped undo 与耐久补偿） | superseded in part（写前全量磁盘预检、外部回执阶段、逐路径补偿、恢复可见性与 WAL 单一权威由 D-232 纠正） | D-232 | 设计 5.4/6.1；plan/status 3.2；Documents / recovery / Recovery UI | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-229 | 2026-09-12 | 2.2 / 2.3 / 2.4（纠正 D-226 命令事实） | superseded in part（per-target Pi session 投影/幂等、PowerShell 状态归属与 zsh ZDOTDIR 由 D-233 纠正） | D-233 | 设计 7.3；plan/status 2.2–2.4；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
@@ -275,7 +275,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-235 | 2026-09-12 | 3.16（语义生产装配与原生写入通知） | implementation（共用生产语义装配与 native journal after 通知） | — | 设计 6.1；plan/status 3.16；architecture 4.4 | [retrieval](decisions/retrieval.md) |
 | D-236 | 2026-09-12 | 3.1 / 3.11 / 3.12（符号目录复用关联抽取事实） | implementation（符号目录复用关联抽取事实） | — | 设计 6.2；plan/status 3.1/3.11/3.12；structure DOCUMENTATION | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
 | D-237 | 2026-09-12 | 3.1（目录重扫的删除对账） | implementation（完整枚举与 missing/代际确认驱动目录删除对账） | — | 设计 6.2；plan/status 3.1；structure DOCUMENTATION | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
-| D-238 | 2026-09-12 | 2.4（steering、用户计划与子返回加速现有 keeper） | implementation（steering/用户计划/本次 Run 返回携带材料进入现有 keeper） | — | 设计 8.4；plan/status 2.4；pi-host / Host harness | [context-knowledge](decisions/context-knowledge.md) |
+| D-238 | 2026-09-12 | 2.4（steering、用户计划与子返回加速现有 keeper） | superseded in part（keeper nudge 目标退出；来源/归属/送达保留，代码待替换） | D-284 | 设计 8.4；plan/status 2.4；pi-host / Host harness | [context-knowledge](decisions/context-knowledge.md) |
 | D-239 | 2026-09-12 | 3.4 / 3.4a / 3.10（用户释放旧结果与引用持久顺序） | implementation（用户旧结果释放、独立引用及中断对账） | — | 设计 9.2.5b/9.3.4；plan/status 3.4/3.4a/3.10；recovery / Thread UI | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-240 | 2026-09-12 | 6.2 / 3.1 / 3.3 / 3.8 / 3.12（解析后的 references/calls 进符号图与检索链） | implementation（解析后 references/calls 进符号图：relation collector + lsp 导航回写 + related/explore 消费） | — | 设计 6.2；status 3.1/3.3/3.8/3.12；knowledge/lsp/harness | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
 | D-241 | 2026-09-12 | 3.17 / 5.2（包管理器通配进命令输出整理） | implementation（包管理器通配层：PM 头归类、脚本回显识别内层工具、PM 噪声折叠） | — | 设计 5.2；status 3.17；output-organize | [tool-environment](decisions/tool-environment.md) |
@@ -321,3 +321,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-281 | 2026-09-15 | R5 原生文件/结构计算：固定视图、生产消费者与索引输入收口 | accepted / implemented / R5 complete | — | plan/status R5；architecture；rust-kernel-design；kernel/Harness/search/structure/semantic documentation；native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-282 | 2026-09-15 | R0/R6 收口：有回执的传输窗口、真实发行面、遗留清理与受控资源证据 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-283 | 2026-09-15 | 现有 Harness 优先收口：原生权限唯一权威与 Web 配置闭环 | accepted / implemented / Harness closure complete | — | plan 0.4/0.7/1b.7/3b；status 1b.3–1b.7 / 3b.1–3b.3；architecture/code | [stage-r-kernel](decisions/stage-r-kernel.md) |
+| D-284 | 2026-09-16 | 上下文无感续接：固定摘要后台准备、容量按需切换与较长原文 | accepted design / implementation pending | — | 设计 8.4 及关联消费者；plan 2.4A/B、2.6A/B；status；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |

@@ -2,7 +2,7 @@
 
 Status: Pi-native workbench/harness in production; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ## 1. Context
 
@@ -300,6 +300,14 @@ handing the worker host credentials. The harness contract, its cache rules, and 
 are specified in [agent-harness.md](agent-harness.md); which of its capabilities are implemented,
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
+
+D-284 accepts the replacement context policy, pending implementation: derive one fixed-range summary
+from the active model request near capacity while foreground work continues, then commit it with retained
+original messages only when the next request needs room. Pi remains the session/history authority;
+request budgeting and summary scheduling stay in the TypeScript/Pi layer, not the Rust kernel. The
+keeper behavior described here is the current code, not the new target. The cutover also removes keeper
+nudges, block-based compaction coverage and memory-mode UI, while keeping plans, user notes, accepted
+knowledge and real event delivery. See harness section 8.4 and plan 2.4/2.6.
 
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
