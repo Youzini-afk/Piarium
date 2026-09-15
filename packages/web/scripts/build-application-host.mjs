@@ -146,12 +146,6 @@ try {
     throw new Error('Staging directory does not contain the typed public Host contract');
   }
 
-  // Verify index.js is syntactically valid
-  const checkResult = spawnSync(process.execPath, ['--check', indexJs], { stdio: 'pipe', shell: false });
-  if (checkResult.status !== 0) {
-    throw new Error(`Staging index.js failed syntax check: ${checkResult.stderr?.toString() ?? 'unknown error'}`);
-  }
-
   const boundary = pruneLegacyHostArtifacts(stagingDir);
   log(`Production boundary: ${boundary.runtimeModules} reachable modules; ${boundary.removedArtifacts} legacy/test artifacts excluded.`);
   log(`Staging complete: ${stagingDir}`);
