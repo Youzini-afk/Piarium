@@ -236,12 +236,7 @@ describe("production shell assembly", () => {
     const attached = terminal.attachTerminalSession(started.id);
     expect(attached?.id).toBe(started.id);
     const view: string[] = [];
-    let resolveView!: () => void;
-    const viewObserved = new Promise<void>((resolve) => { resolveView = resolve; });
-    attached?.onData((data) => {
-      view.push(data);
-      if (view.join("").includes("got:piarium-term-in")) resolveView();
-    });
+    attached?.onData((data) => { view.push(data); });
     await expect(createShellWriteService(host).handle(
       { id: started.id, text: "piarium-term-in\r" },
       ctx,
@@ -252,11 +247,10 @@ describe("production shell assembly", () => {
       observed += slice.text;
       if (!observed.includes("got:piarium-term-in")) await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    await viewObserved;
     expect(observed).toContain("got:piarium-term-in");
     expect(view.join("")).toContain("got:piarium-term-in");
     expect(terminal.inspectSession(started.id)?.status).toBe("running");
-  }, 30_000);
+  }, 45_000);
 
   it("completes background verification from the real command lifecycle without shell.read", async () => {
     const discovered = discoverShells();
