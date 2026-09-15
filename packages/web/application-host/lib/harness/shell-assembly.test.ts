@@ -236,19 +236,23 @@ describe("production shell assembly", () => {
     const attached = terminal.attachTerminalSession(started.id);
     expect(attached?.id).toBe(started.id);
     const view: string[] = [];
-    attached?.onData((data) => { view.push(data); });
+    let resolveView!: () => void;
+    const viewObserved = new Promise<void>((resolve) => { resolveView = resolve; });
+    attached?.onData((data) => {
+      view.push(data);
+      if (view.join("").includes("got:piarium-term-in")) resolveView();
+    });
     await expect(createShellWriteService(host).handle(
       { id: started.id, text: "piarium-term-in\n" },
       ctx,
     )).resolves.toMatchObject({ accepted: true });
-    const deadline = Date.now() + 12_000;
     let observed = "";
-    while (Date.now() < deadline) {
+    while (!observed.includes("got:piarium-term-in")) {
       const slice = await createShellReadService(host).handle({ id: started.id }, ctx);
-      observed = slice.text;
-      if (observed.includes("got:piarium-term-in")) break;
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      observed += slice.text;
+      if (!observed.includes("got:piarium-term-in")) await new Promise((resolve) => setTimeout(resolve, 100));
     }
+    await viewObserved;
     expect(observed).toContain("got:piarium-term-in");
     expect(view.join("")).toContain("got:piarium-term-in");
     expect(terminal.inspectSession(started.id)?.status).toBe("running");

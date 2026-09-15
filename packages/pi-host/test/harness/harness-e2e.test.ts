@@ -189,32 +189,37 @@ describe("harness e2e integration", () => {
     }
   });
 
-  it("3. background command + get_output retrieves output", async () => {
+  it("3. background command + get_output retrieves output", { timeout: 30_000 }, async () => {
     const { workspaceRoot, bridge, dispose } = await setupE2E();
     try {
       const bashTool = createBashTool(bridge, SESSION_ID, workspaceRoot);
       const getOutputTool = createGetOutputTool(bridge, SESSION_ID);
-      const sleepCmd = process.platform === "win32"
-        ? "powershell -Command \"Start-Sleep -Seconds 2; Write-Output done\""
-        : "sleep 2 && echo done";
+      // Node is part of every supported Piarium runtime and keeps this test on
+      // the selected interpreter instead of nesting PowerShell inside Git Bash.
+      const sleepCmd = "node -e \"setTimeout(() => console.log('done'), 2000)\"";
       const bgText = await executeTool(bashTool, { command: sleepCmd, waitMs: 500 });
       // Background shell must return a shell ID
       const shellIdMatch = bgText.match(/sh_\w+/);
       assert.ok(shellIdMatch, `background bash should return sh_ id: got "${bgText}"`);
       const shellId = shellIdMatch![0];
 
-      // Wait for command to finish
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const reads: string[] = [];
+      let outputText = "";
+      do {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        outputText = await executeTool(getOutputTool, { handle: shellId });
+        reads.push(outputText);
+      } while (!/exited 0/.test(outputText));
 
-      // get_output must retrieve non-empty output
-      const outputText = await executeTool(getOutputTool, { handle: shellId });
-      assert.match(`${bgText}\n${outputText}`, /done/, "the initial snapshot or incremental read must contain the completed output");
-      if (/done/.test(outputText)) {
-        assert.match(outputText, /\+\d+ bytes since last read.*exited 0/s, `final incremental read should include only new bytes and the exit state: got "${outputText}"`);
+      const transcript = [bgText, ...reads].join("\n");
+      assert.match(transcript, /done/, "the initial snapshot or incremental reads must contain the completed output");
+      const incrementalOutput = reads.find((read) => /done/.test(read));
+      if (incrementalOutput) {
+        assert.match(incrementalOutput, /\+\d+ bytes since last read/s, `the incremental read should include only new bytes: got "${incrementalOutput}"`);
       } else {
-        assert.match(bgText, /done/, "output absent from the incremental read must already be in the background snapshot");
-        assert.match(outputText, /no new output since last read.*exited 0/s);
+        assert.match(bgText, /done/, "output absent from incremental reads must already be in the background snapshot");
       }
+      assert.match(outputText, /exited 0/s, `the final observation must report the real exit state: got "${outputText}"`);
       const unchanged = await executeTool(getOutputTool, { handle: shellId });
       assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
       await bridge.request("compaction.after", { summary: "compacted", firstKeptEntryId: "entry", tokensBefore: 10 });
