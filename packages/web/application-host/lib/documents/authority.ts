@@ -480,7 +480,8 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const observeAgentWrite = async (workspaceId: string, absolutePath: string): Promise<void> => {
     try {
       const workspace = await loadWorkspace(workspaceId);
-      const relative = pathModule.relative(workspace.root, absolutePath);
+      const canonicalPath = await canonicalizePathIdentity(absolutePath, { fsPromises, pathModule });
+      const relative = pathModule.relative(workspace.root, canonicalPath);
       if (!relative || relative.startsWith('..') || pathModule.isAbsolute(relative)) return;
       surfaceSnapshots.observeWrite(workspaceId, relative.split(pathModule.sep).join('/'));
     } catch {
