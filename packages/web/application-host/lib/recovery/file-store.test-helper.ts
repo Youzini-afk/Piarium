@@ -84,7 +84,9 @@ export const createRecoveryFileStore = ({
     try {
       stat = await fsPromises.lstat(resolved.absolute);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return { path: resolved.relative, state: { kind: 'missing' } };
+      if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '')) {
+        return { path: resolved.relative, state: { kind: 'missing' } };
+      }
       throw error;
     }
     if (stat.isSymbolicLink()) {
