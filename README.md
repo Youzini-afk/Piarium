@@ -20,8 +20,7 @@ Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a
 Pi stays the agent kernel — model and provider stack, session tree, package manager, and extension
 model — while Piarium owns everything around it: the tool environment, working state, recovery,
 retrieval, context policy, and task governance, plus the workbench surfaces the agent runs inside.
-It uses Pi's public SDK directly—no terminal scraping and no permanent OpenCode compatibility
-layer.
+It uses Pi's public SDK directly rather than scraping a terminal UI.
 
 Its interface is not a fixed shell. Piarium ships two first-party working shapes — an **Agent
 Workspace** centered on sessions, tasks, and context, and an **IDE Workbench** centered on editors,

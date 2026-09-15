@@ -22,8 +22,7 @@ Pi reste le noyau de l'agent — pile de modèles et de fournisseurs, arbre de s
 paquets et modèle d'extensions — tandis que Piarium possède tout ce qui l'entoure : l'environnement
 d'outils, l'état de travail, la restauration, la recherche, la politique de contexte et la gouvernance
 des tâches, ainsi que les surfaces de workbench dans lesquelles l'agent s'exécute. Il utilise
-directement le SDK public de Pi : aucun parsing de sortie de terminal, aucune couche de compatibilité
-OpenCode permanente.
+directement le SDK public de Pi plutôt que de parser une sortie de terminal.
 
 Son interface n'est pas une coque figée. Piarium fournit deux formes de travail officielles : un
 **Agent Workspace** centré sur les sessions, les tâches et le contexte, et un **IDE Workbench** centré
