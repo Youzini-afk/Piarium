@@ -2,6 +2,7 @@ import { runKernelCompute } from "./compute-runner.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "../harness/working-state/query-contract.js";
 import { randomUUID, createHash } from "node:crypto";
 import path from "node:path";
+import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelBranchReadResult, KernelBranchState, KernelEntry, KernelRecordResult, KernelWorkingDraftDocument } from "./protocol.generated.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { WorkspaceRecoveryEngine } from "../recovery/engine.js";
@@ -1703,14 +1704,17 @@ export class KernelStorageAdapter {
       return { ...authority, basePath };
     };
     const resolveFileRoot = async (directory: string) => {
-      const requestedRoot = path.resolve(directory);
+      // Windows runners can expose the same directory through an 8.3 alias
+      // while Documents returns its long canonical path. Compare and register
+      // one real identity so an alias cannot be rejected as an unrelated root.
+      const requestedRoot = await canonicalizePathIdentity(directory);
       const resolved = this.fileRootResolver
         ? await this.fileRootResolver(requestedRoot, workspaceId)
         : {
             workspaceId: grant.executionWorkspace ?? workspaceId,
             canonicalRoot: await this.options.resolveWorkspaceRoot(workspaceId),
           };
-      const canonicalRoot = path.resolve(resolved.canonicalRoot);
+      const canonicalRoot = await canonicalizePathIdentity(resolved.canonicalRoot);
       const relative = path.relative(canonicalRoot, requestedRoot);
       if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) {
         throw new Error(`WorkingState file root was not admitted by the Host: ${directory}`);

@@ -6,6 +6,7 @@ import type { SpawnOptions } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { ManagedProcessLaunchError, type ManagedPipedProcessHandle } from "../process/types.js";
+import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelClient, KernelGrantHandle, KernelScopedClient } from "./kernel-client.js";
 import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
 
@@ -240,9 +241,10 @@ export function createKernelProcessService(options: Options) {
     if (stopping || !options.client.isReady) throw new Error("Native process authority is unavailable or stopping");
     if (typeof input.cwd !== "string" || !path.isAbsolute(input.cwd)) throw new Error("Native process launch requires an admitted absolute cwd");
     if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
-    const resolved = await context(input.cwd);
+    const canonicalCwd = await canonicalizePathIdentity(input.cwd);
+    const resolved = await context(canonicalCwd);
     if (stopping) throw new Error("Native process authority is stopping");
-    const cwd = path.relative(resolved.identity.canonicalRoot, input.cwd).replaceAll("\\", "/");
+    const cwd = path.relative(resolved.identity.canonicalRoot, canonicalCwd).replaceAll("\\", "/");
     if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");
     input.signal?.throwIfAborted();
     const params: KernelMethodParams["process.spawn"] = {
