@@ -299,18 +299,29 @@ export function createKernelProcessService(options: Options) {
         const events = new EventEmitter();
         const pending: string[] = [];
         let attached = false;
+        let outputEnded = false;
         let exited: { exitCode: number | null; signal: number } | undefined;
+        let exitDelivered = false;
+        const deliverExit = () => {
+          if (!outputEnded || !exited || exitDelivered) return;
+          exitDelivered = true;
+          const remaining = decoder.end();
+          if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
+          events.emit("exit", exited);
+        };
         child.stdout.on("data", (bytes: Buffer) => {
           const data = decoder.write(bytes);
           if (!data) return;
           if (!attached) pending.push(data); else events.emit("data", data);
         });
+        child.stdout.on("end", () => {
+          outputEnded = true;
+          deliverExit();
+        });
         child.stderr.resume();
         child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
-          const remaining = decoder.end();
-          if (remaining) { if (attached) events.emit("data", remaining); else pending.push(remaining); }
           exited = { exitCode: code, signal: signal ? os.constants.signals[signal] : 0 };
-          events.emit("exit", exited);
+          deliverExit();
         });
         return {
           native: true as const,
@@ -329,7 +340,7 @@ export function createKernelProcessService(options: Options) {
           onExit(handler: (event: { exitCode: number | null; signal: number }) => void) {
             events.on("exit", handler);
             let active = true;
-            if (exited) queueMicrotask(() => { if (active) handler(exited!); });
+            if (exitDelivered && exited) queueMicrotask(() => { if (active) handler(exited!); });
             return { dispose: () => { active = false; events.off("exit", handler); } };
           },
         };
