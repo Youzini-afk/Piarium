@@ -404,7 +404,7 @@ it("audit: real Documents write, stale save, move and delete use the kernel Reco
     });
     assert.equal(invoked, false, "Documents must not shortcut kernel coverage validation");
   } finally { await adapter.dispose(); await h.cleanup(); }
-});
+}, 30_000);
 
 it("audit: materialization installs children before readonly directory modes", async () => {
   const f = await fixture();

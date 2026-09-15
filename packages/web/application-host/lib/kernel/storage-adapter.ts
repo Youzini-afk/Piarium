@@ -1692,13 +1692,17 @@ export class KernelStorageAdapter {
         throw new Error("Kernel managed materialization requires explicit Host ownership admission");
       }
       const resolved = await this.managedRootResolver(path.resolve(directory), workspaceId);
-      const basePath = path.relative(resolved.canonicalRoot, path.resolve(directory)).replace(/\\/g, "/");
+      const [canonicalRoot, canonicalTarget] = await Promise.all([
+        canonicalizePathIdentity(resolved.canonicalRoot),
+        canonicalizePathIdentity(directory, { allowMissing: true }),
+      ]);
+      const basePath = path.relative(canonicalRoot, canonicalTarget).replace(/\\/g, "/");
       if (!basePath || basePath === ".." || basePath.startsWith("../") || path.isAbsolute(basePath)) {
         throw new Error(`Managed materialization target is not below its ownership root: ${directory}`);
       }
       const authority = await this.fileAuthorityContext({
         owningWorkspaceId: workspaceId, executionWorkspaceId: resolved.workspaceId,
-        canonicalRoot: resolved.canonicalRoot, purpose: "working-managed-materialization",
+        canonicalRoot, purpose: "working-managed-materialization",
         capabilities: ["storage.maintenance"],
       });
       return { ...authority, basePath };

@@ -216,7 +216,11 @@ export function createKernelProcessService(options: Options) {
     for (const handle of handles) handle.invalidate(error);
   });
   const context = async (cwd: string) => {
-    const identity = await options.resolveIdentity(cwd);
+    const resolvedIdentity = await options.resolveIdentity(cwd);
+    const identity = {
+      ...resolvedIdentity,
+      canonicalRoot: await canonicalizePathIdentity(resolvedIdentity.canonicalRoot),
+    };
     const key = JSON.stringify(identity);
     let existing = grants.get(key);
     if (!existing) {
@@ -242,7 +246,7 @@ export function createKernelProcessService(options: Options) {
     if (typeof input.cwd !== "string" || !path.isAbsolute(input.cwd)) throw new Error("Native process launch requires an admitted absolute cwd");
     if (input.shell || input.detached || input.uid !== undefined || input.gid !== undefined) throw new Error("Native process launch does not accept an alternate shell, detached identity, uid or gid");
     const canonicalCwd = await canonicalizePathIdentity(input.cwd);
-    const resolved = await context(canonicalCwd);
+    const resolved = await context(input.cwd);
     if (stopping) throw new Error("Native process authority is stopping");
     const cwd = path.relative(resolved.identity.canonicalRoot, canonicalCwd).replaceAll("\\", "/");
     if (cwd === ".." || cwd.startsWith("../") || path.isAbsolute(cwd)) throw new Error("Native process cwd is outside its admitted root");

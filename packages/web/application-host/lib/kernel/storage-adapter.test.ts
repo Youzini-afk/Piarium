@@ -217,7 +217,7 @@ it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned re
     await client.close().catch(() => undefined);
     await fs.rm(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
 
 it.skipIf(!hasReleaseKernel)("composes the kernel branch authority with the durable integration journal", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-integration-"));

@@ -1,4 +1,3 @@
-import path from "node:path";
 import type { ThreadWorktree } from "@piarium/protocol";
 import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileRootResolver } from "./storage-adapter.js";
@@ -10,12 +9,18 @@ export function createManagedRootAdmission(options: {
   assertOwnership(worktree: ThreadWorktree, operation: string, candidates: readonly string[]): Promise<void>;
 }): { materialization: KernelFileRootResolver; container: KernelFileRootResolver } {
   const resolve = async (directory: string, owningWorkspaceId: string, kind: "target" | "container") => {
-    const requested = normalizePathIdentity(path.resolve(directory));
+    const requested = normalizePathIdentity(await canonicalizePathIdentity(directory, { allowMissing: true }));
     const worktrees = await options.listWorktrees(owningWorkspaceId);
-    const recorded = worktrees.find((worktree) => {
+    let recorded: ThreadWorktree | undefined;
+    for (const worktree of worktrees) {
       const candidate = kind === "target" ? worktree.path : worktree.managedRoot;
-      return candidate && normalizePathIdentity(path.resolve(candidate)) === requested;
-    });
+      if (!candidate) continue;
+      const canonicalCandidate = await canonicalizePathIdentity(candidate, { allowMissing: true });
+      if (normalizePathIdentity(canonicalCandidate) === requested) {
+        recorded = worktree;
+        break;
+      }
+    }
     if (!recorded?.managedRoot) {
       throw new Error(`Managed path has no retained Thread ownership: ${directory}`);
     }

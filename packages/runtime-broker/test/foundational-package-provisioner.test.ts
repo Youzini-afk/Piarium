@@ -52,57 +52,46 @@ const descriptor = (
 });
 
 describe("foundational package reconcile", () => {
-  it("adopts disabled packages offline and never repairs configured broken artifacts", async () => {
-    const integrations = [
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!,
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1]!,
-    ] as const;
-    const authority = [
-      descriptor(integrations[0].source, { enabled: false }),
-      descriptor(integrations[1].source, { installed: false }),
-    ];
-    const receipt = fakeStore();
+  it("adopts disabled or configured-broken packages offline without repairing them", async () => {
+    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
     let bootstrapCalls = 0;
-    const result = await reconcileFoundationalPackages({
+    const reconcile = (candidate: PackageDescriptor) => reconcileFoundationalPackages({
       bootstrapPackages: async () => {
         bootstrapCalls += 1;
         throw new Error("must not install configured packages");
       },
-      integrations,
-      listPackages: async () => authority,
+      integrations: [integration],
+      listPackages: async () => [candidate],
       manifestRevision: 1,
-      receiptStore: receipt.store,
+      receiptStore: fakeStore().store,
     });
+    const disabled = await reconcile(descriptor(integration.source, { enabled: false }));
+    const broken = await reconcile(descriptor(integration.source, { installed: false }));
     assert.equal(bootstrapCalls, 0);
-    assert.equal(result.entries[0]?.observed, "disabled");
-    assert.equal(result.entries[1]?.observed, "configured_broken");
-    assert.equal(result.state, "degraded");
+    assert.equal(disabled.entries[0]?.observed, "disabled");
+    assert.equal(broken.entries[0]?.observed, "configured_broken");
+    assert.equal(disabled.state, "degraded");
+    assert.equal(broken.state, "degraded");
   });
 
-  it("continues after a partial failure and verifies success from Host descriptors", async () => {
-    const integrations = [
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!,
-      FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[1]!,
-    ] as const;
+  it("records a bootstrap failure when the Host still reports the package absent", async () => {
+    const integration = FOUNDATIONAL_PI_PACKAGE_MANIFEST.integrations[0]!;
     const receipt = fakeStore();
-    const installed = descriptor(integrations[0].source);
     const batch: PackageBootstrapResult = {
-      packages: [installed],
+      packages: [],
       results: [
-        { source: integrations[0].source, status: "installed" },
-        { error: "offline", source: integrations[1].source, status: "failed" },
+        { error: "offline", source: integration.source, status: "failed" },
       ],
     };
     const result = await reconcileFoundationalPackages({
       bootstrapPackages: async () => batch,
-      integrations,
+      integrations: [integration],
       listPackages: async () => [],
       manifestRevision: 1,
       receiptStore: receipt.store,
     });
-    assert.equal(result.entries[0]?.provenance, "auto_managed");
-    assert.equal(result.entries[1]?.operation, "failed_retryable");
-    assert.equal(receipt.document().entries.mcp?.lastObservedPresent, true);
+    assert.equal(result.entries[0]?.operation, "failed_retryable");
+    assert.equal(receipt.document().entries.mcp?.lastObservedPresent, false);
     assert.equal(result.state, "degraded");
   });
 

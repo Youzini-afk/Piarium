@@ -14,27 +14,27 @@ export function createKernelProcessIdentityResolver(options: {
 }): (cwd: string) => Promise<NativeProcessIdentity> {
   return async (cwd) => {
     if (!path.isAbsolute(cwd)) throw new Error("Native process cwd must be absolute");
-    const requested = normalizePathIdentity(cwd);
-    let retained: { workspaceId: string; directory: string } | undefined;
+    const canonicalCwd = await canonicalizePathIdentity(cwd);
+    let retained: { workspaceId: string; directory: string; canonicalDirectory: string } | undefined;
     // Keep owning and execution identities separate. This lookup also runs
     // before Documents has enrolled a newly materialized application-data view.
     for (const workspaceId of await options.registry.listWorkspaceIds()) {
       for (const thread of await options.registry.listWorkspaceThreads(workspaceId)) {
         const directory = thread.worktree?.path;
-        if (!directory || !isPathWithinRoot(requested, directory)) continue;
-        if (!retained || normalizePathIdentity(directory).length > normalizePathIdentity(retained.directory).length) {
-          retained = { workspaceId, directory };
+        if (!directory) continue;
+        const canonicalDirectory = await canonicalizePathIdentity(directory, { allowMissing: true });
+        if (!isPathWithinRoot(canonicalCwd, canonicalDirectory)) continue;
+        if (!retained || normalizePathIdentity(canonicalDirectory).length > normalizePathIdentity(retained.canonicalDirectory).length) {
+          retained = { workspaceId, directory, canonicalDirectory };
         }
       }
     }
     const executionWorkspaceId = await options.documents.resolveScopeId(cwd);
-    const canonicalCwd = await canonicalizePathIdentity(cwd);
     if (retained) {
       // Revalidate both the retained worktree and the exact requested cwd. A
       // symlink under the Thread cannot authorize a different sibling tree.
       const admitted = await options.admitManaged(retained.directory, retained.workspaceId);
-      const canonicalThread = await canonicalizePathIdentity(retained.directory);
-      if (!isPathWithinRoot(canonicalCwd, canonicalThread)) throw new Error("Process cwd escaped its retained Thread");
+      if (!isPathWithinRoot(canonicalCwd, retained.canonicalDirectory)) throw new Error("Process cwd escaped its retained Thread");
       if (!executionWorkspaceId) {
         return { workspaceId: retained.workspaceId, executionWorkspaceId: admitted.workspaceId, canonicalRoot: admitted.canonicalRoot };
       }
