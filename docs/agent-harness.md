@@ -1,8 +1,8 @@
 # Piarium agent harness
 
-Status: design accepted; code profile v1 in delivery — per-capability state is in agent-harness-status.md, not here
+Status: design accepted; code profile v1 and Rust system-kernel Stage R delivered — per-capability state is in agent-harness-status.md, not here
 
-Last updated: 2026-09-12
+Last updated: 2026-09-15
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -20,9 +20,9 @@ Piarium 不再只是 Pi 的图形外围。产品由两部分组成：**工作台
 Piarium 拥有、调优、默认提供，且每一块都可以被用户替换。
 
 决定 harness 质量的四件事——工具环境、检索、上下文管理、验证——全部收回到 Piarium 拥有的代码
-里。当前实现位于 Application Host 与 pi-host 进程内扩展。D-252 已把 Rust 系统内核确定为下一架构阶段：
-文件/资源/持久事务与重计算由内核接管，TS 保留产品和 Agent 策略，Pi 继续内置；完整边界见
-[rust-kernel-design.md](rust-kernel-design.md)，不从实现语言推定已具备的正确性或性能。
+里。D-282 已完成 D-252 定义的 Rust 系统内核阶段：文件/资源/持久事务、物化、受管进程/PTY 与文件/结构计算由
+Application Host 的私有 Rust 子进程接管，TS 保留产品和 Agent 策略，Pi 继续内置。完整边界和实际性能证据见
+[rust-kernel-design.md](rust-kernel-design.md) 与 status；不从实现语言外推未测平台或统一提速倍数。
 
 ### 1.1 非目标
 
@@ -65,11 +65,11 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 主题 | 决定 |
 | --- | --- |
 | 产品边界 | Piarium = 工作台 + harness；Pi = agent 内核；其他 agent 是能力协商的 bring-your-own runtime |
-| 系统内核 | 正式推进阶段 R（D-252）：Rust 系统内核 + TS Application Host/产品与 Agent 编排 + 内置 Node/Pi worker；按完整资源权威接管，完成后只有一个写者，不长期双写或默认关闭 |
+| 系统内核 | 阶段 R 已由 D-282 完成：Rust 系统内核 + TS Application Host/产品与 Agent 编排 + 内置 Node/Pi worker；每类系统资源只有一个生产权威，不保留双写、shadow 或旧后端 fallback |
 | harness 形态 | 通用内核 + 领域 profile；不是每个领域一套 harness |
 | profile 作用域 | Workbench Profile 属于 surface 展示；Agent Profile 属于执行配置。工具与 system 在同一执行配置世代内冻结；同一持久 Pi session 可经用户操作进入新 Run/配置世代，切工作台布局不改变执行配置（D-063/D-072） |
 | 工具注入 | 与 Pi 内置工具**同名覆盖**，不并列；覆盖发生在 pi-host 进程内 |
-| 重活归属 | Host 服务保持统一入口；阶段 R 把工作状态/磁盘恢复/物化、PTY/受管进程、文件与结构计算移到私有 Rust 内核。TS 保留知识库 adapter、LSP 协议/视图、结果呈现与策略；pi-host 保留模型调用、薄工具和钩子 |
+| 重活归属 | Host 服务保持统一入口；工作状态/磁盘恢复/物化、PTY/受管进程、文件与结构计算位于私有 Rust 内核。TS 保留知识库 adapter、LSP 协议/视图、结果呈现与策略；pi-host 保留模型调用、薄工具和钩子 |
 | worker→host 通道 | 类型化协议请求（`@piarium/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
 | 检索分层 | 精确匹配用 grep；快速发现和原文获取用 explore；开放事实追踪用 retrieval。文件/结构/索引操作归 Host，较长语义判断归 agent，持久记忆检索归知识库；三种工具不要求逐级失败后才可使用（D-173） |
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
@@ -137,27 +137,25 @@ harness 拆成层之后，大部分层在所有领域里不变，少数层变，
 
 ## 4. 进程与代码归属
 
-以下为当前生产形态；Rust 目标与接管顺序见 4.3 和 plan 阶段 R。仅修改设计不改变实际消费者或 status。
+以下为当前生产形态；Rust 的已完成责任与证据见 4.3、plan 阶段 R 和 status。
 
 ```text
 Application Host（packages/web/application-host）
-  harness 服务：索引与搜索、shell 监督、LSP 诊断与符号、输出存储、知识库（TriviumDB）
-  现有服务被复用：documents、search、terminal、lsp、recovery journal、git
+  TS：产品策略、公开服务、Thread/Run、Documents/Registry 协调、LSP、知识/模型 adapter
+      |
+      | 私有生成协议（piarium.kernel.v1）
+      v
+  Rust kernel：WorkingState/Recovery、文件/物化、PTY/受管进程、文件/结构计算
       ^
       | 类型化 worker→host 请求（@piarium/protocol，requestId 关联）
-      | 先例：workspace.mutation.request / respond
       v
 pi-host session worker（packages/pi-host）
-  harness-tools.ts：与 workspace-mutation-journal.ts 并列，进入同一个 customTools 数组
-  harness 进程内 ExtensionFactory：与 session-features.ts 同一模式，挂 Pi 钩子
-      |
-      v
-Pi SDK（用户级或内置安装）
+  harness-tools.ts + 进程内 ExtensionFactory → Pi SDK（用户级或内置安装）
 ```
 
 pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢复日志的 mutation boundary），
 并以进程内 `ExtensionFactory` 挂载 `before_agent_start` 等钩子。工具仍沿这两个机制进入 Host，
-不新增 Pi 包或 MCP 跳板。D-252 在 Host 内侧增加 Rust 系统进程；ACP agent 的 MCP 门面仍是后续交付，使用相同 Host 服务。
+不新增 Pi 包或 MCP 跳板。Rust kernel 是 Host 私有实现，不向 renderer/Pi 开第二端口；ACP agent 的 MCP 门面仍是后续交付，使用相同 Host 服务。
 
 ### 4.1 Pi 钩子到 harness 机制的映射
 
@@ -184,7 +182,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 `session-features.ts` 曾在 before_agent_start 把变化的目标 token 计数写进 systemPrompt；现已按 status 1.2 修复。
 动态目标与运行状态使用尾部消息，不回改静态前缀。修改相关装配时运行现有 Zone 0 契约测试，不把已修缺陷重新列为前置任务。
 
-### 4.3 Rust 系统内核（正式架构，D-252）
+### 4.3 Rust 系统内核（正式架构，D-252；D-282 完成）
 
 内核是 Application Host 管理的私有子进程，沿同一生成协议服务 Electron/Web/远程，不向 renderer 或 Pi 扩展开放新端口。
 它统一拥有实际文件资源、分支/对象/引用/恢复事务、物化和进程/PTY 后端，并承担固定视图文件搜索与结构计算。
@@ -197,14 +195,16 @@ TS 保留 Thread/Run 与模型策略、公开 API、知识领域、语言协议�
 Document Registry 继续拥有未保存缓冲。混合操作在内核记录同一 operationId 的逐目标阶段，经 TS Documents adapter
 调用真实 Registry 的修订检查与 grouped undo，不隐式保存、不建第二缓冲权威。Thread/Pi/知识的跨域清理按持久操作与幂等回执协调。
 
-R0 的真实链路已是 `Application Host → 私有 KernelClient → piarium-kernel 子进程 → framed protocol → kernel SQLite/object store`；
-Electron/Web/serve 共用这一装配，kernel 不监听公共端口。R1 kernel storage vertical 已提供 immutable root/trie、blob、
-branch/revision/CAS、pin、operation/recovery 和 GC 领域方法。完整 WorkingState/Recovery/结果/草稿/evidence 消费者的 TS
-writer cutover 仍按 status 的责任表推进，不能把当前 client/vertical 误写成 R1 全部已完成。
+真实链路是 `Application Host → 私有 KernelClient → piarium-kernel 子进程 → framed protocol → kernel SQLite/object store`；
+Electron/Web/serve/云与 VS Code companion 都从自己的发行目录使用 manifest-verified executable，kernel 不监听公共端口。
+R1–R5 已分别接管 immutable root/trie、blob/branch/revision/CAS/pin/Recovery/GC、文件资源与物化、PTY/pipe、固定视图搜索和
+tree-sitter 结构计算。所有生产消费者走 root/path/domain/file/process/compute API；旧 TS writer 只保留为明确测试 helper，发行树会
+审计并删掉不可达测试/旧实现。
 
-这是 plan R0–R6 的完整实施范围，不是一个原生函数或只读试验。每个职责接管同时覆盖生产消费者、数据保留、取消/重启、
-资源回收、性能与发行，并删除原写入路径。完整契约及范围见 [rust-kernel-design.md](rust-kernel-design.md)；
-当前 TS 代码和 D-246–D-251 返工独立验收，不能以 Rust 计划代替已知错误修复。
+D-282 完成 R0/R6：传输用 acknowledgement-backed request credits，取消可越过数据背压；release smoke 覆盖任意 cwd、安装目录替换、
+同一 current-format catalog 重开、坏 manifest、固定 root、条件磁盘写与真实 shell 退出。受控 128/1024/4096 文件对照记录冷/热、
+事件循环、RSS、节点和取消，既保留搜索收益，也如实记录 inventory/逐文件 structure 的额外成本。完整契约、数值与平台边界见
+[rust-kernel-design.md](rust-kernel-design.md) 和 status。阶段 R 已完成，后续能力直接复用该边界。
 
 ## 5. 工具集（code profile v1）
 
@@ -1025,8 +1025,9 @@ trusted project 只能调整 workspace scope，设置不可读时保留 suggeste
 - **分词职责**：现有记录描述 tokenizer 为 ASCII 字母数字段 + CJK 2-gram、camelCase 不拆分，本轮未复核最新上游。
   数据库可说明 Unicode、可配置分词或预分词输入等通用能力；camelCase/snake_case/路径的代码分析策略由 Piarium 拥有并版本化，
   不要求数据库为了 Piarium 内置一套代码语言分析器。当前 searchSymbols 是 JS 字符串计分，不声称已走 AC/BM25 排序。
-- **native 模块**：`.node` 需按 Electron ABI 构建。Piarium 已维护 `better-sqlite3` / `node-pty` /
-  `sherpa-onnx-node` 的 asar unpack 与重建流水线，本项复用同一条；TriviumDB 已发布六平台预编译。
+- **native 模块**：系统存储与 PTY 已由打包在 `resources/kernel` 的 Rust executable 接管，不再发行或重建
+  `better-sqlite3` / `node-pty` / `bun-pty`。Electron 仍核对 TriviumDB 与 `sherpa-onnx-node` 的目标平台预编译，
+  并在打包前、after-pack 与 unpacked smoke 中核对 kernel manifest、架构和摘要（D-282）。
 - **两个 host 同路径**：按 `hostId` 隔离；`serve` 复用运行中的桌面 host（第 7.1 节），因此正常情况下同一机器只有一个
   host。
 - **数据安全**：知识库含文件内容与命令文本，按工作区数据对待——不进日志、不进事件载荷、不进 URL，与
@@ -1495,13 +1496,13 @@ Review 在 Devin 自己写的 PR 上仍平均抓 2 个 bug、58% 为严重）；
 
 #### 9.2.5b 工作分支、按需物化与版本化集成（正式架构，D-078）
 
-**工作状态独立于目录。** Application Host 拥有内容寻址的工作状态存储：文件按字节哈希存为不可变对象，目录树引用路径状态，
+**工作状态独立于目录。** Application Host 的 Rust kernel 拥有内容寻址的工作状态存储：文件按字节哈希存为不可变对象，目录树引用路径状态，
 工作分支引用一个固定基线与自身修改，发布新修订时原子切换分支头。Thread 关联工作分支，ThreadRun 关联本次输入修订及执行目录；
 结果是不可变修订，目录是执行载体。需要保留的修改收回持久状态之前，目录不能视为可丢弃缓存。
 
-**D-252 的目标接管：** 本节用户行为继续有效；存储/分支 gate/磁盘操作的最终执行者改为 Host 的 Rust 内核。
-下面引用的 TS 文件、JSON catalog 和既有锁实现描述当前路径，不约束阶段 R 保留它们。R1–R3 按根/引用/事务/物化的完整职责
-接管并清理旧实现；Thread catalog、Pi 会话和 Registry 保持各自所有权，见 4.3 与 Rust 设计。
+**D-282 的当前实现：** 本节用户行为继续有效；存储/分支 gate/磁盘操作的最终执行者是 Host 的 Rust kernel。
+生产调用使用不可变 root/path/domain、file-resource 与 materialization API，不展开持久全树或打开 TS recovery SQLite。
+Thread catalog、Pi 会话和 Registry 保持各自所有权，见 4.3 与 Rust 设计。
 
 | 对象 | 所有权与用途 |
 | --- | --- |
@@ -1564,15 +1565,12 @@ queued dequeue 把 `thread.manifest.permissions` 送进 `session.create`，live 
 显式文件/目录根、其基线后代与当前后代，捕获新增、修改和删除；不会因此重新扫描整个工作区。重启、partial publish、reclaim 和
 materialize 使用同一冻结范围，Git 是否忽略该路径不再决定结果是否保存。
 
-Git 后端可直接读取 baseline commit 的 tree/blob 并搜索树对象；非 Git、尚无首次 commit 的目录按需捕获输入并使用 copy/CoW
-（已实现：`workspace/reflink.ts`，D-244——`COPYFILE_FICLONE_FORCE` 先试，不支持退化为普通复制并如实报告 backend；
-非 Git worktree 准备、baseline 快照、untracked/merge 复制、对象库→目标材料化与 recovery `replaceFile` 都走同一原语，
-材料化返回 `cow.{reflink,copy}` 计数）。
-初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变根，不承诺端到端。
-（当前实现：`working-state/state-trie.ts`，D-245/D-251/D-254——catalog schema 4 把平面内存映射序列化为
-`{trie: root}` 与共享 `stateNodes`，tree identity 使用根哈希；加载核验内容寻址 DAG，持久化按 root 收集全部可达节点。
-当前 TS 的 Branch/Result 读写权威仍是平表，catalog 仍整体写入，所以这里只宣称持久去重与 identity。生产 root 读写、增量
-节点事务和取消 whole-pool rewrite 由阶段 R1 一次接管，不再在 TS 中建设第二套过渡内核。旧 schema/平表持久形状直接拒绝。）
+Git 后端提供 staged/unstaged/untracked、filter/EOL、index mode 与 execution baseline 语义；文件正文由 kernel `file.scan/capture`
+从工具实际看到的工作目录固定。非 Git、尚无首次 commit 的目录走同一捕获。kernel `file.materialize` 从不可变 root 构建 staging，
+Linux 尝试 FICLONE、macOS 尝试 `clonefile`，不支持时正式 copy，并返回真实 backend；Windows 当前实测为 copy，不伪报 extent sharing。
+初次发现/捕获文件有真实成本，单文件哈希随字节数增长，Merkle 只减少重复树结构；O(1) 只适用于引用已就绪不可变 root。
+当前 v10 catalog 由 Rust 持久化 AVL/Merkle 节点、branch/revision/pin 与完整 mode 身份；单路径 CAS 只更新树深相关节点，
+不复制整个平表。旧 schema、TS JSON writer 与升级 importer 都不在生产链。
 文件监视器提供失效信号，不是完整事务日志；并发外部修改导致捕获不稳定时重读相关路径或报告不完整，不宣称跨文件瞬时一致。
 基线采集属于创建/更新分支的工作，不进入普通消息、每轮恢复或每次查询的全仓扫描。Git 的过滤器、LFS 与换行转换由适配层处理，
 记录实际工具所见版本，不能把仓库 blob 与物化字节无条件当成相同。（D-254：不再从 commit blob 重放 filter/LFS。
@@ -1591,7 +1589,7 @@ authority/session/worker generation/Run 与 binding generation。Git 输入身�
 结果修订，不做每命令全目录扫描。非 Git 在没有便宜固定身份时标 uncertain。格式化、生成源码或后台写入产生新修订，不自动继承旧修订的验证结论。
 相关流程直接实现并用故障测试验证，不另建研究门槛（D-210）。
 
-**存储迁移与保留。** 复用恢复库的内容寻址、流式捕获、路径状态与条件补偿实现，增加工作分支、结果、集成的独立引用所有者。
+**存储与保留。** kernel 的内容寻址对象、流式捕获、路径状态与条件补偿为工作分支、结果、集成提供独立引用所有者。
 恢复历史清理、恢复插件关闭/更换不得删除仍由线程引用的对象；线程删除释放自身引用，只有没有任何所有者的对象才能清理。
 用户可以从线程面板释放选定的旧结果版本（D-239）。当前 branch head、Thread 默认结果、active/lost Run 输入、活动 review 和
 未结束或冲突 Integration 的输入仍保留；释放旧结果不删除当前分支、报告和转录。已完成 Integration 独立持有 safety/target，
@@ -1599,8 +1597,8 @@ authority/session/worker generation/Run 与 binding generation。Git 输入身�
 
 释放绑定 branchId 与 resultRevisions，在 Thread lifecycle、存储独占 lease 和 Registry 快照序列化内重核依赖；任一选中版本
 仍在使用时整批拒绝。先持久化版本目录删除，再释放引用和回收无所有者对象；失败分别报告逻辑移除与清理未完成，可用原请求重试。
-WorkingState 更新先用临时 `working-state-write` 保护新增正文，原所有者直到新 JSON 持久化后才替换。启动及显式释放按实际目录
-对账派生引用；缺失或损坏的目录不能被解释为空集。没有新增保留天数、自动删除线程或全仓扫描。
+对象先 flush/安装，SQLite 事务再发布 root/record/reference；result release、pin 与 GC 在同一 Rust 权威下按可达性处理。
+启动及显式释放按实际记录对账；缺失或损坏的节点/对象不能被解释为空集。没有新增保留天数、自动删除线程或全仓扫描。
 
 正常的存储位置转移须同时复制新格式对象及引用，不能仅复制 hash。固定 Git resultCommit 可以作为正常导入来源；
 这些能力不要求维护旧 Piarium 库升级路径。当前内部格式替换按 D-253 直接重建并删除旧写入权威，Git 保留基线/物化/导出职责。
@@ -1924,7 +1922,7 @@ SaaS 连接器（邮件、日历、聊天）本质是 MCP server 加不可逆动
 不再附加统一的回放批准阶段（D-078）。文件入口与验收要点见 plan。
 
 P0、T1/T2/T3 核心和 D-076 已交付；工作状态/集成、默认记忆、窗口读取/explore 的具体进度见 status。
-D-252 确定当前返工验收后进入阶段 R，再发展外部 runtime 和新领域。单会话配置与归因随相关能力完成，
+D-282 已完成 D-252 的阶段 R，后续外部 runtime 和新领域直接复用当前 Rust kernel/TS Host 边界。单会话配置与归因随相关能力完成，
 T4、完整 RunManifest、知识数据库迁移或沙箱不作为共同前置。下面是总体范围，实际顺序按 plan 0.7。
 
 0. **前置**：对齐 Pi 版本并在该版本上复核第 4.1 节的钩子形状（已完成，D-001：0.84.3）；恢复的 coverage 从计划级二值改为路径级（见
@@ -1945,8 +1943,8 @@ T4、完整 RunManifest、知识数据库迁移或沙箱不作为共同前置。
    worker 丢失恢复、host 观察的活性与循环检测、`dispatch` / `threads` / `wait` / `send` / `read_thread` / `kill`、角色目录
    与独立模型槽位、原生工作分支与按需物化、集成与回收、事件驱动等待（缓存保活可选）、观察游标、线程侧栏与讨论线；默认 review 传感器。
 3b. **权限纵切**：Host 静态授权与 scope、`pi-permission-system` 单一提示所有权、原生 Harness fallback、Settings 与 Smart fallback。可与 3 并行。
-R. **Rust 系统内核与 Host 分层（D-252）**：在当前返工验收后，按 R0–R6 接管工作状态/恢复、磁盘/物化、进程/终端、文件/结构计算，
-   完成数据保留、取消/崩溃恢复、性能定标与跨平台发行。TS/Pi 保留上层职责；该完整阶段先于新的外部 runtime 和领域扩展。
+R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 已接管工作状态/恢复、磁盘/物化、进程/终端、文件/结构计算，
+   并完成数据保留、取消/崩溃恢复、性能定标与发行矩阵接线。TS/Pi 保留上层职责；外部 runtime 和领域扩展沿此边界继续。
 4. **默认 runtime**：内置钉住的 Pi。
 5. **外部 agent**：host 服务的 MCP 门面、ACP host、能力协商；届时重新评估协议兼容策略。
 6. **research profile**：复用已具备的工具/知识库/文档能力，直接建设文献采集、引用核验与 Shell 面，不等 1–3 全部长尾任务结束。
@@ -1969,7 +1967,7 @@ R. **Rust 系统内核与 Host 分层（D-252）**：在当前返工验收后，
 
 | 范围 | 已确定方向与实施选择 |
 | --- | --- |
-| Rust 内核 | D-252 已采用；完整契约见 rust-kernel-design，实施为 plan R0–R6；按权威接管而非逐文件翻译，修复后的 TS 作为验收/性能基线 |
+| Rust 内核 | D-252 已采用、D-282 已完成 R0–R6；完整契约与实际性能边界见 rust-kernel-design/status。生产只有 Rust 系统资源权威；修复后的 TS 路径只作为历史验收/性能 baseline 或显式测试 helper |
 | 记忆 | 活动模型、memory_edit、分支/块修订/实际 entry 覆盖；默认 takeover，off/assist/session override 与失败可见，缺证据逐次回到 Pi，取消辅助分项统计（D-081） |
 | 工作状态与结果 | Host 原生内容对象/树/分支/Integration，Git 基线与物化可复用；独立引用、真实执行写回；旧内部格式按 D-253 直接替换，不建升级导入器 |
 | RunManifest | Host 执行意图、runtime 解析模型/工具、Host 确认能力、worker 报实际装配；沿 launch 消费者收敛，不复制凭据权威 |

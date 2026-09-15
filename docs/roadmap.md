@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-12
+Last updated: 2026-09-15
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -23,14 +23,15 @@ authoritative record of delivery, and each phase names the design document that 
 | 8 | OpenChamber upstream capability absorption | Complete |
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
-| R | Rust system kernel and Host separation | Accepted plan; delivery tracked only in [harness status](agent-harness-status.md) |
+| R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 
-Stage R is the next architecture stage after acceptance of the current harness rework. Its complete
-scope is the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
+Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
 storage, Documents/file operations, materialization, processes/terminals, file/structure computation,
-and production/performance/release acceptance. It retains TypeScript product/Agent policy and the
-bundled Pi runtime. This roadmap entry does not claim Rust code or a production takeover has shipped.
+and production/performance/release acceptance. Rust owns those system resources through one private
+Application Host child; TypeScript retains product/Agent policy and the bundled Pi runtime remains the
+Agent loop/provider/session authority. Current evidence and platform-specific limits are recorded only in
+[harness status](agent-harness-status.md).
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
@@ -358,9 +359,10 @@ commands and signing live in [packages/electron/README.md](../packages/electron/
   detected npm/Bun/pnpm, and otherwise a verified standalone payload when the distribution supplies
   one. Newer Pi versions are kept; only missing or older versions expose install/upgrade actions.
 - Implemented: the Windows x64 pipeline produces an unsigned NSIS installer, blockmap, and
-  `latest.yml`. Packaging rebuilds `better-sqlite3`, verifies the published `node-pty` N-API prebuild,
-  and performs a clean-profile unpacked-app smoke including the health endpoint, renderer app-ready
-  state, and terminal create/close cycle.
+  `latest.yml`. Packaging verifies the manifest-bound Rust kernel, target TriviumDB and sherpa binaries,
+  rejects the retired `better-sqlite3`/`node-pty`/`bun-pty` authority packages, and performs a clean-profile
+  unpacked-app smoke including Host health, recovery, native semantic/structure, renderer app-ready state,
+  and terminal create/close.
 - Implemented: the ordinary installer graph carries no Pi SDK package. `build.files` ships only the
   bundled main process and preload, so the SDK is never a packaged payload; the Host resolves the
   selected package root at runtime. `afterPack` proves this by driving a real Runtime Manager probe

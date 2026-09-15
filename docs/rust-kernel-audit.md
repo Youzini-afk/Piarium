@@ -1,14 +1,14 @@
 # Rust kernel R0–R3 审查与返工记录
 
-Status: D-278 audit implemented; D-279 closes the reopened R2/R3 acceptance gaps; R1–R3 are Complete
+Status: historical D-278 audit; D-279 closed its R2/R3 gaps and D-282 later completed Stage R
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## 1. 结论与范围
 
 审查基线是 `e465e2df`，即此前标记 R3 Complete 的提交。本轮从实际生产装配、权限和文件资源边界、durable operation、GC、物化与 Thread 生命周期往下追，再用真实 release kernel 反例验证，而不是从状态文档或测试总数推导完成度。
 
-结论：**架构方向成立，但此前 R2/R3 的完成度高估；存在可以复现的数据安全、权限边界和生产装配缺陷，不只是代码风格问题。** 首批独立编写的十个反例在修改前的 release binary 上全部失败；随后又复现 GC 对象复活删除、未完成 operation 被释放、查询 pin 跨 epoch 泄漏和 Documents 嵌套 scope 绕过。本轮已修复这些问题，并补入正向消费者验证。当前里程碑以 [agent-harness-status.md](agent-harness-status.md) 为准，以下表述不把局部通过升级成全链路证明。
+结论：**架构方向成立，但此前 R2/R3 的完成度高估；存在可以复现的数据安全、权限边界和生产装配缺陷，不只是代码风格问题。** 首批独立编写的十个反例在修改前的 release binary 上全部失败；随后又复现 GC 对象复活删除、未完成 operation 被释放、查询 pin 跨 epoch 泄漏和 Documents 嵌套 scope 绕过。本轮已修复这些问题，并补入正向消费者验证。当前里程碑以 [agent-harness-status.md](agent-harness-status.md) 为准；下表保留 D-278/D-279 当时的判断，R0/R6 已在 D-282 后完成。
 
 | 阶段 | 本轮判断 | 依据与边界 |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Last updated: 2026-09-14
 | R2 | **Complete（D-279）** | D-278 的物理互斥/coverage/owner/重试修复保留；`file.operation.list/reconcile` 现在把 pending operationId、路径、reason/disposition 暴露给 Host，并以真实 restart 反例证明证据不足的目录 rename 不会隐身或被猜成成功 |
 | R3 | **Complete（D-279）** | 固定 root/revision/writeRevision、同一 kernel operationId、persistent handoff pin、Git executionBaseline receipt、Thread Registry 与 execution view 已形成可重入持久交接；setup timeout/abort 等待真实 child close |
 
-不增加新的产品范围：本地 macOS/Linux 机器、购买签名证书、物理断电实验、真实付费 Pi 会话都不作为这次返工的硬门槛。native 平台验证交给已有 CI；普通 copy 是正式后端，未测文件系统不宣称已证明 CoW。R4 进程后端、R5 检索和 R6 性能/发行整体收口不在本轮迁移。
+不增加新的产品范围：本地 macOS/Linux 机器、购买签名证书、物理断电实验、真实付费 Pi 会话都不作为这次返工的硬门槛。native 平台验证交给已有 CI；普通 copy 是正式后端，未测文件系统不宣称已证明 CoW。R4–R6 当时不在本轮迁移，后来分别由 D-280–D-282 完成。
 
 ## 2. 已修复的问题
 

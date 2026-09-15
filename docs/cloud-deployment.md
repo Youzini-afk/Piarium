@@ -8,14 +8,18 @@ closure:
 - `@piarium/pi-host`;
 - `@piarium/runtime-broker`;
 - `@piarium/settings-store`;
-- `@piarium/web`.
+- `@piarium/web`;
+- the target `packages/web/kernel` executable and manifest.
 
 These packages remain one workspace because the broker resolves the bundled host through package
 exports and Pi loads runtime resources from the installed package tree. Desktop Host workers bind a
 selected Pi package root at process start; the cloud builder still copies the pinned
 `@earendil-works/pi-*` packages into the staged `pi-host` production graph so images stay
 self-contained. The cloud builder creates a dedicated production `bun.lock`; native dependencies are
-installed on the target OS and CPU instead of being copied from the developer machine.
+installed on the target OS and CPU instead of being copied from the developer machine. The Rust kernel
+is built for the release target, copied with its SHA-256/build/architecture manifest, and exercised by
+`verify-kernel.mjs` before an image or SSH release is accepted. Storage/PTY do not install a second
+`better-sqlite3` or Node PTY authority.
 
 ## Container images
 
@@ -69,7 +73,7 @@ The persistent paths are:
 
 | Host path | Container path | Purpose |
 | --- | --- | --- |
-| `data/piarium` | `/home/piarium/.config/piarium` | settings, runtime registry, auth keys, clients, pairing and tunnels |
+| `data/piarium` | `/home/piarium/.config/piarium` | settings, runtime registry, auth keys, clients, pairing, tunnels, and Rust kernel state/recovery roots |
 | `data/ssh` | `/home/piarium/.ssh` | SSH identity used by workspace Git operations |
 | `data/cloudflared` | `/home/piarium/.cloudflared` | managed-local Cloudflare configuration and credentials |
 | `workspaces` | `/home/piarium/workspaces` | user projects |

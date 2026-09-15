@@ -1,8 +1,8 @@
 # Piarium native recovery journal
 
-Status: built-in kernel provider delivered; R1–R4 accepted through D-280; R0 and R5–R6 retain separate work.
+Status: built-in kernel provider delivered; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-09-14
+Last updated: 2026-09-15
 
 ## Decision
 
@@ -23,6 +23,9 @@ apply/compensation, exact/subtree overlap leases and restart reconciliation use 
 The public recovery service and affected-path semantics remain; Document Registry remains the mutable buffer
 owner and Pi remains the conversation owner. Current milestone evidence is recorded in
 [agent-harness-status.md](agent-harness-status.md) and [agent-harness-plan.md](agent-harness-plan.md).
+D-282 completes the surrounding R0/R6 release boundary: production artifacts carry the manifest-verified
+kernel, the old TS file writer is test-only, and the cross-domain Registry+disk apply/undo vertical runs
+against the real Rust storage/file/recovery authority.
 
 `pi-workspace-history` and `pi-wtf` are ordinary optional Pi packages. They are neither provisioned nor
 consulted by Piarium's native rollback path.

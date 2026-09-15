@@ -69,7 +69,11 @@ coverage gaps instead of converting them into a false pass.
 - The workspace uses Bun `1.3.14`; root and package `package.json` scripts are the command authority.
 - The private Rust kernel lives in `kernel/`; use `bun run kernel:check` for a fast compile check and
   `bun run kernel:build` to produce the release executable. Host/desktop packaging stages that binary
-  outside `app.asar`; a local Host may use the Cargo runner only when no staged executable exists.
+  outside `app.asar`; a source-development Host may use the Cargo runner only when explicitly allowed,
+  while every production/Web/cloud/Electron/VS Code layout requires its manifest-verified staged executable.
+  `bun run test:kernel` is the non-skipping native authority suite; `scripts/smoke-kernel-release.mjs`
+  validates the emitted release boundary, and `scripts/measure-kernel.mjs` owns the reproducible R6
+  subsystem measurement rather than an informal microbenchmark.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
 - `@piarium/ui` runs under Vitest as part of `bun run test:pi`.

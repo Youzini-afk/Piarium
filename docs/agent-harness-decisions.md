@@ -6203,3 +6203,30 @@ Host 注入同一 native service 到用户终端、Harness shell、Thread setup�
 | Decision | Current status | Superseded by | Folded into |
 | --- | --- | --- | --- |
 | D-281 | accepted / implemented / R5 complete | — | plan/status R5；architecture；rust-kernel-design；kernel/Harness/search/structure/semantic documentation；native acceptance |
+
+### D-282 · 2026-09-15 · R0/R6 收口：有回执的传输窗口、真实发行面、遗留清理与受控资源证据
+
+类型：R0 process/package 与 R6 complete acceptance closure；只追加，不改写 D-281 及更早历史事实
+
+背景：D-281 已完成 R1–R5 的资源权威接管，但阶段 R 仍缺两组整体证据。R0 的 Host transport 虽有单请求背压与取消，blob data frame 没有逐块回执，串行 worker 忙时也缺少“控制仍可到达且在飞请求有界”的真实饱和证明；截断输入、任意 cwd 和安装目录替换后的同库重开尚未形成一个 release 契约。R6 还没有把 Web/云/Electron/VS Code 的真实发行树、旧 Node PTY/SQLite authority 清理、surface shutdown/纵切与同机同语料资源测量合成一个可复现验收。只把 workflow 写出来或把 Rust helper 跑绿，仍不足以关闭阶段 R。
+
+决定：
+
+1. kernel handshake 发布 `requestWindow`，当前值 2 是 transport credit，不是产品并发配额。普通 request、blob chunk 与 branch builder batch 在 Host 编码前取得 credit，只有匹配的 native response 或连接终止才能释放；caller cancel 先拒绝等待者并发送独立 cancel 控制帧，但在 Rust 回执前不归还 credit。Rust admission queue 使用同一常量，拒绝重复在飞 request id、畸形 request 和超窗发送。旧无回执 `kind:data` 删除；chunk 是有序、每块不超过 64 KiB 的 typed request。截断/损坏输入结束该 epoch、取消剩余 token、排空 worker/writer，之后可用新 epoch 重开同一 current-format catalog。
+2. 发行目录是 R0/R6 的运行权威。Web/云携带 `packages/web/kernel` 和独立 verify 脚本；Electron 携带 `resources/kernel`，package 前、after-pack 和 unpacked smoke 都核对 build/target/arch/SHA-256；VS Code companion 携带 `dist/kernel`，workspace search 直接使用同一 Host compute 实现。缺 kernel/manifest 明确失败，不允许 Cargo、source loader 或 ripgrep fallback。release smoke 必须从无关 cwd 启动，复制到另一安装目录后以新 epoch 重开同一数据，并拒绝坏 manifest。
+3. 删除 Web/Electron 生产 `node-pty`、`bun-pty`、`better-sqlite3` 依赖和 Electron rebuild 脚本。TriviumDB、sherpa 和 Pi 仍按各自领域验证，不因阶段 R 被移入 kernel。Application Host build 对实际 emitted `index.js`/`public-contract.js` 及 worker URL 做 import-graph 审计：可达旧 store/test helper 失败，不可达测试/旧 authority artifact 在发布前删除并生成 manifest。旧 TS recovery file writer 移到显式 test helper；生产 `journal-files` 只保留 path/hash reader。
+4. Web 与 VS Code Documents watch 必须传递 `surface-operation`，不能只传 dirty barrier；Document Registry `dispose()` 返回同一个 Promise 并等待最终 journal 与 dirty-owner release。原先位于 Application Host 目录、可能随生产 emit 的 surface vertical JS 测试改为 Web test，使用真实 release Rust storage/file/recovery authority 与 Registry 完成 disk+surface apply/undo。
+5. R6 性能/资源证据使用 `scripts/measure-kernel.mjs`。固定 128/1024/4096 文件的路径、UTF-8 字节与语料 hash；D-280 后/R5 前的 TS 产品路径从固定 commit 导出到临时树，当前 Rust 产品路径从 staged release 运行；两者独立进程、交替顺序，记录首调、2 次 warmup、8 次热样本、事件循环、分阶段 RSS。Rust 另记录固定 root create/read、单路径 write、node 增量、WAL 文件长度变化、后台背压下前台读取和 cancel→terminal/release。WAL 文件长度不是物理写放大，瞬时 RSS 未覆盖 baseline 短命 rg 子进程；不得据此给统一 Rust 倍数或内存胜负。
+6. 性能结果按实际数据接受：Rust warm content search 在 128/1024/4096 文件为 45.696/278.325/1166.156 ms，对应 TS 192.042/435.825/1229.434 ms；三档均改善，4096 文件差距较小。Rust inventory 9.073/20.914/77.911 ms 与单文件 structure 35.939/37.346/51.432 ms 慢于 TS 的 1.318/7.210/23.862 和 20.887/22.502/22.304 ms，但保持有界且没有系统性事件循环阻塞。固定 root 单路径写 p50 4.005/4.484/4.540 ms，只新增 12/15/17 个节点；后台背压时前台读约 11 ms，取消至 terminal+release 为 13.919/18.321/22.373 ms。这里不为更好看的结论隐藏负项，也不因此恢复旧 backend。
+
+证据：`bun run test:kernel` 通过 Node release child-process 25 项和 native Vitest 70 项；新增饱和窗口、并行流式上传、queued/active cancellation、截断输入与重启。`smoke-kernel-release.mjs` 覆盖任意 cwd、manifest identity、固定 root search/structure、条件 file apply、真实 shell exit 7、安装目录复制和同库重开。VS Code native search 2/2、真实 Rust+Registry Integration 1/1、Document Registry 29/29、production graph audit 7/7。Windows unpacked Electron smoke 返回 Host health、builtin recovery、native semantic/structure 与 terminal create/close，两个 smoke stderr 均为空；production boundary 为 385 个 runtime module、移除 52 个 artifact、禁止引用 0。Windows release build 成功；直接在未加载 VS SDK 的普通 shell 执行 `cargo check` 会缺 C headers，仓库 `kernel:build` 自动加载 VS Build Tools 后成功，该环境差异不记为代码失败。
+
+发行平台边界：本机只证明 Windows x64。Windows ARM64、Linux x64/ARM64、macOS x64/ARM64 的 matching native runner build/verify/package/smoke 已成为 release workflow gate，当前提交尚未观察远端结果，不把 Windows 结果冒充其他平台实测。当前产品允许 unsigned Windows/macOS artifact，签名不是 R0/R6 gate；真实 ReFS/APFS extent sharing、物理断电 campaign 与付费模型质量继续单列环境/领域证据。
+
+结果：R0 与 R6 标记 Complete；R1–R5 保持 Complete，阶段 R 整体完成。后续外部 MCP/ACP、research profile、新模型和产品优化直接使用 Rust kernel/TS Host/Pi worker 的现行边界，不再维护迁移 fallback 或重复 TS 系统权威。
+
+## D-282 决策索引追加
+
+| Decision | Current status | Superseded by | Folded into |
+| --- | --- | --- | --- |
+| D-282 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance |

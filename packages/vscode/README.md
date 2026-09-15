@@ -12,6 +12,8 @@ Official IDE Workbench (`piarium.ide`) and Agent Profile Fleet/agent-group manag
 - Pi agents from built-ins, user/project configuration, and installed packages.
 - Provider, model, package, prompt, and resource settings in the companion sidebar.
 - File mentions, attachments, click-to-open paths, and diff views.
+- Workspace content search through the bundled manifest-verified Rust kernel; the companion does not
+  fall back to Cargo or a second ripgrep backend when that release resource is unavailable.
 - Git and GitHub pull request or issue workflows.
 - Send the current file, selection, or editor prompt into the active Pi session.
 - Deep links that focus chat (`vscode://youzini-afk.piarium/chat`) or open a session (`?session=<id>`).
@@ -64,11 +66,15 @@ bun run --cwd packages/vscode build
 bun run --cwd packages/vscode package
 ```
 
-The VSIX is written under `packages/vscode` by `vsce`.
+The VSIX is written under `packages/vscode` by `vsce`. `prepare:kernel` stages the target executable and
+manifest in `dist/kernel`; `test:native-search` exercises the packaged search boundary and explicit
+missing-kernel failure before publication.
 
 ## Data and worktrees
 
-Extension settings are stored in Piarium's configuration directory. Generated worktrees live below the Piarium data directory (`PIARIUM_DATA_DIR` when set, otherwise the platform data location) and use `piarium/<name>` branches by default. Piarium does not write engine-specific metadata into the repository.
+Extension settings and the companion kernel's private catalog live below Piarium's configuration/data
+directory. Generated worktrees also live below that data root (`PIARIUM_DATA_DIR` when set, otherwise the
+platform data location). Piarium does not write kernel metadata into the repository.
 
 ## License
 

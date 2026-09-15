@@ -1,15 +1,15 @@
 # Rust 系统内核与 Host 分层
 
-Status: accepted architecture; R1–R5 production cutover complete through D-281; R0 and R6 remain separate.
+Status: implemented architecture; R0–R6 and Stage R complete through D-282.
 
 Last updated: 2026-09-15
 
-本文规定 Piarium Rust 系统内核的最终职责和跨进程契约。实施顺序见
+本文规定 Piarium Rust 系统内核的当前职责和跨进程契约。R0–R6 的实施记录见
 [agent-harness-plan.md](agent-harness-plan.md) 阶段 R，实际交付只看
 [agent-harness-status.md](agent-harness-status.md)。本阶段以长期稳定性、工作区规模、并发执行和可维护性为目标；
 不是原生加速函数试验，也不以完成一个存储 helper 宣告整体迁移完成。
 
-R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust。D-281 再把固定 WorkingState pin、live revision-bound file search/inventory、native tree-sitter structure/chunks 以及 symbol/semantic 索引输入接入同一 kernel compute boundary，并删除生产 TS ripgrep/branch-corpus/Host AST 扫描路径。当前 R1–R5 均按各自可执行契约完成；R0 与 R6 仍独立验收。[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
+R1 已将 WorkingState root/revision、内容对象与 Recovery/Integration durable metadata 接到唯一 Rust writer；内置 storage 固定共址于 application data，Registry 继续拥有未保存正文。D-278 通过真实反例修复物理租约、owner、GC、重试和实际 root admission，并重新打开 R2/R3；D-279 随后完成 low-level pending operation 的 Host-visible disposition/reconcile，以及 kernel/Git/Registry 的 durable materialization handoff 和真实 setup 退出确认。D-280 把实际 PTY/pipe、process tree、原始输出与 writer 生命周期接到 Rust。D-281 再把固定 WorkingState pin、live revision-bound file search/inventory、native tree-sitter structure/chunks 以及 symbol/semantic 索引输入接入同一 kernel compute boundary，并删除生产 TS ripgrep/branch-corpus/Host AST 扫描路径。D-282 完成 transport/request-credit、发行 surface、旧 authority 清理、真实 release smoke 与受控资源测量；R0–R6 现均按各自可执行契约完成。[审查记录](rust-kernel-audit.md) 保留 D-278 的历史缺口与 D-279 的关闭证据。
 
 ## 1. 产品与阶段目标
 
@@ -304,4 +304,32 @@ Host 的 `web-tree-sitter` 只用于 grammar 安装 ABI admission，不解析 wo
 生产旧路径已退出：Host ripgrep child、递归 file-search scanner、WorkingBranch corpus/body mirror、Host JSON outline/
 chunk discovery 无生产 caller。Windows release kernel 的 R5 native suite 10/10 以及 focused consumer 13 files / 118
 tests 验证 pin/live drift、scope、draft/tombstone、Git ignore、前后台 backpressure/cancel、disk/pin structure/chunks 与
-semantic/symbol consumer。R5 因此 Complete；R0/R6 仍分别负责 package/process 和完整发行/性能收口。
+semantic/symbol consumer。R5 因此 Complete；其后的 R0/R6 收口见 D-282。
+
+## D-282 R0/R6 与阶段 R 的实际完成边界
+
+R0 transport 现在以握手返回的 `requestWindow` 为 acknowledgement-backed credit。Host 在编码普通请求、blob chunk 和
+branch builder batch 前取得 credit，只在匹配响应或连接终止时释放；请求被调用方取消后仍保留 credit，直到 Rust 确认实际停止。
+cancel 是独立控制帧，因此 serial Storage 忙或输出背压时仍能到达。Rust admission queue 与握手窗口使用同一常量，拒绝重复在飞 id、
+畸形 request 和超窗发送；截断/损坏输入终结该 epoch，取消剩余工作并完成 worker/writer 排空。关闭不凭固定等待推断成功。
+
+发行树是生产事实。Web/云包包含 `packages/web/kernel/{manifest,binary}` 与独立 verify 脚本；Electron 把 kernel 放在
+`resources/kernel`，在打包前和 after-pack/unpacked smoke 中核对 target、架构、build identity 与 SHA-256；VS Code companion
+把相同资源放入 `dist/kernel`，workspace search 直接启动它，缺资源时明确失败。支持矩阵由 Windows x64/ARM64、Linux x64/ARM64、
+macOS x64/ARM64 的 native runner 构建与 smoke，当前本机只声明 Windows x64 实测。复制 release 目录后的新安装可用新 epoch 重开
+同一 current-format catalog；坏 manifest 不能启动。客户端不安装 Cargo/Rust，也没有 source/Cargo/ripgrep production fallback。
+
+R6 清理同时删除 Web/Electron 生产 `node-pty`、`bun-pty`、`better-sqlite3` 依赖和 rebuild 脚本；TriviumDB、sherpa 与 Pi
+仍按各自领域验证。Application Host 构建从实际 emitted `index.js`/`public-contract.js` 追踪 import/worker URL，任何可达旧 store 或
+test helper 都失败；不可达测试/旧实现不进入 release，并生成 production-boundary manifest。旧 TS file writer 只在显式 test-helper
+文件中存在，生产 `journal-files` 只保留 path/hash reader。Web/VS Code watch 传递 surface-operation，Document Registry dispose
+等待最后 journal 与 dirty-owner release，真实 Rust+Registry surface/disk Integration 覆盖 apply/undo。
+
+`scripts/measure-kernel.mjs` 使用固定 corpus hash、同机交替顺序、独立进程、首调/预热/8 次热样本比较已验收的 TS baseline 与
+当前产品路径，并记录 startup、inventory/search/structure、event-loop delay、Host+kernel RSS、固定 root 读写、节点增量、WAL 文件长度
+变化和 cancel→terminal/release。结果只支持结构与实际负载判断：Rust search 在 128/1024 文件更快、4096 文件接近持平；native
+inventory 和逐文件 structure 在该夹具更慢但保持有界；单路径写约 4–5 ms 且新增节点随树深而非兄弟数增长；后台背压下前台固定读
+约 11 ms。瞬时 RSS 未覆盖 baseline 短命 rg 子进程，WAL 文件长度也不是物理写放大，因此不据此宣称统一语言倍数。
+
+由此第 10 节的六类完成条件均有生产实现与相称证据，Stage R 完成。真实 ReFS/APFS extent sharing、物理断电 campaign、付费模型
+质量和尚未运行的其他平台 release workflow 结果继续按各自环境登记，不恢复旧实现或把已验证平台置回候选状态。

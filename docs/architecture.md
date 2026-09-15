@@ -1,6 +1,6 @@
 # Piarium architecture
 
-Status: Pi-native workbench/harness in production; R1–R5 complete through D-281; R0 and R6 retain separate acceptance.
+Status: Pi-native workbench/harness in production; Rust system-kernel Stage R complete through D-282.
 
 Last updated: 2026-09-15
 
@@ -12,9 +12,10 @@ the Agent loop, model/provider stack, native session tree, and extension ecosyst
 originated from the maintainer's OpenChamber fork, whose product capabilities are retained. That
 source fork remains read-only; all Piarium edits and history live in this repository.
 
-The accepted next architecture separates a Rust system kernel from the TypeScript product and Agent
-orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the target responsibilities;
-[agent-harness-plan.md](agent-harness-plan.md) stage R defines the complete transition. The storage/file/materialization and native process boundaries are wired through R4; full release evidence remains in [agent-harness-status.md](agent-harness-status.md).
+The production architecture separates a Rust system kernel from the TypeScript product and Agent
+orchestration layers. [rust-kernel-design.md](rust-kernel-design.md) defines the implemented responsibilities;
+[agent-harness-plan.md](agent-harness-plan.md) stage R records the completed R0–R6 transition. Current release and
+verification evidence remains in [agent-harness-status.md](agent-harness-status.md).
 
 Desktop was the first surface to ship, and Windows, Linux, and macOS packages are published from
 matching runners. The same process and protocol boundaries carry the remote host, browser client, and
@@ -46,8 +47,7 @@ companion mobile client, so no surface moves extension execution into an untrust
 
 ## 4. Process model
 
-The following is the current process arrangement. Stage R transfers the specified system responsibilities
-to a private Rust child process; the transfer and current implementation must not be conflated.
+The following is the current process arrangement after Stage R.
 
 ```text
 React renderer: Workbench Profile selects a shell extension
@@ -58,17 +58,24 @@ React renderer: Workbench Profile selects a shell extension
     | authenticated Piarium v1 WebSocket/postMessage surface protocol (Pi runtime)
     v
 Application host: web/Electron shell + Piarium broker + extension host
-    |- LSP, DAP, test, and task supervisors
-    |- revisioned document authority and recovery journals
+    |- TypeScript product policy, authenticated APIs, Thread/Run lifecycle
+    |- Documents/Registry coordination, LSP/DAP protocol, knowledge/model adapters
     |
-    | Piarium protocol v1 over a private child-process IPC pipe
-    v
-Pi session worker (Node >=22.19)
-    |- Pi SDK session runtime
-    |- Pi resource and package loader
-    |- extension UI bridge
-    |- extension-specific structured adapters
-    `- recovery capability adapter
+    |- private generated piarium.kernel.v1 framed protocol
+    |    v
+    |  Rust kernel
+    |    |- immutable working roots, recovery records, objects and GC
+    |    |- canonical file authority, capture/materialization and reconciliation
+    |    |- PTY/pipe process trees, raw output and writer lifetime
+    |    `- fixed/live file search, inventory, tree-sitter structure and chunks
+    |
+    `- Piarium protocol v1 over a private child-process IPC pipe
+         v
+       Pi session worker (Node >=22.19)
+         |- Pi SDK session runtime and model/provider stack
+         |- Pi resource and package loader
+         |- extension UI bridge
+         `- extension-specific structured adapters
 ```
 
 Electron does not add a parallel backend. It hosts the Web application host in-process, so the
@@ -76,7 +83,7 @@ desktop renderer reaches the same HTTP/SSE/WebSocket surfaces over loopback rath
 separate Electron IPC protocol. Only genuinely native capability — windows, menus, dialogs,
 notifications, updater — crosses the Electron preload boundary.
 
-### 4.0 Accepted Rust kernel target (D-252)
+### 4.0 Rust kernel boundary (D-252, completed by D-282)
 
 One Rust kernel process belongs to each actual Application Host instance. Desktop and Web/remote
 deployments use the same private client and packaged executable. Renderer and Pi workers continue to
@@ -90,7 +97,7 @@ Pi worker/session management stays in runtime-broker; credentials and native Pi 
 TriviumDB graph/vector stores keep their current single-writer adapters; changing the implementation
 language is not authorization to replace those databases.
 
-The new process is an implementation component of this Host, shared by all surfaces. It does not create
+The process is an implementation component of this Host, shared by all surfaces. It does not create
 a second Electron backend. Responsibilities move with all their writers, references, consumers, and
 recovery paths; migrated TS code becomes a protocol adapter and the old implementation is removed.
 There are no users requiring Piarium internal-format compatibility (D-253): obsolete internal stores
@@ -1248,5 +1255,36 @@ reclassified as R5 compute; their mutation/resource authority remains the R2 bou
 
 The removed production paths include Host ripgrep child management, recursive file-search scanning,
 WorkingBranch corpus/body mirrors and Host AST/chunker discovery. R5 is therefore Complete under
-D-281. R0 package/process acceptance and R6 full release/performance closeout remain independent, so
-Stage R as a whole is not yet Complete.
+D-281. D-282 then closes R0/R6 and Stage R as described below.
+
+## D-282 Stage R release and acceptance closure
+
+The kernel handshake now negotiates an acknowledgement-backed request window shared by ordinary calls,
+streaming blob chunks and branch builders. Cancellation remains a control frame, so it can reach Rust while
+the serial Storage worker is occupied. Credits return on native acknowledgement or disconnect, duplicate
+in-flight IDs and malformed/over-window admission terminate the epoch, and truncated input drains the old
+worker before a clean restart. Host close waits admitted work and actual child exit instead of treating a
+caller-side cancellation as native completion.
+
+Web, cloud, Electron and VS Code release layouts now carry a manifest-verified kernel. Electron verifies the
+target TriviumDB and sherpa binaries and no longer ships or rebuilds `better-sqlite3`, `node-pty` or `bun-pty`;
+the Rust kernel owns those former storage/process responsibilities. The VS Code companion's workspace search
+uses its packaged kernel and has no Cargo/ripgrep fallback. Application Host build output is audited from its
+real runtime entrypoints: a reachable legacy store/test helper fails the build, while unreachable test and old
+authority artifacts are pruned before publication. The legacy TS recovery file writer is now an explicit test
+helper; production retains only read-only path/hash utilities around the Rust file backend.
+
+Release acceptance covers an arbitrary cwd, copied installation, new epoch over the same current-format data,
+manifest mismatch, fixed-root search/structure, conditional file mutation, native shell exit, cross-domain
+Registry+disk Integration and awaited Registry shutdown. The native runner matrix builds and smokes Windows
+x64/ARM64, Linux x64/ARM64 and macOS x64/ARM64; local evidence is Windows x64 and other runner results remain
+platform-specific rather than inferred.
+
+The R6 measurement uses fixed corpus hashes at 128/1024/4096 files and compares the accepted TS product path
+with the Rust product path in separate processes. It records cold/warm latency, event-loop delay, Host+kernel
+RSS, fixed-root reads, COW tree-node counts and cancellation. Search improves on the small/medium corpora and is
+near parity at 4096 files; native inventory and single-file structure parsing cost more in this fixture but stay
+bounded. A single-path update remains about 4–5 ms and creates nodes proportional to tree depth, while foreground
+fixed reads stay around 11 ms under background backpressure. The data does not support a universal language or
+memory multiplier, and none is claimed. R0–R6 are complete; future work uses this authority split rather than
+maintaining a migration fallback.

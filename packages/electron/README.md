@@ -10,6 +10,10 @@ Desktop starts the Piarium web server in the same Electron main process. There i
 
 The `main.ts` source imports `@piarium/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
+That embedded Application Host starts the private Rust system kernel from `resources/kernel`; storage,
+file/materialization, PTY/process, and fixed-view compute remain Host services and do not become a second
+Electron backend or renderer IPC surface.
+
 Same-origin session-chat iframes complete an authenticated parent-frame handshake before creating their SDK client. The parent supplies its active in-memory endpoint and credentials; when relay is active it also supplies the public relay descriptor without any pairing grant, because Electron preload and IPC are unavailable inside the iframe. The iframe establishes its own transport and rebinds its SDK before rendering. Additional windows retain their own per-window runtime bootstrap instead of being overwritten by the main window. Credentials are never placed in iframe URLs, and other child pages do not receive this runtime state.
 
 The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.__PIARIUM_DESKTOP__`. Privileged commands are checked in `main.ts`, not only in the UI.
@@ -27,7 +31,7 @@ The `preload.ts` bridge exposes desktop-only APIs to the web UI through `window.
 | `scripts/build-web-assets.mjs` | Builds `packages/web` and stages UI assets into `resources/web-dist` |
 | `pi-runtime.ts` | Resolves and starts the packaged Pi host through Electron's Node mode |
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
-| `scripts/rebuild-native.mjs` | Rebuilds native modules against the Electron runtime |
+| `scripts/verify-native.mjs` | Runs the staged release-kernel and TriviumDB smoke under Electron's Node runtime |
 | `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
@@ -89,13 +93,14 @@ That runs, in order:
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:pi-runtime` to compile the Pi host bootstrap and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `rebuild:native` to verify the bundled N-API `better-sqlite3` binary and the published Windows
-   `node-pty` prebuild under Electron's Node ABI.
-5. `package.mjs` to run `electron-builder`; its `afterPack` hook stages the target `better-sqlite3`
-   binary, removes its other-platform/build-only files, and removes the duplicate dependency copy of
-   the already staged Web UI. It also verifies that every distribution-owned Host runtime needed after
-   lazy activation, including the TypeScript language package and its `tsserver`, exists in the physical
-   `app.asar.unpacked` tree.
+4. `verify:native` to start the manifest-verified release kernel and perform a durable TriviumDB
+   read/write through Electron's Node runtime. Storage and PTY no longer use Electron native addons.
+5. `package.mjs` to build the target Rust kernel, stage it in `resources/kernel`, and run
+   `electron-builder`. Its `afterPack` hook verifies the kernel identity/hash, keeps only the target
+   TriviumDB binary, rejects retired `better-sqlite3` / `node-pty` / `bun-pty` authority packages, and
+   removes the duplicate dependency copy of the already staged Web UI. It also verifies that every
+   distribution-owned Host runtime needed after lazy activation, including the TypeScript language
+   package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.
 
 Build output goes to `packages/electron/dist`.
 
@@ -262,8 +267,8 @@ Development builds use a separate user data directory named `Piarium Dev`, so de
 
 - Keep desktop-specific code in this package. Pi runtime behavior belongs in the host/broker packages.
 - Use hidden Windows process launches for background helpers. Avoid visible console flashes.
-- Keep `@piarium/web`, `bun-pty`, `node-pty`, and native modules external in `bundle-main.mjs`; bundling them can break Electron startup.
-- Rebuild `better-sqlite3` and re-run the Electron-backed `node-pty` prebuild check after dependency or Electron version changes.
+- Keep `@piarium/web` and its runtime packages external in `bundle-main.mjs`; the packaged Host, Pi workers, kernel manifest and assets must resolve from the release layout.
+- Run `verify:native` after changing Electron, Rust-kernel packaging, TriviumDB, sherpa, or target architecture; do not restore addon rebuilds for storage or PTY.
 - Test both HMR dev mode and bundled UI mode when changing startup, preload, routing, or packaged asset behavior.
 
 ## Quick Checks
@@ -271,6 +276,7 @@ Development builds use a separate user data directory named `Piarium Dev`, so de
 ```bash
 bun run type-check:electron
 bun run lint:electron
+bun run --cwd packages/electron verify:native
 bun run electron:dev:bundled
 ```
 

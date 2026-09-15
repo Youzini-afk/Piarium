@@ -49,11 +49,12 @@ reliable as code, a script, or normal documentation.
 - `packages/mobile` is a Capacitor client connected to a Piarium server.
 - Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
   [docs/architecture.md](docs/architecture.md).
-- Stage R in [docs/agent-harness-plan.md](docs/agent-harness-plan.md) is the accepted Rust system-kernel
-  transition; [docs/rust-kernel-design.md](docs/rust-kernel-design.md) owns its target boundaries. Until a
-  responsibility is delivered, its current owner remains authoritative. Transfer all writers together;
-  do not introduce dual TS/Rust storage or process authorities. The kernel is a private Application Host
-  component shared by surfaces, not a second Electron backend. Delivery facts remain in harness status.
+- Stage R in [docs/agent-harness-plan.md](docs/agent-harness-plan.md) completed the Rust system-kernel
+  transition at D-282; [docs/rust-kernel-design.md](docs/rust-kernel-design.md) owns its implemented boundaries.
+  Rust is the production authority for the transferred state, file, materialization, process, and compute
+  resources. Do not reintroduce dual TS/Rust writers or fallback authorities. The kernel is a private
+  Application Host component shared by surfaces, not a second Electron backend. Delivery facts remain in
+  harness status.
 
 Never execute Pi extensions in a renderer. Keep privileged filesystem, network, credential, shell, and
 process behavior in the application host, Electron main/preload, VS Code extension host, or Pi host as

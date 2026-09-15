@@ -83,7 +83,7 @@ Last updated: 2026-09-15
 | Host harness | packages/web/application-host/lib/harness/DOCUMENTATION.md；router、service-host、harness-services、thread-services |
 | 线程与物化 | 同目录 thread-runtime.ts、thread-worktree.ts、thread-registry.ts |
 | 知识与观察 | packages/web/application-host/lib/knowledge/DOCUMENTATION.md；store.ts、context-runtime.ts |
-| 文件/恢复 | packages/web/application-host/lib/documents/、lib/recovery/ 的 DOCUMENTATION.md；authority、journal-files、journal-catalog、journal-engine |
+| 文件/恢复 | packages/web/application-host/lib/kernel/ 与 lib/recovery/ 的 DOCUMENTATION.md；KernelClient/file-resource/recovery adapters、Documents authority、journal-engine；`journal-catalog` 只属测试夹具 |
 | 搜索/LSP/终端 | packages/web/application-host/lib/search/content.ts、lib/lsp/supervisor.ts、lib/terminal/runtime.ts |
 | UI | packages/ui/src/components/pi-session/；HarnessThreadState、HarnessThreadsPanel、PiChatView |
 | 真 Pi 测试 | packages/pi-host/test/harness/session-e2e.test.ts；同目录 thread-runtime-session.e2e.test.ts |
@@ -92,10 +92,10 @@ Last updated: 2026-09-15
 
 P0、T1/T2/T3 核心与 D-076 已交付，不重开宽泛 P0。以下是整合建议，不是全部串行等待链：
 
-**2026-09-12 的推进顺序（D-252 / D-254）：** D-246–D-251 已独立验收并由 D-254 关闭重要错误；随后进入本文的
-**阶段 R：Rust 系统内核与 Host 分层**。R0–R6 是正式整体范围，按完整权威逐项接管，不以一个原生 helper 或只读演示交付收尾。
-已有修复及反例作为迁移基线；不把 TS 功能数量等同稳定性，不用新计划替代本轮验收。外部 MCP/ACP、research profile 和新模型
-列在阶段 R 之后；无依赖的产品修复可并行，不要求把所有未测平台/真实 provider 观察先做完。
+**2026-09-15 的推进状态（D-252 / D-282）：** D-246–D-251 的返工基线已被阶段 R 的 R0–R6 完整接管并验收。
+工作状态/恢复、文件/物化、进程/PTY、文件与结构计算的生产权威都已迁入 Rust kernel，旧生产 writer 与发行依赖已清理；TS 保留
+产品与 Agent 编排，Pi 保留 Agent loop/provider/session。后续外部 MCP/ACP、research profile 和新模型沿该边界发展，不再重复建设
+TS 系统内核。未测平台、真实 provider 与真实 CoW 的观察继续如实登记，但不把它们改写成已完成平台的功能禁用。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
    草稿基线与 surface 写回/绑定预览已进入生产链（D-203）；归档/恢复与用户预算下的空间治理已进入线程面板与 Host 路由（D-204）。
@@ -692,19 +692,18 @@ T2 已交付，插件 session-keyed service 独占提示，缺席才 Harness fal
 
 ## 阶段 R：Rust 系统内核与 Host 分层（D-252）
 
-目标架构、资源归属和失败语义见 [rust-kernel-design.md](rust-kernel-design.md)。本阶段完整完成需要 R0–R6，
-不是“先试 Rust，后面再决定是否使用”。实现可按里程碑提交，但不能把其中一项完成写成整个阶段交付。
-模块迁移后的生产默认只有新写者；TS 保留产品编排、Pi runtime、Document Registry、知识领域和已经由原生库承担的查询。
+目标架构、资源归属和失败语义见 [rust-kernel-design.md](rust-kernel-design.md)。D-282 已在 R0–R5 各自接管后完成 R6 汇总验收，
+因此阶段 R 整体完成。模块迁移后的生产默认只有新写者；TS 保留产品编排、Pi runtime、Document Registry、知识领域和模型/索引装饰层。
 
 | 里程碑 | 交付范围 | 必须接通的消费者与删除的旧路径 |
 | --- | --- | --- |
-| R0 | Partial：framed kernel、同源 DTO、代际与现有取消已接入；D-278 补 native CI 入口 | 继续按实际 process/package 边界验收；跨平台用 CI，当前可选 signing 不作为 kernel gate |
+| R0 | **Complete（D-282）**：framed kernel、同源 DTO、epoch/grant、acknowledgement-backed request window、取消/断线/关闭与 release identity | 真实 Host/release binary 覆盖饱和、queued cancel、截断输入、任意 cwd、relocated restart 与 manifest mismatch；Web/Electron/云/VS Code 都从自己的发行目录启动同一 kernel。支持平台的 native build/smoke 是 release workflow gate；本机证据只声明 Windows x64 |
 | R1 | **Complete**：format v10（D-280 增 process records）、typed path state、AVL immutable root/trie、revision pin、recordRevision CAS、blob/source authority、workspace/actor-scoped identity、分页 root read、typed recovery 与 GC | Application Host 的 WorkingState、result/draft/verification/review/retrieval/history/materialize/delete 和 combined Recovery/Integration/agent-mutation 元数据均走 Rust root/path/domain/recovery API；TS 不再有生产 compatibility projection 或 SQLite recovery writer。旧实现仅保留为测试 helper。内置 Recovery 固定共用 kernel application-data root，`storageManagement:false`；可替换 provider 的位置管理仍是公开 v5 可选能力。落盘顺序、事务故障注入与重启对账构成 R1 durability evidence |
 | R2 | **Complete**：单一 Rust file authority + Host-visible pending-operation disposition | Registry 保持 buffer authority；low-level operationId/path/reason/disposition 可列举并可安全 reconcile，证据不足保留 needs-attention；不恢复 TS writer |
 | R3 | **Complete**：fixed baseline + kernel materialization + durable Host/Git/Registry handoff | native operationId/root/writeRevision、persistent handoff pin、Git executionBaseline、Registry/binding 使用同一可重入 intent/receipt；setup timeout/abort 等真实 child close 后才结束；旧 seam 仍仅为测试夹具 |
 | R4 | **Complete（D-280）**：统一 Rust PTY/pipe、process tree/raw output/writer authority | 用户终端、Harness shell、Thread setup、LSP/DAP、任务/测试均经实际 native backend；未确认退出/失联保留 writer，控制不依赖输出排空；Host 保留协议与启动取消编排。Pi broker 仍拥有 Pi worker；Git 短命令和 shell 发现留作领域适配，不另建通用进程 authority |
 | R5 | **Complete（D-281）**：固定 pin/live revision-bound 文件检索、遍历/哈希、native tree-sitter 结构解析/切块，前后台 lane + 实际取消 | read/grep/find/ls/explore、file find、语言/符号/语义目录建设均复用 kernel compute；virtual WorkingBranch semantic 直接在 pin 上 `unitsFixed`，不跨 Host 搬整分支正文。旧 TS ripgrep/recursive scan、branch corpus/body mirror、Host AST/chunker discovery 已退出生产链；Registry draft、TriviumDB/vector/embedder/Pi/LSP 仍按原领域权威 |
-| R6 | 完整生产与故障验收、性能定标、发行更新、遗留实现清理 | Desktop/Web/远程和既有 surface，实际 packaged binary；状态/模块文档指向唯一实现 |
+| R6 | **Complete（D-282）**：完整生产/故障验收、受控结构与资源测量、发行更新、遗留实现清理 | Desktop/Web/云/VS Code 的实际 release layout 均带 manifest-verified kernel；Windows unpacked 与 cross-domain surface 纵切已跑。旧 PTY/SQLite authority 发行依赖、TS file writer 和 emitted legacy/test artifacts 已退出生产；当前文档指向唯一实现 |
 
 ### R0. 契约、运行时与发行基础
 
@@ -716,6 +715,12 @@ Rust 内核通过私有进程管道连接一个 Host，生成跨语言 DTO/schem
 真实 Host 装配需验证启动、协议不匹配、损坏帧、背压、取消、关闭和内核退出后的状态。Windows/macOS/Linux 的仓库发行
 target 从此步开始构建，不把二进制打包、Node/Electron 协同和许可证检查留到最后才发现。R0 只标运行时基础完成，
 尚未迁移的功能保持原生产所有者。
+
+D-282 完成本节。握手发布 `requestWindow`，Host credit 只在 Rust 响应/断线时释放；blob chunk、branch builder 和普通请求共用
+acknowledged request window，cancel 控制帧可在数据背压时到达。重复 request id、超窗发送、坏帧和截断输入结束本 epoch，关闭先等
+已准入工作，再发 shutdown 或关闭 stdin，不把未确认工作报成功。真实 release smoke 从任意 cwd 启动，核对 build/target/arch/hash，
+复制到另一安装目录后用新 epoch 重开同一 v10 catalog；坏 manifest 明确拒绝。Web、Electron、云和 VS Code 分别携带自己的 kernel+
+manifest，支持平台由 native runner 构建，不需要客户端安装 Rust。
 
 ### R1. 工作状态与恢复存储接管
 
@@ -797,7 +802,7 @@ R4 不声称新增恶意代码 OS sandbox，也不要求用户本地其他平台
 验证父 live 漂移、草稿覆盖、嵌套 view、scope、查询取消/partial/终态、结构批量传输与后台负载下前台响应。
 删除对应旧扫描/解析/缓存路径；跨边界只传需要的记录/范围，不传整库。
 
-D-281 完成本节：`compute.start/read/cancel/release` 使用 bounded cursor 和 2 foreground + 1 background worker；immutable WorkingState query 复制短生命周期 reader pin，caller unpin/branch delete/GC 不改变正在读取的 root。live workspace 通过 Host-admitted canonical root 读取并给正文/结构结果绑定实际 content revision，读取窗口漂移只能 partial/failed，不被宣传为 immutable snapshot。surface draft 是 Registry 捕获后上传的固定 object overlay，ancestor tombstone 在候选预算前遮蔽。`search.content`、file find、Harness grep/explore、language catalog、symbol graph 与 semantic disk scan 统一走该 native boundary；virtual Thread semantic 只枚举 pin 内 path/revision，tree-sitter `unitsFixed` 在 pin 上直接产生结构 unit，再由 TS tokenizer/embedder 装饰，不再复制整分支正文到 Host。Host 保留 grammar 安装 ABI 校验与 LSP 协议，不把它们当第二套 workspace parser；TriviumDB/vector store/remote inference/Pi 归属不变。R5 因此 Complete，R0/R6 状态不变。
+D-281 完成本节：`compute.start/read/cancel/release` 使用 bounded cursor 和 2 foreground + 1 background worker；immutable WorkingState query 复制短生命周期 reader pin，caller unpin/branch delete/GC 不改变正在读取的 root。live workspace 通过 Host-admitted canonical root 读取并给正文/结构结果绑定实际 content revision，读取窗口漂移只能 partial/failed，不被宣传为 immutable snapshot。surface draft 是 Registry 捕获后上传的 fixed object overlay，ancestor tombstone 在候选预算前遮蔽。`search.content`、file find、Harness grep/explore、language catalog、symbol graph 与 semantic disk scan 统一走该 native boundary；virtual Thread semantic 只枚举 pin 内 path/revision，tree-sitter `unitsFixed` 在 pin 上直接产生结构 unit，再由 TS tokenizer/embedder 装饰，不再复制整分支正文到 Host。Host 保留 grammar 安装 ABI 校验与 LSP 协议，不把它们当第二套 workspace parser；TriviumDB/vector store/remote inference/Pi 归属不变。R5 因此 Complete；D-281 当时不改变 R0/R6，二者随后由 D-282 收口。
 
 ### R6. 完整验收与发行收口
 
@@ -813,6 +818,16 @@ D-281 完成本节：`compute.start/read/cancel/release` 使用 bounded cursor �
 依赖关系：R0 → R1 → R2 → R3；R4 在 R0/R2 的身份与 writer 契约确定后可独立推进，R5 依赖 R1/R2 的固定视图。
 R6 汇总所有里程碑并完成发行验收。并行不能让两个任务各改一份共享协议/存储权威；共同契约由一个整合者负责。
 
+D-282 已完成本节。`scripts/measure-kernel.mjs` 对固定语料和 D-280 后/R5 前的 TS 产品路径做交替顺序的冷/热对照，记录语料 hash、
+脚本/kernel identity、事件循环、分阶段 RSS、root 节点、WAL 文件长度变化与实际取消；结果见 status，不从瞬时 RSS/WAL 长度推导物理
+写放大，也不把结构解析或 inventory 的额外成本藏掉。`smoke-kernel-release.mjs`、Windows unpacked smoke、VS Code native-search smoke
+和云运行时 verify 脚本都从发行树运行，覆盖重启、固定 root、文件条件应用、结构读取、shell 退出与句柄释放。
+
+生产依赖已删除 `node-pty`、`bun-pty`、`better-sqlite3` authority 与 Electron rebuild 脚本；TriviumDB/sherpa 仍按各自领域的预编译
+binary 验证。Application Host build 会对 emitted import graph 做运行时可达性审计，拒绝可达的旧 store/test helper，并从发行树删掉不可达
+测试/旧实现；源码测试 helper 不构成生产 fallback。Document Registry 关闭等待最后 journal/owner release，Web/VS Code 的 surface operation
+事件不再被 watch adapter 丢弃。R0–R6 均完成，阶段 R 的下一步是使用与优化，不再维护迁移待办。
+
 ## 阶段 4–6：既有默认 runtime 与后续领域
 
 - 默认 runtime：直接交付 bundled Pi、Runtime Manager 默认选择与 Git Bash 就绪说明，保留自有 runtime；实际 Electron smoke。
@@ -821,8 +836,8 @@ R6 汇总所有里程碑并完成发行验收。并行不能让两个任务各�
 - research/文件知识工作：沿共享工具、存储、文档、验证器做文献/PDF/引用/notebook；按实际用途交付。第二个 profile 发展公共
   接口，不是允许建接口的前置。SaaS 连接器与 Windows 沙箱保持范围之外。
 
-默认 bundled Pi 的已交付路径保持。当前新主线是阶段 R；外部 adapter 和新领域 profile 使用 R 收口后的系统边界，
-不在迁移中另建一套资源/存储后端。
+默认 bundled Pi 的已交付路径保持。阶段 R 已由 D-282 收口；外部 adapter 和新领域 profile 使用当前 Rust kernel/TS Host 边界，
+不另建一套资源、存储或进程后端。
 
 ## 文档同步与验收
 

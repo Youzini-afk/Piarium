@@ -12,9 +12,10 @@ agent execution are provided by the bundled Pi runtime workspace:
         -> @piarium/protocol
 ```
 
-The four packages are one release unit. Publishing or installing the Web tarball by itself is not a
-supported deployment path because it would omit the private broker, host, protocol, and their package
-exports.
+The four packages and the manifest-verified Rust kernel are one release unit. Publishing or installing
+only the browser bundle is not a supported deployment path because it would omit the private broker,
+host, protocol, kernel executable, and their package exports. The canonical cloud builder stages
+`packages/web/kernel` and runs its release smoke before accepting the runtime.
 
 ## Development
 
