@@ -24,6 +24,8 @@ or implementation in the same coherent change.
 | Area | Current authority |
 | --- | --- |
 | Product/process/data architecture | [architecture.md](architecture.md) |
+| Agent harness contract, plan, status, decision log | [agent-harness.md](agent-harness.md), [agent-harness-plan.md](agent-harness-plan.md), [agent-harness-status.md](agent-harness-status.md), [agent-harness-decisions.md](agent-harness-decisions.md) |
+| Rust system kernel | [rust-kernel-design.md](rust-kernel-design.md), [rust-kernel-audit.md](rust-kernel-audit.md), [kernel/README.md](../kernel/README.md) |
 | OpenChamber source and non-regression boundary | [openchamber-pi-migration.md](openchamber-pi-migration.md) |
 | Workbench profiles and extension composition | [composable-workbench.md](composable-workbench.md) |
 | Documents, Monaco, mobile adapters, language services | [unified-file-editor-platform.md](unified-file-editor-platform.md) and the module docs under `packages/ui/src/lib` |
