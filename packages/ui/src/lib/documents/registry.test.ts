@@ -30,6 +30,7 @@ const hashText = async (text: string): Promise<string> => {
 };
 
 const createMemoryDocuments = () => {
+  type DirtyPublication = Parameters<DocumentsAPI['publishDirtyBuffers']>[0];
   const files = new Map<string, { content: string; revision: string }>();
   const journals = new Map<string, {
     journalId: string;
@@ -40,7 +41,16 @@ const createMemoryDocuments = () => {
     baseRevision: string | null;
   }>();
   const listeners = new Set<(event: PiariumDocumentWatchEvent) => void>();
-  const dirtyPublications: Array<Parameters<DocumentsAPI['publishDirtyBuffers']>[0]> = [];
+  const dirtyPublications: DirtyPublication[] = [];
+  const dirtyPublicationWaiters = new Set<{
+    predicate: (publication: DirtyPublication) => boolean;
+    resolve: (publication: DirtyPublication) => void;
+  }>();
+  const waitForDirtyPublication = (predicate: (publication: DirtyPublication) => boolean): Promise<DirtyPublication> => {
+    const existing = dirtyPublications.findLast(predicate);
+    if (existing) return Promise.resolve(existing);
+    return new Promise((resolve) => { dirtyPublicationWaiters.add({ predicate, resolve }); });
+  };
   const barrierAcknowledgements: Array<Parameters<NonNullable<DocumentsAPI['ackDirtyStateBarrier']>>[0]> = [];
   let resolveBarrierAcknowledgement: () => void = () => undefined;
   const barrierAcknowledged = new Promise<void>((resolve) => { resolveBarrierAcknowledgement = resolve; });
@@ -72,6 +82,11 @@ const createMemoryDocuments = () => {
     },
     publishDirtyBuffers: async (request) => {
       dirtyPublications.push(request);
+      for (const waiter of dirtyPublicationWaiters) {
+        if (!waiter.predicate(request)) continue;
+        dirtyPublicationWaiters.delete(waiter);
+        waiter.resolve(request);
+      }
       return { ...request, updatedAt: '2026-08-28T00:00:00.000Z' };
     },
     resolveWorkspace: async () => ({ workspaceId: resource().workspaceId, hostId: 'host-1', epoch: workspaceEpoch }),
@@ -226,6 +241,7 @@ const createMemoryDocuments = () => {
     setSurfaceOperation: (operation: PiariumDocumentSurfaceOperationPayload) => { surfaceOperation = operation; },
     emit,
     setEpoch: (epoch: number) => { workspaceEpoch = epoch; },
+    waitForDirtyPublication,
   };
 };
 
@@ -566,7 +582,7 @@ describe('DocumentRegistry', () => {
   });
 
   test('dirty subscriptions only publish dirty-set membership changes', async () => {
-    const { api, dirtyPublications } = createMemoryDocuments();
+    const { api, dirtyPublications, waitForDirtyPublication } = createMemoryDocuments();
     const identity = resource();
     await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
@@ -577,28 +593,28 @@ describe('DocumentRegistry', () => {
     registry.applyTransaction(identity, 'second', { origin: 'view' });
     expect(updates).toBe(1);
     expect(registry.dirtyResourceIds(identity.workspaceId)).toEqual(new Set([identity.resourceId]));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForDirtyPublication((publication) => publication.resources[0]?.localEditRevision === 2);
     expect(dirtyPublications.at(-1)?.resources).toHaveLength(1);
     expect(dirtyPublications.at(-1)?.resources[0]?.resource).toEqual(identity);
     await registry.save(identity);
     expect(updates).toBe(2);
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForDirtyPublication((publication) => publication.resources.length === 0);
     expect(dirtyPublications.at(-1)?.resources).toEqual([]);
     unsubscribe();
     registry.dispose();
   });
 
   test('publishes every dirty revision and fences affected edits during a Host barrier', async () => {
-    const { api, barrierAcknowledged, barrierAcknowledgements, dirtyPublications, emit } = createMemoryDocuments();
+    const { api, barrierAcknowledged, barrierAcknowledgements, dirtyPublications, emit, waitForDirtyPublication } = createMemoryDocuments();
     const identity = resource();
     await api.write({ token: mutationToken(), resource: identity, content: 'base', encoding: 'utf-8', bom: false, expectedRevision: null, operationId: '1' });
     const registry = new DocumentRegistry({ documents: api, getGeneration: () => 1, recoverySessionId: 'session' });
     await registry.open(identity);
     registry.applyTransaction(identity, 'first edit', { origin: 'editor' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForDirtyPublication((publication) => publication.resources[0]?.localEditRevision === 1);
     expect(dirtyPublications.at(-1)?.resources[0]?.localEditRevision).toBe(1);
     registry.applyTransaction(identity, 'second edit', { origin: 'editor' });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await waitForDirtyPublication((publication) => publication.resources[0]?.localEditRevision === 2);
     expect(dirtyPublications.at(-1)?.resources[0]?.localEditRevision).toBe(2);
 
     emit({
