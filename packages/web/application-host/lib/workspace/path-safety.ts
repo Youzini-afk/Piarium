@@ -175,7 +175,7 @@ const findNearestExistingParent = async (
       }
       return pathModule.dirname(current);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '')) {
         throw error;
       }
       const parent = pathModule.dirname(current);
@@ -230,7 +230,7 @@ export const resolveWorkspacePath = async (
     const realPath = await assertRealPathInsideRoot(absolutePath, rootRealPath, fsPromises, pathModule);
     return { rootPath, rootRealPath, relativePath, absolutePath, realPath };
   } catch (error) {
-    if (!allowMissing || (error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+    if (!allowMissing || !['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '')) {
       throw error;
     }
   }
@@ -280,7 +280,7 @@ export const assertAbsolutePathInWorkspace = async (
           break;
         }
       } catch (error) {
-        if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error;
+        if (!['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '')) throw error;
       }
       const parent = pathModule.dirname(current);
       if (parent === current) break;

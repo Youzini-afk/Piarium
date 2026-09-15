@@ -179,7 +179,9 @@ describe("draft-baseline", () => {
     expect((await fs.promises.lstat(path.join(child, "newdir"))).isDirectory()).toBe(true);
     expect(await fs.promises.readFile(path.join(child, "newdir", "new.ts"), "utf8")).toBe("new nested draft\n");
     expect((await fs.promises.lstat(path.join(child, "dir"))).isFile()).toBe(true);
-    await expect(fs.promises.lstat(path.join(child, "dir", "old.txt"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(fs.promises.lstat(path.join(child, "dir", "old.txt"))).rejects.toMatchObject({
+      code: expect.stringMatching(/ENOENT|ENOTDIR/),
+    });
     expect((await fs.promises.lstat(path.join(child, "file-base"))).isDirectory()).toBe(true);
     expect(await fs.promises.readFile(path.join(child, "file-base", "child.ts"), "utf8")).toBe("file replaced by directory\n");
     expect(await fs.promises.readFile(path.join(child, "stable", "new.ts"), "utf8")).toBe("existing directory remains baseline\n");
