@@ -271,11 +271,34 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         : captured.draftBaselineId || (preset?.id === "retrieval" && parent.kind === "thread")
           ? "isolated" as const
           : preset?.worktree === "none" ? "none" as const : "isolated" as const;
+      // `inherit` fixes the parent's committed input at dispatch time; a queued
+      // Thread never re-reads later parent state (D-285.4 / 3.18B).
+      let inheritedContext: import("@piarium/protocol").ThreadInheritedContext | undefined;
+      if (params.input === "inherit") {
+        const parentSessionId = parent.kind === "session"
+          ? parent.id
+          : (await registry.getActiveRun(workspaceId, parent.id))?.sessionId;
+        if (!parentSessionId || !host.threadCaptureInputContext) {
+          await captured.cleanup().catch(() => undefined);
+          throw new HarnessServiceError("unavailable", "Parent input capture is not available for an inherit dispatch");
+        }
+        const material = await host.threadCaptureInputContext({ sessionId: parentSessionId });
+        if (material) {
+          inheritedContext = {
+            fromSessionId: parentSessionId,
+            capturedAt: new Date().toISOString(),
+            text: material.text,
+            anchors: material.anchors,
+          };
+        }
+      }
       const input = {
         workspaceId,
         parent,
         brief: params.task,
         ...(preset ? { preset: preset.id } : {}),
+        ...(params.input === "inherit" ? { inputOrigin: "inherit" as const } : {}),
+        ...(inheritedContext ? { inheritedContext } : {}),
         kind: "implementation" as const,
         createdBy: "agent" as const,
         concurrency,
@@ -605,13 +628,50 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       assertOwnerTool(owner, "send");
       const thread = await registry.getThread(workspaceId, parent, params.threadId);
       if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      const kind = params.kind ?? "inform";
+      if (params.context !== undefined && kind !== "request") {
+        throw new HarnessServiceError(
+          "invalid-params",
+          "context only applies to an execution request (kind: \"request\")",
+        );
+      }
       if (thread.lifecycle !== "active") {
+        // An explicit execution request on a settled implementation Thread
+        // starts a new Run (D-285.5/3.18B) — it does not merely reopen send.
+        if (kind === "request" && thread.lifecycle === "settled") {
+          if (!host.threadContinueRun) {
+            throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
+          }
+          try {
+            const { runId } = await host.threadContinueRun({
+              workspaceId,
+              parent,
+              threadId: thread.id,
+              mode: params.context ?? "continue",
+              task: params.message,
+            });
+            return { accepted: true, lifecycle: "active", attention: "none", runId };
+          } catch (error) {
+            if (error instanceof ThreadRuntimeError) {
+              const code = error.code === "not-found"
+                ? "not-found"
+                : error.code === "conflict" || error.code === "invalid-request"
+                  ? "invalid-params"
+                  : "unavailable";
+              throw new HarnessServiceError(code, error.message, error.retryable);
+            }
+            throw error;
+          }
+          return { accepted: true, lifecycle: "active", attention: "none" };
+        }
         throw new HarnessServiceError("unavailable", `Thread is not active: ${params.threadId}`);
       }
       const run = await registry.getActiveRun(workspaceId, thread.id);
       if (!run?.sessionId || run.workerState !== "running") {
         throw new HarnessServiceError("unavailable", `Thread has no running session: ${params.threadId}`);
       }
+      // A request on an already-active Thread delivers like inform — it never
+      // starts a second Run on a live worker.
       await host.threadSendToSession(run.sessionId, params.message, params.from);
       const updated = thread.attention === "user" || thread.attention === "permission"
         ? await registry.setAttention(workspaceId, thread.id, "none")

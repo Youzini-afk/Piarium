@@ -3625,4 +3625,129 @@ describe("thread runtime", () => {
     expect(observedMode).toBe("exclusive");
     await deleting.dispose();
   });
+
+  const reportFor = (sessionId: string): import("@piarium/protocol").ThreadReport => ({
+    blocksSnapshot: {},
+    changedFiles: ["a.ts"],
+    conclusion: "Implemented the seam",
+    confidence: 0.8,
+    deviations: ["kept the adapter"],
+    transcriptRef: { branchLeafId: "entry-2", fromEntryId: null, runtimeId: "pi", sessionId, toEntryId: null },
+    unresolved: ["Still need a migration test"],
+  });
+
+  const settle = async (sessionId = "child-1") => {
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await runtime.spawn({ ...input, threadId: thread.id, runId: run.id });
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, reportFor(sessionId));
+    return { input, thread, run };
+  };
+
+  it("continue on a settled Thread reopens the retained session and prompts the task", async () => {
+    const { thread } = await settle();
+    const { runId } = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "Apply the review feedback",
+    });
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "child-1" }));
+    expect(sessionAdapter.create).toHaveBeenCalledTimes(1);
+    expect(sent.at(-1)).toBe("Apply the review feedback");
+    const run = await registry.getActiveRun(WORKSPACE, thread.id);
+    expect(run?.id).toBe(runId);
+    expect(run?.frozen.inputOrigin).toBe("continue");
+    const updated = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(updated?.lifecycle).toBe("active");
+  });
+
+  it("continue without a retained session ends the new Run as a failure", async () => {
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, {
+      ...reportFor(""),
+    });
+    await expect(runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "keep going",
+    })).rejects.toMatchObject({ code: "unavailable" });
+    const last = await registry.getActiveRun(WORKSPACE, thread.id);
+    expect(last?.outcome).toBe("failure");
+    const updated = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(updated?.lifecycle).toBe("settled");
+  });
+
+  it("fresh rebuilds the input on a new session while keeping the worktree", async () => {
+    sessionAdapter.readEntries = vi.fn(async (sessionId: string, _cwd: string | undefined, scope: "branch" | "all" = "branch"): Promise<SessionEntriesResult> => ({
+      sessionId,
+      scope,
+      leafId: "e3",
+      entries: [
+        { id: "e1", parentId: null, timestamp: "2026-09-04T00:00:00.000Z", type: "message", message: { role: "user", content: "keep the public API stable", timestamp: 0 } },
+        { id: "e2", parentId: "e1", timestamp: "2026-09-04T00:01:00.000Z", type: "compaction", summary: "earlier work summarized", firstKeptEntryId: "e3", tokensBefore: 9000 },
+        { id: "e3", parentId: "e2", timestamp: "2026-09-04T00:02:00.000Z", type: "message", message: assistantMessage("implemented the seam") },
+      ],
+    }));
+    const { thread } = await settle();
+    const { runId } = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "fresh",
+      task: "Rebuild context and fix the regression",
+    });
+    expect(sessionAdapter.readEntries).toHaveBeenCalledWith("child-1", undefined, "branch");
+    expect(sessionAdapter.create).toHaveBeenCalledTimes(2);
+    const promptText = sent.at(-1) ?? "";
+    expect(promptText).toContain("## Task");
+    expect(promptText).toContain("Rebuild context and fix the regression");
+    expect(promptText).toContain("keep the public API stable");
+    expect(promptText).toContain("Implemented the seam");
+    expect(promptText).toContain("Still need a migration test");
+    expect(promptText).toContain("History anchors");
+    const run = await registry.getActiveRun(WORKSPACE, thread.id);
+    expect(run?.id).toBe(runId);
+    expect(run?.frozen.inputOrigin).toBe("fresh");
+    // The existing worktree is reused — no second prepare call.
+    expect(prepareWorktree).toHaveBeenCalledTimes(1);
+  });
+
+  it("continueRun rejects an active Thread instead of starting a second Run", async () => {
+    const { thread } = await start();
+    await expect(runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "again",
+    })).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("captureInputContext renders the committed summary plus retained raw material", async () => {
+    vi.mocked(sessionAdapter.entries).mockImplementation(async (sessionId: string, scope: "branch" | "all" = "branch"): Promise<SessionEntriesResult> => ({
+      sessionId,
+      scope,
+      leafId: "e4",
+      entries: [
+        { id: "e1", parentId: null, timestamp: "2026-09-04T00:00:00.000Z", type: "message", message: { role: "user", content: "old task", timestamp: 0 } },
+        { id: "e2", parentId: "e1", timestamp: "2026-09-04T00:01:00.000Z", type: "compaction", summary: "SUMMARY TEXT", firstKeptEntryId: "e3", tokensBefore: 9000 },
+        { id: "e3", parentId: "e2", timestamp: "2026-09-04T00:02:00.000Z", type: "message", message: { role: "user", content: "follow-up", timestamp: 0 } },
+        { id: "e4", parentId: "e3", timestamp: "2026-09-04T00:03:00.000Z", type: "message", message: { role: "toolResult", toolName: "read", isError: false, content: [], toolCallId: "t1", timestamp: 0 } },
+      ],
+    }));
+    const material = await runtime.captureInputContext("sess-x");
+    expect(material?.text).toContain("[committed summary]");
+    expect(material?.text).toContain("SUMMARY TEXT");
+    expect(material?.text).toContain("[user] follow-up");
+    expect(material?.text).toContain("[tool result: read]");
+    expect(material?.text).not.toContain("old task");
+    expect(material?.anchors).toEqual(["e2"]);
+  });
 });

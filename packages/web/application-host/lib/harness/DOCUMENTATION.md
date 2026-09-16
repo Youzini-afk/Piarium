@@ -150,6 +150,20 @@ identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
 Draft merge records that disk commands cannot verify unsaved buffers.
 
+Input origins are frozen per Run (`task`/`inherit`/`continue`/`fresh`). An
+`input: "inherit"` dispatch captures the parent session's committed input at
+dispatch time through `threadCaptureInputContext` — the last compaction summary
+plus the raw committed entries kept after it, rendered bounded — persists it on
+the manifest, and renders it in the child's initial prompt; a queued Thread
+never re-reads later parent state. `thread.send` distinguishes `inform`
+(delivery only; requires an active running session) from `request`: a `request`
+on a settled implementation Thread calls `threadContinueRun` to start a new
+Run — `continue` reopens the retained session and prompts the new task, `fresh`
+reads the closed transcript through `sessions.readEntries`
+(`previewSessionEntries`), assembles a rebuilt input via `assembleFreshInput`,
+and spawns a new session on the retained worktree. A request on an active
+Thread delivers like inform; `inform` on a settled Thread is still rejected.
+
 `retrieval` is a Thread preset, not a second explore tool. `thread.dispatch`
 freezes the retrieval model slot, read-only allowlist, and scope, and does not
 copy parent blocks. The child delivers facts only through `submit_facts` →

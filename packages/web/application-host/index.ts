@@ -1762,6 +1762,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       },
       stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
       entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
+      readEntries: (sessionId, _cwd, scope = 'branch') => piRuntimeBroker.previewSessionEntries(sessionId, undefined, scope),
     },
     onError: (error) => {
       console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
@@ -2331,6 +2332,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)
     ),
     threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
+    threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
+    threadContinueRun: (input) => threadRuntime!.continueRun(input),
   });
   harnessShellActivity.hasActiveCommandAtDirectory = (directory) => (
     harnessServiceHost.hasActiveCommandAtDirectory(directory)

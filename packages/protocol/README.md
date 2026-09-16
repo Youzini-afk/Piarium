@@ -61,10 +61,10 @@ language server read itself, which LSP cannot attribute to a version.
 | `explore.query.release` | `{ queryId }` | `{ released }` | Drop the short-lived query after the public explore tool ends |
 | `related.query` | `{ anchor }` | file-level defines / imports / importers / connection endpoints + query-time `roles` + source status | Symbol-graph topology for a path or name; not `lsp.references`. File roles are a query decoration, not graph facts |
 | `surface.snapshot.commit/release` | content-free `AgentInputContext` | lifecycle acknowledgement | Bind or release an opaque Documents snapshot after input delivery |
-| `thread.dispatch` | `{ task, preset?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread |
+| `thread.dispatch` | `{ task, preset?, input?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread; `input: "inherit"` fixes the parent's committed input at dispatch |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
-| `thread.send` | `{ threadId, message, from }` | `ThreadSendResult` | Send message to a thread |
+| `thread.send` | `{ threadId, message, from, kind?, context? }` | `ThreadSendResult` | `inform` (default) delivers only; `request` on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) |
 | `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
 | `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
@@ -171,7 +171,8 @@ worker restart and never reuses a cached key.
 - `language-id.ts` — `languageIdForPath`, `editorLanguageIdForLanguage`. Single language identity for the Host language views, provider matching, and the editor; a second table split one file across two sessions and hid extensions from one side
 - `harness-settings.ts` — `HarnessSettings`, `HarnessModelRole`, `ModelSelection`, `mergeHarnessSettings`
 - `harness-presets.ts` — Execution preset catalog: `PresetId`, `ExecutionPreset`, `EXECUTION_PRESETS`, `resolvePresets`, `buildTeamPrompt`. Shared because pi-host builds the `dispatch` team prompt from the resolved presets while the host builds threads from the same definitions
-- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest`, observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
+- `harness-threads.ts` — orthogonal `Thread` / `ThreadRun` types, immutable `ThreadLaunchManifest` (with `inputOrigin`/`inheritedContext`), `ThreadRunFrozenConfig` (`inputOrigin: task|inherit|continue|fresh`), observer cursor, seven thread service DTOs, and `DEFAULT_TTL_TABLE` telemetry for the opt-in keepalive experiment (not a default wait schedule)
+- `harness-fresh-input.ts` — shared `assembleFreshInput`/`minePiBranchEntries` for a `fresh` Run's seed input (task, still-valid requirements, selected results, open items, history anchors); used by pi-host for in-session rebuilds and by the Application Host for settled-Thread continuation
 - `harness-tools.ts` — Tool-specific protocol types, `HARNESS_TOOL_META`
 - `utf8.ts` — browser-safe UTF-8 byte slicing used by Host output stores and pi-host truncation; returns `nextOffset` / `eof`
 - `permission-gate.ts` — `PermissionPolicy`, `PermissionRule`, `evaluateGate`, `isHighRisk`, `HIGH_RISK_PATTERNS`, `defaultRules`, `mergePolicies`

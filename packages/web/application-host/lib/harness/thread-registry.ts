@@ -25,6 +25,7 @@ import type {
   ThreadAttention,
   ThreadCreatedBy,
   ThreadDiffStats,
+  ThreadInheritedContext,
   ThreadIntegration,
   ThreadIntegrationBinding,
   ThreadKind,
@@ -33,6 +34,7 @@ import type {
   ThreadParent,
   ThreadReport,
   ThreadRun,
+  ThreadRunInputOrigin,
   ThreadRunOutcome,
   ThreadTokens,
   ThreadViewCursor,
@@ -156,6 +158,9 @@ export interface CreateThreadInput {
   carryBlocks?: boolean;
   concurrency: number;
   draftBaselineId?: string;
+  /** How the first Run's input is constructed; `inherit` requires inheritedContext. */
+  inputOrigin?: "task" | "inherit";
+  inheritedContext?: ThreadInheritedContext;
   scope?: string[];
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
@@ -526,11 +531,21 @@ const normalizeThreadPreset = (thread: Thread): Thread => {
   return next;
 };
 
+const isInheritedContext = (value: unknown): value is ThreadInheritedContext => (
+  isRecord(value)
+  && isString(value.fromSessionId)
+  && isString(value.capturedAt)
+  && isString(value.text)
+  && Array.isArray(value.anchors) && value.anchors.every(isString)
+);
+
 const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   isRecord(value)
   && typeof value.carryBlocks === "boolean"
   && Number.isSafeInteger(value.concurrency) && Number(value.concurrency) > 0
   && (value.draftBaselineId === null || (isString(value.draftBaselineId) && value.draftBaselineId.length > 0))
+  && (value.inputOrigin === undefined || value.inputOrigin === "task" || value.inputOrigin === "inherit")
+  && (value.inheritedContext === undefined || isInheritedContext(value.inheritedContext))
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
@@ -708,7 +723,7 @@ const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["froz
   && Array.isArray(value.scope) && value.scope.every(isString)
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && isNullableString(value.systemPromptFragment)
-  && (value.inputOrigin === "task" || value.inputOrigin === "inherit")
+  && (value.inputOrigin === "task" || value.inputOrigin === "inherit" || value.inputOrigin === "continue" || value.inputOrigin === "fresh")
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -1658,6 +1673,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           carryBlocks: input.carryBlocks ?? true,
           concurrency: input.concurrency,
           draftBaselineId: input.draftBaselineId ?? null,
+          ...(input.inputOrigin !== undefined ? { inputOrigin: input.inputOrigin } : {}),
+          ...(input.inheritedContext !== undefined ? { inheritedContext: structuredClone(input.inheritedContext) } : {}),
           scope: [...(input.scope ?? [])].map(normalizeThreadScopePath),
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],
@@ -1801,7 +1818,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     workspaceId: string,
     threadId: string,
     runtimeId = "pi",
-    options: { allowSettled?: boolean } = {},
+    options: { allowSettled?: boolean; inputOrigin?: ThreadRunInputOrigin } = {},
   ): Promise<ThreadRun> => (
     mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
@@ -1836,7 +1853,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           scope: [...thread.manifest.scope],
           worktree: thread.manifest.worktree,
           systemPromptFragment: thread.manifest.systemPromptFragment,
-          inputOrigin: "task",
+          inputOrigin: options.inputOrigin ?? thread.manifest.inputOrigin ?? "task",
         },
         workerState: "starting",
         outcome: null,

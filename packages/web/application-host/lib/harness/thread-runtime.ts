@@ -5,8 +5,11 @@ import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResul
 import type {
   AgentInputContext,
   HarnessWorktreeSettings,
+  PiAssistantMessage,
+  PiCompactionEntry,
   PiMessage,
   PiSessionMessageEntry,
+  PiUserMessage,
   SessionEntriesResult,
   SessionSnapshot,
   SessionStats,
@@ -24,7 +27,9 @@ import type {
   WorkspaceThreadSpace,
 } from "@piarium/protocol";
 import {
+  assembleFreshInput,
   HARNESS_TOOL_META,
+  minePiBranchEntries,
   normalizeFrozenHarnessPermissions,
   threadIntegrationBindingFromPreview,
 } from "@piarium/protocol";
@@ -97,6 +102,11 @@ export interface ThreadSessionAdapter {
   summary(sessionId: string): Promise<SessionSummary>;
   stats(sessionId: string): Promise<SessionStats>;
   entries(sessionId: string, scope?: "branch" | "all"): Promise<SessionEntriesResult>;
+  /**
+   * Read a persisted session's entries without opening a worker — used for
+   * `fresh` input construction on a settled Thread's retained transcript.
+   */
+  readEntries?(sessionId: string, cwd: string | undefined, scope?: "branch" | "all"): Promise<SessionEntriesResult>;
 }
 
 export interface ThreadRuntimeOptions {
@@ -394,6 +404,16 @@ const initialPrompt = (
       parentBlocksText(parentBlocks),
       "When finished, use the headings `Conclusion`, `Deviations from brief`, and `Unresolved issues`; use `- none` when a section is empty.",
       "If a memory decisions block is available, record each deviation as `Deviation: ...`.",
+      input.inheritedContext
+        ? [
+            "",
+            "The parent's committed context captured at dispatch is included below. Output handles and",
+            "session-specific references were not carried; the parent may have progressed since the capture.",
+            `<inherited-context from-session="${input.inheritedContext.fromSessionId}">`,
+            input.inheritedContext.text,
+            "</inherited-context>",
+          ].join("\n")
+        : null,
       "",
       "Task:",
       input.promptText ?? input.brief,
@@ -2964,6 +2984,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               carryBlocks: thread.manifest.carryBlocks,
               concurrency: thread.manifest.concurrency,
               ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
+              ...(thread.manifest.inputOrigin !== undefined ? { inputOrigin: thread.manifest.inputOrigin } : {}),
+              ...(thread.manifest.inheritedContext ? { inheritedContext: thread.manifest.inheritedContext } : {}),
               autoRun: true,
               worktree: thread.manifest.worktree,
               ...(thread.model ? { model: thread.model } : {}),
@@ -5125,8 +5147,209 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadLifecycleTails.clear();
   };
 
+  /**
+   * Renders a parent session's current actual input for `input: "inherit"`
+   * dispatch (D-285.4): the committed summary plus the raw committed material
+   * kept after the last compaction boundary — the same content the child would
+   * see if it carried the parent session. Output handles and session-specific
+   * references are not carried. Bounded to `INHERIT_CONTEXT_MAX_CHARS`; older
+   * material is elided rather than the newest.
+   */
+  const INHERIT_CONTEXT_MAX_CHARS = 30_000;
+  const messageText = (message: PiUserMessage | PiAssistantMessage): string => {
+    const content = message.content;
+    if (typeof content === "string") return content;
+    const parts: string[] = [];
+    for (const block of content) {
+      if (block.type === "text") parts.push(block.text);
+    }
+    return parts.join("\n");
+  };
+  const captureInputContext = async (
+    sessionId: string,
+  ): Promise<{ text: string; anchors: string[] } | null> => {
+    let result: SessionEntriesResult;
+    try {
+      result = await options.sessions.entries(sessionId, "branch");
+    } catch (error) {
+      if (!options.sessions.readEntries) throw error;
+      result = await options.sessions.readEntries(sessionId, undefined, "branch");
+    }
+    let lastCompaction: PiCompactionEntry | null = null;
+    for (const entry of result.entries) {
+      if (entry.type === "compaction") lastCompaction = entry;
+    }
+    const anchors = lastCompaction?.id ? [lastCompaction.id] : [];
+    const sections: string[] = [];
+    if (lastCompaction) sections.push(`[committed summary]\n${lastCompaction.summary}`);
+    const rawLines: string[] = [];
+    const skipped = lastCompaction
+      ? result.entries.findIndex((entry) => entry.id === lastCompaction.id) + 1
+      : 0;
+    for (const entry of result.entries.slice(Math.max(0, skipped))) {
+      if (entry.type !== "message") continue;
+      const message = entry.message;
+      if (message.role === "user" || message.role === "assistant") {
+        const text = messageText(message).trim();
+        if (text) rawLines.push(`[${message.role}] ${text}`);
+      } else if (message.role === "toolResult") {
+        rawLines.push(`[tool result: ${message.toolName}${message.isError ? " (error)" : ""}]`);
+      }
+    }
+    if (rawLines.length > 0) sections.push(`[raw committed material]\n${rawLines.join("\n\n")}`);
+    const text = sections.join("\n\n").trim();
+    if (!text) return null;
+    if (text.length <= INHERIT_CONTEXT_MAX_CHARS) return { text, anchors };
+    // Keep the newest material; note the elision so the child can pull earlier
+    // content through `history` on the parent transcript if needed.
+    const kept = text.slice(text.length - INHERIT_CONTEXT_MAX_CHARS);
+    const boundary = kept.indexOf("\n");
+    return {
+      text: `[earlier material elided]\n\n${boundary > 0 ? kept.slice(boundary + 1) : kept}`,
+      anchors,
+    };
+  };
+
+  /**
+   * Starts a new Run on a settled implementation Thread (D-285.4):
+   * `continue` resumes the retained session with the new task verbatim;
+   * `fresh` opens a new session on a rebuilt input assembled from the task,
+   * still-valid requirements, delivered results, unresolved items, and
+   * historical anchors. The old transcript and work are never discarded.
+   */
+  const continueRun = async (input: {
+    workspaceId: string;
+    parent: ThreadParent;
+    threadId: string;
+    mode: "continue" | "fresh";
+    task: string;
+  }): Promise<{ runId: string }> => {
+    const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
+    if (thread.kind !== "implementation") {
+      throw new ThreadRuntimeError("invalid-request", "Execution requests apply to implementation threads");
+    }
+    if (thread.lifecycle !== "settled") {
+      throw new ThreadRuntimeError("conflict", `Thread is not settled: ${input.threadId}`);
+    }
+    const previous = await options.registry.getActiveRun(input.workspaceId, thread.id);
+    const retainedSessionId = thread.report?.transcriptRef.sessionId ?? previous?.sessionId ?? null;
+    const run = await options.registry.startRun(input.workspaceId, thread.id, previous?.runtimeId ?? "pi", {
+      allowSettled: true,
+      inputOrigin: input.mode,
+    });
+    try {
+      if (input.mode === "continue") {
+        if (!retainedSessionId) {
+          throw new ThreadRuntimeError("unavailable", "No retained session to continue; request with context \"fresh\"");
+        }
+        const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
+        const cwd = thread.worktree?.path ?? sourceRoot;
+        const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
+        const snapshot = await options.sessions.open({
+          cwd,
+          ...(thread.model ? { model: thread.model } : {}),
+          permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
+          ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+          sessionId: retainedSessionId,
+          tools: [...thread.manifest.tools],
+          workspaceId: runtimeWorkspaceId,
+        });
+        const baselineStats = await options.sessions.stats(snapshot.sessionId).catch((error) => {
+          reportError(error);
+          return null;
+        });
+        const binding = {
+          workspaceId: input.workspaceId,
+          parent: input.parent,
+          threadId: thread.id,
+          runId: run.id,
+          sessionId: snapshot.sessionId,
+          cwd,
+          kind: thread.kind,
+          providerId: thread.model?.providerId ?? null,
+          baseline: {
+            cost: baselineStats?.cost ?? 0,
+            toolCalls: baselineStats?.toolCalls ?? 0,
+            tokens: {
+              input: baselineStats?.tokens.input ?? 0,
+              output: baselineStats?.tokens.output ?? 0,
+              cacheRead: baselineStats?.tokens.cacheRead ?? 0,
+            },
+          },
+        };
+        bind(binding);
+        await bindExecutionView({
+          sessionId: snapshot.sessionId,
+          workspaceId: input.workspaceId,
+          parent: input.parent,
+          threadId: thread.id,
+          runId: run.id,
+        });
+        await options.registry.markRunRunning(input.workspaceId, thread.id, run.id, snapshot.sessionId);
+        options.onThreadSessionBound?.(snapshot.sessionId, input.workspaceId);
+        scheduleStallTimer(binding);
+        await options.sessions.prompt(snapshot.sessionId, input.task);
+        return { runId: run.id };
+      }
+      let entries: SessionEntriesResult["entries"] = [];
+      if (retainedSessionId && options.sessions.readEntries) {
+        entries = (await options.sessions.readEntries(retainedSessionId, undefined, "branch")).entries;
+      } else if (retainedSessionId) {
+        entries = (await options.sessions.entries(retainedSessionId, "branch")).entries;
+      }
+      const mined = minePiBranchEntries(entries);
+      const results: string[] = [];
+      if (thread.report) {
+        if (thread.report.conclusion) results.push(`conclusion: ${thread.report.conclusion}`);
+        if (thread.report.changedFiles.length > 0) {
+          results.push(`changed files: ${thread.report.changedFiles.join(", ")}`);
+        }
+        if (thread.report.deviations.length > 0) {
+          results.push(`deviations: ${thread.report.deviations.join("; ")}`);
+        }
+        if (retainedSessionId) results.push(`transcript: session ${retainedSessionId}`);
+      }
+      const fresh = assembleFreshInput({
+        task: input.task,
+        results,
+        openItems: thread.report?.unresolved ?? [],
+        carriedUserMessages: mined.carriedUserMessages,
+        boundaryEntryIds: mined.boundaryEntryIds,
+      });
+      await spawn({
+        workspaceId: input.workspaceId,
+        parent: input.parent,
+        threadId: thread.id,
+        runId: run.id,
+        brief: thread.brief,
+        ...(thread.preset ? { preset: thread.preset } : {}),
+        kind: thread.kind,
+        createdBy: thread.createdBy,
+        carryBlocks: thread.manifest.carryBlocks,
+        concurrency: thread.manifest.concurrency,
+        ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
+        autoRun: true,
+        worktree: thread.manifest.worktree,
+        ...(thread.model ? { model: thread.model } : {}),
+        tools: [...thread.manifest.tools],
+        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
+        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+        ...(thread.manifest.systemPromptFragment ? { systemPromptFragment: thread.manifest.systemPromptFragment } : {}),
+        promptText: fresh.text,
+      });
+      return { runId: run.id };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await options.registry.endRun(input.workspaceId, thread.id, run.id, "failure", message).catch(reportError);
+      throw error;
+    }
+  };
+
   return {
     spawn,
+    captureInputContext,
+    continueRun,
     captureDraftBaseline,
     prepareIsolatedBranch,
     createDiscussion,

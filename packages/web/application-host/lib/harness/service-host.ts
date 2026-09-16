@@ -247,6 +247,25 @@ export interface HarnessServiceHost {
   threadCaptureDraftBaseline: ((sessionId: string, workspaceId: string, context: import("@piarium/protocol").AgentInputContext) => Promise<CapturedThreadDraftBaseline>) | null;
   threadPrepareIsolatedBranch: ((input: PrepareIsolatedBranchInput) => Promise<{ branchId: string; worktree: import("@piarium/protocol").ThreadWorktree }>) | null;
   threadSpawnSession: ((input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>) | null;
+  /**
+   * Capture the parent session's committed input at dispatch time for an
+   * `inherit` Thread (D-285.4): compaction summary + retained raw messages
+   * rendered as bounded text plus history anchors. Null when the session has
+   * no capturable material.
+   */
+  threadCaptureInputContext?: ((input: { sessionId: string }) => Promise<{ text: string; anchors: string[] } | null>) | null;
+  /**
+   * Start a new Run on a settled Thread for an execution `request`
+   * (D-285.5/3.18B): `continue` resumes the retained session; `fresh`
+   * rebuilds the input on a new session while results/files/transcript stay.
+   */
+  threadContinueRun?: ((input: {
+    workspaceId: string;
+    parent: import("@piarium/protocol").ThreadParent;
+    threadId: string;
+    mode: "continue" | "fresh";
+    task: string;
+  }) => Promise<{ runId: string }>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
   threadApplyWorktreeDiff: ((
@@ -396,6 +415,8 @@ export interface HarnessServiceHostOptions {
   threadCaptureDraftBaseline?: HarnessServiceHost["threadCaptureDraftBaseline"];
   threadPrepareIsolatedBranch?: HarnessServiceHost["threadPrepareIsolatedBranch"];
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
+  threadCaptureInputContext?: HarnessServiceHost["threadCaptureInputContext"];
+  threadContinueRun?: HarnessServiceHost["threadContinueRun"];
   threadKillSession?: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   requireThreadMergeJournal?: boolean;
@@ -455,6 +476,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadCaptureDraftBaseline = options.threadCaptureDraftBaseline ?? null;
   const threadPrepareIsolatedBranch = options.threadPrepareIsolatedBranch ?? null;
   const threadSpawnSession = options.threadSpawnSession ?? null;
+  const threadCaptureInputContext = options.threadCaptureInputContext ?? null;
+  const threadContinueRun = options.threadContinueRun ?? null;
   const threadKillSession = options.threadKillSession ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
@@ -682,6 +705,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadCaptureDraftBaseline,
     threadPrepareIsolatedBranch,
     threadSpawnSession,
+    threadCaptureInputContext,
+    threadContinueRun,
     threadKillSession,
     threadApplyWorktreeDiff,
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,

@@ -1501,7 +1501,8 @@ Rust WorkingState/Integration 保持文件与结果权威。任务身份不会�
 
 #### 9.2.2 普通派发与可选执行预设
 
-模型可见的概念接口为 `dispatch(task, { context?, preset?, scope?, worktree? })`；这些是目标参数，不是当前已支持的协议。
+模型可见接口为 `dispatch(task, { input?, preset?, scope?, worktree? })`；`task`/`preset`/`input`/`scope`/`worktree`已是
+当前协议参数（`input`取`task|inherit`，`worktree`仅接受显式`shared`）。
 普通派发不要求 role：默认简洁任务背景、明确继承发起者当前模型和已获准的普通工作能力，写入任务默认独立 WorkingState，
 需要 shell/LSP 等真实路径时才物化。shared 是明确需要共同现场时的执行选择，不因“任务简单”或某预设名称而默认共享。
 
@@ -1790,7 +1791,9 @@ catalog，身份来自 broker/Host，不因状态条目还在就声称 worker �
 retrieval 默认 task，保留不携父 blocks 和专门事实协议的选择；预设声明与用户显式输入选择冲突时清楚表达，不偷偷继承。
 
 已有线程继续由执行请求进入：工作和背景仍相关用 `continue`；工作延续但旧背景大半过期用 `fresh`（8.4.7）；不相关新任务
-新建 Thread。当前 public send 拒绝 settled 实现线程，D-285 必须补真实新 Run/会话恢复路径，不只放宽一个状态判断。
+新建 Thread。`send` 的 `kind:"request"` 对 settled 实现线程经 `threadContinueRun` 新建 Run：`continue` 重开保留会话
+原样续跑，`fresh` 按 2.6A 组装新输入开新会话（旧转录经 `previewSessionEntries` 可读，工作与结果保留）；普通 `inform`
+仍只投递不新建 Run，对 settled 线程按当前语义拒绝。
 需要时从选定结果重建已回收目录，沿实际权限和统一执行准入启动；新 Run 记录输入结果身份。普通 inform 不触发这些动作。
 
 只读讨论转实现保留工作与历史，按新 Run 授予实际工具/权限并准备工作分支。上下文可继续，也可 fresh；不强制新建“实现员工”。

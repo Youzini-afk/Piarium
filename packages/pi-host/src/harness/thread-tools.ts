@@ -33,6 +33,10 @@ function threadErrorResult(toolName: string, error: unknown): { content: Array<{
 const DispatchParams = Type.Object({
   task: Type.String(),
   preset: Type.Optional(Type.String()),
+  input: Type.Optional(Type.Union([
+    Type.Literal("task"),
+    Type.Literal("inherit"),
+  ], { description: "task starts on the brief (default); inherit carries the parent's committed input captured at dispatch" })),
   worktree: Type.Optional(Type.Literal("shared")),
   scope: Type.Optional(Type.Array(Type.String())),
 });
@@ -50,6 +54,14 @@ const ThreadWaitParams = Type.Object({
 const ThreadSendParams = Type.Object({
   threadId: Type.String(),
   message: Type.String(),
+  kind: Type.Optional(Type.Union([
+    Type.Literal("inform"),
+    Type.Literal("request"),
+  ], { description: "inform only delivers the message; request asks for execution — on a settled thread it starts a new Run" })),
+  context: Type.Optional(Type.Union([
+    Type.Literal("continue"),
+    Type.Literal("fresh"),
+  ], { description: "For a request on a settled thread: continue resumes its retained session (default); fresh rebuilds the input on a new session" })),
 });
 
 const ThreadReadParams = Type.Object({
@@ -152,6 +164,7 @@ export function createDispatchTool(
           ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
           task: params.task,
           ...(params.preset !== undefined ? { preset: params.preset } : {}),
+          ...(params.input !== undefined ? { input: params.input } : {}),
           ...(params.worktree !== undefined ? { worktree: params.worktree } : {}),
           model,
           ...(tools !== undefined ? { tools } : {}),
@@ -237,8 +250,8 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "send",
     label: "Send",
-    description: "Send a message to a sub-agent thread. Wakes idle or waiting-for-input threads. Message is marked as from parent agent.",
-    promptSnippet: "send: pass a teammate new information; wakes idle or waiting threads",
+    description: "Send a message to a sub-agent thread. Wakes idle or waiting-for-input threads. kind: 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). Message is marked as from parent agent.",
+    promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
     promptGuidelines: [],
     parameters: ThreadSendParams,
     executionMode: "parallel",
@@ -248,6 +261,8 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
           threadId: params.threadId,
           message: params.message,
           from: "parent-agent",
+          ...(params.kind !== undefined ? { kind: params.kind } : {}),
+          ...(params.context !== undefined ? { context: params.context } : {}),
         });
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;
