@@ -9,6 +9,7 @@ export * from "./harness-settings.js";
 export * from "./harness-inference.js";
 export * from "./harness-model-slots.js";
 export * from "./harness-presets.js";
+export * from "./harness-fresh-input.js";
 export * from "./harness-tools.js";
 export * from "./harness-threads.js";
 export * from "./utf8.js";

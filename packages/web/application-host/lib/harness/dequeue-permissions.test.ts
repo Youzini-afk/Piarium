@@ -153,4 +153,84 @@ describe("dequeued thread permissions", () => {
       await registry.dispose();
     }
   });
+
+  it("carries the frozen input origin and inherited context into a dequeued spawn", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "piarium-dequeue-inherit-"));
+    roots.push(dataDir);
+    const prompts: string[] = [];
+    const sessionAdapter: ThreadSessionAdapter = {
+      create: vi.fn(async () => snapshot("queued-child")),
+      open: vi.fn(async (input) => snapshot(input.sessionId ?? "opened")),
+      prompt: vi.fn(async (_sessionId, text) => { prompts.push(text); }),
+      send: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined),
+      close: vi.fn(async () => undefined),
+      snapshot: vi.fn(async (sessionId) => snapshot(sessionId)),
+      summary: vi.fn(async (sessionId) => summary(sessionId)),
+      stats: vi.fn(async () => stats),
+      entries: vi.fn(async (sessionId, scope: "all" | "branch" = "branch") => ({
+        sessionId,
+        scope,
+        leafId: "entry-1",
+        entries: [],
+      })),
+    };
+    let registry = createThreadRegistry({ dataDir, hostId: "host-1", maxConcurrency: 1 });
+    const runtime = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      worktrees: {
+        prepare: async () => ({ cwd: "/workspace/thread", worktree: { path: "/workspace/thread", base: "base" } }),
+        snapshot: async (worktree) => ({ ...worktree, branch: "piarium/thread", resultCommit: "result" }),
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    await registry.dispose();
+    registry = createThreadRegistry({
+      dataDir,
+      hostId: "host-1",
+      maxConcurrency: 1,
+      onThreadDequeued: createOnThreadDequeued({
+        getRegistry: () => registry,
+        getRuntime: () => runtime,
+      }),
+    });
+    try {
+      const first = await registry.createThread(createInput({ brief: "first" }));
+      const firstRun = await registry.startRun(WORKSPACE, first.id);
+      await registry.markRunRunning(WORKSPACE, first.id, firstRun.id, "first-child");
+      const queued = await registry.createThread(createInput({
+        brief: "queued inherit work",
+        inputOrigin: "inherit",
+        inheritedContext: {
+          fromSessionId: "parent-1",
+          capturedAt: "2026-09-15T00:00:00.000Z",
+          text: "[committed summary]\nPARENT SUMMARY",
+          anchors: ["anchor-1"],
+        },
+      }));
+      await registry.endRun(WORKSPACE, first.id, firstRun.id, "success", null, {
+        conclusion: "done",
+        changedFiles: [],
+        unresolved: [],
+        deviations: [],
+        confidence: 1,
+        transcriptRef: { runtimeId: "pi", sessionId: "first-child", fromEntryId: null, toEntryId: null },
+        blocksSnapshot: {},
+      });
+      await vi.waitFor(() => {
+        expect(prompts.length).toBeGreaterThan(0);
+      });
+      expect(prompts.at(-1)).toContain('<inherited-context from-session="parent-1">');
+      expect(prompts.at(-1)).toContain("PARENT SUMMARY");
+      const run = await registry.getActiveRun(WORKSPACE, queued.id);
+      expect(run?.frozen.inputOrigin).toBe("inherit");
+    } finally {
+      await runtime.dispose();
+      await registry.dispose();
+    }
+  });
 });

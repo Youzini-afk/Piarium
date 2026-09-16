@@ -361,11 +361,31 @@ export interface ThreadWorktree {
 }
 
 /** Immutable launch inputs captured when the Thread is created. */
+/**
+ * Parent context captured at dispatch time for an `inherit` thread (D-285.4):
+ * the committed compaction summary plus the retained raw messages rendered as
+ * bounded text, with entry ids kept as history anchors. The material is fixed
+ * at dispatch — a queued Thread never re-reads the parent's later state.
+ */
+export interface ThreadInheritedContext {
+  fromSessionId: string;
+  capturedAt: string;
+  text: string;
+  anchors: string[];
+}
+
 export interface ThreadLaunchManifest {
   carryBlocks: boolean;
   concurrency: number;
   /** Host-owned immutable editor draft baseline captured at dispatch. */
   draftBaselineId: string | null;
+  /**
+   * How the Thread's first Run input was constructed (D-285.4): `task` is a
+   * fresh task brief; `inherit` carries `inheritedContext`. Later Runs carry
+   * their own origin in `ThreadRunFrozenConfig.inputOrigin`.
+   */
+  inputOrigin?: "task" | "inherit";
+  inheritedContext?: ThreadInheritedContext;
   scope: string[];
   systemPromptFragment: string | null;
   tools: string[];
@@ -537,6 +557,14 @@ export interface ThreadReviewOf {
  * input origin this Run actually runs with. Later Runs on the same Thread
  * may freeze different values; the Thread manifest projects the latest.
  */
+/**
+ * How a Run's input was constructed (D-285.4): `task` is a fresh task brief;
+ * `inherit` carries captured parent context; `continue` resumes the retained
+ * session on an existing Thread; `fresh` rebuilds the input from current
+ * rules and carried evidence on a new session.
+ */
+export type ThreadRunInputOrigin = "task" | "inherit" | "continue" | "fresh";
+
 export interface ThreadRunFrozenConfig {
   model: import("./harness-settings.js").ModelSelection | null;
   tools: string[];
@@ -544,13 +572,7 @@ export interface ThreadRunFrozenConfig {
   scope: string[];
   worktree: "none" | "shared" | "isolated";
   systemPromptFragment: string | null;
-  /**
-   * Where this Run's input came from (D-285.4): `task` is a fresh task brief;
-   * `inherit` retains existing session content (e.g. a discussion converted
-   * into an implementation Run). `continue`/`fresh` arrive with the settled
-   * rerun path.
-   */
-  inputOrigin: "task" | "inherit";
+  inputOrigin: ThreadRunInputOrigin;
 }
 
 export interface ThreadRun {
@@ -648,12 +670,26 @@ export interface ThreadSendParams {
   threadId: string;
   message: string;
   from: "user" | "parent-agent";
+  /**
+   * `inform` only delivers the message to a running session. `request` asks
+   * for execution: on a settled implementation Thread it starts a new Run
+   * (D-285.5/3.18B).
+   */
+  kind?: "inform" | "request";
+  /**
+   * Input origin for a `request` that starts a new Run on a settled Thread:
+   * `continue` resumes the retained session (default); `fresh` rebuilds the
+   * input on a new session while results, files, and the old transcript stay.
+   */
+  context?: "continue" | "fresh";
 }
 
 export interface ThreadSendResult {
   accepted: boolean;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
+  /** Set when the send started a new Run (request on a settled Thread). */
+  runId?: string;
 }
 
 export type ThreadReadWhat = "blocks" | "report" | "steps";
@@ -829,6 +865,12 @@ export interface ThreadDispatchParams {
    * frozen allowlist; presets use their declared tool list instead.
    */
   tools?: string[];
+  /**
+   * Input origin for the new Thread (D-285.4): `task` (default) seeds only
+   * the task brief; `inherit` captures the parent's committed summary and
+   * retained raw messages at dispatch time and prepends them to the task.
+   */
+  input?: "task" | "inherit";
 }
 
 export interface ThreadFactsSetParams {

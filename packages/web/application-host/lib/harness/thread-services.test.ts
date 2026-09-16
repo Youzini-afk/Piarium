@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
-import { createThreadDispatchService, createThreadKillService, createThreadMergeService } from "./thread-services.js";
+import { createThreadDispatchService, createThreadKillService, createThreadMergeService, createThreadSendService } from "./thread-services.js";
 import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
 
@@ -873,6 +873,66 @@ describe("thread services", () => {
     }
   });
 
+  it("captures the parent's committed input for an inherit dispatch", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-dispatch-inherit-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child-9" }));
+    const capture = vi.fn(async ({ sessionId }: { sessionId: string }) => ({
+      text: `[committed summary]\nPARENT SUMMARY for ${sessionId}`,
+      anchors: ["anchor-1"],
+    }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+      threadCaptureInputContext: capture,
+    } as never);
+    try {
+      const result = await service.handle({
+        task: "Continue in my context",
+        input: "inherit",
+        model: { providerId: "openai", modelId: "gpt-test" },
+      }, serviceContext());
+      expect(capture).toHaveBeenCalledWith({ sessionId: "parent-1" });
+      expect(spawn).toHaveBeenCalledWith(expect.objectContaining({
+        inputOrigin: "inherit",
+        inheritedContext: expect.objectContaining({
+          fromSessionId: "parent-1",
+          anchors: ["anchor-1"],
+        }),
+      }));
+      const thread = await registry.getThreadById("workspace-1", result.threadId);
+      expect(thread?.manifest.inputOrigin).toBe("inherit");
+      expect(thread?.manifest.inheritedContext?.text).toContain("PARENT SUMMARY");
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects an inherit dispatch when parent input capture is unavailable", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-dispatch-inherit-off-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "child-9" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+      threadPrepareIsolatedBranch: prepareIsolatedBranch,
+    } as never);
+    try {
+      await expect(service.handle({
+        task: "Continue in my context",
+        input: "inherit",
+        model: { providerId: "openai", modelId: "gpt-test" },
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      expect(spawn).not.toHaveBeenCalled();
+      expect(await registry.listThreads("workspace-1", { kind: "session", id: "parent-1" })).toEqual([]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("rejects thread tools when a session binding has no matching catalog owner", async () => {
     const service = createThreadDispatchService({
       threadRegistry: {
@@ -899,5 +959,118 @@ describe("thread services", () => {
       actor: { ...serviceContext().actor, sessionId: "orphan-session", workspaceId: "execution-ws" },
     })).rejects.toMatchObject({ harnessCode: "denied" });
     expect(prepareIsolatedBranch).not.toHaveBeenCalled();
+  });
+
+  const settledThread = async (registry: ReturnType<typeof createThreadRegistry>) => {
+    const thread = await registry.createThread({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "parent-1" },
+      brief: "Implement the feature",
+      kind: "implementation" as const,
+      createdBy: "agent" as const,
+      concurrency: 2,
+      autoRun: true,
+      worktree: "isolated" as const,
+      tools: ["read", "edit"],
+      permissions: {},
+    });
+    const run = await registry.startRun("workspace-1", thread.id);
+    await registry.endRun("workspace-1", thread.id, run.id, "success", null, {
+      blocksSnapshot: {},
+      changedFiles: ["a.ts"],
+      conclusion: "done",
+      confidence: 0.8,
+      deviations: [],
+      transcriptRef: { fromEntryId: null, runtimeId: "pi", sessionId: "child-1", toEntryId: null },
+      unresolved: [],
+    });
+    return { thread, run };
+  };
+
+  it("routes a request on a settled Thread to a new Run instead of reopening send", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-request-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-2" }));
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const { thread } = await settledThread(registry);
+      const result = await service.handle({
+        threadId: thread.id,
+        message: "Apply the review feedback",
+        from: "parent-agent",
+        kind: "request",
+      }, serviceContext());
+      expect(result).toMatchObject({ accepted: true, lifecycle: "active", runId: "run-2" });
+      expect(continueRun).toHaveBeenCalledWith({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "parent-1" },
+        threadId: thread.id,
+        mode: "continue",
+        task: "Apply the review feedback",
+      });
+      expect(sendToSession).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("passes context fresh through to the continuation mode", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-fresh-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-3" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const { thread } = await settledThread(registry);
+      await service.handle({
+        threadId: thread.id,
+        message: "Rebuild and fix",
+        from: "parent-agent",
+        kind: "request",
+        context: "fresh",
+      }, serviceContext());
+      expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({ mode: "fresh" }));
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a plain send to a settled Thread and context without a request", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-settled-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-4" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const { thread } = await settledThread(registry);
+      await expect(service.handle({
+        threadId: thread.id,
+        message: "still there?",
+        from: "parent-agent",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      await expect(service.handle({
+        threadId: thread.id,
+        message: "still there?",
+        from: "parent-agent",
+        context: "fresh",
+      }, serviceContext())).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      expect(continueRun).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
   });
 });

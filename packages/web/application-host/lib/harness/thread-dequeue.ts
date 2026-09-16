@@ -28,6 +28,8 @@ export const createOnThreadDequeued = (options: {
       carryBlocks: thread.manifest.carryBlocks,
       concurrency: thread.manifest.concurrency,
       ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
+      ...(thread.manifest.inputOrigin !== undefined ? { inputOrigin: thread.manifest.inputOrigin } : {}),
+      ...(thread.manifest.inheritedContext ? { inheritedContext: thread.manifest.inheritedContext } : {}),
       autoRun: true,
       worktree: thread.manifest.worktree,
       ...(thread.model ? { model: thread.model } : {}),
