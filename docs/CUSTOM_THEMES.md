@@ -16,6 +16,20 @@ folder and reload it without restarting the application.
 
 4. Select your theme from the dropdown.
 
+Built-in theme names and style descriptions follow the interface language. Original palette names
+remain recognizable, and the picker previews each variant's actual background, text, and primary
+accent colors. Custom names/descriptions remain author-owned; changing the interface language never
+rewrites theme JSON or stored theme IDs.
+
+## Surfaces and accents
+
+Each palette defines its own `surface`, `primary`, `interactive`, `status`, and `syntax` colors.
+Switching themes selects all of them together; an accent is not a global tint applied to the UI.
+Keep background hierarchy and readable text in `surface`, prominent actions in `primary`, and
+hover/selection/focus in `interactive`. A theme can retain warm, cool, or ink-like surfaces without
+using its primary accent as every panel background. Error/success and code colors retain their own
+meaning. Light and dark variants need their own contrast choices rather than identical accent values.
+
 ## Theme location
 
 | Platform | Default path |

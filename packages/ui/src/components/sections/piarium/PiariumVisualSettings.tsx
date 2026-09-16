@@ -67,6 +67,7 @@ import { isTerminalShell } from '@/lib/terminalShell';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
+import { ThemePicker } from './ThemePicker';
 
 interface Option<T extends string> {
     id: T;
@@ -609,15 +610,13 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
 
     const lightThemes = React.useMemo(
         () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'light')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+            .filter((theme) => theme.metadata.variant === 'light'),
         [availableThemes],
     );
 
     const darkThemes = React.useMemo(
         () => availableThemes
-            .filter((theme) => theme.metadata.variant === 'dark')
-            .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+            .filter((theme) => theme.metadata.variant === 'dark'),
         [availableThemes],
     );
 
@@ -630,11 +629,6 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
         () => darkThemes.find((theme) => theme.metadata.id === darkThemeId) ?? darkThemes[0],
         [darkThemes, darkThemeId],
     );
-
-    const formatThemeLabel = React.useCallback((themeName: string, variant: 'light' | 'dark') => {
-        const suffix = variant === 'dark' ? ' Dark' : ' Light';
-        return themeName.endsWith(suffix) ? themeName.slice(0, -suffix.length) : themeName;
-    }, []);
 
     const shouldShow = (setting: VisibleSetting): boolean => {
         if (!visibleSettings) return true;
@@ -913,43 +907,17 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
                                             label={t('settings.piarium.visual.field.lightTheme')}
                                             settingsItem="appearance.light-theme"
                                         >
-                                            <Select value={selectedLightTheme?.metadata.id ?? ''} onValueChange={setLightThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.piarium.visual.field.selectLightThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.piarium.visual.field.selectThemePlaceholder')}>
-                                                        {selectedLightTheme
-                                                            ? formatThemeLabel(selectedLightTheme.metadata.name, 'light')
-                                                            : undefined}
-                                                    </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {lightThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'light')}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <ThemePicker themes={lightThemes} selected={selectedLightTheme}
+                                                onChange={setLightThemePreference}
+                                                label={t('settings.piarium.visual.field.selectLightThemeAria')} />
                                         </SettingsStackedField>
                                         <SettingsStackedField
                                             label={t('settings.piarium.visual.field.darkTheme')}
                                             settingsItem="appearance.dark-theme"
                                         >
-                                            <Select value={selectedDarkTheme?.metadata.id ?? ''} onValueChange={setDarkThemePreference}>
-                                                <SelectTrigger aria-label={t('settings.piarium.visual.field.selectDarkThemeAria')} size={SETTINGS_SELECT_SIZE} className={SETTINGS_SELECT_TRIGGER_CLASS}>
-                                                    <SelectValue placeholder={t('settings.piarium.visual.field.selectThemePlaceholder')}>
-                                                        {selectedDarkTheme
-                                                            ? formatThemeLabel(selectedDarkTheme.metadata.name, 'dark')
-                                                            : undefined}
-                                                    </SelectValue>
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    {darkThemes.map((theme) => (
-                                                        <SelectItem key={theme.metadata.id} value={theme.metadata.id}>
-                                                            {formatThemeLabel(theme.metadata.name, 'dark')}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <ThemePicker themes={darkThemes} selected={selectedDarkTheme}
+                                                onChange={setDarkThemePreference}
+                                                label={t('settings.piarium.visual.field.selectDarkThemeAria')} />
                                         </SettingsStackedField>
 
                                         <div className="flex items-center gap-2 pt-1">
