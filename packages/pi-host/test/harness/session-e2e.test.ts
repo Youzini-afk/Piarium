@@ -773,7 +773,7 @@ describe("session e2e — context preparation chain", () => {
         harness: { context: { preparationWaterline: 0.5 } },
       }), "utf8");
       await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 48_000, maxTokens: 800, reasoning: true }] });
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 42_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
       let markCompactionStarted!: () => void;
@@ -845,7 +845,10 @@ describe("session e2e — context preparation chain", () => {
           await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(10_000));
           await session!.host.session.waitForIdle();
         })();
-        await compactionStarted;
+        await Promise.race([
+          compactionStarted,
+          pending.then(() => { throw new Error("capacity-bound request completed without entering compaction"); }),
+        ]);
         assert.equal(session.host.snapshot().isCompacting, true);
         assert.equal(foreground.length, 3, "the capacity-bound request waits before reaching the provider");
         assert.equal(summaries.length, 1, "capacity waits on the same in-flight call");
