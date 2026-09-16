@@ -3659,7 +3659,7 @@ describe("thread runtime", () => {
     expect(sent.at(-1)).toBe("Apply the review feedback");
     const run = await registry.getActiveRun(WORKSPACE, thread.id);
     expect(run?.id).toBe(runId);
-    expect(run?.frozen.inputOrigin).toBe("continue");
+    expect(run?.frozen?.inputOrigin).toBe("continue");
     const updated = await registry.getThread(WORKSPACE, PARENT, thread.id);
     expect(updated?.lifecycle).toBe("active");
   });
@@ -3714,7 +3714,7 @@ describe("thread runtime", () => {
     expect(promptText).toContain("History anchors");
     const run = await registry.getActiveRun(WORKSPACE, thread.id);
     expect(run?.id).toBe(runId);
-    expect(run?.frozen.inputOrigin).toBe("fresh");
+    expect(run?.frozen?.inputOrigin).toBe("fresh");
     // The existing worktree is reused — no second prepare call.
     expect(prepareWorktree).toHaveBeenCalledTimes(1);
   });

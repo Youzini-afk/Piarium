@@ -114,7 +114,7 @@ it('continues the original session after Git/native archive, reclaim and restore
     expect(existsSync(join(directory, '.git'))).toBe(true);
     expect(normalizePathIdentity(await canonicalizePathIdentity(git(directory, ['rev-parse', '--show-toplevel']))))
       .toBe(normalizePathIdentity(await canonicalizePathIdentity(directory)));
-    await runtime.send('child-session', 'Continue the work', 'user');
+    await runtime.send('child-session', 'Continue the work', { from: 'user' });
     expect(sessions.prompt).toHaveBeenLastCalledWith('child-session', expect.stringContaining('Continue the work'));
     writeFileSync(join(directory, 'result.txt'), 'second result\n');
     const archivedAgain = await runtime.archiveUser(workspaceId, parent, thread.id);

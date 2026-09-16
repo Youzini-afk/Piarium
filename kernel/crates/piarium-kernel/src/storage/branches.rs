@@ -917,13 +917,21 @@ impl Storage {
             .branch_write_builders
             .remove(builder_id)
             .expect("validated branch mutation builder still exists");
-        let mutation = json!({
+        let mut mutation = json!({
             "operationId": builder.operation_id,
             "branchId": builder.branch_id,
             "workspaceId": builder.workspace_id,
             "expectedWriteRevision": builder.expected_write_revision,
             "changes": builder.changes,
         });
+        for field in ["baseRef", "parentRef"] {
+            if let Some(value) = params.get(field) {
+                mutation
+                    .as_object_mut()
+                    .expect("branch mutation is an object")
+                    .insert(field.to_string(), value.clone());
+            }
+        }
         idempotent(self, "branch.write", &mutation, |storage| {
             storage.branch_write(&mutation, grant_id)
         })
@@ -971,6 +979,27 @@ impl Storage {
                 json!({"status": "conflict", "writeRevision": branch.write_revision, "root": branch.head_root}),
             );
         }
+        // An optional `baseRef` rebases the branch onto a different immutable
+        // baseline in one CAS commit: the new head is rebuilt as
+        // `resolved_base + changes`, so every path not listed in `changes`
+        // follows the new base. This is the durable "explicitly recorded new
+        // baseline revision" used when a dependent Thread incorporates a
+        // selected parent result (3.18D).
+        let rebase_root = match params.get("baseRef").and_then(Value::as_str) {
+            Some(base_ref) => Some(self.resolve_base_ref(base_ref, &branch.workspace_id)?),
+            None => None,
+        };
+        let parent_ref = match params.get("parentRef") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .filter(|text| !text.is_empty())
+                    .ok_or_else(|| KernelError::Operation("parentRef must be a non-empty string".to_string()))?
+                    .to_string(),
+            ),
+        };
+        let effective_base = rebase_root.clone().unwrap_or_else(|| branch.base_root.clone());
         let changes = params
             .get("changes")
             .and_then(Value::as_array)
@@ -1054,7 +1083,7 @@ impl Storage {
             &owners_to_consume,
             &source_paths,
             &source_records,
-            &[&branch.head_root, &branch.base_root],
+            &[&branch.head_root, &branch.base_root, &effective_base],
             &branch.workspace_id,
             grant_id,
         )?;
@@ -1063,10 +1092,10 @@ impl Storage {
             .iter()
             .filter_map(|(_, state)| state.object_hash().map(str::to_string))
             .collect::<Vec<_>>();
-        let mut root = previous_root.clone();
+        let mut root = rebase_root.clone().unwrap_or_else(|| previous_root.clone());
         for (segments, state) in changes_to_write {
             let refs = segments.iter().map(String::as_str).collect::<Vec<_>>();
-            let base_state = self.root_get(&branch.base_root, &segments.join("/"))?;
+            let base_state = self.root_get(&effective_base, &segments.join("/"))?;
             let restores_base = !state.is_directory()
                 && match (&state, base_state.as_ref()) {
                     (PathState::Missing, None) => true,
@@ -1074,19 +1103,26 @@ impl Storage {
                     _ => false,
                 };
             root = if restores_base {
-                self.root_restore_from_base(&root, &branch.base_root, &refs)?
+                self.root_restore_from_base(&root, &effective_base, &refs)?
             } else {
                 self.root_set(&root, &refs, state)?
             };
         }
         let next = branch.write_revision + 1;
-        self.conn.execute("UPDATE branches SET head_root = ?2, write_revision = ?3, updated_at = ?4 WHERE branch_id = ?1 AND write_revision = ?5", params![branch_id, root, next, now_ms(), expected])?;
+        if let Some(new_base) = rebase_root.as_ref() {
+            self.conn.execute("UPDATE branches SET base_root = ?2, head_root = ?3, write_revision = ?4, parent_ref = COALESCE(?5, parent_ref), updated_at = ?6 WHERE branch_id = ?1 AND write_revision = ?7", params![branch_id, new_base, root, next, parent_ref, now_ms(), expected])?;
+            if self.conn.changes() == 1 {
+                self.conn.execute("INSERT OR REPLACE INTO revisions(branch_id, revision, root_hash, operation_id, created_at) VALUES (?1, 0, ?2, ?3, ?4)", params![branch_id, new_base, params.get("operationId").and_then(Value::as_str), now_ms()])?;
+            }
+        } else {
+            self.conn.execute("UPDATE branches SET head_root = ?2, write_revision = ?3, updated_at = ?4 WHERE branch_id = ?1 AND write_revision = ?5", params![branch_id, root, next, now_ms(), expected])?;
+        }
         if self.conn.changes() != 1 {
             return Ok(
                 json!({"status": "conflict", "writeRevision": self.branch(branch_id)?.write_revision, "root": self.branch(branch_id)?.head_root}),
             );
         }
-        self.record_root_parent(&root, &previous_root)?;
+        self.record_root_parent(&root, rebase_root.as_ref().unwrap_or(&previous_root))?;
         self.record_root_blob_hashes(&root, changed_blobs.clone())?;
         self.consume_object_owners(&branch.workspace_id, grant_id, &owners_to_consume)?;
         Ok(json!({"status": "committed", "writeRevision": next, "root": root}))

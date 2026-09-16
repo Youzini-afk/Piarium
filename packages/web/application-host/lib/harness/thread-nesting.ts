@@ -7,6 +7,7 @@ export const THREAD_CONTROL_TOOL_NAMES = [
   "send",
   "read_thread",
   "merge",
+  "update",
   "kill",
 ] as const;
 

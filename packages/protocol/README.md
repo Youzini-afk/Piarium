@@ -67,6 +67,7 @@ language server read itself, which LSP cannot attribute to a version.
 | `thread.send` | `{ threadId?, to?, message, from, kind?, context?, requestId?, replyTo? }` | `ThreadSendResult` | `inform` (default) delivers only — held durably for non-running targets, never starts a Run; `request` wakes a waiting target and on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) or parks behind the shared root budget (`delivery: "scheduled"`). `to: "parent"` targets the caller's own parent; `requestId` is the idempotency key; `replyTo` answers a request and completes the requester's wait |
 | `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
 | `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
+| `thread.update` | `{ threadId, resultRevision? }` | `ThreadUpdateResult` | Rebase the calling thread's working baseline onto a selected parent result revision; keeps the thread's own deltas, merges clean text edits, and reports divergent paths as conflicts |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |
 
 `agent.prompt`, `agent.steer`, and `agent.followUp` accept an optional

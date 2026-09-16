@@ -53,6 +53,11 @@ export interface WorkingBranch {
   headRevision: number;
   /** Monotonic CAS token for unpublished virtual writes (D-213). */
   writeRevision: number;
+  /** Generation of the branch baseline; bumped by every rebaseBranch. */
+  baseRevision?: number;
+  /** Superseded baselines retained so older published results keep resolving
+   * against the base they were published on. */
+  baseLineage?: Record<number, Record<string, RecoveryState>>;
   createdAt: string;
   updatedAt: string;
 }
@@ -155,6 +160,21 @@ export interface WorkingStateRootStore {
     expectedWriteRevision: number,
     files: Record<string, RecoveryState>,
   ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }>;
+  /** Atomically move the branch baseline to a new immutable parent state while
+   * preserving the surviving deltas in `changes` (the complete new delta set,
+   * not a patch). `baseRef` is a kernel-resolvable ref (root hash, pin:id, or
+   * branchId@revision); `parentRef` is recorded as lineage metadata. */
+  rebaseBranch(
+    branchId: string,
+    expectedWriteRevision: number,
+    rebase: {
+      baseRef: string;
+      parentRef?: string;
+      /** Full state map of the new baseline; used by non-kernel stores. */
+      baseState?: Record<string, RecoveryState>;
+      changes: Record<string, RecoveryState>;
+    },
+  ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }>;
   materializeResult(branchId: string, revision: number, directory: string): Promise<import("./materializer.js").MaterializeResult>;
   materializePin(pin: WorkingStatePin, directory: string): Promise<import("./materializer.js").MaterializeResult>;
   /** Production Rust backend can atomically materialize directly into the live managed directory. */
@@ -226,6 +246,8 @@ export interface WorkingResult {
   pathStates: Record<string, RecoveryState>;
   diffStats: ThreadDiffStats;
   createdAt: string;
+  /** Baseline generation this result was published against (non-kernel stores). */
+  baseRevision?: number;
   /** Rust-kernel root bound to resultRevision when the kernel is authoritative. */
   root?: string;
 }

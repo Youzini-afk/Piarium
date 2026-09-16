@@ -52,6 +52,7 @@ import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-sta
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
 import type { RecoveryState, WorkingStatePin, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
+import { rebaseBranchOntoParentRevision } from "./working-state/baseline-rebase.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./working-state/virtual-write-gate.js";
 import {
@@ -269,7 +270,7 @@ const DISCUSSION_TOOLS = new Set([
   "webfetch",
   "websearch",
 ]);
-const THREAD_CONTROL_TOOLS = new Set(["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill"]);
+const THREAD_CONTROL_TOOLS = new Set(["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "update"]);
 
 const toolSignature = (name: unknown, args: unknown): string => createHash("sha256")
   .update(typeof name === "string" ? name : "unknown")
@@ -3573,6 +3574,121 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  /**
+   * Incorporate a selected published parent result revision into a started
+   * child thread's working baseline (D-286/3.18D). The child's base moves to
+   * the immutable parent result while its effective edits are preserved via
+   * three-way planning; conflicts keep the child's bytes and are reported.
+   */
+  const updateBaseline = async (
+    workspaceId: string,
+    parent: ThreadParent,
+    threadId: string,
+    revision?: number,
+    extras?: { signal?: AbortSignal },
+  ) => {
+    if (!options.workingStates) throw new Error("Persistent working state is unavailable for baseline updates");
+    const existing = await options.registry.getThread(workspaceId, parent, threadId);
+    if (!existing) throw new Error(`Thread not found: ${threadId}`);
+    if (!usesWorkingBranchAuthority(existing) || !existing.workBranchId) {
+      throw new Error(`Thread ${threadId} has no working branch baseline to update`);
+    }
+    if (existing.parent?.kind !== "thread") {
+      throw new Error(`Thread ${threadId} has no parent thread to incorporate a baseline from`);
+    }
+    const owner = await options.registry.getThreadById(workspaceId, existing.parent.id);
+    if (!owner?.workBranchId) throw new Error(`Parent thread working branch is unavailable: ${existing.parent.id}`);
+    const targetRevision = revision ?? owner.resultRevision;
+    if (targetRevision === undefined) {
+      throw new Error(`Parent thread ${owner.id} has no published result revision to incorporate`);
+    }
+    const childBranchId = existing.workBranchId;
+    const parentBranchId = owner.workBranchId;
+    const operation = async () => {
+      let outcome: Awaited<ReturnType<typeof rebaseBranchOntoParentRevision>> | null = null;
+      for (let attempt = 0; attempt < 3 && (!outcome || outcome.status === "conflict"); attempt += 1) {
+        outcome = await options.workingStates!.withBranchStore(
+          workspaceId,
+          "thread-baseline-update",
+          (store) => rebaseBranchOntoParentRevision(store, childBranchId, parentBranchId, targetRevision, { ...(extras?.signal ? { signal: extras.signal } : {}) }),
+          "exclusive",
+        );
+      }
+      if (!outcome) throw new Error(`Baseline update did not run for ${threadId}`);
+      if (outcome.status !== "committed") {
+        return {
+          status: "conflict" as const,
+          threadId,
+          resultRevision: targetRevision,
+          baseRef: `${parentBranchId}@${targetRevision}`,
+          updatedFromParent: [] as string[],
+          keptPaths: [] as string[],
+          mergedPaths: [] as string[],
+          conflicts: [] as { path: string; reason?: string }[],
+          message: `Thread ${threadId} kept changing while its baseline was being updated; retry the update`,
+        };
+      }
+      const latest = await options.registry.getThread(workspaceId, parent, threadId);
+      const worktree = latest?.worktree ? { ...latest.worktree } : null;
+      if (worktree) {
+        worktree.base = `${parentBranchId}@${targetRevision}`;
+        await options.registry.setWorktree(workspaceId, threadId, worktree).catch(reportError);
+      }
+      if (worktree?.path && worktree.materialized === true && worktree.viewMode !== "virtual") {
+        try {
+          await options.workingStates!.withBranchStore(
+            workspaceId,
+            "thread-baseline-rematerialize",
+            async (store) => {
+              if (!store.materializePinManaged) throw new Error("Managed materialization is unavailable on this backend");
+              const pin = await store.pinBranch(childBranchId, { ...(extras?.signal ? { signal: extras.signal } : {}) });
+              try {
+                if (pin.writeRevision !== outcome!.writeRevision || (outcome!.root !== undefined && pin.root !== outcome!.root)) {
+                  throw new Error(`Working branch changed after baseline update: ${childBranchId}`);
+                }
+                await store.materializePinManaged(pin, worktree.path!, `thread-baseline-rematerialize:${threadId}:${randomUUID()}`, extras?.signal);
+              } finally {
+                await pin.release().catch(reportError);
+              }
+            },
+            "shared",
+          );
+        } catch (error) {
+          return {
+            status: "needs-attention" as const,
+            threadId,
+            resultRevision: targetRevision,
+            baseRef: `${parentBranchId}@${targetRevision}`,
+            updatedFromParent: outcome.updatedFromParent,
+            keptPaths: outcome.keptChildPaths,
+            mergedPaths: outcome.mergedPaths,
+            conflicts: outcome.conflicts,
+            message: `Baseline updated but the materialized worktree could not be refreshed: ${error instanceof Error ? error.message : String(error)}`,
+          };
+        }
+      }
+      return {
+        status: "applied" as const,
+        threadId,
+        resultRevision: targetRevision,
+        baseRef: `${parentBranchId}@${targetRevision}`,
+        updatedFromParent: outcome.updatedFromParent,
+        keptPaths: outcome.keptChildPaths,
+        mergedPaths: outcome.mergedPaths,
+        conflicts: outcome.conflicts,
+      };
+    };
+    return withThreadLifecycle(workspaceId, threadId, async () => {
+      const latest = await options.registry.getThread(workspaceId, parent, threadId);
+      if (!latest) throw new Error(`Thread not found: ${threadId}`);
+      if (latest.deletion) throw new Error("Cannot update the baseline of a thread while deletion is pending");
+      if (latest.lifecycle === "archived") throw new Error("Cannot update the baseline of an archived thread");
+      return options.withMergeWriter
+        ? options.withMergeWriter(workspaceId, threadId, operation)
+        : operation();
+    });
+  };
+
   const previewIntegration = async (
     workspaceId: string,
     parent: ThreadParent,
@@ -5451,6 +5567,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     send,
     kill,
     merge,
+    updateBaseline,
     previewIntegration,
     undoIntegration,
     invalidateIntegrationPreviews,

@@ -339,7 +339,6 @@ describe("thread services", () => {
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "root-session" },
         brief: "limited parent",
-        preset: null,
         kind: "implementation",
         createdBy: "agent",
         concurrency: 2,

@@ -225,7 +225,8 @@
     "KernelWorkingDiffStats": {"fields": {"files": {"type": "number"}, "insertions": {"type": "number"}, "deletions": {"type": "number"}}},
     "KernelWorkingResultDocument": {"fields": {
       "resultRevision": {"type": "number"}, "branchId": {"type": "string"}, "parentRef": {"type": "string", "optional": true},
-      "changedPaths": {"type": "string[]"}, "diffStats": {"type": "KernelWorkingDiffStats"}, "createdAt": {"type": "string"}, "root": {"type": "string"}
+      "changedPaths": {"type": "string[]"}, "diffStats": {"type": "KernelWorkingDiffStats"}, "createdAt": {"type": "string"}, "root": {"type": "string"},
+      "baseRoot": {"type": "string"}, "baseStates": {"type": "unknown"}, "pathStates": {"type": "unknown"}
     }},
     "KernelDraftProvenance": {"fields": {
       "path": {"type": "string"}, "baseRevision": {"type": "string | null"}, "encoding": {"type": "string"}, "bom": {"type": "boolean"}, "localEditRevision": {"type": "number"}, "revision": {"type": "string"}
@@ -305,7 +306,7 @@
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}
     }},
     "KernelBranchWriteAppendParams": {"fields": {"builderId": {"type": "string"}, "sequence": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}}},
-    "KernelBranchWriteFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}}},
+    "KernelBranchWriteFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}, "baseRef": {"type": "string", "optional": true}, "parentRef": {"type": "string", "optional": true}}},
     "KernelBranchWriteAbortParams": {"fields": {"builderId": {"type": "string"}}},
     "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
     "KernelBranchPublishParams": {"fields": {

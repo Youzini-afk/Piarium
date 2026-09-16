@@ -278,6 +278,14 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
     return this.store.commitVirtualWrites(branchId, expectedWriteRevision, files);
   }
 
+  rebaseBranch(branchId: string, expectedWriteRevision: number, rebase: { baseRef: string; parentRef?: string; baseState?: Record<string, RecoveryState>; changes: Record<string, RecoveryState> }) {
+    const baseState = rebase.baseState ?? this.pins.get(rebase.baseRef)?.states;
+    return this.store.rebaseBranch(branchId, expectedWriteRevision, {
+      ...rebase,
+      ...(baseState === undefined ? {} : { baseState }),
+    });
+  }
+
   async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = []): Promise<WorkingBranchRoot> {
     const created = await this.store.createBranch(workspaceId, branchId, baseState, baseRef, draftBasePaths, captureScopes);
     if (created?.branchId && created.baseState) return rootFromBranch(created);

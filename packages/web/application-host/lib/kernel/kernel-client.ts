@@ -244,7 +244,7 @@ export class KernelScopedClient {
     return this.owner.readBranch(params, this.grant, signal);
   }
 
-  writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[] }, signal?: AbortSignal): Promise<KernelWriteResult> {
+  writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[]; baseRef?: string; parentRef?: string }, signal?: AbortSignal): Promise<KernelWriteResult> {
     return this.owner.writeBranch(params, this.grant, signal);
   }
 
@@ -993,7 +993,7 @@ export class KernelClient {
     return this.requestRaw<KernelBranchReadResult>("branch.read", params, { signal, grant });
   }
 
-  async writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[] }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {
+  async writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[]; baseRef?: string; parentRef?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {
     const scoped = this.assertGrant(grant);
     const builderId = `branch-write-${randomUUID()}`;
     try {
@@ -1008,7 +1008,12 @@ export class KernelClient {
         await this.requestRaw<Record<string, unknown>>("branch.write.append", { builderId, sequence, changes: batch }, { signal, grant: scoped });
         sequence += 1;
       }
-      return await this.requestRaw<KernelWriteResult>("branch.write.finish", { operationId: params.operationId, builderId }, { signal, grant: scoped });
+      return await this.requestRaw<KernelWriteResult>("branch.write.finish", {
+        operationId: params.operationId,
+        builderId,
+        ...(params.baseRef === undefined ? {} : { baseRef: params.baseRef }),
+        ...(params.parentRef === undefined ? {} : { parentRef: params.parentRef }),
+      }, { signal, grant: scoped });
     } catch (error) {
       await this.requestRaw<Record<string, unknown>>("branch.write.abort", { builderId }, { grant: scoped }).catch(() => undefined);
       throw error;

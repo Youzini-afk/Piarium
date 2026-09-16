@@ -323,7 +323,7 @@ and independent plans/knowledge. A task can also start a fresh input view when i
 mostly obsolete. That refresh uses current rules and selected work evidence without discarding files,
 results, pending messages or the old Pi transcript, and does not require a background freshness model.
 
-D-285 accepts task-centered collaboration; plan 3.18A–C is implemented. A normal dispatch requires only
+D-285 accepts task-centered collaboration; plan 3.18A–D is implemented. A normal dispatch requires only
 `task` and inherits the caller's current model and active tools; presets are optional, resolve per-Run
 execution configuration, and `shared` worktree stays an explicit choice. Each Run freezes its model,
 tool allowlist, permission overlay, scope, worktree, prompt fragment, and input origin
@@ -334,8 +334,15 @@ Thread with `requestId` idempotency; `inform` never starts execution while `requ
 target or continues a settled Thread as a new Run. Execution admission is shared per root session
 (`countActiveInRoot`): nested Threads count against the same budget, a Thread waiting on a dependency
 (`waitingFor: "thread"`) yields its slot, and queued Threads and parked `pendingContinuation` requests
-promote through the same `tryDequeue` gate when a slot frees. Still pending under 3.18D–E:
-staged-result dependency integration and the UI/old-path closure.
+promote through the same `tryDequeue` gate when a slot frees. Result revisions freeze their publish-time
+provenance — the kernel `working.result` record carries `baseRoot` plus per-path `baseStates`/`pathStates`
+validated against the published roots — so a later baseline rebase cannot rewrite an older revision's
+base. `thread.update` (`threadUpdateBaseline`) rebases the calling thread's working branch onto a
+selected parent result revision: a three-way plan keeps the thread's own deltas, adopts parent-only
+changes, merges clean text edits, and reports divergent paths as conflicts, while the kernel applies the
+complete new delta set and the `baseRef`/`parentRef` lineage atomically under the expected
+`writeRevision` CAS; materialized worktrees are refreshed onto the new baseline. Still pending under
+3.18E: the UI thread controls and old-path closure.
 
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
@@ -631,7 +638,7 @@ The `HarnessServiceMap` defines the following method groups:
   fixed search-only Pi auth entries, and the Host advertises `web.search` only
   when startup configuration is usable.
 - **Phase 2**: `zone2.assemble`, `compaction.after`, `todo.upsert`, `recall.search`
-- **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.kill`
+- **Phase 3 threads**: `thread.dispatch`, `thread.list`, `thread.wait`, `thread.send`, `thread.read`, `thread.merge`, `thread.update`, `thread.kill`
 
 Each has typed params and result in `@piarium/protocol`. The host's
 `HarnessRouter` dispatches requests to registered services and the

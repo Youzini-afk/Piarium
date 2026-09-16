@@ -54,9 +54,12 @@ nodes and objects.
 
 The working result/draft/verification/review boundary has generated `working.*` DTOs and Rust domain methods.
 Rust validates nested documents, explicit branch identity, published root/revision and root-diff `changedPaths`; malformed
-or mismatched records are rejected. Drafts are dedicated fixed branches. Result release removes dependent records and its
-revision atomically while independent pins retain the root. Full state is read through scoped root/path methods rather than
-durable `baseStates/pathStates` payloads or a Host-side compatibility projection.
+or mismatched records are rejected. Result documents also carry `baseRoot` plus per-path `baseStates`/`pathStates`
+frozen at publish — Rust validates them against the publish-time baseline and result roots so a later `branch.write`
+`baseRef`/`parentRef` rebase cannot rewrite an older revision's provenance. Drafts are dedicated fixed branches. Result
+release removes dependent records and its revision atomically while independent pins retain the root. Current state is
+read through scoped root/path methods; historical results resolve from their frozen provenance rather than the branch's
+live baseline or a Host-side compatibility projection.
 
 The shared wire source is `kernel/protocol/schema.json`; it generates both the TypeScript client shapes and Rust boundary DTOs. Regenerate with
 `node scripts/generate-kernel-protocol.mjs` and check drift with

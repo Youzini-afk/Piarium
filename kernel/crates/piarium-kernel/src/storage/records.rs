@@ -1012,9 +1012,10 @@ impl Storage {
         }
         if record_type == "working.result"
             && (object.contains_key("baseStates") || object.contains_key("pathStates"))
+            && !object.contains_key("baseRoot")
         {
             return Err(KernelError::Operation(
-                "working.result document must use root identity instead of state maps".to_string(),
+                "working.result state maps require the publish-time baseRoot".to_string(),
             ));
         }
         if record_type == "working.result" {
@@ -1137,6 +1138,66 @@ impl Storage {
                     "working.result references do not match the published base/result states"
                         .to_string(),
                 ));
+            }
+            // Frozen provenance: the document's base/path state maps must
+            // mirror the publish-time roots so a later baseline rebase cannot
+            // silently rewrite this revision's provenance (3.18D). A put
+            // replays alongside its publish, so `base_root` is still the base
+            // the result was published on.
+            let document_base_root = object
+                .get("baseRoot")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    KernelError::Operation("working.result baseRoot is required".to_string())
+                })?;
+            if document_base_root != base_root {
+                return Err(KernelError::Operation(
+                    "working.result baseRoot does not match the publish-time baseline".to_string(),
+                ));
+            }
+            let state_map = |key: &str| -> Result<&serde_json::Map<String, Value>, KernelError> {
+                object
+                    .get(key)
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        KernelError::Operation(format!("working.result {key} is required"))
+                    })
+            };
+            let base_states = state_map("baseStates")?;
+            let path_states = state_map("pathStates")?;
+            if base_states.len() != expected_paths.len() || path_states.len() != expected_paths.len() {
+                return Err(KernelError::Operation(
+                    "working.result state maps must cover exactly the changed paths".to_string(),
+                ));
+            }
+            let missing_state = json!({"kind": "missing"});
+            for path in &expected_paths {
+                let expected_base = self
+                    .root_get(&base_root, path)?
+                    .map(|state| serde_json::to_value(state))
+                    .transpose()
+                    .map_err(|error| {
+                        KernelError::Operation(format!("working.result base state encode failed: {error}"))
+                    })?
+                    .unwrap_or_else(|| missing_state.clone());
+                if base_states.get(path) != Some(&expected_base) {
+                    return Err(KernelError::Operation(format!(
+                        "working.result baseStates[{path}] does not match the publish-time baseline"
+                    )));
+                }
+                let expected_result = self
+                    .root_get(&expected_root, path)?
+                    .map(|state| serde_json::to_value(state))
+                    .transpose()
+                    .map_err(|error| {
+                        KernelError::Operation(format!("working.result result state encode failed: {error}"))
+                    })?
+                    .unwrap_or_else(|| missing_state.clone());
+                if path_states.get(path) != Some(&expected_result) {
+                    return Err(KernelError::Operation(format!(
+                        "working.result pathStates[{path}] does not match the published result"
+                    )));
+                }
             }
         } else if record_type == "working.draft" {
             let id = object

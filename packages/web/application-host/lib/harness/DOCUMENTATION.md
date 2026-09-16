@@ -486,6 +486,19 @@ Conditional compensation/undo preserves
 subsequent edits; reconnect or restart cannot reinterpret a surface target as disk.
 `merge-ready` comes from a bound preview; resolution submissions must consume that
 binding. Preview reads and identical projections do not create event feedback loops.
+`thread.update` (3.18D) rebases the calling thread's working branch onto a selected
+published parent result revision — the explicit file-level counterpart to merge that
+directed messages and `fresh` continuation cannot substitute for. A three-way plan
+reads the child's revision-0 baseline, its current head, and the chosen parent
+revision: parent-only changes are adopted, the child's own deltas are kept, clean
+text edits merge, and divergent paths keep the child's bytes and are reported as
+conflicts. The kernel `branch.write` `baseRef`/`parentRef` path resolves the new
+immutable baseline, applies the complete delta set, and records the lineage under
+the expected `writeRevision` CAS, so a concurrent child write cannot be lost.
+Result records freeze their publish-time provenance — `baseRoot` plus per-path
+`baseStates`/`pathStates` validated by the kernel against the published roots — so
+an older revision still resolves against its original baseline after the rebase.
+Materialized worktrees are refreshed onto the new baseline under the same gate.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
 User archive keeps the report, transcript reference, native results, and original

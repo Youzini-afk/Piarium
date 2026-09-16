@@ -135,6 +135,16 @@ const parseBranch = (
   if (draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
     throw new Error(`Working branch ${key} does not contain every draft baseline path`);
   }
+  let baseLineage: Record<number, Record<string, RecoveryState>> | undefined;
+  if (row.baseLineage !== undefined) {
+    if (!row.baseLineage || typeof row.baseLineage !== "object" || Array.isArray(row.baseLineage)) {
+      throw new Error(`Working branch ${key} baseline lineage is malformed`);
+    }
+    baseLineage = Object.fromEntries(Object.entries(row.baseLineage as Record<string, unknown>).map(([gen, states]) => {
+      if (!/^\d+$/.test(gen)) throw new Error(`Working branch ${key} baseline lineage generation is malformed`);
+      return [Number(gen), parseStateMap(states, `Working branch ${key} baseline lineage ${gen}`, nodes)];
+    }));
+  }
   return {
     branchId: key,
     workspaceId,
@@ -147,6 +157,10 @@ const parseBranch = (
     writeRevision: Number.isSafeInteger(row.writeRevision) && Number(row.writeRevision) >= 0
       ? Number(row.writeRevision)
       : 0,
+    ...(Number.isSafeInteger(row.baseRevision) && Number(row.baseRevision) > 0
+      ? { baseRevision: Number(row.baseRevision) }
+      : {}),
+    ...(baseLineage ? { baseLineage } : {}),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -213,6 +227,9 @@ const parseResult = (value: unknown, key: string, nodes: StateNodePool): Working
     resultRevision: row.resultRevision as number,
     branchId: row.branchId,
     ...(typeof row.parentRef === "string" ? { parentRef: row.parentRef } : {}),
+    ...(Number.isSafeInteger(row.baseRevision) && Number(row.baseRevision) >= 0
+      ? { baseRevision: Number(row.baseRevision) }
+      : {}),
     changedPaths,
     baseStates,
     pathStates,
@@ -474,6 +491,7 @@ export class WorkingStateStore {
     return [
       ...this.references(branch.baseState, "base"),
       ...this.references(branch.deltas, "delta"),
+      ...Object.values(branch.baseLineage ?? {}).flatMap((states) => this.references(states, "base")),
     ];
   }
 
@@ -527,6 +545,9 @@ export class WorkingStateStore {
         ...branch,
         baseState: refOf(branch.baseState),
         deltas: refOf(branch.deltas),
+        ...(branch.baseLineage
+          ? { baseLineage: Object.fromEntries(Object.entries(branch.baseLineage).map(([gen, states]) => [gen, refOf(states)])) }
+          : {}),
       }])),
       draftBaselines: Object.fromEntries(Object.entries(next.draftBaselines).map(([key, baseline]) => [key, {
         ...baseline,
@@ -805,21 +826,37 @@ export class WorkingStateStore {
     await this.persist(next, () => undefined);
   }
 
+  /**
+   * Baseline map a result was published against. After a rebase the branch's
+   * baseState moves forward, so older results resolve through baseLineage
+   * (generation 0 is the original baseline, which also covers results
+   * persisted before the field existed).
+   */
+  private baseForResult(branch: WorkingBranch, result: WorkingResult): Record<string, RecoveryState> | null {
+    const generation = result.baseRevision ?? 0;
+    if (generation === (branch.baseRevision ?? 0)) return branch.baseState;
+    return branch.baseLineage?.[generation] ?? null;
+  }
+
   resultState(branchId: string, revision: number): Record<string, RecoveryState> | null {
     const branch = this.document.branches[branchId];
     const result = this.document.results[`${branchId}@${revision}`];
     if (!branch || !result) return null;
-    return { ...clone(branch.baseState), ...clone(result.pathStates) };
+    const base = this.baseForResult(branch, result);
+    if (!base) return null;
+    return { ...clone(base), ...clone(result.pathStates) };
   }
 
   /**
-   * Current Host branch view: fixed base plus published/in-flight deltas.
-   * Revision 0 (no published result) is a valid empty-delta view.
+   * Branch view by revision: undefined = current head (base plus deltas),
+   * 0 = the fixed baseline only (kernel revision-0 semantics), >0 = the
+   * published result's full state resolved against its own baseline.
    */
   effectiveState(branchId: string, revision?: number): Record<string, RecoveryState> | null {
     const branch = this.document.branches[branchId];
     if (!branch) return null;
     if (revision !== undefined && revision > 0) return this.resultState(branchId, revision);
+    if (revision === 0) return clone(branch.baseState);
     return { ...clone(branch.baseState), ...clone(branch.deltas) };
   }
 
@@ -845,6 +882,9 @@ export class WorkingStateStore {
       ? this.document.results[`${branchId}@${revision}`]
       : undefined;
     if (revision !== undefined && revision > 0 && !result) return null;
+    const overlayBase = result ? this.baseForResult(branch, result) : branch.baseState;
+    if (!overlayBase) return null;
+    const overlay = revision === 0 ? {} : (result?.pathStates ?? branch.deltas);
     const roots = (prefixes.length > 0 ? prefixes : [""]).map((value) => {
       const raw = value.replace(/\\/g, "/").replace(/^\.\//, "");
       if (!raw || raw === ".") return "";
@@ -870,8 +910,8 @@ export class WorkingStateStore {
         if (relevant(file)) states[file] = clone(state);
       }
     };
-    copyRelevant(branch.baseState);
-    copyRelevant(result?.pathStates ?? branch.deltas);
+    copyRelevant(overlayBase);
+    copyRelevant(overlay);
     check();
     return states;
   }
@@ -1033,6 +1073,7 @@ export class WorkingStateStore {
       pathStates,
       diffStats: { files: changedPaths.length, insertions: 0, deletions: 0 },
       createdAt: new Date().toISOString(),
+      baseRevision: branch.baseRevision ?? 0,
     };
     const next = this.nextDocument();
     // pathStates is shared with branch.deltas: identical maps collapse to one
@@ -1096,6 +1137,69 @@ export class WorkingStateStore {
     const nextDocument = this.nextDocument();
     nextDocument.branches[branchId] = {
       ...branch,
+      deltas,
+      writeRevision,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.persist(nextDocument, () => this.protectBranch(nextDocument.branches[branchId]!), this.branchReferences(nextDocument.branches[branchId]!));
+    return { status: "committed", writeRevision };
+  }
+
+  /**
+   * Atomically move the branch baseline to `baseState` while replacing the
+   * delta set with `changes` (complete set, not a patch). The superseded
+   * baseline is kept in baseLineage so older published results still resolve
+   * against the base they were published on.
+   */
+  async rebaseBranch(
+    branchId: string,
+    expectedWriteRevision: number,
+    rebase: {
+      baseRef: string;
+      parentRef?: string;
+      baseState?: Record<string, RecoveryState>;
+      changes: Record<string, RecoveryState>;
+    },
+  ): Promise<{ status: "committed"; writeRevision: number } | { status: "conflict"; writeRevision: number }> {
+    const branch = this.document.branches[branchId];
+    if (!branch) throw new Error(`Working branch not found: ${branchId}`);
+    const current = branch.writeRevision ?? 0;
+    if (current !== expectedWriteRevision) {
+      return { status: "conflict", writeRevision: current };
+    }
+    if (!rebase.baseState) throw new Error(`Rebase of ${branchId} requires the resolved base state map`);
+    const baseState: Record<string, RecoveryState> = {};
+    for (const [file, state] of Object.entries(rebase.baseState)) {
+      baseState[normalizeRelative(file)] = clone(state);
+    }
+    if (branch.draftBasePaths.some((file) => !Object.hasOwn(baseState, file))) {
+      throw new Error(`Rebase of ${branchId} would drop draft baseline paths`);
+    }
+    const deltas: Record<string, RecoveryState> = {};
+    for (const [file, next] of Object.entries(rebase.changes)) {
+      const normalized = normalizeRelative(file);
+      deltas[normalized] = clone(next);
+      if (next.kind === "missing") continue;
+      let parent = this.pathModule.posix.dirname(normalized);
+      while (parent && parent !== "." && parent !== "/") {
+        if (!deltas[parent] && !baseState[parent]) {
+          deltas[parent] = { kind: "directory" };
+        }
+        parent = this.pathModule.posix.dirname(parent);
+      }
+    }
+    const writeRevision = current + 1;
+    const baseRevision = (branch.baseRevision ?? 0) + 1;
+    const nextDocument = this.nextDocument();
+    nextDocument.branches[branchId] = {
+      ...branch,
+      baseRef: rebase.parentRef ?? rebase.baseRef,
+      baseState,
+      baseRevision,
+      baseLineage: {
+        ...(branch.baseLineage ?? {}),
+        [branch.baseRevision ?? 0]: branch.baseState,
+      },
       deltas,
       writeRevision,
       updatedAt: new Date().toISOString(),

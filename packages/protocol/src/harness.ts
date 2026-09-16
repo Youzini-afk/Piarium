@@ -19,6 +19,8 @@ import type {
   ThreadReadResult,
   ThreadMergeParams,
   ThreadMergeResult,
+  ThreadUpdateParams,
+  ThreadUpdateResult,
   ThreadKillParams,
   ThreadKillResult,
   ThreadDispatchParams,
@@ -1129,6 +1131,7 @@ export interface HarnessServiceMap {
   "thread.send": { params: ThreadSendParams; result: ThreadSendResult };
   "thread.read": { params: ThreadReadParams; result: ThreadReadResult };
   "thread.merge": { params: ThreadMergeParams; result: ThreadMergeResult };
+  "thread.update": { params: ThreadUpdateParams; result: ThreadUpdateResult };
   "thread.kill": { params: ThreadKillParams; result: ThreadKillResult };
   "explore.search": {
     params: ExploreSearchParams;
@@ -1229,6 +1232,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.send": "control.thread",
   "thread.read": "control.thread",
   "thread.merge": "control.thread",
+  "thread.update": "control.thread",
   "thread.kill": "control.thread",
   "explore.search": "read.search",
   "explore.query.start": "read.search",
@@ -1299,6 +1303,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.send",
   "thread.read",
   "thread.merge",
+  "thread.update",
   "thread.kill",
   "explore.search",
   "explore.query.start",

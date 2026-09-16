@@ -459,31 +459,50 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const document = asRecord(record.record);
     if (document.branchId !== branchId || Number(document.resultRevision) !== revision || typeof document.root !== "string") return null;
     const changedPaths = Array.isArray(document.changedPaths) ? document.changedPaths.filter((value): value is string => typeof value === "string") : [];
+    // Results published after baseline-rebase support carry their own frozen
+    // base/path states, so a later baseline switch cannot rewrite the
+    // provenance of an older revision. Documents predating that field fall
+    // back to the live revision-0 base read.
+    const storedStates = (key: "baseStates" | "pathStates"): Record<string, RecoveryState> | null => {
+      const raw = asRecord(document[key]);
+      const entries = Object.entries(raw ?? {});
+      if (!entries.length) return null;
+      try {
+        return Object.fromEntries(entries.map(([file, state]) => [normalize(file), parseRecoveryState(state)]));
+      } catch {
+        return null;
+      }
+    };
+    const storedBaseStates = storedStates("baseStates");
+    const storedPathStates = storedStates("pathStates");
     const [base, fixed] = await Promise.all([
-      this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }, options?.signal),
+      storedBaseStates
+        ? null
+        : this.context.client.readBranch({ branchId, revision: 0, paths: changedPaths, includeEntries: true }, options?.signal),
       this.context.client.readBranch({ branchId, revision, paths: changedPaths, includeEntries: true }, options?.signal),
     ]);
-    if (base.branchId !== branchId || fixed.branchId !== branchId
-      || base.workspaceId !== this.context.identity.workspaceId || fixed.workspaceId !== base.workspaceId
-      || base.view !== "revision" || base.revision !== 0
+    if (fixed.branchId !== branchId || fixed.workspaceId !== this.context.identity.workspaceId
       || fixed.view !== "revision" || fixed.revision !== revision
-      || fixed.root !== document.root) {
+      || fixed.root !== document.root
+      || (base !== null && (base.branchId !== branchId || base.workspaceId !== fixed.workspaceId
+        || base.view !== "revision" || base.revision !== 0))) {
       throw new Error(`Working result ${branchId}@${revision} returned inconsistent provenance`);
     }
     const states = (page: KernelBranchReadResult): Record<string, RecoveryState> => {
       const byPath = new Map(page.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
       return Object.fromEntries(changedPaths.map((file) => [file, byPath.get(file) ?? { kind: "missing" as const }]));
     };
+    const baseStates = storedBaseStates ?? states(base!);
     const resultRecordId = `working-result:${branchId}@${revision}`;
     for (const [file, state] of Object.entries(states(fixed))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
-    for (const [file, state] of Object.entries(states(base))) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
+    for (const [file, state] of Object.entries(baseStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}`, branchId, path: file, revision: 0 });
     return {
       resultRevision: revision,
       branchId,
       ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
       changedPaths,
-      baseStates: states(base),
-      pathStates: states(fixed),
+      baseStates,
+      pathStates: storedPathStates ?? states(fixed),
       diffStats: asRecord(document.diffStats) as unknown as WorkingResult["diffStats"],
       createdAt: typeof document.createdAt === "string" ? document.createdAt : nowIso(),
       root: document.root,
@@ -1188,6 +1207,60 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return { status: result.status, writeRevision: result.writeRevision, root: result.root };
   }
 
+  async rebaseBranch(
+    branchId: string,
+    expectedWriteRevision: number,
+    rebase: {
+      baseRef: string;
+      parentRef?: string;
+      changes: Record<string, RecoveryState>;
+    },
+  ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
+    const normalized = Object.fromEntries(Object.entries(rebase.changes).map(([file, state]) => [normalize(file), state]));
+    const releaseInputOwners = async (): Promise<void> => {
+      const owned = new Map(Object.values(normalized).flatMap((state) => {
+        if (state.kind !== "regular-file") return [];
+        const ownerId = this.ownerByHash.get(state.objectHash);
+        return ownerId ? [[state.objectHash, ownerId] as const] : [];
+      }));
+      await Promise.all([...new Set(owned.values())].map((ownerId) => this.context.client.releaseBlob(ownerId)));
+      for (const [hash, ownerId] of owned) if (this.ownerByHash.get(hash) === ownerId) this.ownerByHash.delete(hash);
+    };
+    const currentRead = await this.selected(branchId, [], undefined);
+    if (!currentRead) {
+      await releaseInputOwners();
+      throw new Error(`Working branch not found: ${branchId}`);
+    }
+    if (currentRead.writeRevision !== expectedWriteRevision) {
+      await releaseInputOwners();
+      return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
+    }
+    const committedWrites = compactTreeWrites(normalized);
+    const changes = Object.entries(committedWrites).map(([path, state]) => ({
+      path,
+      state: toKernelState(state),
+      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
+        ? { ownerId: this.ownerByHash.get(state.objectHash)! }
+        : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.recordId && this.sourceByHash.get(state.objectHash)?.slot
+          ? { sourceRecordId: this.sourceByHash.get(state.objectHash)!.recordId!, sourceSlot: this.sourceByHash.get(state.objectHash)!.slot! }
+          : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.branchId && this.sourceByHash.get(state.objectHash)?.path
+            ? { sourcePath: this.sourceByHash.get(state.objectHash)!.path! }
+            : {}),
+    }));
+    const result = await this.context.client.writeBranch({
+      operationId: `branch-rebase:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`,
+      branchId,
+      expectedWriteRevision,
+      changes,
+      baseRef: rebase.baseRef,
+      ...(rebase.parentRef === undefined ? {} : { parentRef: rebase.parentRef }),
+    });
+    if (result.status === "committed") {
+      for (const state of Object.values(committedWrites)) if (state.kind === "regular-file") this.ownerByHash.delete(state.objectHash);
+    } else await releaseInputOwners();
+    return { status: result.status, writeRevision: result.writeRevision, root: result.root };
+  }
+
   async materializeResult(branchId: string, revision: number, directory: string): Promise<MaterializeResult> {
     const read = await this.context.client.readBranch({ branchId, revision, includeEntries: false });
     if (typeof read.root !== "string" || read.root.length === 0) {
@@ -1322,7 +1395,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         ...Object.entries(result.pathStates).flatMap(([file, state]) => state.kind === "regular-file" ? [{ slot: `result:${file}`, objectHash: state.objectHash }] : []),
       ];
       const resultRecordId = `working-result:${branchId}@${revision}`;
-      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: resultRecordId, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root }, ownerIds: [], references });
+      await this.context.working.resultPut({ operationId: `result:${branchId}:${revision}`, recordId: resultRecordId, branchId, resultRevision: revision, root, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, document: { resultRevision: revision, branchId, changedPaths: changed, diffStats: result.diffStats, createdAt: result.createdAt, root, baseRoot: branch.baseRoot, baseStates: result.baseStates, pathStates: result.pathStates }, ownerIds: [], references });
       // Publishing consumes transient blob owners. Keep immediate readers on
       // the immutable result record rather than on the branch head, which may
       // already have advanced concurrently.

@@ -462,6 +462,9 @@ export interface KernelWorkingResultDocument {
   diffStats: KernelWorkingDiffStats;
   createdAt: string;
   root: string;
+  baseRoot: string;
+  baseStates: unknown;
+  pathStates: unknown;
 }
 
 export interface KernelDraftProvenance {
@@ -744,6 +747,8 @@ export interface KernelBranchWriteAppendParams {
 export interface KernelBranchWriteFinishParams {
   operationId: string;
   builderId: string;
+  baseRef?: string;
+  parentRef?: string;
 }
 
 export interface KernelBranchWriteAbortParams {

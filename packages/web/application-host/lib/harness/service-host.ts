@@ -75,7 +75,7 @@ export function deriveHarnessCapabilities(
   if (tools.has("write") || tools.has("edit") || tools.has("apply_patch")) capabilities.add("write.document");
   if (
     availability.threadRuntime
-    && ["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "submit_facts"].some((name) => tools.has(name))
+    && ["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "submit_facts", "update"].some((name) => tools.has(name))
   ) {
     capabilities.add("control.thread");
   }
@@ -301,6 +301,26 @@ export interface HarnessServiceHost {
     operationId?: string;
     resultRevision?: number;
   }>) | null;
+  /** Incorporate a published parent result revision into a started child
+   * thread's working baseline (D-286/3.18D); conditional three-way, never a
+   * snapshot overwrite. */
+  threadUpdateBaseline?: ((
+    workspaceId: string,
+    parent: import("@piarium/protocol").ThreadParent,
+    threadId: string,
+    resultRevision?: number,
+    extras?: { signal?: AbortSignal },
+  ) => Promise<{
+    status: "applied" | "conflict" | "needs-attention";
+    threadId: string;
+    resultRevision: number;
+    baseRef: string;
+    updatedFromParent: string[];
+    keptPaths: string[];
+    mergedPaths: string[];
+    conflicts: { path: string; reason?: string }[];
+    message?: string;
+  }>) | null;
   threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
   registerSession(ctx: HarnessSessionContext): void;
@@ -428,6 +448,7 @@ export interface HarnessServiceHostOptions {
   threadResumeLost?: HarnessServiceHost["threadResumeLost"];
   threadKillSession?: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
+  threadUpdateBaseline?: HarnessServiceHost["threadUpdateBaseline"];
   requireThreadMergeJournal?: boolean;
   threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
@@ -490,6 +511,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadResumeLost = options.threadResumeLost ?? null;
   const threadKillSession = options.threadKillSession ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
+  const threadUpdateBaseline = options.threadUpdateBaseline ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
   const threadTranscriptReader = options.threadTranscriptReader ?? null;
   const verification = options.verification ?? createVerificationCoordinator();
@@ -720,6 +742,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadResumeLost,
     threadKillSession,
     threadApplyWorktreeDiff,
+    threadUpdateBaseline,
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,
     threadSendToSession,
     threadTranscriptReader,

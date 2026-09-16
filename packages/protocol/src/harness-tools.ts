@@ -37,6 +37,7 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   dispatch: { mutation: 'none', executionMode: 'parallel' },
   wait: { mutation: 'none', executionMode: 'sequential' },
   merge: { mutation: 'journaled', executionMode: 'sequential' },
+  update: { mutation: 'journaled', executionMode: 'sequential' },
   kill: { mutation: 'none', executionMode: 'sequential' },
   threads: { mutation: 'none', executionMode: 'parallel' },
   send: { mutation: 'none', executionMode: 'parallel' },

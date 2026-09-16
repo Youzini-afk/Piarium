@@ -28,7 +28,7 @@ const READ_TOOLS = new Set([
   "references", "hover", "get_output", "threads", "wait", "read_thread", "recall",
   "related", "explore", "history",
 ]);
-const WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "merge"]);
+const WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "merge", "update"]);
 const PROCESS_TOOLS = new Set(["bash", "write_to_process", "kill_shell"]);
 const THREAD_TOOLS = new Set(["dispatch", "send", "kill", "submit_facts", "todo"]);
 const NETWORK_TOOLS = new Set(["webfetch", "websearch"]);

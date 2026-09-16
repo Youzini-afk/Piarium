@@ -594,6 +594,8 @@ pub(crate) struct KernelBranchWriteAppendParams {
 pub(crate) struct KernelBranchWriteFinishParams {
     pub(crate) operation_id: String,
     pub(crate) builder_id: String,
+    pub(crate) base_ref: Option<String>,
+    pub(crate) parent_ref: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -967,6 +969,9 @@ pub(crate) struct KernelWorkingResultDocument {
     pub(crate) diff_stats: KernelWorkingDiffStats,
     pub(crate) created_at: String,
     pub(crate) root: String,
+    pub(crate) base_root: String,
+    pub(crate) base_states: Value,
+    pub(crate) path_states: Value,
 }
 
 #[derive(Clone, Debug, Deserialize)]

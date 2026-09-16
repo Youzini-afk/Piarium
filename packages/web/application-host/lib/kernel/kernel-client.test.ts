@@ -678,7 +678,7 @@ test("typed durable records own references and page fixed roots", { timeout: 30_
   await assert.rejects(client.getBlob(body.hash, { recordId: "record-1", slot: "body" }), /content|record|reference|owner/i);
 });
 
-test("typed working result boundary stores root identity without state maps", { timeout: 30_000 }, async (t) => {
+test("typed working result boundary stores root identity with frozen state maps", { timeout: 30_000 }, async (t) => {
   if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-record-"));
   roots.push(root);
@@ -699,12 +699,14 @@ test("typed working result boundary stores root identity without state maps", { 
     changedPaths: [],
     diffStats: { files: 0, insertions: 0, deletions: 0 },
     createdAt: new Date().toISOString(),
-    document: { branchId: "branch-1", resultRevision: 1, root: publishedRoot, changedPaths: [], diffStats: { files: 0, insertions: 0, deletions: 0 }, createdAt: new Date().toISOString() },
+    document: { branchId: "branch-1", resultRevision: 1, root: publishedRoot, changedPaths: [], diffStats: { files: 0, insertions: 0, deletions: 0 }, createdAt: new Date().toISOString(), baseRoot: String(created.root), baseStates: {}, pathStates: {} },
     ownerIds: [],
     references: [],
   });
   assert.equal((value.record as { root: string }).root.startsWith("sha256-"), true);
-  assert.equal(JSON.stringify(value.record).includes("pathStates"), false);
+  // Frozen per-path states travel with the record so a later branch baseline
+  // rebase cannot rewrite an older revision's provenance (3.18D).
+  assert.equal(JSON.stringify(value.record).includes("pathStates"), true);
   const verificationClient = host.scoped(await host.issueGrant({
     grantId: "working-record-verification-actor",
     hostGeneration: host.handshake?.hostGeneration,
@@ -801,7 +803,7 @@ test("Rust rejects malformed and mismatched typed working result DTOs", { timeou
   };
   await assert.rejects(
     client.workingResultPut({ ...common, document: { branchId: "missing", resultRevision: 1, root: common.root, changedPaths: [], diffStats: common.diffStats, createdAt: common.createdAt, pathStates: {} } as never }),
-    /unknown field|malformed|revision is not published/i,
+    /unknown field|malformed|missing field|revision is not published/i,
   );
   await assert.rejects(
     client.workingResultPut({ ...common, operationId: "working-dto-reject-mismatch", recordId: "working-result:missing@1", document: { branchId: "missing", resultRevision: 1, root: common.root, changedPaths: [], diffStats: common.diffStats, createdAt: common.createdAt } as never }),
@@ -858,6 +860,9 @@ test("releasing a non-head result drops its revision while an explicit pin alone
       changedPaths: ["file.txt"],
       diffStats: { files: 1, insertions: 0, deletions: 0 },
       createdAt: new Date().toISOString(),
+      baseRoot: String(created.root),
+      baseStates: { "file.txt": { kind: "regular-file", objectHash: base.hash, byteLength: base.byteLength, mode: 0o644 } },
+      pathStates: { "file.txt": { kind: "regular-file", objectHash: first.hash, byteLength: first.byteLength, mode: 0o644 } },
     },
     ownerIds: [],
     references: [],
@@ -879,6 +884,9 @@ test("releasing a non-head result drops its revision while an explicit pin alone
       changedPaths: ["file.txt"],
       diffStats: { files: 1, insertions: 0, deletions: 0 },
       createdAt: new Date().toISOString(),
+      baseRoot: String(created.root),
+      baseStates: { "file.txt": { kind: "regular-file", objectHash: base.hash, byteLength: base.byteLength, mode: 0o644 } },
+      pathStates: { "file.txt": { kind: "regular-file", objectHash: first.hash, byteLength: first.byteLength, mode: 0o644 } },
     },
     ownerIds: [],
     references: [
@@ -919,6 +927,168 @@ test("releasing a non-head result drops its revision while an explicit pin alone
   await client.unpinBranch({ operationId: "result-release-unpin", branchId: "result-release-branch", pinId: String(pin.pinId) });
   await client.gc("result-release-gc-unpinned");
   assert.equal((await client.health()).blobs, 2);
+});
+
+test("a baseline rebase keeps older result provenance and validates new results against the new base", { timeout: 30_000 }, async (t) => {
+  if (!(await fs.stat(kernelPath).then(() => true).catch(() => false))) { t.skip("release kernel has not been built in this checkout"); return; }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-rebase-result-"));
+  roots.push(root);
+  const host = createKernelClient({ hostId: "rebase-result-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
+  clients.push(host);
+  await host.start();
+  const client = host.scoped(await issueActor(host, "rebase-result-actor", "rebase-result-workspace", [""], ["storage.maintenance"]));
+  const parentBase = await client.putBlob(Buffer.from("parent-base\n"), "rebase-parent-base");
+  const parentResult = await client.putBlob(Buffer.from("parent-result\n"), "rebase-parent-result");
+  const childBase = await client.putBlob(Buffer.from("child-base\n"), "rebase-child-base");
+  const childFirst = await client.putBlob(Buffer.from("child-first\n"), "rebase-child-first");
+  const childSecond = await client.putBlob(Buffer.from("child-second\n"), "rebase-child-second");
+  const state = (blob: { hash: string; byteLength: number }) => ({ kind: "regular-file" as const, objectHash: blob.hash, byteLength: blob.byteLength, mode: 0o644 });
+  const parent = await client.createBranch({
+    operationId: "rebase-parent-create",
+    branchId: "rebase-parent-branch",
+    workspaceId: "rebase-result-workspace",
+    draftBasePaths: [],
+    captureScopes: [],
+    entries: [{ path: "p.txt", state: state(parentBase), ownerId: parentBase.ownerId }],
+  });
+  const parentWrite = await client.writeBranch({
+    operationId: "rebase-parent-write",
+    branchId: "rebase-parent-branch",
+    expectedWriteRevision: Number(parent.writeRevision),
+    changes: [{ path: "p.txt", state: state(parentResult), ownerId: parentResult.ownerId }],
+  });
+  await client.publishBranch({
+    operationId: "rebase-parent-publish",
+    branchId: "rebase-parent-branch",
+    expectedWriteRevision: parentWrite.writeRevision,
+    expectedRoot: parentWrite.root,
+  });
+  const child = await client.createBranch({
+    operationId: "rebase-child-create",
+    branchId: "rebase-child-branch",
+    workspaceId: "rebase-result-workspace",
+    draftBasePaths: [],
+    captureScopes: [],
+    entries: [{ path: "c.txt", state: state(childBase), ownerId: childBase.ownerId }],
+  });
+  const childWrite = await client.writeBranch({
+    operationId: "rebase-child-write-first",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: Number(child.writeRevision),
+    changes: [{ path: "c.txt", state: state(childFirst), ownerId: childFirst.ownerId }],
+  });
+  const childPublished = await client.publishBranch({
+    operationId: "rebase-child-publish-first",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: childWrite.writeRevision,
+    expectedRoot: childWrite.root,
+  });
+  const childRevision = Number(childPublished.revision);
+  await client.workingResultPut({
+    operationId: "rebase-child-record-first",
+    recordId: `working-result:rebase-child-branch@${childRevision}`,
+    workspaceId: "rebase-result-workspace",
+    branchId: "rebase-child-branch",
+    resultRevision: childRevision,
+    root: String(childPublished.root),
+    changedPaths: ["c.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: {
+      branchId: "rebase-child-branch",
+      resultRevision: childRevision,
+      root: String(childPublished.root),
+      changedPaths: ["c.txt"],
+      diffStats: { files: 1, insertions: 0, deletions: 0 },
+      createdAt: new Date().toISOString(),
+      baseRoot: String(child.root),
+      baseStates: { "c.txt": state(childBase) },
+      pathStates: { "c.txt": state(childFirst) },
+    },
+    ownerIds: [],
+    references: [
+      { slot: "base:c.txt", objectHash: childBase.hash },
+      { slot: "result:c.txt", objectHash: childFirst.hash },
+    ],
+  });
+  const staleRebase = await client.writeBranch({
+    operationId: "rebase-child-write-stale",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: Number(child.writeRevision),
+    baseRef: "rebase-parent-branch@1",
+    parentRef: "rebase-parent-branch@1",
+    changes: [{ path: "c.txt", state: { kind: "missing" } }],
+  });
+  assert.equal(staleRebase.status, "conflict");
+  const rebased = await client.writeBranch({
+    operationId: "rebase-child-write-rebase",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: childWrite.writeRevision,
+    baseRef: "rebase-parent-branch@1",
+    parentRef: "rebase-parent-branch@1",
+    changes: [{
+      path: "c.txt",
+      state: state(childFirst),
+      sourceRecordId: `working-result:rebase-child-branch@${childRevision}`,
+      sourceSlot: "result:c.txt",
+    }],
+  });
+  const frozen = await client.workingResultGet({ workspaceId: "rebase-result-workspace", recordId: `working-result:rebase-child-branch@${childRevision}` });
+  const frozenDoc = (frozen as { record?: Record<string, unknown> } | null)?.record as { baseRoot?: string; baseStates?: Record<string, { objectHash?: string }> } | undefined;
+  assert.equal(frozenDoc?.baseRoot, String(child.root));
+  assert.equal(frozenDoc?.baseStates?.["c.txt"]?.objectHash, childBase.hash);
+  const secondWrite = await client.writeBranch({
+    operationId: "rebase-child-write-second",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: rebased.writeRevision,
+    changes: [{ path: "c.txt", state: state(childSecond), ownerId: childSecond.ownerId }],
+  });
+  const secondPublished = await client.publishBranch({
+    operationId: "rebase-child-publish-second",
+    branchId: "rebase-child-branch",
+    expectedWriteRevision: secondWrite.writeRevision,
+    expectedRoot: secondWrite.root,
+  });
+  const secondRevision = Number(secondPublished.revision);
+  const secondDocument = (baseRoot: string) => ({
+    branchId: "rebase-child-branch",
+    resultRevision: secondRevision,
+    root: String(secondPublished.root),
+    changedPaths: ["c.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    baseRoot,
+    baseStates: { "c.txt": { kind: "missing" as const } },
+    pathStates: { "c.txt": state(childSecond) },
+  });
+  await assert.rejects(client.workingResultPut({
+    operationId: "rebase-child-record-stale-base",
+    recordId: `working-result:rebase-child-branch@${secondRevision}`,
+    workspaceId: "rebase-result-workspace",
+    branchId: "rebase-child-branch",
+    resultRevision: secondRevision,
+    root: String(secondPublished.root),
+    changedPaths: ["c.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: secondDocument(String(child.root)),
+    ownerIds: [],
+    references: [{ slot: "result:c.txt", objectHash: childSecond.hash }],
+  }), /baseRoot.*baseline|publish-time/i);
+  await client.workingResultPut({
+    operationId: "rebase-child-record-second",
+    recordId: `working-result:rebase-child-branch@${secondRevision}`,
+    workspaceId: "rebase-result-workspace",
+    branchId: "rebase-child-branch",
+    resultRevision: secondRevision,
+    root: String(secondPublished.root),
+    changedPaths: ["c.txt"],
+    diffStats: { files: 1, insertions: 0, deletions: 0 },
+    createdAt: new Date().toISOString(),
+    document: secondDocument(String(parentWrite.root)),
+    ownerIds: [],
+    references: [{ slot: "result:c.txt", objectHash: childSecond.hash }],
+  });
 });
 
 test("domain record identity is workspace- and actor-scoped", { timeout: 30_000 }, async (t) => {

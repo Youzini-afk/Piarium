@@ -1218,6 +1218,40 @@ export function createThreadMergeService(host: HarnessServiceHost): HarnessServi
   };
 }
 
+export function createThreadUpdateService(host: HarnessServiceHost): HarnessService<"thread.update"> {
+  return {
+    handle: async (params, ctx) => {
+      const registry = host.threadRegistry;
+      if (!registry || !host.threadUpdateBaseline) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
+      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      assertOwnerTool(owner, "update");
+      const thread = await registry.getThread(workspaceId, parent, params.threadId);
+      if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+      const result = await host.threadUpdateBaseline(
+        workspaceId,
+        parent,
+        thread.id,
+        params.resultRevision,
+        { signal: ctx.signal },
+      );
+      return {
+        text: result.status === "applied"
+          ? `updated thread ${thread.id} baseline to parent result revision ${result.resultRevision}: ${result.updatedFromParent.length} paths adopted, ${result.keptPaths.length} kept, ${result.mergedPaths.length} merged${result.conflicts.length > 0 ? `, ${result.conflicts.length} conflicts kept the thread's bytes` : ""}`
+          : result.status === "conflict"
+            ? (result.message ?? `thread ${thread.id} baseline update conflicted with concurrent writes; retry the update`)
+            : (result.message ?? `thread ${thread.id} baseline updated but requires attention`),
+        status: result.status,
+        resultRevision: result.resultRevision,
+        baseRef: result.baseRef,
+        updatedFromParent: result.updatedFromParent,
+        keptPaths: result.keptPaths,
+        mergedPaths: result.mergedPaths,
+        conflicts: result.conflicts,
+      };
+    },
+  };
+}
+
 type RetrievalReportSegment =
   | { kind: "text"; bytes: Buffer; byteLength: number }
   | { kind: "artifact"; artifact: RetrievalArtifactRef; byteLength: number };

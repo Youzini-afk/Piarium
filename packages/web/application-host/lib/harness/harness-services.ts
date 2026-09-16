@@ -8,6 +8,7 @@ import {
   createThreadKillService,
   createThreadListService,
   createThreadMergeService,
+  createThreadUpdateService,
   createThreadReadService,
   createThreadSendService,
   createThreadWaitService,
@@ -812,6 +813,9 @@ export function registerHarnessServices(
   }
   if (host.threadRegistry && host.threadApplyWorktreeDiff) {
     router.register("thread.merge", createThreadMergeService(host));
+  }
+  if (host.threadRegistry && host.threadUpdateBaseline) {
+    router.register("thread.update", createThreadUpdateService(host));
   }
   router.register("explore.search", createExploreSearchService(host));
   router.register("explore.query.start", createExploreQueryStartService(host));

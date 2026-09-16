@@ -10,6 +10,7 @@ import type {
   ThreadSendResult,
   ThreadReadResult,
   ThreadMergeResult,
+  ThreadUpdateResult,
   ThreadKillResult,
 } from "@piarium/protocol";
 import { HARNESS_MAX_REQUEST_TIMEOUT_MS, buildTeamPrompt } from "@piarium/protocol";
@@ -90,6 +91,11 @@ const ThreadMergeParams = Type.Object({
     expectedParentRevision: Type.String(),
     expectedLocalEditRevision: Type.Optional(Type.Integer({ minimum: 0 })),
   }))),
+});
+
+const ThreadUpdateParams = Type.Object({
+  threadId: Type.String(),
+  resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Published parent result revision to incorporate into this thread's baseline; defaults to the parent's latest published result." })),
 });
 
 const ThreadKillParams = Type.Object({
@@ -366,6 +372,41 @@ export function createMergeTool(bridge: HostServicesBridge, _sessionId: string):
         };
       } catch (error) {
         return threadErrorResult("merge", error);
+      }
+    },
+  });
+}
+
+export function createUpdateTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+  return defineTool({
+    name: "update",
+    label: "Update",
+    description: "Incorporate a published parent result revision into a started teammate's working baseline. The teammate's own changes are preserved through a three-way merge; paths where both sides diverged keep the teammate's bytes and are reported as conflicts.",
+    promptSnippet: "update: pull a published parent revision into a teammate's baseline",
+    promptGuidelines: [],
+    parameters: ThreadUpdateParams,
+    executionMode: "sequential",
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      try {
+        const result = await bridge.request<"thread.update">("thread.update", {
+          threadId: params.threadId,
+          ...(params.resultRevision !== undefined ? { resultRevision: params.resultRevision } : {}),
+        }, signal ? { signal } : undefined);
+        const typed = result as ThreadUpdateResult;
+        return {
+          content: [{ type: "text", text: typed.text }],
+          details: {
+            status: typed.status,
+            resultRevision: typed.resultRevision,
+            baseRef: typed.baseRef,
+            updatedFromParent: typed.updatedFromParent,
+            keptPaths: typed.keptPaths,
+            mergedPaths: typed.mergedPaths,
+            conflicts: typed.conflicts,
+          },
+        };
+      } catch (error) {
+        return threadErrorResult("update", error);
       }
     },
   });

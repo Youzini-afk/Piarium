@@ -227,7 +227,7 @@ describe("dequeued thread permissions", () => {
       expect(prompts.at(-1)).toContain('<inherited-context from-session="parent-1">');
       expect(prompts.at(-1)).toContain("PARENT SUMMARY");
       const run = await registry.getActiveRun(WORKSPACE, queued.id);
-      expect(run?.frozen.inputOrigin).toBe("inherit");
+      expect(run?.frozen?.inputOrigin).toBe("inherit");
     } finally {
       await runtime.dispose();
       await registry.dispose();

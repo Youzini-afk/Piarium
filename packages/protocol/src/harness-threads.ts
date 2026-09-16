@@ -914,6 +914,32 @@ export interface ThreadMergeResult {
   operationId?: string;
 }
 
+export interface ThreadUpdateParams {
+  threadId: string;
+  /**
+   * Published parent result revision to incorporate into the thread's working
+   * baseline. Omit to use the parent thread's latest published result.
+   */
+  resultRevision?: number;
+}
+
+export interface ThreadUpdateResult {
+  text: string;
+  status: "applied" | "conflict" | "needs-attention";
+  /** The parent result revision that became the thread's new baseline. */
+  resultRevision?: number;
+  /** Identity of the new baseline (`branchId@revision` or an immutable root). */
+  baseRef?: string;
+  /** Paths that adopted the parent revision's bytes. */
+  updatedFromParent?: string[];
+  /** Paths where the thread's own change was preserved over the new base. */
+  keptPaths?: string[];
+  /** Paths textually merged clean across both sides. */
+  mergedPaths?: string[];
+  /** Paths where both sides diverged; the thread's bytes were kept. */
+  conflicts?: { path: string; reason?: string }[];
+}
+
 export interface ThreadKillParams {
   threadId: string;
   keepWorktree?: boolean;

@@ -2338,6 +2338,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId, extras) => (
       threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)
     ),
+    threadUpdateBaseline: (workspaceId, parent, threadId, resultRevision, extras) => (
+      threadRuntime!.updateBaseline(workspaceId, parent, threadId, resultRevision, extras)
+    ),
     threadSendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
     threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
     threadContinueRun: (input) => threadRuntime!.continueRun(input),
