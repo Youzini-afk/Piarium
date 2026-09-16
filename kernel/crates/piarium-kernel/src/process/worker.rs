@@ -180,6 +180,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGUSR1, stop_signal as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, stop_signal as libc::sighandler_t);
     }
+    #[cfg(target_os = "linux")]
+    platform::arm_parent_death_signal()?;
     let config: Config = {
         let Some(frame) = read_frame(&mut io::stdin().lock())? else {
             return Ok(());
