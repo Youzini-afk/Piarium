@@ -9,7 +9,6 @@ import {
   type PiAgentEvent,
   type PiAssistantMessage,
   type PiSessionEntry,
-  type PiSessionFeatureState,
   type RecoveryStatus,
   type RuntimeEventEnvelope,
   type RuntimeMethod,
