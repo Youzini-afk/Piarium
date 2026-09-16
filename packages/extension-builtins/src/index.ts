@@ -46,7 +46,7 @@ export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "piarium.builtin.
 export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
 
 const pageContribution = (input: {
-  group: "pi";
+  group: "pi" | "harness";
   icon: string;
   id: string;
   keywords: string[];
@@ -210,17 +210,63 @@ export const PIARIUM_BUILTIN_RECOVERY_EXTENSION = definition({
 export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
   id: "piarium.builtin.pi-harness",
   displayName: "Agent Harness",
-  contributions: [pageContribution({
-    group: "pi",
-    icon: "terminal",
-    id: "piarium.builtin.pi-harness.page.harness",
-    keywords: ["harness", "agent", "tools", "shell", "bash", "output", "web", "search"],
-    kind: "single",
-    order: 49,
-    slug: "harness",
-    title: "Agent Harness",
-    titleKey: "settings.page.harness.title",
-  })],
+  contributions: [
+    pageContribution({
+      group: "harness",
+      icon: "terminal",
+      id: "piarium.builtin.pi-harness.page.tools",
+      keywords: ["harness", "agent", "tools", "shell", "bash", "output", "process"],
+      kind: "single",
+      order: 0,
+      slug: "harness-tools",
+      title: "Tools & Execution",
+      titleKey: "settings.page.harness.page.tools.title",
+    }),
+    pageContribution({
+      group: "harness",
+      icon: "shield-check",
+      id: "piarium.builtin.pi-harness.page.permissions",
+      keywords: ["harness", "permissions", "approval", "rules", "policy"],
+      kind: "single",
+      order: 1,
+      slug: "harness-permissions",
+      title: "Permissions & Policy",
+      titleKey: "settings.page.harness.page.permissions.title",
+    }),
+    pageContribution({
+      group: "harness",
+      icon: "brain-ai-3",
+      id: "piarium.builtin.pi-harness.page.models",
+      keywords: ["harness", "models", "slots", "review", "delegation"],
+      kind: "single",
+      order: 2,
+      slug: "harness-models",
+      title: "Models & Review",
+      titleKey: "settings.page.harness.page.models.title",
+    }),
+    pageContribution({
+      group: "harness",
+      icon: "chat-history",
+      id: "piarium.builtin.pi-harness.page.context",
+      keywords: ["harness", "context", "compaction", "preparation", "long session"],
+      kind: "single",
+      order: 3,
+      slug: "harness-context",
+      title: "Context Management",
+      titleKey: "settings.page.harness.page.context.title",
+    }),
+    pageContribution({
+      group: "harness",
+      icon: "search-eye",
+      id: "piarium.builtin.pi-harness.page.retrieval",
+      keywords: ["harness", "retrieval", "embedding", "rerank", "web", "search", "domains"],
+      kind: "single",
+      order: 4,
+      slug: "harness-retrieval",
+      title: "Retrieval & Web",
+      titleKey: "settings.page.harness.page.retrieval.title",
+    }),
+  ],
 });
 
 const AGENT_FEATURE_TARGETS = [

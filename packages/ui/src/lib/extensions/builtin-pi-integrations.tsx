@@ -17,7 +17,10 @@ import type { SurfaceActivation, SurfaceActivationContext } from '@piarium/exten
 import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
 import { FleetPage } from '@/components/sections/fleet';
-import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
+import {
+  HarnessSettingsPage,
+  type HarnessSettingsSection,
+} from '@/components/sections/harness/HarnessSettingsPage';
 import { McpPage } from '@/components/sections/mcp/McpPage';
 import { McpSidebar } from '@/components/sections/mcp/McpSidebar';
 import { RecoverySettings } from '@/components/sections/piarium/RecoverySettings';
@@ -48,7 +51,18 @@ import {
   WORKBENCH_REPLACEMENT_TARGETS,
 } from './workbench-registry';
 
-const pageImplementation = (definition: PiariumBuiltinExtensionDefinition): SettingsPageImplementation => {
+const HARNESS_SECTION_BY_SLUG: Record<string, HarnessSettingsSection> = {
+  'harness-tools': 'tools',
+  'harness-permissions': 'permissions',
+  'harness-models': 'models',
+  'harness-context': 'context',
+  'harness-retrieval': 'retrieval',
+};
+
+const pageImplementation = (
+  definition: PiariumBuiltinExtensionDefinition,
+  contributionId: string,
+): SettingsPageImplementation => {
   switch (definition.manifest.id) {
     case PIARIUM_BUILTIN_AGENTS_EXTENSION.manifest.id:
       return {
@@ -94,8 +108,13 @@ const pageImplementation = (definition: PiariumBuiltinExtensionDefinition): Sett
         renderContent: () => <PluginSettingsPage />,
         renderSidebar: (options) => <PluginSettingsSidebar onItemSelect={options.onItemSelect} />,
       };
-    case PIARIUM_BUILTIN_HARNESS_EXTENSION.manifest.id:
-      return { renderContent: () => <HarnessSettingsPage /> };
+    case PIARIUM_BUILTIN_HARNESS_EXTENSION.manifest.id: {
+      const contribution = definition.manifest.contributions?.find((item) => item.id === contributionId);
+      const slug = typeof contribution?.data.slug === 'string' ? contribution.data.slug : '';
+      const section = HARNESS_SECTION_BY_SLUG[slug];
+      if (!section) throw new Error(`Unknown Agent Harness settings page: ${contributionId}`);
+      return { renderContent: () => <HarnessSettingsPage section={section} /> };
+    }
     default:
       throw new Error(`Built-in Pi integration does not own a settings page: ${definition.manifest.id}`);
   }
@@ -167,7 +186,7 @@ const contributionImplementation = (
   if (contribution?.kind === 'transition-scene') {
     return { framework: 'react-19', Component: BuiltinWorkbenchTransitionScene };
   }
-  if (contribution?.kind === 'settings-page') return pageImplementation(definition);
+  if (contribution?.kind === 'settings-page') return pageImplementation(definition, contributionId);
   if (contribution?.kind === 'panel' && contribution.data.contract === 'pi-plugin-settings-adapter/v1') {
     return adapterImplementation(String(contribution.data.adapterId));
   }

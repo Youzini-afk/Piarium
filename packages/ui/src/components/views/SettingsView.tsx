@@ -47,7 +47,7 @@ interface SettingsViewProps {
   initialMobileStage?: MobileStage;
 }
 
-const NAV_GROUP_ORDER = ['general', 'projects', 'pi', 'content'] as const;
+const NAV_GROUP_ORDER = ['general', 'projects', 'harness', 'pi', 'content'] as const;
 
 const ADD_PROVIDER_SETTINGS_ID = '__add_provider__';
 

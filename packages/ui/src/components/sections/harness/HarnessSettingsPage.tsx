@@ -67,6 +67,31 @@ export interface HarnessSettings {
   review?: { enabled?: boolean; gate?: boolean };
 }
 
+export type HarnessSettingsSection = 'tools' | 'permissions' | 'models' | 'context' | 'retrieval';
+
+const PAGE_COPY = {
+  tools: {
+    title: 'settings.page.harness.page.tools.title',
+    description: 'settings.page.harness.page.tools.description',
+  },
+  permissions: {
+    title: 'settings.page.harness.page.permissions.title',
+    description: 'settings.page.harness.page.permissions.description',
+  },
+  models: {
+    title: 'settings.page.harness.page.models.title',
+    description: 'settings.page.harness.page.models.description',
+  },
+  context: {
+    title: 'settings.page.harness.page.context.title',
+    description: 'settings.page.harness.page.context.description',
+  },
+  retrieval: {
+    title: 'settings.page.harness.page.retrieval.title',
+    description: 'settings.page.harness.page.retrieval.description',
+  },
+} as const;
+
 function readHarnessSettings(snapshot: PiSettingsSnapshot | null): HarnessSettings {
   const global = (snapshot?.global ?? {}) as Record<string, unknown>;
   const harness = global.harness;
@@ -80,8 +105,9 @@ const parseDomainDraft = (value: string): string[] => [...new Set(
   value.split(/[\n,]/).map((entry) => entry.trim().toLowerCase()).filter(Boolean),
 )];
 
-export const HarnessSettingsPage: React.FC = () => {
+export const HarnessSettingsPage: React.FC<{ section: HarnessSettingsSection }> = ({ section }) => {
   const { t } = useI18n();
+  const pageCopy = PAGE_COPY[section];
   const currentDirectory = useDirectoryStore((state) => state.currentDirectory);
 
   const runtimeTarget = React.useMemo<RuntimeContextTarget>(
@@ -398,9 +424,9 @@ export const HarnessSettingsPage: React.FC = () => {
   return (
     <div className="space-y-6 p-6">
       <div>
-        <h2 className="text-lg font-semibold">{t('settings.page.harness.title')}</h2>
+        <h2 className="text-lg font-semibold">{t(pageCopy.title)}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          {t('settings.page.harness.description')}
+          {t(pageCopy.description)}
         </p>
         <p className="text-xs text-muted-foreground mt-2">
           {t('settings.page.harness.nextSession')}
@@ -414,7 +440,7 @@ export const HarnessSettingsPage: React.FC = () => {
       )}
 
       {/* Tool toggles */}
-      <SettingsSection
+      {section === 'tools' ? <SettingsSection
         title={t('settings.page.harness.section.tools')}
         description={t('settings.page.harness.section.tools.description')}
       >
@@ -429,9 +455,9 @@ export const HarnessSettingsPage: React.FC = () => {
             />
           ))}
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'permissions' ? <SettingsSection
         title={t('settings.page.harness.section.permissions')}
         description={t('settings.page.harness.section.permissions.description')}
       >
@@ -478,9 +504,9 @@ export const HarnessSettingsPage: React.FC = () => {
             </div>
           </div>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'models' ? <SettingsSection
         title={t('settings.page.harness.section.models')}
         description={t('settings.page.harness.section.models.description')}
       >
@@ -519,9 +545,9 @@ export const HarnessSettingsPage: React.FC = () => {
             );
           })}
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'retrieval' ? <SettingsSection
         title={t('settings.page.harness.section.embedding')}
         description={t('settings.page.harness.section.embedding.description')}
       >
@@ -559,9 +585,9 @@ export const HarnessSettingsPage: React.FC = () => {
             </Button>
           </div>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'retrieval' ? <SettingsSection
         title={t('settings.page.harness.section.rerank')}
         description={t('settings.page.harness.section.rerank.description')}
       >
@@ -610,9 +636,9 @@ export const HarnessSettingsPage: React.FC = () => {
             </Button>
           </div>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'context' ? <SettingsSection
         title={t('settings.page.harness.section.context')}
         description={t('settings.page.harness.section.context.description')}
       >
@@ -622,9 +648,9 @@ export const HarnessSettingsPage: React.FC = () => {
           label={t('settings.page.harness.context.backgroundPreparation')}
           description={t('settings.page.harness.context.backgroundPreparation.description')}
         />
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'models' ? <SettingsSection
         title={t('settings.page.harness.section.review')}
         description={t('settings.page.harness.section.review.description')}
       >
@@ -642,9 +668,9 @@ export const HarnessSettingsPage: React.FC = () => {
             description={t('settings.page.harness.review.gate.description')}
           />
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
-      <SettingsSection
+      {section === 'retrieval' ? <SettingsSection
         title={t('settings.page.harness.section.web')}
         description={t('settings.page.harness.section.web.description')}
       >
@@ -768,10 +794,10 @@ export const HarnessSettingsPage: React.FC = () => {
             </Button>
           </div>
         </div>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {/* Shell selection */}
-      <SettingsSection
+      {section === 'tools' ? <SettingsSection
         title={t('settings.page.harness.section.shell')}
         description={t('settings.page.harness.section.shell.description')}
       >
@@ -792,10 +818,10 @@ export const HarnessSettingsPage: React.FC = () => {
             </SelectContent>
           </Select>
         </SettingsFieldRow>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {/* Output settings */}
-      <SettingsSection
+      {section === 'tools' ? <SettingsSection
         title={t('settings.page.harness.section.output')}
         description={t('settings.page.harness.section.output.description')}
       >
@@ -819,10 +845,10 @@ export const HarnessSettingsPage: React.FC = () => {
             </SelectContent>
           </Select>
         </SettingsFieldRow>
-      </SettingsSection>
+      </SettingsSection> : null}
 
       {/* Bash settings */}
-      <SettingsSection
+      {section === 'tools' ? <SettingsSection
         title={t('settings.page.harness.section.bash')}
         description={t('settings.page.harness.section.bash.description')}
       >
@@ -846,7 +872,7 @@ export const HarnessSettingsPage: React.FC = () => {
             </SelectContent>
           </Select>
         </SettingsFieldRow>
-      </SettingsSection>
+      </SettingsSection> : null}
     </div>
   );
 };

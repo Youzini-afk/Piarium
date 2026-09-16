@@ -4,7 +4,7 @@ import type { I18nKey } from '@/lib/i18n/store';
 
 export type SettingsPageSlug = string;
 
-export type SettingsPageGroup = 'general' | 'projects' | 'pi' | 'content';
+export type SettingsPageGroup = 'general' | 'projects' | 'harness' | 'pi' | 'content';
 
 export interface SettingsRuntimeContext {
   isVSCode: boolean;
