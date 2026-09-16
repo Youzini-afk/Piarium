@@ -44,6 +44,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': '知識內容不能為空',
   'harness.knowledge.conflict': '這條建議已變更，現已載入最新審閱清單。',
   'harness.threads.open': '開啟子任務',
+  'harness.threads.transcript': '查看轉錄',
+  'harness.threads.transcriptReadOnly': '僅查看歷史，不啟動 Run，也不還原工作目錄。',
   'harness.sources.title': '網頁來源',
   'harness.sources.pin': '釘選來源',
   'harness.sources.unpin': '取消釘選來源',

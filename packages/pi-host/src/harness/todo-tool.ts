@@ -38,7 +38,7 @@ export function createTodoTool(bridge: HostServicesBridge): ToolDefinition {
         const typed = result as TodoUpsertResult;
         return {
           content: [{ type: "text", text: typed.text }],
-          details: {},
+          details: { materialRevisions: typed.materialRevisions ?? {} },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

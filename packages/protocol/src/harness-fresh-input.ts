@@ -5,15 +5,14 @@
  * A fresh continuation is not a summary of the old transcript. The new input
  * carries: the current task and still-valid user requirements (verbatim
  * excerpts, not a model re-derivation), selected results, open items, and
- * history anchors — entry ids the new run can pull verbatim through the
- * public `history` tool. The original Pi history and WorkingState stay
+ * source-transcript provenance. Old entry ids do not become entries in the
+ * new session; current-session `history` cannot resolve them. Pi history and WorkingState stay
  * untouched; stale verification is not replayed as if it passed on the new
  * revision. Callers publish the new generation only after this input is
  * fully built — no forced re-summarization of the old history.
  *
- * Both entry domains mine into this assembler: pi-host mines raw Pi SDK
- * `SessionEntry`s for in-session use, while the Application Host mines
- * protocol `PiSessionEntry`s for thread reruns.
+ * The Application Host consumes this assembler using protocol PiSessionEntry
+ * values. Tests exercise that same path instead of a parallel SDK-only helper.
  */
 
 import type { PiSessionEntry, PiUserContent } from "./session.js";
@@ -26,18 +25,18 @@ export interface FreshInputCarriedMessage {
 export interface FreshInputSeed {
   /** The current task statement, if the caller has one. */
   task?: string;
+  /** Authorized old Run of the same Thread; resolves through history(run: ...). */
+  sourceRunId?: string;
   /** Session goal/assist state still in force (verbatim). */
   goal?: string;
   /** Selected results/artifacts to carry (thread results, delta references). */
   results?: readonly string[];
   /** Open items: unfinished plan steps, todos, unresolved questions. */
   openItems?: readonly string[];
-  /** User messages carried verbatim as still-valid requirements. */
+  /** Selected prior user statements, not automatically certified as still valid. */
   carriedUserMessages?: readonly FreshInputCarriedMessage[];
   /** Compaction boundary entry ids (readback anchors). */
   boundaryEntryIds?: readonly string[];
-  /** Per-message excerpt cap in chars (default 2000). */
-  excerptChars?: number;
 }
 
 export interface FreshInput {
@@ -49,12 +48,7 @@ export interface FreshInput {
   boundaryEntryIds: string[];
 }
 
-function clip(text: string, max: number): string {
-  return text.length <= max ? text : `${text.slice(0, max)}\n…[truncated — full text via history]`;
-}
-
 export function assembleFreshInput(seed: FreshInputSeed): FreshInput {
-  const excerptChars = Math.max(200, seed.excerptChars ?? 2_000);
   const carried = seed.carriedUserMessages ?? [];
   const boundaryEntryIds = [...(seed.boundaryEntryIds ?? [])];
 
@@ -63,8 +57,9 @@ export function assembleFreshInput(seed: FreshInputSeed): FreshInput {
   if (task) sections.push(`## Task\n${task}`);
   if (carried.length > 0) {
     sections.push(
-      `## Still-valid requirements and corrections\n`
-      + carried.map((entry) => `- [entry ${entry.entryId}] ${clip(entry.text, excerptChars)}`).join("\n"),
+      `## Selected prior user statements\n`
+      + `These are verbatim source statements; apply current instructions and explicit later corrections first.\n`
+      + carried.map((entry) => `- [source entry ${entry.entryId}] ${entry.text}`).join("\n"),
     );
   }
   if (seed.results?.length) {
@@ -74,11 +69,13 @@ export function assembleFreshInput(seed: FreshInputSeed): FreshInput {
     sections.push(`## Open items\n${seed.openItems.map((item) => `- ${item}`).join("\n")}`);
   }
   const anchors = [...carried.map((entry) => entry.entryId), ...boundaryEntryIds];
-  if (anchors.length > 0) {
+  if (anchors.length > 0 || seed.sourceRunId) {
     sections.push(
       `## History anchors\n`
-      + `Earlier session entries remain readable verbatim with the history tool `
-      + `(entry + before/after). Known anchors:\n`
+      + `These ids identify the preserved source transcript, not entries in this new session. `
+      + (seed.sourceRunId
+        ? `Read original entries with history({ run: ${JSON.stringify(seed.sourceRunId)}, entry: "<entry id>" }); query/path/offset pagination works on that same retained Run. Known source anchors:\n`
+        : `The current-session history tool cannot resolve them; source-transcript access is required. Known source anchors:\n`)
       + anchors.map((id) => `- ${id}`).join("\n"),
     );
   }
@@ -120,7 +117,7 @@ export function minePiBranchEntries(
     if (text.length > 0) userEntries.push({ entryId: entry.id, text });
   }
   return {
-    carriedUserMessages: userEntries.slice(-Math.max(0, recentUserMessages)),
+    carriedUserMessages: recentUserMessages >= 1 ? userEntries.slice(-Math.trunc(recentUserMessages)) : [],
     boundaryEntryIds,
   };
 }

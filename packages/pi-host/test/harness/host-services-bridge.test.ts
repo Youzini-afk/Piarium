@@ -154,3 +154,31 @@ describe("HostServicesBridge", () => {
     await assert.rejects(resultPromise);
   });
 });
+
+
+describe("scheduler wait transport lifetime", () => {
+  it("lets scheduler admission outlive a dependency deadline and still cancels", async () => {
+    const controller = new AbortController();
+    const emitted: Array<{ event: string; data: HarnessRequestData | HarnessCancelData }> = [];
+    const bridge = new HostServicesBridge({ sessionId: "session-1", defaultTimeoutMs: 10,
+      emit: (event, data) => { emitted.push({ event, data }); } });
+    let finished = false;
+    const pending = bridge.request("thread.wait", { timeoutMs: 5 }, { timeoutMs: 0, signal: controller.signal });
+    const rejected = assert.rejects(pending, (error: unknown) => error instanceof HarnessRequestError && error.message === "aborted");
+    void pending.then(() => { finished = true; }, () => { finished = true; });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(finished, false);
+    assert.equal((emitted[0]!.data as HarnessRequestData).timeoutMs, 0);
+    controller.abort();
+    await rejected;
+    assert.ok(emitted.some((item) => item.event === "harness.cancel"));
+    bridge.dispose();
+  });
+
+  it("does not disable another tool's timeout with zero", async () => {
+    const bridge = new HostServicesBridge({ emit: () => undefined, sessionId: "session-1" });
+    await assert.rejects(bridge.request("output.store", { text: "x" }, { timeoutMs: 0 }),
+      (error: unknown) => error instanceof HarnessRequestError && error.code === "timeout");
+    bridge.dispose();
+  });
+});

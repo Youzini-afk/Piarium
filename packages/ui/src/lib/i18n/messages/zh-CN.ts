@@ -42,6 +42,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': '知识内容不能为空',
   'harness.knowledge.conflict': '这条建议已发生变化，现已载入最新审阅列表。',
   'harness.threads.open': '打开子任务',
+  'harness.threads.transcript': '查看转录',
+  'harness.threads.transcriptReadOnly': '仅查看历史，不启动 Run，也不恢复工作目录。',
   'harness.sources.title': '网页来源',
   'harness.sources.pin': '固定来源',
   'harness.sources.unpin': '取消固定来源',

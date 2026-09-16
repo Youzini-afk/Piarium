@@ -253,6 +253,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       label: block.label,
       content: block.content,
     }));
+    material.blocksComplete = true;
     if (request.query?.trim()) {
       const recalled = options.recall
         ? await options.recall(binding.workspaceId, store, request.query, request.signal)

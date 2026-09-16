@@ -61,6 +61,7 @@ export function parsePlanContent(content: string): TodoItem[] {
 
 export interface TodoToolResult {
   text: string;
+  content: string;
 }
 
 export async function executeTodoTool(
@@ -89,7 +90,7 @@ export async function executeTodoTool(
   let text = `plan updated: ${done}/${total} done`;
   if (blocked > 0) text += `, ${blocked} blocked`;
 
-  return { text };
+  return { text, content };
 }
 
 // ── Prompt guidelines ──────────────────────────────────────────────

@@ -222,7 +222,7 @@ describe("harness e2e integration", () => {
       assert.match(outputText, /exited 0/s, `the final observation must report the real exit state: got "${outputText}"`);
       const unchanged = await executeTool(getOutputTool, { handle: shellId });
       assert.match(unchanged, /no new output since last read.*exited 0/s, `a repeated read should not duplicate shell output: got "${unchanged}"`);
-      await bridge.request("compaction.after", { summary: "compacted", firstKeptEntryId: "entry", tokensBefore: 10 });
+      await bridge.request("context.retained", { retainedObservationRefs: [], retainedGit: false });
       const reset = await executeTool(getOutputTool, { handle: shellId });
       assert.match(reset, /initial read.*exited 0/s, `compaction should restore a full shell baseline with its exit state: got "${reset}"`);
       assert.match(reset, /done/, `the reset baseline should contain the complete shell output: got "${reset}"`);

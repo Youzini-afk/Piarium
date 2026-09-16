@@ -271,9 +271,184 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
   }
 };
 
+describe("session e2e — passive thread input", () => {
+  it("shows a passive note in the next actual tool continuation without adding a turn", async () => {
+    await withTempRoot("piarium-passive-tool-boundary-", async (root) => {
+      await writeFile(join(root, "note-source.txt"), "tool result", "utf8");
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      let release!: () => void;
+      let entered!: () => void;
+      const waiting = new Promise<void>((resolve) => { entered = resolve; });
+      const delayed = new Promise<void>((resolve) => { release = resolve; });
+      faux.setResponses([
+        async (context) => { contexts.push(structuredClone(context)); entered(); await delayed;
+          return fauxAssistantMessage([fauxToolCall("read", { path: "note-source.txt" })]); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("done"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "read note-source.txt");
+        await waiting;
+        await session.host.notify(snapshot.sessionId, "intra-turn-note", "NOTE_AT_TOOL_BOUNDARY_739");
+        release();
+        await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 2, "one original request plus its existing tool continuation only");
+        assert.equal(JSON.stringify(contexts[1]!.messages).match(/NOTE_AT_TOOL_BOUNDARY_739/g)?.length, 1);
+      } finally { release?.(); await session.dispose(); faux.unregister(); }
+    });
+  });
+
+  it("deduplicates concurrent execution requests and replays a native receipt after reopening", async () => {
+    await withTempRoot("piarium-thread-request-receipt-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("initial task done"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("request handled"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "initial task");
+        await session.host.session.waitForIdle();
+        const outcomes = await Promise.all(Array.from({ length: 4 }, () => session.host.requestThreadMessage(
+          snapshot.sessionId, "request-once", "REQUEST_BODY_739",
+        )));
+        assert.ok(outcomes.every((result) => result.accepted));
+        await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 2);
+        assert.equal(JSON.stringify(contexts[1]!.messages).match(/REQUEST_BODY_739/g)?.length, 1);
+        const sessionFile = session.host.session.sessionFile!;
+        await session.host.close(snapshot.sessionId);
+        await session.host.open({ cwd: root, sessionFile });
+        assert.deepEqual(await session.host.requestThreadMessage(snapshot.sessionId, "request-once", "REQUEST_BODY_739"), {
+          accepted: true, alreadyDelivered: true,
+        });
+        assert.equal(session.host.snapshot().busy, false);
+        assert.equal(contexts.length, 2);
+        await assert.rejects(session.host.requestThreadMessage(snapshot.sessionId, "request-once", "different input"), /different input/);
+      } finally { await session.dispose(); faux.unregister(); }
+    });
+  });
+  it("persists a notification without waking an idle model and deduplicates the Pi receipt", async () => {
+    await withTempRoot("piarium-passive-idle-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("ready"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("read the note"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "initial work");
+        await session.host.session.waitForIdle();
+        assert.deepEqual(await session.host.notify(snapshot.sessionId, "note-1", "PASSIVE_NOTE_739"), {
+          accepted: true, alreadyDelivered: false,
+        });
+        assert.deepEqual(await session.host.notify(snapshot.sessionId, "note-1", "PASSIVE_NOTE_739"), {
+          accepted: true, alreadyDelivered: true,
+        });
+        await assert.rejects(session.host.notify(snapshot.sessionId, "note-1", "different message"), /different input/);
+        assert.equal(session.host.snapshot().busy, false);
+        assert.equal(session.host.snapshot().pendingMessageCount, 0);
+        assert.equal(contexts.length, 1, "a passive message must not request another model response");
+        const raw = await readFile(session.host.session.sessionFile!, "utf8");
+        assert.equal(raw.match(/PASSIVE_NOTE_739/g)?.length, 1, "the actual Pi JSONL owns one durable receipt");
+        await session.host.prompt(snapshot.sessionId, "continue normal work");
+        await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 2);
+        assert.equal(JSON.stringify(contexts[1]!.messages).match(/PASSIVE_NOTE_739/g)?.length, 1);
+      } finally { await session.dispose(); faux.unregister(); }
+    });
+  });
+
+  it("does not schedule a follow-up when inform arrives during an actual model request", async () => {
+    await withTempRoot("piarium-passive-active-", async (root) => {
+      const faux = registerFauxProvider();
+      let entered!: () => void;
+      let release!: () => void;
+      const started = new Promise<void>((resolve) => { entered = resolve; });
+      const held = new Promise<void>((resolve) => { release = resolve; });
+      const contexts: Context[] = [];
+      faux.setResponses([
+        async (context) => { contexts.push(structuredClone(context)); entered(); await held; return fauxAssistantMessage("finished"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("continued"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        await session.host.prompt(snapshot.sessionId, "work while a note arrives");
+        await started;
+        await session.host.notify(snapshot.sessionId, "note-active", "NOTE_DURING_REQUEST_739");
+        release();
+        await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 1);
+        assert.equal(session.host.snapshot().pendingMessageCount, 0);
+        await session.host.prompt(snapshot.sessionId, "next explicit request");
+        await session.host.session.waitForIdle();
+        assert.equal(contexts.length, 2);
+        assert.match(JSON.stringify(contexts[1]!.messages), /NOTE_DURING_REQUEST_739/);
+      } finally { release(); await session.dispose(); faux.unregister(); }
+    });
+  });
+});
+
 // ── Zone 2 ─────────────────────────────────────────────────────────
 
 describe("session e2e — zone2 extension", () => {
+  it("sends only new material and rebuilds only material actually removed by a native Pi cut", async () => {
+    await withTempRoot("piarium-zone2-retained-", async (root) => {
+      const faux = registerFauxProvider();
+      const requests: Context[] = [];
+      faux.setResponses(Array.from({ length: 4 }, () => (context: Context) => {
+        requests.push(structuredClone(context)); return fauxAssistantMessage("ok");
+      }));
+      let plan = "PLAN_ORIGINAL_739";
+      const session = await setupSession({ root, faux, serviceHostOptions: {
+        zone2Provider: async () => ({ eventCursor: 0, material: {
+          userEdits: [], userCommands: [], newDiagnostics: [], git: null,
+          knowledge: [{ id: 2, title: "KNOWLEDGE_739", trigger: "work" }],
+          blocks: [{ label: "plan", content: plan }], blocksComplete: true,
+          contextUsage: { used: 345, window: 1000 },
+        } }),
+      } });
+      try {
+        const snapshot = await session.host.create(root);
+        const prompt = async (text: string) => {
+          await session.host.prompt(snapshot.sessionId, text); await session.host.session.waitForIdle();
+        };
+        await prompt("first");
+        await prompt("second");
+        const second = JSON.stringify(requests[1]!.messages);
+        assert.equal(second.match(/PLAN_ORIGINAL_739/g)?.length, 1);
+        assert.equal(second.match(/KNOWLEDGE_739/g)?.length, 1);
+        assert.doesNotMatch(second, /window used/);
+        plan = "PLAN_CORRECTED_739";
+        await prompt("third");
+        const manager = session.host.session.sessionManager;
+        const kept = manager.getBranch().findLast((entry) => entry.type === "message" && entry.message.role === "user");
+        assert.ok(kept);
+        // Arrange a real Pi boundary retaining the third prompt and its new
+        // plan, but not the older knowledge presentation. Summary generation
+        // is covered separately by the controlled-provider compaction tests.
+        const compactId = manager.appendCompaction("Earlier work completed", kept.id, 1000);
+        const entry = manager.getEntry(compactId);
+        assert.ok(entry?.type === "compaction");
+        session.host.session.agent.state.messages = manager.buildSessionContext().messages;
+        await session.host.session.extensionRunner?.emit({ type: "session_compact", compactionEntry: entry,
+          fromExtension: true, reason: "manual", willRetry: false });
+        await prompt("fourth");
+        const actual = JSON.stringify(requests[3]!.messages);
+        assert.equal(actual.match(/PLAN_CORRECTED_739/g)?.length, 1, "retained corrected plan must not be duplicated");
+        assert.equal(actual.match(/KNOWLEDGE_739/g)?.length, 1, "knowledge outside the raw retained interval must be available again");
+        assert.doesNotMatch(actual, /PLAN_ORIGINAL_739/);
+        assert.match(await readFile(session.host.session.sessionFile!, "utf8"), /PLAN_ORIGINAL_739/);
+      } finally { await session.dispose(); faux.unregister(); }
+    });
+  });
   it("carries a committed editor mutation through the Host store into the next real Pi turn", async () => {
     await withTempRoot("piarium-s-zone2-documents-", async (root) => {
       const dataDir = join(root, "data");
@@ -588,129 +763,116 @@ describe("session e2e — context preparation settings", () => {
 });
 
 describe("session e2e — context preparation chain", () => {
-  it("prepares a candidate in background during a real turn and commits it through a real compaction", async () => {
-    await withTempRoot("piarium-s-context-chain-", async (root) => {
-      // usable = 24000 − 6000 = 18000, waterline 5400, keepRecent target ≈4553.
-      // Provider usage ≈ prompt + output + uncached suffix (≈2×prompt on the
-      // first call), so turn 1 lands ~16k: under compaction threshold, and its
-      // usage plus the new prompt estimate crosses the waterline at turn 2.
-      // Turn 2's request usage then exceeds 18000, so Pi compacts after the
-      // reply and commits the already-prepared candidate.
+  for (const outcome of ["commit", "cancel", "invalid-summary"] as const) it(`fixed candidate ${outcome}: foreground progress, capacity admission, and native history`, async () => {
+    await withTempRoot("piarium-fixed-context-chain-", async (root) => {
       await mkdir(join(root, "agent"), { recursive: true });
       await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
-        compaction: { enabled: true, reserveTokens: 6_000, keepRecentTokens: 1_200 },
-        harness: { context: { preparationWaterline: 0.3 } },
+        compaction: { enabled: true, reserveTokens: 8_000, keepRecentTokens: 4_000 },
+        harness: { context: { preparationWaterline: 0.5 } },
       }), "utf8");
-
-      const faux = registerFauxProvider({
-        models: [{ id: "faux-1", contextWindow: 24_000, maxTokens: 800 }],
-      });
-      const summaryCalls: { context: Context }[] = [];
-      const turnCalls: Context[] = [];
-      const compactedSessions: string[] = [];
-      let releaseSummary: (() => void) | undefined;
-      const summaryGate = new Promise<void>((resolve) => { releaseSummary = resolve; });
-      const router = (context: Context, options: { toolChoice?: string } | undefined) => {
-        if (options?.toolChoice === "none") {
-          summaryCalls.push({ context });
-          return summaryGate.then(() => fauxAssistantMessage("Candidate summary: continue the layout report."));
-        }
-        turnCalls.push(context);
-        // The second foreground request reaching the provider while the
-        // summary is still gated is the foreground-continuation evidence:
-        // release it there so a serialized queue would deadlock the test.
-        if (turnCalls.length === 2) releaseSummary?.();
-        return fauxAssistantMessage(`Reply ${turnCalls.length}. ${"detail ".repeat(680)}`);
-      };
-      // Turn 3: after compaction the agent reads the summarized first turn
-      // back verbatim through the public history tool on the same branch.
-      // The still-large kept region crosses the waterline again at turn 3's
-      // context hook, so a second background preparation request (toolChoice
-      // "none") precedes the turn's own first request in the provider queue.
-      let historyResult = "";
-      const secondPreparation = (context: Context, options: { toolChoice?: string } | undefined) => {
-        assert.equal(options?.toolChoice, "none", "the follow-up preparation must reuse the summary request shape");
-        summaryCalls.push({ context });
-        return fauxAssistantMessage("Second candidate summary.");
-      };
-      const turn3History = (context: Context) => {
-        turnCalls.push(context);
-        return fauxAssistantMessage([fauxToolCall("history", { query: "repository layout" })]);
-      };
-      const turn3Final = (context: Context) => {
-        turnCalls.push(context);
-        historyResult = JSON.stringify(context.messages.at(-1));
-        return fauxAssistantMessage("done");
-      };
-      faux.setResponses([router, router, router, secondPreparation, turn3History, turn3Final]);
-
+      await writeFile(join(root, "new-material.txt"), "RAW-TOOL-MATERIAL " + "observed ".repeat(800), "utf8");
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 48_000, maxTokens: 800, reasoning: true }] });
+      let releaseSummary!: () => void;
+      const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
+      const summaries: { context: Context; reasoning?: string }[] = [];
+      const foreground: Context[] = [];
+      const compacted: string[] = [];
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
-      try {
-        session = await setupSession({
-          root,
-          faux,
-          serviceHostOptions: {
-            onSessionCompacted: (sessionId) => compactedSessions.push(sessionId),
-          },
-        });
-        const snapshot = await session.host.create(root);
-
-        await session.host.prompt(snapshot.sessionId, `Inspect the repository layout. ${"detail ".repeat(1_150)}`);
-        await session.host.session.waitForIdle();
-        assert.equal(turnCalls.length, 1);
-        assert.equal(summaryCalls.length, 0, "one ordinary turn under the waterline must not prepare anything");
-        assert.equal(compactedSessions.length, 0);
-
-        // The second turn crosses the waterline at its first request: the
-        // summary call starts in the background while the main request
-        // streams. The router releases the summary when that request arrives.
-        // Turn 2's request usage then exceeds the compaction threshold, so Pi
-        // compacts after the reply and commits the prepared candidate as-is.
-        await session.host.prompt(snapshot.sessionId, `Continue with the package list. ${"more ".repeat(3_000)}`);
-        await session.host.session.waitForIdle();
-        assert.equal(turnCalls.length, 2);
-        assert.equal(summaryCalls.length, 1, "the derived summary request must reach the provider");
-
-        const entries = session.host.session.sessionManager.getEntries();
-        const compactionEntry = entries.find((entry) => entry.type === "compaction") as
-          | { summary?: string; firstKeptEntryId?: string }
-          | undefined;
-        assert.ok(compactionEntry, "a compaction entry must be persisted in the session log");
-        assert.equal(compactionEntry?.summary, "Candidate summary: continue the layout report.");
-        assert.ok(compactionEntry?.firstKeptEntryId, "the candidate's fixed cut must be committed");
-        assert.ok(
-          entries.some((entry) => entry.id === compactionEntry?.firstKeptEntryId),
-          "firstKeptEntryId must reference a real session entry",
-        );
-        assert.deepEqual(compactedSessions, [snapshot.sessionId]);
-        assert.equal(summaryCalls.length, 1, "the commit must reuse the prepared call, never re-summarize");
-
-        // Runtime state returns to idle and stays visible on the snapshot.
-        const state = session.host.snapshot().harness?.context;
-        assert.equal(state?.candidate, "none");
-        assert.equal(state?.backgroundPreparation, true);
-
-        // The summary request reused the main request shape: real system
-        // prompt, schema-only tools, and the fixed-scope instruction at tail.
-        const summaryContext = summaryCalls[0]!.context;
-        assert.equal(summaryContext.systemPrompt, turnCalls[0]!.systemPrompt);
-        for (const tool of (summaryContext.tools ?? []) as { name: string }[]) {
-          assert.equal("execute" in tool, false, "summary tools must carry schema only");
+      let historyResult = "";
+      let requestHistory = false;
+      const respond = (context: Context, options: { cacheRetention?: string; reasoning?: string } | undefined) => {
+        if (options) options.cacheRetention = "none"; // avoid faux's overlapping synthetic cache accounting
+        if (/summary text only/i.test(JSON.stringify(context.messages.at(-1)))) {
+          summaries.push({ context, ...(options?.reasoning ? { reasoning: options.reasoning } : {}) });
+          return summaries.length === 1
+            ? gate.then(() => outcome === "invalid-summary"
+              ? fauxAssistantMessage([fauxToolCall("write", { path: "unexpected-summary-write.txt", content: "must not execute" })])
+              : fauxAssistantMessage("FIRST FIXED SUMMARY: the initial task remains binding; older entries remain in native history."))
+            : fauxAssistantMessage("NEXT CANDIDATE: continue the same task.");
         }
-        const tail = summaryContext.messages.at(-1) as { role?: string; content?: { text?: string }[] };
-        assert.match(tail?.content?.[0]?.text ?? "", /summary text only/);
-
-        // History readback: the summarized first turn is gone from the live
-        // context, but the public history tool reads the raw entry back from
-        // the same session branch.
-        await session.host.prompt(snapshot.sessionId, "read back the original request");
+        foreground.push(context);
+        if (foreground.length === 2) {
+          assert.equal(summaries.length, 1, "preparation is already running when the actual foreground request reaches the provider");
+          return fauxAssistantMessage([fauxToolCall("read", { path: "new-material.txt" })]);
+        }
+        if (requestHistory) {
+          requestHistory = false;
+          return fauxAssistantMessage([fauxToolCall("history", { query: "ORIGINAL-TASK-MARKER" })]);
+        }
+        const last = context.messages.at(-1);
+        if (last?.role === "toolResult" && last.toolName === "history") {
+          historyResult = JSON.stringify(last);
+        }
+        return fauxAssistantMessage("Foreground completion.");
+      };
+      faux.setResponses(Array.from({ length: 24 }, () => respond));
+      try {
+        session = await setupSession({ root, faux, serviceHostOptions: { onSessionCompacted: (id) => compacted.push(id) } });
+        const created = await session.host.create(root);
+        session.host.session.setThinkingLevel("high");
+        await session.host.prompt(created.sessionId, "ORIGINAL-TASK-MARKER " + "alpha ".repeat(6_000));
         await session.host.session.waitForIdle();
-        assert.equal(turnCalls.length, 4);
-        assert.equal(summaryCalls.length, 2, "the second preparation is a new candidate, not a recommit of the first");
-        assert.match(historyResult, /Inspect the repository layout/, "history must return the summarized raw user text");
-        assert.match(historyResult, /entry [0-9a-f]+ · message\/user/, "history must identify the entry and its role");
+        assert.equal(summaries.length, 0, "an ordinary completed turn must not schedule idle summarization");
+
+        await session.host.prompt(created.sessionId, "KEPT-RAW-MARKER " + "beta ".repeat(8_000));
+        await session.host.session.waitForIdle();
+        assert.equal(foreground.length, 3, "both the foreground tool call and its continuation finish while the summary remains blocked");
+        assert.equal(summaries.length, 1);
+        assert.equal(compacted.length, 0, "preparing a candidate cannot reset observers or publish a boundary");
+        const kept = session.host.session.sessionManager.getBranch().find((entry) => entry.type === "message"
+          && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("KEPT-RAW-MARKER"));
+        assert.ok(kept);
+        assert.ok(summaries[0]!.context.systemPrompt === foreground[1]!.systemPrompt);
+        assert.deepEqual(summaries[0]!.context.tools, foreground[1]!.tools);
+        assert.equal(summaries[0]!.reasoning, "high");
+        assert.ok(!summaries[0]!.context.tools?.some((tool) => "execute" in tool));
+        assert.ok(!JSON.stringify(summaries[0]!.context).includes("KEPT-RAW-MARKER"), "the fixed kept suffix is not part of the summarized prefix");
+
+        const pending = (async () => {
+          await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(10_000));
+          await session!.host.session.waitForIdle();
+        })();
+        await waitUntil(async () => session!.host.snapshot().isCompacting);
+        assert.equal(foreground.length, 3, "the capacity-bound request waits before reaching the provider");
+        assert.equal(summaries.length, 1, "capacity waits on the same in-flight call");
+        if (outcome === "cancel") await session.host.abort(created.sessionId);
+        releaseSummary();
+        await pending;
+        if (outcome !== "commit") {
+          assert.equal(foreground.length, 3, "a cancelled or failed summary cannot admit the over-capacity request");
+          assert.equal(summaries.length, 1, "failure does not start a second summary implementation");
+          assert.equal(compacted.length, 0);
+          const original = session.host.session.sessionManager.getEntries();
+          assert.ok(!original.some((entry) => entry.type === "compaction"));
+          for (const marker of ["ORIGINAL-TASK-MARKER", "KEPT-RAW-MARKER", "NEW-WHILE-PREPARING-MARKER"]) {
+            assert.ok(original.some((entry) => entry.type === "message" && entry.message.role === "user"
+              && JSON.stringify(entry.message.content).includes(marker)), marker + " must remain verbatim");
+          }
+          await assert.rejects(readFile(join(root, "unexpected-summary-write.txt")), { code: "ENOENT" });
+          return;
+        }
+        assert.equal(foreground.length, 4);
+        const entries = session.host.session.sessionManager.getEntries();
+        const committed = entries.find((entry) => entry.type === "compaction");
+        assert.equal(committed?.type, "compaction");
+        if (committed?.type !== "compaction") throw new Error("missing native boundary");
+        assert.equal(committed.firstKeptEntryId, kept.id, "new tool output and prompts cannot move the fixed cut forward");
+        assert.match(committed.summary, /FIRST FIXED SUMMARY/);
+        assert.match(JSON.stringify(foreground[3]), /KEPT-RAW-MARKER/);
+        assert.match(JSON.stringify(foreground[3]), /NEW-WHILE-PREPARING-MARKER/);
+        assert.match(JSON.stringify(foreground[3]), /RAW-TOOL-MATERIAL/);
+        assert.ok(!JSON.stringify(foreground[3]).includes("ORIGINAL-TASK-MARKER"));
+        assert.deepEqual(compacted, [created.sessionId]);
+
+        requestHistory = true;
+        await session.host.prompt(created.sessionId, "Read the original initial task from history.");
+        await session.host.session.waitForIdle();
+        assert.match(historyResult, /ORIGINAL-TASK-MARKER/);
+        assert.match(historyResult, /entry [0-9a-f]+/);
+        assert.ok(session.host.session.sessionManager.getEntries().some((entry) => entry.type === "message"
+          && entry.message.role === "user" && JSON.stringify(entry.message.content).includes("ORIGINAL-TASK-MARKER")));
       } finally {
-        releaseSummary?.();
+        releaseSummary();
         await session?.dispose();
         faux.unregister();
       }
@@ -718,8 +880,8 @@ describe("session e2e — context preparation chain", () => {
   });
 });
 
-describe("session e2e — durable output handles", () => {
-  it("lets a real Pi turn read a large file and page the truncated result with get_output", async () => {
+describe("session e2e — native file pagination", () => {
+  it("keeps the native file page intact and follows its read continuation", async () => {
     await withTempRoot("piarium-s-large-read-", async (root) => {
       await writeFile(
         join(root, "large.txt"),
@@ -727,17 +889,17 @@ describe("session e2e — durable output handles", () => {
         "utf8",
       );
       const faux = registerFauxProvider();
-      let handle = "";
+      let nextLine = 0;
       let pagedContext = "";
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "large.txt" })]),
         (context) => {
           const serialized = JSON.stringify(context.messages.at(-1));
-          const match = serialized.match(/out_(?!XXX)[A-Za-z0-9_-]+/);
-          assert.ok(match, "the model-visible read result should contain an output handle");
-          handle = match[0];
-          assert.ok(!serialized.includes("line 8000 — 大文件"), "the full file must not leak into the model context");
-          return fauxAssistantMessage([fauxToolCall("get_output", { handle, offset: 0, length: 1024 })]);
+          assert.ok(serialized.includes("line 1000 — 大文件"), "middle content of the requested native page must survive");
+          assert.ok(!serialized.includes("line 8000 — 大文件"), "the native tool owns file pagination");
+          assert.doesNotMatch(serialized, /ephemeral, generation/);
+          nextLine = 8000;
+          return fauxAssistantMessage([fauxToolCall("read", { path: "large.txt", offset: nextLine, limit: 1 })]);
         },
         (context) => {
           pagedContext = JSON.stringify(context.messages.at(-1));
@@ -749,9 +911,9 @@ describe("session e2e — durable output handles", () => {
         const snapshot = await session.host.create(root);
         await session.host.prompt(snapshot.sessionId, "inspect the large file");
         await session.host.session.waitForIdle();
-        assert.match(handle, /^out_/);
-        assert.match(pagedContext, /line 1/);
-        assert.match(pagedContext, /\[\d+\/\d+ bytes/);
+        assert.equal(nextLine, 8000);
+        assert.match(pagedContext, /line 8000/);
+        assert.doesNotMatch(pagedContext, /ephemeral, generation/);
       } finally {
         await session.dispose();
         faux.unregister();
@@ -2022,4 +2184,59 @@ describe("session e2e — permission gate extension", () => {
     });
   });
 
+});
+
+
+describe("D-284 request admission", () => {
+  it("commits before a tool-loop continuation needs space, not after the final reply", async () => {
+    await withTempRoot("piarium-request-admission-", async (root) => {
+      await mkdir(join(root, "agent"), { recursive: true });
+      await writeFile(join(root, "agent", "settings.json"), JSON.stringify({
+        compaction: { enabled: true, reserveTokens: 4_000, keepRecentTokens: 1_200 },
+        harness: { context: { preparationWaterline: 0.4 } },
+      }), "utf8");
+      await writeFile(join(root, "material.txt"), Array.from({ length: 1_500 },
+        (_, i) => `line ${i + 1}: ${"material ".repeat(8)}`).join("\n"), "utf8");
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 24_000, maxTokens: 800 }] });
+      let session: Awaited<ReturnType<typeof setupSession>> | undefined;
+      const foreground: { compacted: boolean; chars: number }[] = [];
+      let summaryCalls = 0;
+      const respond = (context: Context, options: { cacheRetention?: string } | undefined) => {
+        // Faux's synthetic cache-write count overlaps its uncached input.
+        // Disable that test-only estimator so the capacity test uses one input count.
+        if (options) options.cacheRetention = "none";
+        const tail = JSON.stringify(context.messages.at(-1));
+        if (/summary text only/i.test(tail)) {
+          summaryCalls += 1;
+          return fauxAssistantMessage("The task reads material.txt in chunks. Continue reading; original entries remain in history.");
+        }
+        foreground.push({
+          compacted: session!.host.session.sessionManager.getEntries().some((entry) => entry.type === "compaction"),
+          chars: JSON.stringify(context).length,
+        });
+        return foreground.length <= 3
+          ? fauxAssistantMessage([fauxToolCall("read", { path: "material.txt", offset: 1 + (foreground.length - 1) * 230, limit: 230 })])
+          : fauxAssistantMessage("Finished reading the requested material.");
+      };
+      faux.setResponses(Array.from({ length: 20 }, () => respond));
+      try {
+        session = await setupSession({ root, faux });
+        const created = await session.host.create(root);
+        await session.host.prompt(created.sessionId, "Read the first 690 lines in three consecutive read calls.");
+        await session.host.session.waitForIdle();
+        assert.equal(foreground.length, 4, JSON.stringify(session.host.session.sessionManager.getEntries()
+          .filter((entry) => entry.type === "message" && entry.message.role === "assistant")
+          .map((entry) => ({ id: entry.id, stopReason: (entry as { message: { stopReason?: string } }).message.stopReason,
+            error: (entry as { message: { errorMessage?: string } }).message.errorMessage }))));
+        assert.ok(foreground.slice(1).some((request) => request.compacted),
+          `tool-loop requests must see the committed boundary before going out; shapes=${JSON.stringify(foreground)}; summaries=${summaryCalls}`);
+        const entries = session.host.session.sessionManager.getEntries();
+        assert.equal(entries.filter((entry) => entry.type === "message" && entry.message.role === "toolResult").length, 3,
+          "compaction must retain every original tool result in native Pi history");
+      } finally {
+        await session?.dispose();
+        faux.unregister();
+      }
+    });
+  });
 });

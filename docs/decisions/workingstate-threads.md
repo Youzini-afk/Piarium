@@ -1261,3 +1261,27 @@ trieSet 创建 O(depth) 新节点（<10，非 O(pool)）、500→1000→2000 线
 选择，Run冻结模型/工具/权限/scope/工作区/prompt片段/inputOrigin（task/inherit），Thread持久化与UI投影改用`preset`，
 自动review默认关闭。仍待实施：continue/fresh输入、定向消息语义、同根共享执行准入与分段成果；send仍只收直接子
 active/running，并发仍按parent分别统计，等待仍不让出名额。本次不新增付费模型评测前置或固定审查轮数。
+
+### D-287 · 2026-09-16 · D-284–D-286 验收收口
+
+类型：问题与解法
+
+决定：上下文原文保留、Thread 消息、执行准入和物化 baseline 更新都以各自真实提交边界收口。Pi 的 active context
+产生 observation receipt、材料修订和同 Thread 旧 Run 的历史授权；Host 只在响应或 Pi 输入实际接受后推进 cursor/message
+状态。Run admission 与 starting Run 在同一 catalog mutation 中完成，spawn/resume/restore/continue 消费该 Run 的冻结配置。
+已物化 baseline 更新用 staging branch + Rust durable Integration + 整目录复核 + child branch CAS，并由持久 handoff 阻止
+publish/resume/restore/reclaim 越过未决状态。
+
+原因：审计反例表明原实现多次把“准备完成”当作“消费完成”：先计数后 startRun、先 resolved 后 send、先 cursor advance 后
+响应、先目录 apply 后 branch CAS。测试 helper 和字段存在不能证明这些跨域状态转换。把接受、执行和确认放回实际权威后，
+失败能保留旧结果、原文和用户磁盘内容，也不需要 keeper、第二历史库、TS writer 或固定重试次数。
+
+考虑过的替代：内存锁不能承担崩溃后的消息或物化身份；清空全部 cursor 会重复注入仍在上下文的材料；让 fresh 访问任意
+session 会扩大历史权限；固定重试 CAS 会掩盖并发写者；为了测试 double 保留旧 reset/fallback 会形成第二语义。均不采用。
+
+影响：D-284–D-286 的实现状态由本条验收修正。新增 request-level context boundary、retained-context receipts、同 Thread
+`history(run)`、Pi passive notify/native request receipt、根级原子 admission、固定 delivery 读取和 materialized baseline
+handoff。状态与证据见 `agent-harness-acceptance-20260916.md`、status 2.4A/B、2.6A/B、3.18A–E 以及 Harness/Kernel/Recovery
+模块文档。
+
+状态：已实施并完成定向验收；真实付费 provider 质量、完整 packaged 点击链、其他平台真机和物理断电没有由本条外推。

@@ -50,7 +50,7 @@ import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harne
 import { discoverShells } from './lib/harness/shell-discovery.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
-import { createThreadSendService } from './lib/harness/thread-services.js';
+import { createUserThreadSendAdapter } from './lib/harness/thread-ui-adapter.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
@@ -1603,6 +1603,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cloneAgentInputSnapshot: (sessionId, context) => documentsAuthority.cloneAgentInputSnapshot(sessionId, context),
     resolveIntegrationCoordinator: () => threadIntegrationCoordinator,
     canReclaimWorktree: createWorktreeReclaimGuard(documentsAuthority),
+    resolveBaselineApplyContext: resolveDirectoryApplyContext,
     hasActiveCommands: (directory) => harnessShellActivity.hasActiveCommandAtDirectory(directory),
     verification: verificationCoordinator,
     worktreeSettings: DEFAULT_HARNESS_SETTINGS.worktree,
@@ -1741,13 +1742,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         tools: input.tools,
       }),
-      prompt: async (sessionId, text, instructions) => {
+      prompt: async (sessionId, text, instructions, images) => {
         const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.prompt', {
           sessionId,
           text,
           ...(instructions ? { instructions } : {}),
+          ...(images?.length ? { images } : {}),
         });
         if (!result.accepted) throw new Error(`Pi child session rejected its initial prompt: ${sessionId}`);
+      },
+      request: async (sessionId, text, messageId) => {
+        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.threadRequest', { sessionId, text, messageId });
+        if (!result.accepted) throw new Error(`Pi session rejected execution input: ${sessionId}`);
+      },
+      notify: async (sessionId, text, messageId) => {
+        const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
+        if (!result.accepted) throw new Error(`Pi session rejected passive input: ${sessionId}`);
       },
       send: async (sessionId, text) => {
         const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.followUp', { sessionId, text });
@@ -1769,6 +1779,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         }
       },
       stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
+      captureInput: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.input.capture', { sessionId }),
       entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
       readEntries: (sessionId, _cwd, scope = 'branch') => piRuntimeBroker.previewSessionEntries(sessionId, undefined, scope),
     },
@@ -1784,32 +1795,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,
-    sendToThread: async (input) => {
-      const { workspaceId } = await threadRuntime!.scopeForSession(input.parentSessionId);
-      const service = createThreadSendService(harnessServiceHost);
-      return service.handle({
-        threadId: input.threadId,
-        message: input.message,
-        from: 'user',
-        ...(input.kind === undefined ? {} : { kind: input.kind }),
-        ...(input.context === undefined ? {} : { context: input.context }),
-        ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
-        ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
-      }, {
-        actor: {
-          authorityInstanceId: 'ui-thread-routes',
-          sessionId: input.parentSessionId,
-          workerId: 'ui-thread-routes',
-          workerGeneration: 0,
-          workspaceId,
-          grantedCapabilities: [],
-        },
-        authorizedPaths: [],
-        sessionId: input.parentSessionId,
-        workspaceId,
-        signal: input.signal,
-      });
-    },
+    sendToThread: createUserThreadSendAdapter(() => harnessServiceHost, threadRuntime!),
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerHarnessContextRoutes(app, {
@@ -1872,7 +1858,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (!store || !knowledgeVectors) return;
         knowledgeVectors.notify(store, 'workspace', workspaceId, workspaceId, ids);
       },
-      onBlocksChanged: (sessionId, change) => {
+      onBlocksChanged: (sessionId) => {
         broadcastGlobalUiEvent?.({
           type: 'piarium:harness-blocks-changed',
           properties: { workspaceId, sessionId },
@@ -2370,6 +2356,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     threadSendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
     threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
+    threadHistoryEntries: (sessionId) => piRuntimeBroker.previewSessionEntries(sessionId, undefined, "branch"),
     threadContinueRun: (input) => threadRuntime!.continueRun(input),
     threadResumeLost: (workspaceId, parent) => threadRuntime!.resumeLostForParent(workspaceId, parent),
   });

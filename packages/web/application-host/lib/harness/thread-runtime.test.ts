@@ -137,6 +137,8 @@ describe("thread runtime", () => {
       open: vi.fn(async (input) => snapshot(input.sessionId, input.cwd)),
       prompt: vi.fn(async (_sessionId, text) => { sent.push(text); }),
       send: vi.fn(async (_sessionId, text) => { sent.push(text); }),
+      notify: vi.fn(async (_sessionId, text) => { sent.push(text); }),
+      request: vi.fn(async (_sessionId, text) => { sent.push(text); }),
       abort: vi.fn(async () => {}),
       close: vi.fn(async () => {}),
       snapshot: vi.fn(async (sessionId) => ({
@@ -196,6 +198,24 @@ describe("thread runtime", () => {
     await runtime.spawn({ ...input, threadId: thread.id, runId: run.id });
     return { input, thread, run };
   };
+
+  it("keeps held input pending when opening a continued session fails", async () => {
+    const { thread, run } = await start();
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success");
+    await registry.recordThreadMessage(WORKSPACE, thread.id, {
+      id: "held-on-open-failure", direction: "in", from: { kind: "session", id: PARENT.id },
+      to: { kind: "thread", id: thread.id }, kind: "inform", text: "do not lose this requirement",
+      status: "held", at: new Date().toISOString(),
+    });
+    vi.mocked(sessionAdapter.open).mockRejectedValueOnce(new Error("open failed"));
+    await expect(runtime.continueRun({
+      workspaceId: WORKSPACE, parent: PARENT, threadId: thread.id,
+      mode: "continue", task: "continue the work", requestId: "failed-open-request",
+    })).rejects.toThrow("open failed");
+    const held = (await registry.getThreadById(WORKSPACE, thread.id))!.messages!.find((message) => message.id === "held-on-open-failure");
+    expect(held?.status).toBe("held");
+    expect((await registry.getActiveRun(WORKSPACE, thread.id))?.outcome).toBe("failure");
+  });
 
   it("creates a real child session, selects its preset model, and starts the Run", async () => {
     const { thread, run } = await start();
@@ -1178,7 +1198,7 @@ describe("thread runtime", () => {
       report: {
         conclusion: "Implemented it",
         changedFiles: ["a.ts"],
-        deviations: ["used the existing service seam", "kept the compatibility adapter"],
+        deviations: ["used the existing service seam"],
         unresolved: ["documentation follow-up"],
         blocksSnapshot: {
           progress: "Implementation complete",
@@ -1187,6 +1207,44 @@ describe("thread runtime", () => {
         transcriptRef: { sessionId: "child-1", fromEntryId: "entry-1", toEntryId: "entry-2" },
       },
     });
+  });
+
+  it("does not settle or publish while a materialized baseline handoff is pending", async () => {
+    const { thread, run } = await start();
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/thread",
+      base: "parent@1",
+      materialized: true,
+      viewMode: "materialized",
+      preparationStage: "ready",
+      baselineUpdate: {
+        operationId: "baseline-settle-pending",
+        stageBranchId: "baseline-stage-settle",
+        parentBranchId: "parent-branch",
+        parentResultRevision: 2,
+        expectedWriteRevision: 0,
+        originalRoot: "sha256-original",
+        originalBaseRoot: "sha256-base",
+        plannedRoot: "sha256-planned",
+        phase: "prepared",
+        updatedFromParent: [],
+        keptChildPaths: [],
+        mergedPaths: [],
+        conflicts: [],
+      },
+    });
+    runtime.processEvent({
+      kind: "host",
+      sessionId: "child-1",
+      envelope: { kind: "event", event: "agent.event", data: { event: { type: "agent_settled" } } },
+    });
+    await runtime.drain();
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ id: run.id, outcome: null });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({
+      attention: "stalled",
+      worktree: { baselineUpdate: { operationId: "baseline-settle-pending" } },
+    });
+    expect(sessionAdapter.close).not.toHaveBeenCalled();
   });
 
   it("records unavailable child block storage in the durable report", async () => {
@@ -1250,6 +1308,123 @@ describe("thread runtime", () => {
     expect(runs[1]).toMatchObject({ sessionId: "child-1", workerState: "running" });
     expect(sessionAdapter.create).toHaveBeenCalledWith(expect.objectContaining({ tools: input.tools }));
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.draftBaselineId).toBe("draft-resume");
+  });
+
+  it("does not publish or admit a lost-Run replacement while a baseline handoff is pending", async () => {
+    const input = createInput();
+    const thread = await registry.createThread(input);
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.setWorktree(WORKSPACE, thread.id, {
+      path: "/workspace/thread",
+      base: "parent@1",
+      baselineUpdate: {
+        operationId: "baseline-apply-pending",
+        stageBranchId: "baseline-stage-pending",
+        parentBranchId: "parent-branch",
+        parentResultRevision: 2,
+        expectedWriteRevision: 0,
+        originalRoot: "sha256-original",
+        originalBaseRoot: "sha256-base",
+        plannedRoot: "sha256-planned",
+        phase: "prepared",
+        updatedFromParent: [],
+        keptChildPaths: [],
+        mergedPaths: [],
+        conflicts: [],
+      },
+    });
+    await registry.endRun(WORKSPACE, thread.id, first.id, "lost", "host restarted");
+
+    await runtime.resumeLostForParent(WORKSPACE, PARENT);
+    await runtime.drain();
+
+    expect(await registry.listRuns(WORKSPACE, thread.id)).toHaveLength(1);
+    expect(await registry.getActiveRun(WORKSPACE, thread.id)).toMatchObject({ id: first.id, outcome: "lost" });
+    expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ attention: "stalled" });
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+    expect(sessionAdapter.create).not.toHaveBeenCalled();
+  });
+
+  it("reconciles a committed baseline handoff before startup admits a lost-Run replacement", async () => {
+    const publishDirectoryResult = vi.fn(async () => ({
+      resultRevision: 3,
+      branchId: "child-branch",
+      changedPaths: ["a.ts"],
+      baseStates: { "a.ts": { kind: "missing" as const } },
+      pathStates: { "a.ts": { kind: "missing" as const } },
+      diffStats: { files: 1, insertions: 0, deletions: 0 },
+      createdAt: new Date().toISOString(),
+    }));
+    const store = {
+      getBranchRoot: async (branchId: string) => branchId === "baseline-stage-committed" ? null : { captureScopes: [] },
+      publishDirectoryResult,
+    } as unknown as WorkingStateRootStore;
+    const workingStates: WorkspaceWorkingStateRootAccess = {
+      withBranchStore: async (_workspaceId, _purpose, operation) => operation(store, {
+        identity: { authorityId: "test", canonicalRoot: "/workspace", filesystemProfile: "test", workspaceId: WORKSPACE },
+        durableRecoveryStore: {},
+      } as never),
+    };
+    const recovering = createThreadRuntime({
+      registry,
+      sessions: sessionAdapter,
+      workingStates,
+      resolveWorkspaceRoot: async () => "/workspace",
+      resolveRuntimeWorkspaceId: async () => "runtime-workspace-1",
+      resolveBaselineApplyContext: async () => ({
+        workspaceId: "runtime-workspace-1",
+        resourceOperationGate: { run: async (_resources, operation) => operation() },
+      }),
+      canReclaimWorktree: async () => ({ safe: true }),
+      worktrees: {
+        prepare: prepareWorktree,
+        assertOwnership: async () => undefined,
+        snapshot: async (worktree) => worktree,
+        inspect: async () => ({ patch: "", untracked: [], changedFiles: ["a.ts"], diffStats: { files: 1, insertions: 0, deletions: 0 } }),
+        merge: async () => ({ merged: 0, conflicts: [], conflictState: "none", changedFiles: [], diffStats: { files: 0, insertions: 0, deletions: 0 } }),
+      },
+    });
+    const parent = await registry.createThread(createInput());
+    await registry.setWorkingState(WORKSPACE, parent.id, { branchId: "parent-branch", resultRevision: 2 });
+    const parentRef = { kind: "thread" as const, id: parent.id };
+    const child = await registry.createThread({ ...createInput(), parent: parentRef });
+    await registry.setWorkingState(WORKSPACE, child.id, { branchId: "child-branch", resultRevision: 2 });
+    await registry.setWorktree(WORKSPACE, child.id, {
+      path: "/workspace/thread",
+      base: "parent-branch@1",
+      materialized: true,
+      viewMode: "materialized",
+      preparationStage: "ready",
+      baselineUpdate: {
+        operationId: "baseline-apply-committed",
+        stageBranchId: "baseline-stage-committed",
+        parentBranchId: "parent-branch",
+        parentResultRevision: 2,
+        expectedWriteRevision: 0,
+        originalRoot: "sha256-original",
+        originalBaseRoot: "sha256-base",
+        plannedRoot: "sha256-planned",
+        phase: "committed",
+        updatedFromParent: ["a.ts"],
+        keptChildPaths: [],
+        mergedPaths: [],
+        conflicts: [],
+      },
+    });
+    const first = await registry.startRun(WORKSPACE, child.id);
+    await registry.markRunRunning(WORKSPACE, child.id, first.id, "lost-child-session");
+    await registry.endRun(WORKSPACE, child.id, first.id, "lost", "host restarted");
+    try {
+      await recovering.resumePendingDeletions();
+      expect((await registry.getThread(WORKSPACE, parentRef, child.id))?.worktree?.baselineUpdate).toBeUndefined();
+      expect(await registry.listRuns(WORKSPACE, child.id)).toHaveLength(1);
+      await recovering.resumeLostForParent(WORKSPACE, parentRef);
+      await recovering.drain();
+      expect(await registry.listRuns(WORKSPACE, child.id)).toHaveLength(2);
+      expect(await registry.getActiveRun(WORKSPACE, child.id)).toMatchObject({ attempt: 2, workerState: "running" });
+      expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "lost-child-session" }));
+      expect(publishDirectoryResult).toHaveBeenCalled();
+    } finally { await recovering.dispose(); }
   });
 
   it("stops automatic recovery after a second consecutive worker crash", async () => {
@@ -3301,6 +3476,25 @@ describe("thread runtime", () => {
     await registry.endRun(WORKSPACE, child.id, childRun.id, "success", "done");
     await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "branch-thread", resultRevision: 2 });
     await registry.setWorkingState(WORKSPACE, child.id, { branchId: "branch-child", resultRevision: 1 });
+    await registry.setWorktree(WORKSPACE, child.id, {
+      path: "/workspace/child",
+      base: "branch-thread@1",
+      baselineUpdate: {
+        operationId: "baseline-delete-pending",
+        stageBranchId: "baseline-stage-child",
+        parentBranchId: "branch-thread",
+        parentResultRevision: 2,
+        expectedWriteRevision: 0,
+        originalRoot: "sha256-original",
+        originalBaseRoot: "sha256-base",
+        plannedRoot: "sha256-planned",
+        phase: "prepared",
+        updatedFromParent: [],
+        keptChildPaths: [],
+        mergedPaths: [],
+        conflicts: [],
+      },
+    });
 
     const result = await deleting.deleteUser(WORKSPACE, PARENT, thread.id);
     expect(result.deletedThreadIds).toEqual([child.id, thread.id]);
@@ -3309,7 +3503,7 @@ describe("thread runtime", () => {
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toBeNull();
     expect(await registry.getThread(WORKSPACE, { kind: "thread", id: thread.id }, child.id)).toBeNull();
     expect(deletedSessions).toEqual(expect.arrayContaining(["child-1", "grandchild-session"]));
-    expect(released.branches).toEqual(expect.arrayContaining(["branch-child", "branch-thread"]));
+    expect(released.branches).toEqual(expect.arrayContaining(["baseline-stage-child", "branch-child", "branch-thread"]));
     expect(released.results).toEqual([]);
     expect(reclaimed).toContain("/workspace/thread");
     await deleting.dispose();
@@ -3732,15 +3926,14 @@ describe("thread runtime", () => {
 
   it("continueRun parks the request on the Thread when the shared root budget is full", async () => {
     const solo = { ...createInput(), concurrency: 1 };
-    // The sibling occupies the root's only slot.
-    const blocker = await registry.createThread(solo);
-    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
-    await runtime.spawn({ ...solo, threadId: blocker.id, runId: blockerRun.id });
-    // The settled Thread's own concurrency is 1 — the sibling fills it.
+    // Complete the old Run before another Thread takes the root's only slot.
     const thread = await registry.createThread(solo);
     const settledRun = await registry.startRun(WORKSPACE, thread.id);
     await runtime.spawn({ ...solo, threadId: thread.id, runId: settledRun.id });
     await registry.endRun(WORKSPACE, thread.id, settledRun.id, "success", null, reportFor("child-1"));
+    const blocker = await registry.createThread(solo);
+    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
+    await runtime.spawn({ ...solo, threadId: blocker.id, runId: blockerRun.id });
     await registry.recordThreadMessage(WORKSPACE, thread.id, {
       id: "req-parked",
       direction: "in",
@@ -3764,7 +3957,7 @@ describe("thread runtime", () => {
     expect(result).toEqual({});
     const parkedThread = await registry.getThread(WORKSPACE, PARENT, thread.id);
     expect(parkedThread?.lifecycle).toBe("settled");
-    expect(parkedThread?.pendingContinuation).toMatchObject({
+    expect(parkedThread?.pendingContinuations?.[0]).toMatchObject({
       mode: "continue",
       task: "pick this up",
       requestId: "req-parked",
@@ -3796,27 +3989,19 @@ describe("thread runtime", () => {
     expect(promptText).toContain("keep going");
     expect(promptText).toContain("the API contract changed");
     // Held messages were consumed atomically — a retry cannot deliver them twice.
-    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
+    expect(await registry.listPendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
   });
 
-  it("captureInputContext renders the committed summary plus retained raw material", async () => {
-    vi.mocked(sessionAdapter.entries).mockImplementation(async (sessionId: string, scope: "branch" | "all" = "branch"): Promise<SessionEntriesResult> => ({
-      sessionId,
-      scope,
-      leafId: "e4",
-      entries: [
-        { id: "e1", parentId: null, timestamp: "2026-09-04T00:00:00.000Z", type: "message", message: { role: "user", content: "old task", timestamp: 0 } },
-        { id: "e2", parentId: "e1", timestamp: "2026-09-04T00:01:00.000Z", type: "compaction", summary: "SUMMARY TEXT", firstKeptEntryId: "e3", tokensBefore: 9000 },
-        { id: "e3", parentId: "e2", timestamp: "2026-09-04T00:02:00.000Z", type: "message", message: { role: "user", content: "follow-up", timestamp: 0 } },
-        { id: "e4", parentId: "e3", timestamp: "2026-09-04T00:03:00.000Z", type: "message", message: { role: "toolResult", toolName: "read", isError: false, content: [], toolCallId: "t1", timestamp: 0 } },
-      ],
-    }));
-    const material = await runtime.captureInputContext("sess-x");
-    expect(material?.text).toContain("[committed summary]");
-    expect(material?.text).toContain("SUMMARY TEXT");
-    expect(material?.text).toContain("[user] follow-up");
-    expect(material?.text).toContain("[tool result: read]");
-    expect(material?.text).not.toContain("old task");
-    expect(material?.anchors).toEqual(["e2"]);
+  it("captureInputContext consumes the Pi-owned fixed capture instead of rebuilding projected history", async () => {
+    const material = { text: "fixed source material", anchors: ["kept-id"], images: [{ data: "image", mimeType: "image/png" }] };
+    sessionAdapter.captureInput = vi.fn(async () => material);
+    vi.mocked(sessionAdapter.entries).mockRejectedValue(new Error("entry projection must not be read"));
+    expect(await runtime.captureInputContext("sess-x")).toEqual(material);
+    expect(sessionAdapter.captureInput).toHaveBeenCalledWith("sess-x");
+    expect(sessionAdapter.entries).not.toHaveBeenCalled();
+  });
+
+  it("captureInputContext does not pretend to inherit when the required Pi seam is absent", async () => {
+    await expect(runtime.captureInputContext("sess-x")).rejects.toMatchObject({ code: "unavailable" });
   });
 });

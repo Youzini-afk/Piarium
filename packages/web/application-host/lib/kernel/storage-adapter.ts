@@ -1712,10 +1712,15 @@ export class KernelStorageAdapter {
       ? await this.options.resolveActor(workspaceId, purpose, actorOverride)
       : actorOverride ?? { owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""] };
     const capabilities = [...new Set(["storage.read", "storage.write", "recovery", ...(actor.capabilities ?? []), ...(purpose === "recovery-maintenance" ? ["recovery.maintenance", "storage.gc"] : purpose.includes("gc") ? ["storage.gc"] : [])])].sort();
-    const key = JSON.stringify({ workspaceId, actor, capabilities });
+    // Object insertion order is not actor identity. Recovery capture and record
+    // writers construct the same named fields in different orders; hashing those
+    // raw objects minted different grants and invalidated transferred owners.
+    const actorJson = JSON.stringify(Object.fromEntries(Object.entries(actor)
+      .filter(([, value]) => value !== undefined).sort(([left], [right]) => left.localeCompare(right))));
+    const key = JSON.stringify({ workspaceId, actorJson, capabilities });
     const existing = this.grants.get(key); if (existing) return existing;
     const grant = (async () => {
-      const actorKey = createHash("sha256").update(JSON.stringify(actor)).digest("hex").slice(0, 24);
+      const actorKey = createHash("sha256").update(actorJson).digest("hex").slice(0, 24);
       const capabilityKey = createHash("sha256").update(JSON.stringify(capabilities)).digest("hex").slice(0, 12);
       return this.client.issueGrant({ grantId: `product:${this.options.hostId}:${this.options.hostGeneration ?? process.pid}:${workspaceId}:${actorKey}:${capabilityKey}`, ...actor, capabilities, pathScopes: actor.pathScopes ?? [""] });
     })();

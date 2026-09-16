@@ -4,7 +4,12 @@ import type { SessionEntry, SessionMessageEntry, CompactionEntry } from "@earend
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 import { createHistoryTool } from "../../src/harness/history-tool.js";
-import { buildFreshInput } from "../../src/harness/fresh-input.js";
+import { assembleFreshInput, minePiBranchEntries, type FreshInputSeed } from "@piarium/protocol";
+import { projectSessionEntry } from "../../src/protocol-projector.js";
+
+const buildFreshInput = ({ entries, recentUserMessages = 3, ...seed }: FreshInputSeed & {
+  entries: SessionEntry[]; recentUserMessages?: number;
+}) => assembleFreshInput({ ...seed, ...minePiBranchEntries(entries.map(projectSessionEntry), recentUserMessages) });
 
 const userMessage = (text: string): AgentMessage => ({
   role: "user",
@@ -19,6 +24,7 @@ const assistantMessage = (text: string): AgentMessage => ({
   model: "faux-1",
   content: [{ type: "text", text }],
   stopReason: "stop",
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
   timestamp: Date.now(),
 } as unknown as AgentMessage);
 
@@ -107,11 +113,11 @@ describe("history tool", () => {
   it("caps matches at limit and points at narrower queries", async () => {
     const { text, details } = await runHistory(branch(), { query: "the", limit: 2 });
     assert.equal(details.shown, 2);
-    assert.match(text, /more match\(es\) — narrow the query/);
+    assert.match(text, /more match\(es\) — continue with offset: 2/);
   });
 });
 
-describe("buildFreshInput", () => {
+describe("production fresh input assembler", () => {
   it("carries task, recent verbatim user requirements, results, open items, and anchors", () => {
     const input = buildFreshInput({
       task: "Continue the package map report",
@@ -132,18 +138,19 @@ describe("buildFreshInput", () => {
     assert.match(input.text, /- c1/);
   });
 
-  it("limits carried messages and clips long excerpts without losing the anchor", () => {
+  it("selects messages without truncating requirements behind an inaccessible history promise", () => {
     const long = "x".repeat(5_000);
     const entries = [
       messageEntry("u1", null, userMessage("first requirement")),
       messageEntry("u2", "u1", userMessage("second requirement")),
       messageEntry("u3", "u2", userMessage(long)),
     ];
-    const input = buildFreshInput({ entries, recentUserMessages: 2, excerptChars: 300 });
+    const input = buildFreshInput({ entries, recentUserMessages: 2 });
     assert.deepEqual(input.userMessageEntryIds, ["u2", "u3"]);
     assert.ok(!input.text.includes("first requirement"));
-    assert.match(input.text, /truncated — full text via history/);
-    assert.ok(input.text.length < 5_000);
+    assert.ok(input.text.includes(long));
+    assert.doesNotMatch(input.text, /truncated|full text via history/);
+    assert.match(input.text, /current-session history tool cannot resolve/);
   });
 
   it("produces honest empty input when nothing carries over", () => {
@@ -156,5 +163,28 @@ describe("buildFreshInput", () => {
   it("falls back to the session goal when no explicit task is supplied", () => {
     const input = buildFreshInput({ goal: "Map the packages", entries: branch(), recentUserMessages: 0 });
     assert.match(input.text, /## Task\nMap the packages/);
+    assert.deepEqual(input.userMessageEntryIds, [], "zero selects no prior user messages, not all of them");
+    assert.doesNotMatch(input.text, /## Selected prior user statements/);
+  });
+});
+
+
+describe("history pagination acceptance", () => {
+  it("can reach every matching entry without guessing an unseen id", async () => {
+    const entries = Array.from({ length: 11 }, (_, i) => messageEntry(
+      `p${i}`, i === 0 ? null : `p${i - 1}`, userMessage("SAME-MARKER shared requirement"),
+    ));
+    const first = await runHistory(entries, { query: "SAME-MARKER", limit: 2 });
+    assert.equal(first.details.nextOffset, 2);
+    const second = await runHistory(entries, { query: "SAME-MARKER", offset: first.details.nextOffset, limit: 2 });
+    assert.match(second.text, /entry p2 /);
+    assert.ok(!second.text.includes("entry p0 "));
+    const last = await runHistory(entries, { query: "SAME-MARKER", offset: 10, limit: 2 });
+    assert.match(last.text, /entry p10 /);
+    assert.equal(last.details.shown, 1);
+    assert.equal(last.details.nextOffset, undefined);
+    const end = await runHistory(entries, { query: "SAME-MARKER", offset: 11, limit: 2 });
+    assert.equal(end.details.shown, 0);
+    assert.match(end.text, /end of matching entries/);
   });
 });

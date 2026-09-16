@@ -5,11 +5,8 @@ import type { ThreadResultHistory, ThreadResultHistoryReleaseParams, ThreadResul
 import type {
   AgentInputContext,
   HarnessWorktreeSettings,
-  PiAssistantMessage,
-  PiCompactionEntry,
   PiMessage,
   PiSessionMessageEntry,
-  PiUserMessage,
   SessionEntriesResult,
   SessionSnapshot,
   SessionStats,
@@ -46,13 +43,14 @@ import {
   projectWorkspaceSpace,
   readVolumeSpace,
 } from "./working-state/thread-space.js";
-import type { CreateThreadInput, ThreadRegistry } from "./thread-registry.js";
+import { ThreadAdmissionError, type CreateThreadInput, type ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
 import type { RecoveryState, WorkingStatePin, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { createBranchWithDraftBaseline } from "./working-state/draft-baseline.js";
 import { rebaseBranchOntoParentRevision } from "./working-state/baseline-rebase.js";
+import { updateMaterializedBaseline } from "./working-state/materialized-baseline-update.js";
 import type { ThreadExecutionViewRegistry } from "./working-state/execution-view.js";
 import { acquireVirtualWriteTicket, type VirtualWriteGate } from "./working-state/virtual-write-gate.js";
 import {
@@ -95,8 +93,11 @@ export interface ThreadSessionAdapter {
     tools: string[];
     workspaceId: string;
   }): Promise<SessionSnapshot>;
-  prompt(sessionId: string, text: string, instructions?: string): Promise<void>;
+  prompt(sessionId: string, text: string, instructions?: string, images?: import("@piarium/protocol").ImageAttachment[]): Promise<void>;
   send(sessionId: string, text: string): Promise<void>;
+  /** Passive durable input; implementations must never emulate this with prompt/followUp. */
+  notify?(sessionId: string, text: string, messageId: string): Promise<void>;
+  request?(sessionId: string, text: string, messageId: string): Promise<void>;
   abort(sessionId: string): Promise<void>;
   close(sessionId: string): Promise<void>;
   snapshot(sessionId: string): Promise<SessionSnapshot>;
@@ -107,6 +108,7 @@ export interface ThreadSessionAdapter {
    * Read a persisted session's entries without opening a worker — used for
    * `fresh` input construction on a settled Thread's retained transcript.
    */
+  captureInput?(sessionId: string): Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>;
   readEntries?(sessionId: string, cwd: string | undefined, scope?: "branch" | "all"): Promise<SessionEntriesResult>;
 }
 
@@ -136,6 +138,7 @@ export interface ThreadRuntimeOptions {
     release(): Promise<void>;
   }>;
   readBlocks?(sessionId: string): Promise<Array<{ label: string; content: string }> | null>;
+  resolveBaselineApplyContext?: import("../recovery/durable-file-operation.js").ResolveDirectoryApplyContext;
   withMergeWriter?<T>(workspaceId: string, threadId: string, operation: () => Promise<T>): Promise<T>;
   onError?: (error: unknown) => void;
   /** Alert threshold only; it does not cancel or limit a Run. */
@@ -404,12 +407,11 @@ const initialPrompt = (
       input.scope?.length ? `Scope: ${input.scope.join(", ")}` : null,
       parentBlocksText(parentBlocks),
       "When finished, use the headings `Conclusion`, `Deviations from brief`, and `Unresolved issues`; use `- none` when a section is empty.",
-      "If a memory decisions block is available, record each deviation as `Deviation: ...`.",
       input.inheritedContext
         ? [
             "",
-            "The parent's committed context captured at dispatch is included below. Output handles and",
-            "session-specific references were not carried; the parent may have progressed since the capture.",
+            "The parent's input was fixed at dispatch, including explicitly copied output bodies.",
+            "Source handles and entry ids are not child capabilities; the parent may have progressed since capture.",
             `<inherited-context from-session="${input.inheritedContext.fromSessionId}">`,
             input.inheritedContext.text,
             "</inherited-context>",
@@ -923,6 +925,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!thread?.workBranchId) return;
     let worktree = thread.worktree;
     const recoveredHandoff = worktree?.materializationHandoff;
+    if (worktree?.baselineUpdate) throw new ThreadRuntimeError("unavailable", `Finish baseline update ${worktree.baselineUpdate.operationId} before binding execution`);
     if (worktree?.materializationHandoff) {
       const sourceRoot = await options.resolveWorkspaceRoot(input.workspaceId);
       worktree = await resumeNativeMaterializationHandoff({
@@ -1497,6 +1500,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const thread = await options.registry.getThread(workspaceId, parent, threadId);
     if (thread?.preset === "retrieval") return;
     if (!thread?.worktree || !thread.workBranchId || !options.workingStates) return;
+    if (thread.worktree.baselineUpdate) {
+      throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before publishing a partial result`);
+    }
     const result = isVirtualWorktree(thread.worktree)
       ? await options.workingStates.withBranchStore(workspaceId, "thread-partial-result-publish", (store) => store.publishHeadResult(thread.workBranchId!))
       : await (async () => {
@@ -1934,6 +1940,22 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   );
 
   const spawn = async (input: SpawnThreadRunInput): Promise<{ sessionId: string }> => {
+    const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
+    const run = await options.registry.getActiveRun(input.workspaceId, input.threadId);
+    if (!thread || run?.id !== input.runId || !run.frozen) {
+      throw new ThreadRuntimeError("unavailable", "Thread launch has no current frozen Run authority");
+    }
+    if (thread.worktree?.baselineUpdate) throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before starting execution`);
+    const frozen = run.frozen;
+    // Callers supply identity and any prepared prompt, never a second execution
+    // configuration. Dequeue/recovery and direct dispatch use this same snapshot.
+    const { model: _model, permissions: _permissions, scope: _scope, systemPromptFragment: _fragment, ...identity } = input;
+    input = { ...identity, tools: [...frozen.tools], scope: [...frozen.scope], worktree: frozen.worktree,
+      ...(frozen.model ? { model: frozen.model } : {}),
+      permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+      ...(frozen.systemPromptFragment ? { systemPromptFragment: frozen.systemPromptFragment } : {}),
+      ...(run.request?.preparedInput ? { promptText: run.request.preparedInput } : {}),
+    };
     let releaseSpaceReservation = async (): Promise<void> => undefined;
     try {
       return await runPreparation(
@@ -1945,7 +1967,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     setPreparationStage("resolving-parent");
     const parent = await parentSession(input.workspaceId, input.parent);
     let parentBlocks: Array<{ label: string; content: string }> | null | undefined;
-    if (input.carryBlocks !== false && options.readBlocks) {
+    if (input.carryBlocks !== false && !input.inheritedContext && frozen.inputOrigin !== "fresh" && options.readBlocks) {
       try {
         parentBlocks = await options.readBlocks(parent.id);
       } catch (error) {
@@ -2241,14 +2263,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       checkPreparation();
       // Messages held while the Thread was queued flush into the first Run's
       // input here — they never start execution on their own (3.18C).
-      const heldMessages = await options.registry.takePendingThreadMessages(input.workspaceId, input.threadId);
+      const heldMessages = await options.registry.listPendingThreadMessages(input.workspaceId, input.threadId, run.request?.requestId);
       const basePrompt = input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks);
       await options.sessions.prompt(
         sessionId,
         heldMessages.length > 0
           ? `${basePrompt}\n\nMessages delivered while this thread was queued:\n${pendingMessagesSection(heldMessages)}`
           : basePrompt,
+        undefined,
+        input.inheritedContext?.images,
       );
+      await options.registry.acknowledgeThreadMessages(input.workspaceId, input.threadId, heldMessages.map((message) => message.id), input.runId);
       checkPreparation();
       if (virtualIsolated && mayMaterialize && effectiveSettings?.budget) {
         pendingMaterializeReservations.set(input.threadId, releaseSpaceReservation);
@@ -2490,7 +2515,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           if (await options.registry.countActiveInRoot(source.workspaceId, source.parent) >= createInput.concurrency) {
             return thread;
           }
-          const run = await options.registry.startRun(source.workspaceId, thread.id);
+          let run: ThreadRun;
+          try {
+            run = await options.registry.startRun(source.workspaceId, thread.id);
+          } catch (error) {
+            if (error instanceof ThreadAdmissionError) return thread;
+            throw error;
+          }
           reviewAttempt = { reviewThreadId: thread.id, reviewRunId: run.id };
           try {
             await spawn({ ...createInput, threadId: thread.id, runId: run.id, ...(promptText ? { promptText } : {}) });
@@ -2557,8 +2588,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!currentRun || currentRun.id !== binding.runId || currentRun.outcome !== null) return;
     const end = lastAgentEnd.get(binding.sessionId) ?? { messages: [], willRetry: false };
     if (end.willRetry) return;
+    const thread = await options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId);
+    if (!thread) return;
+    if (thread.worktree?.baselineUpdate) {
+      await options.registry.setAttention(binding.workspaceId, binding.threadId, "stalled");
+      throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before settling execution`);
+    }
     const conclusion = assistantConclusion(end.messages);
-    const [statsResult, entriesResult, blocksResult, thread] = await Promise.all([
+    const [statsResult, entriesResult, blocksResult] = await Promise.all([
       options.sessions.stats(binding.sessionId).then(
         (value) => ({ ok: true as const, value }),
         (error: unknown) => ({ ok: false as const, error }),
@@ -2573,9 +2610,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             (error: unknown) => ({ ok: false as const, error }),
           )
         : Promise.resolve({ ok: true as const, value: undefined }),
-      options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId),
     ]);
-    if (!thread) return;
     let changedFiles: string[] = [];
     let diffStats = thread.diffStats;
     const unresolved: string[] = conclusion.error ? [conclusion.error] : [];
@@ -2849,14 +2884,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     const branchEntries = entries?.entries ?? [];
     const blocksSnapshot = Object.fromEntries((blocks ?? []).map((block) => [block.label, block.content]));
-    const blockDeviations = (blocks ?? [])
-      .filter((block) => block.label === "decisions")
-      .flatMap((block) => block.content.split(/\r?\n/))
-      .flatMap((line) => {
-        const match = line.trim().match(/^(?:[-*]\s*)?deviations?(?:\s+from\s+(?:the\s+)?brief)?\s*[:：]\s*(.+)$/i);
-        return match && !isNone(match[1]!) ? [match[1]!.trim()] : [];
-      });
-    const deviations = [...new Set([...conclusion.deviations, ...blockDeviations])];
+    // The current Run's final report is authoritative. Retained notes remain
+    // inspectable, but old keeper decisions never manufacture new deviations.
+    const deviations = [...new Set(conclusion.deviations)];
     unresolved.push(...conclusion.unresolved.filter((item) => !unresolved.includes(item)));
     const report: ThreadReport = {
       conclusion: conclusion.text,
@@ -2893,10 +2923,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     autoResumedThreads.delete(`${binding.workspaceId}\0${binding.threadId}`);
     await closeBinding(binding, false);
     await releasePendingMaterializeReservation(binding.threadId);
-    const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId, binding.parent);
-    if (effectiveSettings?.reclaimIdle) {
-      await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
-    }
   };
 
   const processEvent = (event: BrokerEventLike): void => {
@@ -2907,10 +2933,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (event.kind === "worker.exit") {
       if (terminatingSessions.has(sessionId)) return;
       enqueue(binding.threadId, async () => {
-        const run = await options.registry.getActiveRun(binding.workspaceId, binding.threadId);
         let shouldResume = false;
-        if (run?.id === binding.runId && run.outcome === null) {
-          await publishPartialResult(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
+        await withThreadLifecycle(binding.workspaceId, binding.threadId, async () => {
+          const run = await options.registry.getActiveRun(binding.workspaceId, binding.threadId);
+          if (run?.id !== binding.runId || run.outcome !== null) return;
+          const thread = await options.registry.getThread(binding.workspaceId, binding.parent, binding.threadId);
+          if (!thread?.worktree?.baselineUpdate) {
+            await publishPartialResult(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
+          }
           await options.registry.endRun(
             binding.workspaceId,
             binding.threadId,
@@ -2919,7 +2949,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             event.expected ? "worker closed before the Run settled" : "worker exited unexpectedly",
           );
           shouldResume = !event.expected;
-        }
+        });
         bindingsBySession.delete(sessionId);
         if (sessionByThread.get(binding.threadId) === sessionId) sessionByThread.delete(binding.threadId);
         options.verification?.detachSession(sessionId);
@@ -3010,24 +3040,67 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (agentEvent.type === "agent_settled") {
       enqueue(
         binding.threadId,
-        () => binding.kind === "discussion" ? settleDiscussionTurn(binding) : settle(binding),
+        () => binding.kind === "discussion"
+          ? settleDiscussionTurn(binding)
+          : withThreadLifecycle(binding.workspaceId, binding.threadId, () => settle(binding)).then(async () => {
+              const run = await options.registry.getActiveRun(binding.workspaceId, binding.threadId);
+              if (run?.outcome === null) return;
+              const effectiveSettings = await resolveEffectiveWorktreeSettings(binding.workspaceId, binding.parent);
+              if (effectiveSettings?.reclaimIdle) {
+                await tryAutoReclaimDirectory(binding.workspaceId, binding.parent, binding.threadId).catch(reportError);
+              }
+            }),
       );
     }
   };
 
   const resumeLostForParent = async (workspaceId: string, parent: ThreadParent): Promise<void> => {
     const threads = await options.registry.listThreads(workspaceId, parent, true);
-    for (const thread of threads) {
-      const previous = await options.registry.getActiveRun(workspaceId, thread.id);
+    for (let thread of threads) {
+      let previous = await options.registry.getActiveRun(workspaceId, thread.id);
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
       if (resuming.has(thread.id)) continue;
-      // Lost-run resume shares the root execution budget (3.18C): when the
-      // pool is full the Thread stays lost until the next admission trigger.
-      if (await options.registry.countActiveInRoot(workspaceId, thread.parent) >= thread.manifest.concurrency) continue;
       resuming.add(thread.id);
       const task = (async () => {
-        await publishPartialResult(workspaceId, parent, thread.id).catch(reportError);
-        const run = await options.registry.startRun(workspaceId, thread.id, previous.runtimeId);
+        try {
+          // Host restart and worker-loss recovery are also the restart entry for
+          // a persisted directory-apply/branch-CAS handoff. Reconcile it before
+          // partial publication or Run admission can replace result identity.
+          if (thread.worktree?.baselineUpdate) {
+            const pending = thread.worktree.baselineUpdate;
+            try {
+              await updateBaseline(workspaceId, thread.parent, thread.id, pending.parentResultRevision);
+            } catch (error) {
+              await options.registry.setAttention(workspaceId, thread.id, "stalled").catch(reportError);
+              reportError(error);
+              return;
+            }
+            const recovered = await options.registry.getThread(workspaceId, thread.parent, thread.id);
+            if (!recovered || recovered.worktree?.baselineUpdate) {
+              await options.registry.setAttention(workspaceId, thread.id, "stalled").catch(reportError);
+              return;
+            }
+            thread = recovered;
+          }
+          await withThreadLifecycle(workspaceId, thread.id, async () => {
+          const latest = await options.registry.getThread(workspaceId, thread.parent, thread.id);
+          const latestRun = await options.registry.getActiveRun(workspaceId, thread.id);
+          if (!latest || latest.worktree?.baselineUpdate || latestRun?.outcome !== "lost") return;
+          thread = latest;
+          previous = latestRun;
+          // Lost-run resume shares the root execution budget (3.18C): when the
+          // pool is full the Thread stays lost until the next admission trigger.
+          if (await options.registry.countActiveInRoot(workspaceId, thread.parent) >= thread.manifest.concurrency) return;
+        await publishPartialResult(workspaceId, parent, thread.id);
+        let run: ThreadRun;
+        try {
+          run = await options.registry.startRun(workspaceId, thread.id, previous.runtimeId);
+        } catch (error) {
+          if (error instanceof ThreadAdmissionError) return;
+          throw error;
+        }
+        const frozen = run.frozen;
+        if (!frozen) throw new ThreadRuntimeError("unavailable", "Recovered Run has no frozen execution configuration");
         let resumedSessionId: string | null = null;
         try {
           if (!previous.sessionId) {
@@ -3046,13 +3119,13 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
               ...(thread.manifest.inputOrigin !== undefined ? { inputOrigin: thread.manifest.inputOrigin } : {}),
               ...(thread.manifest.inheritedContext ? { inheritedContext: thread.manifest.inheritedContext } : {}),
               autoRun: true,
-              worktree: thread.manifest.worktree,
-              ...(thread.model ? { model: thread.model } : {}),
-              tools: thread.manifest.tools,
-              permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-              ...(thread.manifest.scope.length > 0 ? { scope: thread.manifest.scope } : {}),
-              ...(thread.manifest.systemPromptFragment
-                ? { systemPromptFragment: thread.manifest.systemPromptFragment }
+              worktree: frozen.worktree,
+              ...(frozen.model ? { model: frozen.model } : {}),
+              tools: [...frozen.tools],
+              permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+              ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
+              ...(frozen.systemPromptFragment
+                ? { systemPromptFragment: frozen.systemPromptFragment }
                 : {}),
             });
             return;
@@ -3062,11 +3135,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
           const snapshot = await options.sessions.open({
             cwd,
-            ...(thread.model ? { model: thread.model } : {}),
-            permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-            ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+            ...(frozen.model ? { model: frozen.model } : {}),
+            permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+            ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
             sessionId: previous.sessionId!,
-            tools: [...thread.manifest.tools],
+            tools: [...frozen.tools],
             workspaceId: runtimeWorkspaceId,
           });
           resumedSessionId = snapshot.sessionId;
@@ -3082,7 +3155,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             sessionId: snapshot.sessionId,
             cwd,
             kind: thread.kind,
-            providerId: thread.model?.providerId ?? null,
+            providerId: frozen.model?.providerId ?? null,
             baseline: {
               cost: baselineStats?.cost ?? 0,
               toolCalls: baselineStats?.toolCalls ?? 0,
@@ -3127,9 +3200,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             else await options.sessions.close(resumedSessionId).catch(reportError);
           }
           reportError(error);
-        } finally {
-          resuming.delete(thread.id);
         }
+          });
+        } finally { resuming.delete(thread.id); }
       })();
       const tracked = task.catch(reportError);
       backgroundTasks.add(tracked);
@@ -3142,158 +3215,173 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string;
   }): Promise<ThreadMutationSnapshot> => {
     const scope = await scopeForSession(input.parentSessionId);
-    if (!scope.snapshot) {
-      throw new ThreadRuntimeError("unavailable", "Open the parent Pi session before converting its discussion thread");
-    }
-    const thread = await options.registry.getThread(scope.workspaceId, scope.parent, input.threadId);
-    if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
-    if (thread.kind !== "discussion") {
-      throw new ThreadRuntimeError("conflict", "This thread is already an implementation thread");
-    }
-    if (thread.lifecycle !== "active") {
-      throw new ThreadRuntimeError("conflict", `Only an active discussion can be converted (current state: ${thread.lifecycle})`);
-    }
-    const currentRun = await options.registry.getActiveRun(scope.workspaceId, thread.id);
-    if (!currentRun?.sessionId || currentRun.workerState !== "running" || currentRun.outcome !== null) {
-      throw new ThreadRuntimeError("conflict", "The discussion session is not currently available for conversion");
-    }
-    const binding = bindingsBySession.get(currentRun.sessionId);
-    if (!binding || binding.runId !== currentRun.id || binding.kind !== "discussion") {
-      throw new ThreadRuntimeError("unavailable", "The discussion worker must be restored before it can be converted");
-    }
-    const childSnapshot = await options.sessions.snapshot(currentRun.sessionId);
-    if (childSnapshot.busy || childSnapshot.isStreaming || childSnapshot.isCompacting) {
-      throw new ThreadRuntimeError("conflict", "Wait for the current discussion response to finish before converting it");
-    }
+    return withThreadLifecycle(scope.workspaceId, input.threadId, async () => {
+      if (!scope.snapshot) {
+        throw new ThreadRuntimeError("unavailable", "Open the parent Pi session before converting its discussion thread");
+      }
+      const thread = await options.registry.getThread(scope.workspaceId, scope.parent, input.threadId);
+      if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
+      if (thread.kind !== "discussion") {
+        throw new ThreadRuntimeError("conflict", "This thread is already an implementation thread");
+      }
+      if (thread.lifecycle !== "active") {
+        throw new ThreadRuntimeError("conflict", `Only an active discussion can be converted (current state: ${thread.lifecycle})`);
+      }
+      const currentRun = await options.registry.getActiveRun(scope.workspaceId, thread.id);
+      if (!currentRun?.sessionId || currentRun.workerState !== "running" || currentRun.outcome !== null) {
+        throw new ThreadRuntimeError("conflict", "The discussion session is not currently available for conversion");
+      }
+      const binding = bindingsBySession.get(currentRun.sessionId);
+      if (!binding || binding.runId !== currentRun.id || binding.kind !== "discussion") {
+        throw new ThreadRuntimeError("unavailable", "The discussion worker must be restored before it can be converted");
+      }
+      const childSnapshot = await options.sessions.snapshot(currentRun.sessionId);
+      if (childSnapshot.busy || childSnapshot.isStreaming || childSnapshot.isCompacting) {
+        throw new ThreadRuntimeError("conflict", "Wait for the current discussion response to finish before converting it");
+      }
 
-    const tools = scope.snapshot.activeTools.filter((tool) => !THREAD_CONTROL_TOOLS.has(tool));
-    const hasMutationTool = tools.some((tool) => {
-      const mutation = HARNESS_TOOL_META[tool]?.mutation;
-      return mutation === "journaled" || mutation === "process";
-    });
-    if (!hasMutationTool) {
-      throw new ThreadRuntimeError(
-        "unavailable",
-        "The parent session has no implementation-capable tools to grant this thread",
-      );
-    }
-
-    try {
-      await updateRunMetrics(binding);
-    } catch (error) {
-      reportError(error);
-    }
-    const prepared = await options.worktrees.prepare({
-      mode: "isolated",
-      sourceRoot: childSnapshot.cwd,
-      threadId: thread.id,
-      signal: abortController.signal,
-    });
-    if (!prepared.worktree) throw new Error("Implementation conversion did not create an isolated worktree");
-    const model = thread.model ?? (childSnapshot.model
-      ? { providerId: childSnapshot.model.provider, modelId: childSnapshot.model.id }
-      : undefined);
-    const converted = await options.registry.convertThread(scope.workspaceId, thread.id, {
-      ...(model ? { model } : {}),
-      scope: thread.manifest.scope,
-      tools,
-      worktree: prepared.worktree,
-    });
-    if (!converted) throw new ThreadRuntimeError("not-found", `Thread not found: ${thread.id}`);
-
-    try {
-      await closeBinding(binding, false);
-    } catch (error) {
-      await options.registry.endRun(
-        scope.workspaceId,
-        thread.id,
-        converted.run.id,
-        "lost",
-        `worker restart failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
-      ).catch(reportError);
-      throw error;
-    }
-
-    let opened: SessionSnapshot;
-    try {
-      const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
-      opened = await options.sessions.open({
-        cwd: prepared.cwd,
-        ...(model ? { model } : {}),
-        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
-        sessionId: currentRun.sessionId,
-        tools,
-        workspaceId: runtimeWorkspaceId,
+      const tools = scope.snapshot.activeTools.filter((tool) => !THREAD_CONTROL_TOOLS.has(tool));
+      const hasMutationTool = tools.some((tool) => {
+        const mutation = HARNESS_TOOL_META[tool]?.mutation;
+        return mutation === "journaled" || mutation === "process";
       });
-    } catch (error) {
-      await options.registry.endRun(
-        scope.workspaceId,
-        thread.id,
-        converted.run.id,
-        "lost",
-        `worker reopen failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
-      ).catch(reportError);
-      void resumeLostForParent(scope.workspaceId, scope.parent).catch(reportError);
-      throw error;
-    }
+      if (!hasMutationTool) {
+        throw new ThreadRuntimeError(
+          "unavailable",
+          "The parent session has no implementation-capable tools to grant this thread",
+        );
+      }
 
-    const baselineStats = await options.sessions.stats(opened.sessionId).catch((error) => {
-      reportError(error);
-      return null;
-    });
-    const implementationBinding: RuntimeBinding = {
-      workspaceId: scope.workspaceId,
-      parent: scope.parent,
-      threadId: thread.id,
-      runId: converted.run.id,
-      sessionId: opened.sessionId,
-      cwd: prepared.cwd,
-      kind: "implementation",
-      providerId: model?.providerId ?? null,
-      baseline: {
-        cost: baselineStats?.cost ?? 0,
-        toolCalls: baselineStats?.toolCalls ?? 0,
-        tokens: {
-          input: baselineStats?.tokens.input ?? 0,
-          output: baselineStats?.tokens.output ?? 0,
-          cacheRead: baselineStats?.tokens.cacheRead ?? 0,
+      if (await options.registry.countActiveInRoot(scope.workspaceId, scope.parent) >= thread.manifest.concurrency) {
+        throw new ThreadRuntimeError("conflict", "The root task has no free execution slot for implementation conversion");
+      }
+
+      try {
+        await updateRunMetrics(binding);
+      } catch (error) {
+        reportError(error);
+      }
+      const prepared = await options.worktrees.prepare({
+        mode: "isolated",
+        sourceRoot: childSnapshot.cwd,
+        threadId: thread.id,
+        signal: abortController.signal,
+      });
+      if (!prepared.worktree) throw new Error("Implementation conversion did not create an isolated worktree");
+      const model = thread.model ?? (childSnapshot.model
+        ? { providerId: childSnapshot.model.provider, modelId: childSnapshot.model.id }
+        : undefined);
+      let converted: Awaited<ReturnType<ThreadRegistry["convertThread"]>>;
+      try {
+        converted = await options.registry.convertThread(scope.workspaceId, thread.id, {
+          ...(model ? { model } : {}),
+          scope: thread.manifest.scope,
+          tools,
+          worktree: prepared.worktree,
+        });
+      } catch (error) {
+        if (!(error instanceof ThreadAdmissionError)) throw error;
+        // Only a definite admission refusal proves conversion never committed.
+        // Keep the live discussion and discard its never-executed input copy.
+        await options.worktrees.discardInput?.(prepared.worktree, scope.workspaceId).catch(reportError);
+        throw new ThreadRuntimeError("conflict", error.message);
+      }
+      if (!converted) throw new ThreadRuntimeError("not-found", `Thread not found: ${thread.id}`);
+
+      try {
+        await closeBinding(binding, false);
+      } catch (error) {
+        await options.registry.endRun(
+          scope.workspaceId,
+          thread.id,
+          converted.run.id,
+          "lost",
+          `worker restart failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
+        ).catch(reportError);
+        throw error;
+      }
+
+      let opened: SessionSnapshot;
+      try {
+        const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(prepared.cwd);
+        opened = await options.sessions.open({
+          cwd: prepared.cwd,
+          ...(model ? { model } : {}),
+          permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
+          ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+          sessionId: currentRun.sessionId,
+          tools,
+          workspaceId: runtimeWorkspaceId,
+        });
+      } catch (error) {
+        await options.registry.endRun(
+          scope.workspaceId,
+          thread.id,
+          converted.run.id,
+          "lost",
+          `worker reopen failed during conversion: ${error instanceof Error ? error.message : String(error)}`,
+        ).catch(reportError);
+        void resumeLostForParent(scope.workspaceId, scope.parent).catch(reportError);
+        throw error;
+      }
+
+      const baselineStats = await options.sessions.stats(opened.sessionId).catch((error) => {
+        reportError(error);
+        return null;
+      });
+      const implementationBinding: RuntimeBinding = {
+        workspaceId: scope.workspaceId,
+        parent: scope.parent,
+        threadId: thread.id,
+        runId: converted.run.id,
+        sessionId: opened.sessionId,
+        cwd: prepared.cwd,
+        kind: "implementation",
+        providerId: model?.providerId ?? null,
+        baseline: {
+          cost: baselineStats?.cost ?? 0,
+          toolCalls: baselineStats?.toolCalls ?? 0,
+          tokens: {
+            input: baselineStats?.tokens.input ?? 0,
+            output: baselineStats?.tokens.output ?? 0,
+            cacheRead: baselineStats?.tokens.cacheRead ?? 0,
+          },
         },
-      },
-    };
-    bind(implementationBinding);
-    await bindExecutionView({
-      sessionId: opened.sessionId,
-      workspaceId: scope.workspaceId,
-      parent: scope.parent,
-      threadId: thread.id,
-      runId: converted.run.id,
-    });
-    await options.registry.markRunRunning(scope.workspaceId, thread.id, converted.run.id, opened.sessionId);
-    options.onThreadSessionBound?.(opened.sessionId, scope.workspaceId);
-    try {
-      scheduleStallTimer(implementationBinding);
-      await options.sessions.prompt(
-        opened.sessionId,
-        "The user converted this discussion into an implementation thread. Implement the approach agreed in the conversation, re-checking the current worktree before making changes.",
-      );
-    } catch (error) {
-      clearStallTimer(opened.sessionId);
-      reportError(error);
-    }
+      };
+      bind(implementationBinding);
+      await bindExecutionView({
+        sessionId: opened.sessionId,
+        workspaceId: scope.workspaceId,
+        parent: scope.parent,
+        threadId: thread.id,
+        runId: converted.run.id,
+      });
+      await options.registry.markRunRunning(scope.workspaceId, thread.id, converted.run.id, opened.sessionId);
+      options.onThreadSessionBound?.(opened.sessionId, scope.workspaceId);
+      try {
+        scheduleStallTimer(implementationBinding);
+        await options.sessions.prompt(
+          opened.sessionId,
+          "The user converted this discussion into an implementation thread. Implement the approach agreed in the conversation, re-checking the current worktree before making changes.",
+        );
+      } catch (error) {
+        clearStallTimer(opened.sessionId);
+        reportError(error);
+      }
 
-    const [current, activeRun] = await Promise.all([
-      options.registry.getThread(scope.workspaceId, scope.parent, thread.id),
-      options.registry.getActiveRun(scope.workspaceId, thread.id),
-    ]);
-    if (!current || !activeRun) throw new Error(`Converted thread disappeared: ${thread.id}`);
-    return { workspaceId: scope.workspaceId, parent: scope.parent, thread: current, activeRun };
+      const [current, activeRun] = await Promise.all([
+        options.registry.getThread(scope.workspaceId, scope.parent, thread.id),
+        options.registry.getActiveRun(scope.workspaceId, thread.id),
+      ]);
+      if (!current || !activeRun) throw new Error(`Converted thread disappeared: ${thread.id}`);
+      return { workspaceId: scope.workspaceId, parent: scope.parent, thread: current, activeRun };
+    });
   };
 
   const send = async (
     sessionId: string,
     message: string,
-    meta: { from: string; requestId?: string },
+    meta: { from: string; requestId?: string; messageId?: string },
   ): Promise<void> => {
     // `from` is a Host-derived sender label; `requestId` travels in the
     // delivered text so the receiver can bind a replyTo to the real request.
@@ -3301,9 +3389,15 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       ? `Message from ${meta.from} (request ${meta.requestId})`
       : `Message from ${meta.from}`;
     const text = `${header}:\n${message}`;
-    const snapshot = await options.sessions.snapshot(sessionId);
-    if (snapshot.busy || snapshot.isStreaming || snapshot.isCompacting) await options.sessions.send(sessionId, text);
-    else await options.sessions.prompt(sessionId, text);
+    if (!meta.requestId) {
+      if (!options.sessions.notify) {
+        throw new ThreadRuntimeError("unavailable", "The session adapter does not support passive message delivery");
+      }
+      await options.sessions.notify(sessionId, text, meta.messageId ?? randomUUID());
+      return;
+    }
+    if (!options.sessions.request) throw new ThreadRuntimeError("unavailable", "The session adapter does not support idempotent execution requests");
+    await options.sessions.request(sessionId, text, meta.requestId);
   };
 
   const killOne = async (threadId: string, keepWorktree: boolean, workspaceId?: string): Promise<void> => {
@@ -3590,7 +3684,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!options.workingStates) throw new Error("Persistent working state is unavailable for baseline updates");
     const existing = await options.registry.getThread(workspaceId, parent, threadId);
     if (!existing) throw new Error(`Thread not found: ${threadId}`);
-    if (!usesWorkingBranchAuthority(existing) || !existing.workBranchId) {
+    if (!existing.workBranchId) {
       throw new Error(`Thread ${threadId} has no working branch baseline to update`);
     }
     if (existing.parent?.kind !== "thread") {
@@ -3605,16 +3699,12 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const childBranchId = existing.workBranchId;
     const parentBranchId = owner.workBranchId;
     const operation = async () => {
-      let outcome: Awaited<ReturnType<typeof rebaseBranchOntoParentRevision>> | null = null;
-      for (let attempt = 0; attempt < 3 && (!outcome || outcome.status === "conflict"); attempt += 1) {
-        outcome = await options.workingStates!.withBranchStore(
-          workspaceId,
-          "thread-baseline-update",
-          (store) => rebaseBranchOntoParentRevision(store, childBranchId, parentBranchId, targetRevision, { ...(extras?.signal ? { signal: extras.signal } : {}) }),
-          "exclusive",
-        );
-      }
-      if (!outcome) throw new Error(`Baseline update did not run for ${threadId}`);
+      const outcome = await options.workingStates!.withBranchStore(
+        workspaceId,
+        "thread-baseline-update",
+        (store) => rebaseBranchOntoParentRevision(store, childBranchId, parentBranchId, targetRevision, { ...(extras?.signal ? { signal: extras.signal } : {}) }),
+        "exclusive",
+      );
       if (outcome.status !== "committed") {
         return {
           status: "conflict" as const,
@@ -3632,40 +3722,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const worktree = latest?.worktree ? { ...latest.worktree } : null;
       if (worktree) {
         worktree.base = `${parentBranchId}@${targetRevision}`;
-        await options.registry.setWorktree(workspaceId, threadId, worktree).catch(reportError);
-      }
-      if (worktree?.path && worktree.materialized === true && worktree.viewMode !== "virtual") {
-        try {
-          await options.workingStates!.withBranchStore(
-            workspaceId,
-            "thread-baseline-rematerialize",
-            async (store) => {
-              if (!store.materializePinManaged) throw new Error("Managed materialization is unavailable on this backend");
-              const pin = await store.pinBranch(childBranchId, { ...(extras?.signal ? { signal: extras.signal } : {}) });
-              try {
-                if (pin.writeRevision !== outcome!.writeRevision || (outcome!.root !== undefined && pin.root !== outcome!.root)) {
-                  throw new Error(`Working branch changed after baseline update: ${childBranchId}`);
-                }
-                await store.materializePinManaged(pin, worktree.path!, `thread-baseline-rematerialize:${threadId}:${randomUUID()}`, extras?.signal);
-              } finally {
-                await pin.release().catch(reportError);
-              }
-            },
-            "shared",
-          );
-        } catch (error) {
-          return {
-            status: "needs-attention" as const,
-            threadId,
-            resultRevision: targetRevision,
-            baseRef: `${parentBranchId}@${targetRevision}`,
-            updatedFromParent: outcome.updatedFromParent,
-            keptPaths: outcome.keptChildPaths,
-            mergedPaths: outcome.mergedPaths,
-            conflicts: outcome.conflicts,
-            message: `Baseline updated but the materialized worktree could not be refreshed: ${error instanceof Error ? error.message : String(error)}`,
-          };
-        }
+        await options.registry.setWorktree(workspaceId, threadId, worktree);
       }
       return {
         status: "applied" as const,
@@ -3682,10 +3739,48 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const latest = await options.registry.getThread(workspaceId, parent, threadId);
       if (!latest) throw new Error(`Thread not found: ${threadId}`);
       if (latest.deletion) throw new Error("Cannot update the baseline of a thread while deletion is pending");
-      if (latest.lifecycle === "archived") throw new Error("Cannot update the baseline of an archived thread");
-      return options.withMergeWriter
-        ? options.withMergeWriter(workspaceId, threadId, operation)
-        : operation();
+      if (latest.lifecycle === "archived" && !latest.worktree?.baselineUpdate) {
+        throw new Error("Cannot update the baseline of an archived thread");
+      }
+      if (latest.worktree && latest.worktree.materialized !== false && !isVirtualWorktree(latest.worktree)) {
+        if (!options.resolveBaselineApplyContext || !options.canReclaimWorktree) {
+          throw new ThreadRuntimeError("unavailable", "Materialized baseline updates require execution-directory authority");
+        }
+        await ownershipAssertion(latest.worktree)("baseline-update");
+        const guard = await options.canReclaimWorktree(workspaceId, threadId, latest.worktree.path);
+        if (!guard.safe) throw new ThreadRuntimeError("conflict", guard.reason ?? "Execution directory is in use", { retryable: true });
+        try {
+          return await updateMaterializedBaseline({
+            workingStates: options.workingStates!, workspaceId, threadId, branchId: childBranchId,
+            parentBranchId, parentRevision: targetRevision, worktree: latest.worktree,
+            resolveDirectoryApplyContext: options.resolveBaselineApplyContext,
+            persist: async (updated) => {
+              if (!await options.registry.setWorktree(workspaceId, threadId, updated)) throw new Error("Thread disappeared during baseline update");
+            },
+            ...(extras?.signal ? { signal: extras.signal } : {}),
+          });
+        } catch (error) {
+          const pending = await options.registry.getThread(workspaceId, parent, threadId);
+          if (pending?.worktree?.baselineUpdate) {
+            // No next model turn may build on an unfinished native/Registry handoff.
+            const sessionId = sessionByThread.get(threadId);
+            const binding = sessionId ? bindingsBySession.get(sessionId) : undefined;
+            if (binding) await closeBinding(binding, true);
+            await options.registry.setAttention(workspaceId, threadId, "stalled");
+          }
+          throw error;
+        } finally { await guard.release?.(); }
+      }
+      const run = await options.registry.getActiveRun(workspaceId, threadId);
+      let release = () => {};
+      if (run?.sessionId && options.virtualWriteGate && options.executionViews) {
+        // Acquire before opening the store; materialization waits on this gate.
+        const ticket = await acquireVirtualWriteTicket(options.virtualWriteGate, run.sessionId,
+          () => options.executionViews?.get(run.sessionId!)?.mode === "virtual", extras?.signal);
+        if (ticket === "disk") throw new ThreadRuntimeError("conflict", "Thread changed execution authority; retry baseline update", { retryable: true });
+        release = ticket.finish;
+      }
+      try { return await operation(); } finally { release(); }
     });
   };
 
@@ -3904,6 +3999,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (!current.worktree) {
       return { thread: current, reclaimed: true, occupancy };
     }
+    if (current.worktree.baselineUpdate) return {
+      thread: current, reclaimed: false, occupancy,
+      message: `Baseline update ${current.worktree.baselineUpdate.operationId} still needs reconciliation`,
+    };
     if (current.worktree.materialized === false && !isVirtualWorktree(current.worktree)) {
       try {
         await fs.promises.lstat(current.worktree.path);
@@ -4239,6 +4338,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const draftBaselineId = thread.manifest.draftBaselineId ?? null;
     if (options.workingStates) {
       await options.workingStates.withBranchStore(workspaceId, "thread-delete", async (store) => {
+        if (thread.worktree?.baselineUpdate?.stageBranchId) {
+          await store.deleteBranch(thread.worktree.baselineUpdate.stageBranchId);
+        }
         if (branchId && thread.worktree?.materializationHandoff?.pinId) {
           await store.releaseBranchHandoffPin?.(branchId, thread.worktree.materializationHandoff.pinId);
         }
@@ -4449,7 +4551,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
   };
 
+  const resumePendingBaselineUpdates = async (): Promise<void> => {
+    for (const workspaceId of await options.registry.listWorkspaceIds()) {
+      for (const thread of await options.registry.listWorkspaceThreads(workspaceId)) {
+        const pending = thread.worktree?.baselineUpdate;
+        if (!pending || thread.deletion) continue;
+        try {
+          await updateBaseline(workspaceId, thread.parent, thread.id, pending.parentResultRevision);
+        } catch (error) {
+          await options.registry.setAttention(workspaceId, thread.id, "stalled").catch(reportError);
+          reportError(error);
+        }
+      }
+    }
+  };
+
   const resumePendingDeletions = async (): Promise<void> => {
+    // This is the existing one-shot startup recovery entry. Finish baseline
+    // handoffs before deletion recovery can release their staging branches.
+    await resumePendingBaselineUpdates();
     for (const pending of await options.registry.listDeletionRoots()) {
       try {
         await deleteUser(pending.workspaceId, pending.parent, pending.threadId);
@@ -4465,6 +4585,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     thread: Thread,
     signal?: AbortSignal,
   ): Promise<ThreadRun | null> => {
+    if (thread.worktree?.baselineUpdate) {
+      throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before restoring execution`);
+    }
     const checkRestore = (): void => {
       if (signal?.aborted) throw new DOMException("Thread restore aborted", "AbortError");
     };
@@ -4477,18 +4600,20 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     let openedSessionId: string | null = null;
     try {
       checkRestore();
+      const run = await options.registry.startRun(workspaceId, thread.id, previous?.runtimeId ?? "pi", { allowSettled: true });
+      const frozen = run.frozen;
+      if (!frozen) throw new ThreadRuntimeError("unavailable", "Restored Run has no frozen execution configuration");
       const opened = await options.sessions.open({
         cwd,
-        ...(thread.model ? { model: thread.model } : {}),
-        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+        ...(frozen.model ? { model: frozen.model } : {}),
+        permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+        ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
         sessionId,
-        tools: [...thread.manifest.tools],
+        tools: [...frozen.tools],
         workspaceId: runtimeWorkspaceId,
       });
       openedSessionId = opened.sessionId;
       checkRestore();
-      const run = await options.registry.startRun(workspaceId, thread.id, previous?.runtimeId ?? "pi", { allowSettled: true });
       const baselineStats = await options.sessions.stats(opened.sessionId).catch((error) => {
         reportError(error);
         return null;
@@ -4501,7 +4626,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         sessionId: opened.sessionId,
         cwd,
         kind: thread.kind,
-        providerId: thread.model?.providerId ?? null,
+        providerId: frozen.model?.providerId ?? null,
         baseline: {
           cost: baselineStats?.cost ?? 0,
           toolCalls: baselineStats?.toolCalls ?? 0,
@@ -4564,6 +4689,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const existing = await options.registry.getThread(workspaceId, parent, threadId);
       if (!existing) throw new ThreadRuntimeError("not-found", `Thread not found: ${threadId}`);
       if (existing.deletion) throw new ThreadRuntimeError("conflict", "Thread deletion is pending");
+      if (existing.worktree?.baselineUpdate) {
+        throw new ThreadRuntimeError("unavailable", `Finish baseline update ${existing.worktree.baselineUpdate.operationId} before restoring execution`);
+      }
       const blockedAncestor = await ancestorBlocksRestore(workspaceId, existing.parent);
       if (blockedAncestor) {
         throw new ThreadRuntimeError(
@@ -5330,67 +5458,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadLifecycleTails.clear();
   };
 
-  /**
-   * Renders a parent session's current actual input for `input: "inherit"`
-   * dispatch (D-285.4): the committed summary plus the raw committed material
-   * kept after the last compaction boundary — the same content the child would
-   * see if it carried the parent session. Output handles and session-specific
-   * references are not carried. Bounded to `INHERIT_CONTEXT_MAX_CHARS`; older
-   * material is elided rather than the newest.
-   */
-  const INHERIT_CONTEXT_MAX_CHARS = 30_000;
-  const messageText = (message: PiUserMessage | PiAssistantMessage): string => {
-    const content = message.content;
-    if (typeof content === "string") return content;
-    const parts: string[] = [];
-    for (const block of content) {
-      if (block.type === "text") parts.push(block.text);
-    }
-    return parts.join("\n");
-  };
+  /** Pi owns the active context, including kept entries before a compaction record. */
   const captureInputContext = async (
     sessionId: string,
-  ): Promise<{ text: string; anchors: string[] } | null> => {
-    let result: SessionEntriesResult;
-    try {
-      result = await options.sessions.entries(sessionId, "branch");
-    } catch (error) {
-      if (!options.sessions.readEntries) throw error;
-      result = await options.sessions.readEntries(sessionId, undefined, "branch");
+  ): Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null> => {
+    if (!options.sessions.captureInput) {
+      throw new ThreadRuntimeError("unavailable", "The session adapter cannot capture committed Pi input");
     }
-    let lastCompaction: PiCompactionEntry | null = null;
-    for (const entry of result.entries) {
-      if (entry.type === "compaction") lastCompaction = entry;
-    }
-    const anchors = lastCompaction?.id ? [lastCompaction.id] : [];
-    const sections: string[] = [];
-    if (lastCompaction) sections.push(`[committed summary]\n${lastCompaction.summary}`);
-    const rawLines: string[] = [];
-    const skipped = lastCompaction
-      ? result.entries.findIndex((entry) => entry.id === lastCompaction.id) + 1
-      : 0;
-    for (const entry of result.entries.slice(Math.max(0, skipped))) {
-      if (entry.type !== "message") continue;
-      const message = entry.message;
-      if (message.role === "user" || message.role === "assistant") {
-        const text = messageText(message).trim();
-        if (text) rawLines.push(`[${message.role}] ${text}`);
-      } else if (message.role === "toolResult") {
-        rawLines.push(`[tool result: ${message.toolName}${message.isError ? " (error)" : ""}]`);
-      }
-    }
-    if (rawLines.length > 0) sections.push(`[raw committed material]\n${rawLines.join("\n\n")}`);
-    const text = sections.join("\n\n").trim();
-    if (!text) return null;
-    if (text.length <= INHERIT_CONTEXT_MAX_CHARS) return { text, anchors };
-    // Keep the newest material; note the elision so the child can pull earlier
-    // content through `history` on the parent transcript if needed.
-    const kept = text.slice(text.length - INHERIT_CONTEXT_MAX_CHARS);
-    const boundary = kept.indexOf("\n");
-    return {
-      text: `[earlier material elided]\n\n${boundary > 0 ? kept.slice(boundary + 1) : kept}`,
-      anchors,
-    };
+    return options.sessions.captureInput(sessionId);
   };
 
   /**
@@ -5411,11 +5486,26 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     admitted?: boolean;
     from?: import("@piarium/protocol").ThreadMessagePeer;
   }): Promise<{ runId?: string }> => {
+    const requestId = input.requestId ?? `continuation-${randomUUID()}`;
+    const from = input.from ?? { kind: "user" as const, id: "host" };
+    const prior = (await options.registry.listRuns(input.workspaceId, input.threadId))
+      .find((run) => run.request?.requestId === requestId);
+    if (prior) {
+      if (prior.request!.task !== input.task || prior.request!.mode !== input.mode
+        || prior.request!.from.kind !== from.kind || prior.request!.from.id !== from.id) {
+        throw new ThreadRuntimeError("invalid-request", "Continuation identity is already bound to different input");
+      }
+      if (prior.outcome === "failure" || prior.outcome === "cancelled") {
+        throw new ThreadRuntimeError("unavailable", prior.exitReason ?? "The recorded execution attempt failed");
+      }
+      return { runId: prior.id };
+    }
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
     if (thread.kind !== "implementation") {
       throw new ThreadRuntimeError("invalid-request", "Execution requests apply to implementation threads");
     }
+    if (thread.worktree?.baselineUpdate) throw new ThreadRuntimeError("unavailable", `Finish baseline update ${thread.worktree.baselineUpdate.operationId} before continuing execution`);
     const previous = await options.registry.getActiveRun(input.workspaceId, thread.id);
     const resumable = thread.lifecycle === "settled"
       || (thread.lifecycle === "active" && (previous?.outcome === "lost" || previous?.workerState === "lost"));
@@ -5424,28 +5514,84 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     }
     // Requests share the root execution budget (3.18C): a full pool parks the
     // continuation on the Thread; the dequeue path promotes it when a slot frees.
-    if (!input.admitted && await options.registry.countActiveInRoot(input.workspaceId, input.parent) >= thread.manifest.concurrency) {
-      await options.registry.setPendingContinuation(input.workspaceId, thread.id, {
+    const park = async (): Promise<void> => {
+      await options.registry.enqueueContinuation(input.workspaceId, thread.id, {
         mode: input.mode,
         task: input.task,
-        ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
-        from: input.from ?? { kind: "user", id: "host" },
+        requestId,
+        from,
         at: new Date().toISOString(),
       });
+    };
+    if (!input.admitted && await options.registry.countActiveInRoot(input.workspaceId, input.parent) >= thread.manifest.concurrency) {
+      await park();
       return {};
     }
     const retainedSessionId = thread.report?.transcriptRef.sessionId ?? previous?.sessionId ?? null;
-    // Held inbound messages fold into the new Run's input at the normal
-    // boundary; the request itself is excluded (it is `task`).
-    const pending = await options.registry.takePendingThreadMessages(input.workspaceId, thread.id, input.requestId);
-    const task = pending.length > 0
-      ? `${input.task}\n\nMessages delivered while waiting for this run:\n${pendingMessagesSection(pending)}`
-      : input.task;
-    const run = await options.registry.startRun(input.workspaceId, thread.id, previous?.runtimeId ?? "pi", {
-      allowSettled: true,
-      inputOrigin: input.mode,
-    });
+    let freshInput: ReturnType<typeof assembleFreshInput> | undefined;
+    if (input.mode === "fresh") {
+      let entries: SessionEntriesResult["entries"] = [];
+      if (retainedSessionId && options.sessions.readEntries) {
+        entries = (await options.sessions.readEntries(retainedSessionId, undefined, "branch")).entries;
+      } else if (retainedSessionId) {
+        entries = (await options.sessions.entries(retainedSessionId, "branch")).entries;
+      }
+      const sourceRun = (await options.registry.listRuns(input.workspaceId, thread.id))
+        .findLast((candidate) => candidate.sessionId === retainedSessionId);
+      const mined = minePiBranchEntries(entries);
+      const results: string[] = [
+        "The current system and project rules are loaded by this new Pi session; do not treat old transcript rules or verification as current authority.",
+        ...(thread.workBranchId ? [`working branch: ${thread.workBranchId}${thread.resultRevision ? ` (selected published result r${thread.resultRevision})` : ""}; existing code delta is retained`] : []),
+      ];
+      if (thread.report) {
+        if (thread.report.conclusion) results.push(`conclusion: ${thread.report.conclusion}`);
+        if (thread.report.changedFiles.length > 0) {
+          results.push(`changed files: ${thread.report.changedFiles.join(", ")}`);
+        }
+        if (thread.report.deviations.length > 0) {
+          results.push(`deviations: ${thread.report.deviations.join("; ")}`);
+        }
+        if (retainedSessionId) results.push(`transcript: session ${retainedSessionId}`);
+      }
+      freshInput = assembleFreshInput({
+        task: input.task,
+        goal: thread.brief,
+        ...(sourceRun ? { sourceRunId: sourceRun.id } : {}),
+        results,
+        openItems: thread.report?.unresolved ?? [],
+        carriedUserMessages: mined.carriedUserMessages,
+        boundaryEntryIds: mined.boundaryEntryIds,
+      });
+    }
+    // Assembly failures leave the old Run/result/active history authoritative.
+    let run: ThreadRun;
     try {
+      const admitted = await options.registry.admitRun(input.workspaceId, thread.id, previous?.runtimeId ?? "pi", {
+        allowSettled: true,
+        inputOrigin: input.mode,
+        request: { requestId, mode: input.mode, task: input.task, from, at: new Date().toISOString(),
+          ...(freshInput ? { preparedInput: freshInput.text } : {}) },
+      });
+      if (!admitted.started) return { runId: admitted.run.id };
+      run = admitted.run;
+    } catch (error) {
+      if (!(error instanceof ThreadAdmissionError)) throw error;
+      // Dequeue observations are not reservations either. A competing Run
+      // may have claimed the slot; preserve both the request and held input.
+      await park();
+      return {};
+    }
+    try {
+      const frozen = run.frozen;
+      if (!frozen) throw new ThreadRuntimeError("unavailable", "Continuation has no frozen Run configuration");
+      // Once admitted, every preparation failure must end this Run and free
+      // its slot, including a failed message-catalog read.
+      const pending = input.mode === "continue"
+        ? await options.registry.listPendingThreadMessages(input.workspaceId, thread.id, input.requestId)
+        : []; // fresh spawn owns pending delivery; never embed the same messages twice
+      const task = pending.length > 0
+        ? `${input.task}\n\nMessages delivered while waiting for this run:\n${pendingMessagesSection(pending)}`
+        : input.task;
       if (input.mode === "continue") {
         if (!retainedSessionId) {
           throw new ThreadRuntimeError("unavailable", "No retained session to continue; request with context \"fresh\"");
@@ -5455,11 +5601,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         const runtimeWorkspaceId = await options.resolveRuntimeWorkspaceId(cwd);
         const snapshot = await options.sessions.open({
           cwd,
-          ...(thread.model ? { model: thread.model } : {}),
-          permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-          ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
+          ...(frozen.model ? { model: frozen.model } : {}),
+          permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+          ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
           sessionId: retainedSessionId,
-          tools: [...thread.manifest.tools],
+          tools: [...frozen.tools],
           workspaceId: runtimeWorkspaceId,
         });
         const baselineStats = await options.sessions.stats(snapshot.sessionId).catch((error) => {
@@ -5474,7 +5620,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           sessionId: snapshot.sessionId,
           cwd,
           kind: thread.kind,
-          providerId: thread.model?.providerId ?? null,
+          providerId: frozen.model?.providerId ?? null,
           baseline: {
             cost: baselineStats?.cost ?? 0,
             toolCalls: baselineStats?.toolCalls ?? 0,
@@ -5497,33 +5643,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         options.onThreadSessionBound?.(snapshot.sessionId, input.workspaceId);
         scheduleStallTimer(binding);
         await options.sessions.prompt(snapshot.sessionId, task);
+        await options.registry.acknowledgeThreadMessages(input.workspaceId, thread.id, pending.map((message) => message.id), run.id);
         return { runId: run.id };
       }
-      let entries: SessionEntriesResult["entries"] = [];
-      if (retainedSessionId && options.sessions.readEntries) {
-        entries = (await options.sessions.readEntries(retainedSessionId, undefined, "branch")).entries;
-      } else if (retainedSessionId) {
-        entries = (await options.sessions.entries(retainedSessionId, "branch")).entries;
-      }
-      const mined = minePiBranchEntries(entries);
-      const results: string[] = [];
-      if (thread.report) {
-        if (thread.report.conclusion) results.push(`conclusion: ${thread.report.conclusion}`);
-        if (thread.report.changedFiles.length > 0) {
-          results.push(`changed files: ${thread.report.changedFiles.join(", ")}`);
-        }
-        if (thread.report.deviations.length > 0) {
-          results.push(`deviations: ${thread.report.deviations.join("; ")}`);
-        }
-        if (retainedSessionId) results.push(`transcript: session ${retainedSessionId}`);
-      }
-      const fresh = assembleFreshInput({
-        task,
-        results,
-        openItems: thread.report?.unresolved ?? [],
-        carriedUserMessages: mined.carriedUserMessages,
-        boundaryEntryIds: mined.boundaryEntryIds,
-      });
       await spawn({
         workspaceId: input.workspaceId,
         parent: input.parent,
@@ -5537,17 +5659,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         concurrency: thread.manifest.concurrency,
         ...(thread.manifest.draftBaselineId ? { draftBaselineId: thread.manifest.draftBaselineId } : {}),
         autoRun: true,
-        worktree: thread.manifest.worktree,
-        ...(thread.model ? { model: thread.model } : {}),
-        tools: [...thread.manifest.tools],
-        permissions: normalizeFrozenHarnessPermissions(thread.manifest.permissions),
-        ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
-        ...(thread.manifest.systemPromptFragment ? { systemPromptFragment: thread.manifest.systemPromptFragment } : {}),
-        promptText: fresh.text,
+        worktree: frozen.worktree,
+        ...(frozen.model ? { model: frozen.model } : {}),
+        tools: [...frozen.tools],
+        permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+        ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
+        ...(frozen.systemPromptFragment ? { systemPromptFragment: frozen.systemPromptFragment } : {}),
+        promptText: freshInput!.text,
       });
       return { runId: run.id };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      await options.registry.failRunRequest(input.workspaceId, thread.id, run.id, message);
       await options.registry.endRun(input.workspaceId, thread.id, run.id, "failure", message).catch(reportError);
       throw error;
     }

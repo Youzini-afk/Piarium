@@ -1,6 +1,7 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { Zone2AssembleResult } from "@piarium/protocol";
+import { retainedContextState } from "./retained-context.js";
 
 /**
  * Zone 2 extension — hooks before_agent_start to request assembled
@@ -22,10 +23,10 @@ export interface Zone2ExtensionOptions {
 
 export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionFactory {
   const { bridge } = options;
-  let eventCursor: number | undefined;
 
   return (pi) => {
     pi.on("before_agent_start", async (event, ctx) => {
+      let eventCursor: number | undefined;
       // Determine the turn index for sinceTurn — use the current turn count
       // from the session manager. The host uses this to filter events
       // that occurred since the last turn.
@@ -43,7 +44,7 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
           }
         }
       }
-      const usage = ctx.getContextUsage();
+      const retained = retainedContextState(ctx.sessionManager.getBranch());
 
       try {
         const result = await bridge.request<"zone2.assemble">("zone2.assemble", {
@@ -51,12 +52,9 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
           ...(event.prompt.trim() ? { query: event.prompt } : {}),
           ...(eventCursor === undefined ? {} : { afterEventId: eventCursor }),
           branchEntryIds: ctx.sessionManager.getBranch().map((e: { id: string }) => e.id),
-          ...(usage?.tokens === null || usage?.tokens === undefined
-            ? {}
-            : { contextUsage: { used: usage.tokens, window: usage.contextWindow } }),
+          knownMaterial: retained.knownMaterial,
         }, { timeoutMs: 1_000 });
         const projected = result as Zone2AssembleResult;
-        eventCursor = projected.eventCursor;
         const content = projected.content;
         if (!content) return undefined;
 
@@ -65,6 +63,11 @@ export function createZone2Extension(options: Zone2ExtensionOptions): ExtensionF
             customType: "piarium-context",
             content,
             display: false,
+            details: {
+              observationRefs: projected.observationRefs ?? [],
+              materialRevisions: projected.materialRevisions ?? {},
+              gitObserved: content.includes("<git>"),
+            },
           },
         };
       } catch {

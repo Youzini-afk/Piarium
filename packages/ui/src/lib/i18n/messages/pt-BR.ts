@@ -27,6 +27,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': 'O conteúdo do conhecimento é obrigatório',
   'harness.knowledge.conflict': 'Esta sugestão mudou. A lista mais recente foi carregada.',
   'harness.threads.open': 'Abrir tarefa',
+  'harness.threads.transcript': 'Ver transcrição',
+  'harness.threads.transcriptReadOnly': 'Histórico somente leitura. A visualização não inicia uma execução nem restaura o diretório de trabalho.',
   'harness.sources.title': 'Fontes da web',
   'harness.sources.pin': 'Fixar fonte',
   'harness.sources.unpin': 'Desafixar fonte',

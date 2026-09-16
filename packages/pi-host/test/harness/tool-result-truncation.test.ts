@@ -42,7 +42,7 @@ describe("tool-result-truncation", () => {
 
     const event = {
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: "short text" }],
       details: undefined,
       isError: false,
@@ -61,7 +61,7 @@ describe("tool-result-truncation", () => {
     const longText = "a".repeat(200);
     const event = {
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: longText }],
       details: undefined,
       isError: false,
@@ -187,7 +187,7 @@ describe("tool-result-truncation", () => {
     const fullText = "你🙂界".repeat(20);
     const result = await getHandler()!({
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: fullText }],
       details: undefined,
       isError: false,
@@ -195,6 +195,39 @@ describe("tool-result-truncation", () => {
     assert.doesNotMatch(result.content[0]!.text, /�/);
     assert.match(result.content[0]!.text, /界\n\[output:/, "tail must retain the final code point");
     assert.match(result.content[0]!.text, new RegExp(`first ${result.details.truncated.head} and last ${result.details.truncated.tail}`));
+  });
+
+  it("preserves image bytes and ordering when a mixed tool result has oversized text", async () => {
+    const stored = new Map<string, string>();
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({
+      bridge: createFakeBridge(stored) as HostServicesBridge,
+      visibleBytes: 30,
+      sessionId: "s1",
+    })(pi as never);
+    const first = { type: "image", mimeType: "image/png", data: "first-image-bytes" };
+    const second = { type: "image", mimeType: "image/jpeg", data: "second-image-bytes" };
+    const text = "diagnostic text\n".repeat(50);
+    const result = await getHandler()!({
+      type: "tool_result",
+      toolName: "compare_screenshots",
+      content: [first, { type: "text", text }, second],
+      details: { source: "comparison" },
+      isError: false,
+    }) as { content: Array<{ type: string; data?: string; text?: string }> };
+    assert.equal(result, undefined, "the full ordered image/text input must be untouched");
+    assert.equal(stored.size, 0);
+  });
+
+  it("leaves file pages and failure blocks intact, including the middle", async () => {
+    const stored = new Map<string, string>();
+    const { pi, getHandler } = createFakePi();
+    createToolResultTruncationExtension({ bridge: createFakeBridge(stored) as HostServicesBridge, visibleBytes: 10, sessionId: "s1" })(pi as never);
+    const text = "prefix".repeat(50) + "MIDDLE_SOURCE_FAILURE" + "suffix".repeat(50);
+    for (const input of [{ toolName: "read", isError: false }, { toolName: "other_tool", isError: true }]) {
+      assert.equal(await getHandler()!({ ...input, content: [{ type: "text", text }] }), undefined);
+    }
+    assert.equal(stored.size, 0);
   });
 
   it("returns undefined when output.store fails", async () => {
@@ -206,7 +239,7 @@ describe("tool-result-truncation", () => {
 
     const event = {
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: "a".repeat(100) }],
       details: undefined,
       isError: false,
@@ -223,7 +256,7 @@ describe("tool-result-truncation", () => {
 
     const event = {
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: "a".repeat(100) }],
       details: { customField: "value" },
       isError: false,
@@ -242,7 +275,7 @@ describe("tool-result-truncation", () => {
 
     const event = {
       type: "tool_result",
-      toolName: "read",
+      toolName: "large_output",
       content: [{ type: "text", text: "a".repeat(100) }],
       details: undefined,
       isError: false,

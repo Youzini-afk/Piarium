@@ -12,6 +12,11 @@ import {
 } from "../src/index.js";
 
 describe("surface runtime protocol", () => {
+  it("keeps passive input delivery and parent capture on the private Host boundary", () => {
+    assert.equal(isRuntimeMethod("agent.notify"), false);
+    assert.equal(isRuntimeMethod("session.input.capture"), false);
+  });
+
   it("parses only content-free input source fields", () => {
     assert.deepEqual(parseAgentInputContext({
       source: "surface",

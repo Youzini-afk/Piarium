@@ -72,6 +72,7 @@ it('continues the original session after Git/native archive, reclaim and restore
     create: vi.fn(async (input) => snapshot('child-session', input.cwd)),
     open: vi.fn(async (input) => snapshot(input.sessionId, input.cwd)),
     prompt: vi.fn(async () => {}), send: vi.fn(async () => {}), abort: vi.fn(async () => {}), close: vi.fn(async () => {}),
+    request: vi.fn(async () => {}), notify: vi.fn(async () => {}),
     snapshot: async (sessionId) => snapshot(sessionId, repo), stats: async () => stats,
     summary: async (sessionId) => ({
       id: sessionId, allMessagesText: '', createdAt: '2026-09-10T00:00:00Z', updatedAt: '2026-09-10T00:00:00Z',
@@ -114,8 +115,8 @@ it('continues the original session after Git/native archive, reclaim and restore
     expect(existsSync(join(directory, '.git'))).toBe(true);
     expect(normalizePathIdentity(await canonicalizePathIdentity(git(directory, ['rev-parse', '--show-toplevel']))))
       .toBe(normalizePathIdentity(await canonicalizePathIdentity(directory)));
-    await runtime.send('child-session', 'Continue the work', { from: 'user' });
-    expect(sessions.prompt).toHaveBeenLastCalledWith('child-session', expect.stringContaining('Continue the work'));
+    await runtime.send('child-session', 'Continue the work', { from: 'user', requestId: 'restored-request' });
+    expect(sessions.request).toHaveBeenLastCalledWith('child-session', expect.stringContaining('Continue the work'), 'restored-request');
     writeFileSync(join(directory, 'result.txt'), 'second result\n');
     const archivedAgain = await runtime.archiveUser(workspaceId, parent, thread.id);
     expect(archivedAgain.reclaimed).toBe(true);

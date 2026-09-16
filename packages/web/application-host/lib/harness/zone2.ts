@@ -108,6 +108,8 @@ export interface Zone2Material {
   git: Zone2Git | null;
   knowledge: Zone2Knowledge[];
   blocks: Zone2Block[];
+  /** Only a successful complete block read can establish a deletion. */
+  blocksComplete?: boolean;
   contextUsage: Zone2ContextUsage | null;
   threads?: Zone2Threads | null;
   reviews?: Array<{
@@ -154,14 +156,14 @@ function estimateTokens(text: string): number {
 
 const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim();
 
-function formatThread(thread: Zone2Thread, now: number): string {
+export function formatZone2Thread(thread: Zone2Thread, now: number): string {
   const activityAt = Date.parse(thread.lastActivityAt);
   const state = thread.attention === "user"
     ? "waiting for user"
     : thread.attention === "permission"
       ? "waiting for permission"
       : thread.attention === "thread"
-        ? "waiting for review"
+        ? "waiting for a thread"
       : thread.attention === "stalled" || thread.attention === "looping"
         ? thread.attention
         : thread.lifecycle === "queued"
@@ -295,7 +297,7 @@ export function assembleZone2Content(
   if (threads?.status === "unavailable") {
     sections.push(`<threads status="unavailable">thread state unavailable (${threads.reason})</threads>`);
   } else if (threads && (threads.items.length > 0 || threads.overlapWarning)) {
-    threadLines = threads.items.map((thread) => formatThread(thread, now));
+    threadLines = threads.items.map((thread) => formatZone2Thread(thread, now));
     if (threads.overlapWarning) {
       threadLines.push(`overlap warning: ${threads.overlapWarning}`);
     }

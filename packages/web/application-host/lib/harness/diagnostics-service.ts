@@ -175,7 +175,7 @@ export function createLspDiagnosticsSnapshotService(
         );
         if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pending.commit, pending.abort);
         else pending.commit();
-        return pending.result;
+        return { ...pending.result, observationRef: pending.observationRef };
       } catch {
         return { status: "unavailable", diagnostics: [], reason: "diagnostics request failed" };
       }

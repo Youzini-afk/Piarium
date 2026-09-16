@@ -48,7 +48,11 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
       );
       const organizedShellResult = (toolName === "bash" || toolName === "get_output")
         && hasHostOrganizedDisplay(event.details);
-      if (explicitOutputRead || organizedShellResult) return undefined;
+      // The file tool owns its native range/continuation contract. Never turn
+      // an explicitly read page, a failure, or an ordered attachment comparison
+      // into a generic preview backed only by an ephemeral text handle.
+      if (toolName === "read" || event.isError || content.some((part) => part.type !== "text")
+        || explicitOutputRead || organizedShellResult) return undefined;
       const headRatio = DEFAULT_HEAD_RATIO;
 
       // Concatenate all TextContent
@@ -90,8 +94,16 @@ export function createToolResultTruncationExtension(options: ToolResultTruncatio
 
       const truncatedText = `${head}\n…\n${tail}\n[output: ${total} bytes; showing first ${shownHeadBytes} and last ${shownTailBytes} — get_output("${ref.handle}", offset, length) for more (ephemeral, generation ${ref.generation})]`;
 
-      // Replace text content
-      const newContent = [{ type: "text" as const, text: truncatedText }];
+      // Only replace the text projection. Images are first-class input, not
+      // text-store contents: dropping them here silently destroys comparison
+      // and vision tasks. Preserve their bytes and relative order.
+      let replacedText = false;
+      const newContent = content.flatMap<(typeof content)[number]>((part) => {
+        if (part.type !== "text") return [part];
+        if (replacedText) return [];
+        replacedText = true;
+        return [{ type: "text" as const, text: truncatedText }];
+      });
       const newDetails = {
         ...(event.details ?? {}),
         truncated: { ref, total, head: shownHeadBytes, tail: shownTailBytes },

@@ -6,14 +6,16 @@ describe("observation cursor store", () => {
     let now = 10;
     const store = createObservationCursorStore({ now: () => now });
     const value = { offset: 4 };
-    expect(store.set("observer-1", "shell", "same-id", value)).toEqual({ observedAt: 10, revision: 1, value: { offset: 4 } });
+    const initial = store.set("observer-1", "shell", "same-id", value);
+    expect(initial).toMatchObject({ observedAt: 10, revision: 1, value: { offset: 4 } });
+    expect(initial.retainedBy).toEqual([expect.any(String)]);
     value.offset = 99;
     now = 20;
     store.set("observer-1", "diagnostics", "same-id", { diagnostics: ["a"] });
 
-    expect(store.get<{ offset: number }>("observer-1", "shell", "same-id")).toEqual({ observedAt: 10, revision: 1, value: { offset: 4 } });
+    expect(store.get<{ offset: number }>("observer-1", "shell", "same-id")).toEqual(initial);
     expect(store.get("observer-2", "shell", "same-id")).toBeNull();
-    expect(store.get("observer-1", "diagnostics", "same-id")).toEqual({ observedAt: 20, revision: 2, value: { diagnostics: ["a"] } });
+    expect(store.get("observer-1", "diagnostics", "same-id")).toMatchObject({ observedAt: 20, revision: 2, value: { diagnostics: ["a"] } });
     store.clearKind("observer-1", "shell");
     expect(store.get("observer-1", "shell", "same-id")).toBeNull();
     expect(store.get("observer-1", "diagnostics", "same-id")).not.toBeNull();

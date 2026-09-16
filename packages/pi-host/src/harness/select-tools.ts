@@ -168,7 +168,7 @@ export function selectHarnessTools(
     result.push(createRelatedTool(bridge, sessionId));
   }
   if (tools.history !== false) {
-    result.push(createHistoryTool());
+    result.push(createHistoryTool(threadRuntimeAvailable ? bridge : undefined));
   }
   // Phase 3 thread tools — only registered when the host provides a
   // thread runtime (thread registry + spawn capability).

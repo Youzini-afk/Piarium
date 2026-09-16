@@ -181,7 +181,7 @@ describe("thread runtime with real Pi sessions", () => {
       const completed = await registry.getThread("workspace-1", input.parent, thread.id);
       assert.equal(completed?.lifecycle, "settled");
       assert.match(completed?.report?.conclusion ?? "", /completed the assigned check/);
-      assert.deepEqual(completed?.report?.deviations, ["used the existing session adapter"]);
+      assert.deepEqual(completed?.report?.deviations, [], "old notes do not fabricate deviations in the new Run report");
       assert.deepEqual(completed?.report?.blocksSnapshot, {
         progress: "Focused check completed",
         decisions: "Deviation: used the existing session adapter",
@@ -275,7 +275,7 @@ describe("thread runtime with real Pi sessions", () => {
 });
 
 describe("thread runtime with native working-state integration", () => {
-  it("merges an explicitly selected old native result through a real parent Pi turn and undoes that turn", async () => {
+  it("runs task dispatch, directed dependency, fixed native integration, fresh continuation and parent undo", async () => {
     const root = await mkdtemp(join(tmpdir(), "thread-native-integration-"));
     const workspace = join(root, "workspace");
     const agentDir = join(root, "agent");
@@ -308,6 +308,7 @@ describe("thread runtime with native working-state integration", () => {
     const childRunIds = new Map<string, string>();
     const executionContexts = new Map<string, { workspaceId: string; root: string }>();
     let spawningRunId: string | undefined;
+    let dispatchedThreadId: string | undefined;
 
     const model = faux.getModel();
     const configureServices = async (services: AgentSessionServices) => {
@@ -499,16 +500,18 @@ describe("thread runtime with native working-state integration", () => {
         },
         projectTrustOverride: true,
       });
+      child.setHarnessThreadRuntimeEnabled(true);
       return child;
     };
 
     const sessions: ThreadSessionAdapter = {
       create: async (input) => {
-        if (!spawningRunId) throw new Error("Native child session was created without a Run id");
+        const targetRun = spawningRunId ?? (dispatchedThreadId ? (await registry.getActiveRun(workspaceId, dispatchedThreadId))?.id : undefined);
+        if (!targetRun) throw new Error("Native child session was created without a Run id");
         const child = createChildHost();
         const created = await child.create(input.cwd, input.name, input.parentSession, input.tools, input.model, input.permissions);
         childHosts.set(created.sessionId, child);
-        childRunIds.set(created.sessionId, spawningRunId);
+        childRunIds.set(created.sessionId, targetRun);
         const execution = await documents.resolveWorkspace({ path: input.cwd });
         executionContexts.set(created.sessionId, { workspaceId: execution.workspaceId, root: input.cwd });
         if (created.sessionFile) childSessionFiles.set(created.sessionId, created.sessionFile);
@@ -536,12 +539,15 @@ describe("thread runtime with native working-state integration", () => {
         if (!result.accepted) throw new Error(`Native child prompt was not accepted: ${sessionId}`);
       },
       send: async (sessionId, text) => { await hostFor(sessionId).followUp(sessionId, text); },
+      notify: async (sessionId, text, messageId) => { await hostFor(sessionId).notify(sessionId, messageId, text); },
+      request: async (sessionId, text, messageId) => { await hostFor(sessionId).requestThreadMessage(sessionId, messageId, text); },
       abort: async (sessionId) => { await hostFor(sessionId).abort(sessionId); },
       close: async (sessionId) => { await hostFor(sessionId).close(sessionId); },
       snapshot: async (sessionId) => hostFor(sessionId).snapshot(),
       summary: async (sessionId) => hostFor(sessionId).summary(sessionId),
       stats: async (sessionId) => hostFor(sessionId).stats(sessionId),
       entries: async (sessionId, scope = "branch") => hostFor(sessionId).entries(sessionId, scope),
+      readEntries: async (sessionId, _cwd, scope = "branch") => parentHost!.readEntries(sessionId, childSessionFiles.get(sessionId)!, undefined, scope),
     };
 
     const runtime = createThreadRuntime({
@@ -569,12 +575,15 @@ describe("thread runtime with native working-state integration", () => {
       threadPrepareIsolatedBranch: (input) => runtime.prepareIsolatedBranch(input),
       threadSpawnSession: async (input) => {
         spawningRunId = input.runId;
+        dispatchedThreadId = input.threadId;
         try {
           return await runtime!.spawn(input);
         } finally {
           spawningRunId = undefined;
         }
       },
+      threadSendToSession: (sessionId, message, meta) => runtime.send(sessionId, message, meta),
+      threadContinueRun: (input) => runtime.continueRun(input),
       threadKillSession: async (threadId, keepWorktree) => { await runtime!.kill(threadId, keepWorktree); },
       threadApplyWorktreeDiff: async (workspaceIdForMerge, parent, threadId, resultRevision, executionId) => {
         mergeExecutionIds.push(executionId ?? "");
@@ -609,6 +618,8 @@ describe("thread runtime with native working-state integration", () => {
 
     let parentFirstRoundTools = 0;
     let childRoundTools = 0;
+    let answeredDependency = false;
+    let childWrote = false;
     let firstRoundFailure: unknown;
     const firstRoundResponse = (context: { messages: unknown[] }) => {
       const serialized = JSON.stringify(context.messages);
@@ -617,21 +628,28 @@ describe("thread runtime with native working-state integration", () => {
         firstRoundFailure = last;
         return fauxAssistantMessage("Fixture stopped after the failed tool result.");
       }
-      if (serialized.includes("You are working as the hard-implement thread")) {
+      if (serialized.includes("You are working as the teammate thread")) {
         childRoundTools += 1;
-        return childRoundTools === 1
-          ? fauxAssistantMessage([fauxToolCall("write", { path: "child-result.txt", content: "first child result\n" })])
-          : fauxAssistantMessage("Conclusion\nFirst child result is ready.\n\nDeviations from brief\n- none\n\nUnresolved issues\n- none");
+        if (childRoundTools === 1) return fauxAssistantMessage([fauxToolCall("send", {
+          to: "parent", kind: "request", requestId: "native-contract-question", message: "Which filename is approved for the result?",
+        })]);
+        if (!serialized.includes("APPROVED_NAME child-result.txt")) return fauxAssistantMessage([fauxToolCall("wait", { timeout_ms: 5_000 })]);
+        if (!childWrote) { childWrote = true; return fauxAssistantMessage([fauxToolCall("write", { path: "child-result.txt", content: "first child result\n" })]); }
+        return fauxAssistantMessage("Conclusion\nFirst child result is ready.\n\nDeviations from brief\n- none\n\nUnresolved issues\n- none");
       }
       parentFirstRoundTools += 1;
       if (parentFirstRoundTools === 1) {
         return fauxAssistantMessage([fauxToolCall("dispatch", {
-          preset: "hard-implement",
           task: "Write child-result.txt with the first child result.",
         })]);
       }
       if (parentFirstRoundTools === 2) {
         return fauxAssistantMessage([fauxToolCall("threads", {})]);
+      }
+      if (!answeredDependency && serialized.includes("native-contract-question")) {
+        answeredDependency = true;
+        return fauxAssistantMessage([fauxToolCall("send", { threadId: dispatchedThreadId,
+          kind: "inform", replyTo: "native-contract-question", message: "APPROVED_NAME child-result.txt" })]);
       }
       if (/"done":1/.test(serialized)) {
         return fauxAssistantMessage("Conclusion\nThe child result is ready to revise.");
@@ -662,6 +680,9 @@ describe("thread runtime with native working-state integration", () => {
       const created = (await registry.listThreads(workspaceId, { kind: "session", id: parent.sessionId }))[0];
       assert.equal(firstRoundFailure, undefined, JSON.stringify(firstRoundFailure));
       assert.ok(created);
+      assert.equal(created.preset, null);
+      assert.equal(answeredDependency, true);
+      assert.ok(created.messages?.some((message) => message.id === "native-contract-question" && message.status === "resolved"));
       assert.equal(created.lifecycle, "settled");
       assert.equal(created.integration, "merge-ready");
       assert.equal(created.resultRevision, 1);
@@ -728,6 +749,41 @@ describe("thread runtime with native working-state integration", () => {
       const change = recorded.changes.find(change => change.path === "child-result.txt");
       assert.equal(change?.toolName, "thread.merge");
       assert.equal(change?.mutationId, `thread.merge:${mergeOperationId}:child-result.txt`);
+
+      // R1 is already in the parent. A public request starts a real fresh
+      // child session without changing the selected integrated revision.
+      const oldSessionId = created.report!.transcriptRef.sessionId;
+      let freshWrote = false;
+      let freshParentStep = 0;
+      faux.setResponses(Array.from({ length: 10 }, () => (context) => {
+        const material = JSON.stringify(context.messages);
+        if (material.includes("You are working as the teammate thread")) {
+          assert.match(material, /CONTINUE_NATIVE_WORK/);
+          if (!freshWrote) { freshWrote = true; return fauxAssistantMessage([fauxToolCall("write", { path: "child-result.txt", content: "fresh child result\n" })]); }
+          return fauxAssistantMessage("Conclusion\nFresh work delivered.\nDeviations from brief\n- none\nUnresolved issues\n- none");
+        }
+        freshParentStep += 1;
+        if (freshParentStep === 1) return fauxAssistantMessage([fauxToolCall("send", {
+          threadId: created.id, kind: "request", context: "fresh", requestId: "native-fresh-request", message: "CONTINUE_NATIVE_WORK: update the existing result",
+        })]);
+        if (freshParentStep === 2) return fauxAssistantMessage([fauxToolCall("wait", { timeout_ms: 5_000 })]);
+        if (freshParentStep === 3) return fauxAssistantMessage([fauxToolCall("read_thread", { threadId: created.id, what: "report", resultRevision: 1 })]);
+        assert.match(JSON.stringify(context.messages.at(-1)), /First child result is ready/);
+        assert.doesNotMatch(JSON.stringify(context.messages.at(-1)), /Fresh work delivered/);
+        return fauxAssistantMessage("The continued result is ready; the original R1 report remains readable.");
+      }));
+      parentExecutionId = undefined;
+      await parentHost!.prompt(parent.sessionId, "Ask the same thread to rebuild its context and finish the next step.");
+      await parentHost!.session.waitForIdle();
+      await runtime.drain();
+      const continued = await registry.getThread(workspaceId, { kind: "session", id: parent.sessionId }, created.id);
+      assert.equal(freshWrote, true);
+      assert.equal(continued?.lifecycle, "settled");
+      assert.equal(continued?.resultRevision, 3);
+      assert.notEqual(continued?.report?.transcriptRef.sessionId, oldSessionId);
+      assert.equal(await readFile(firstPath, "utf8"), "fresh child result\n");
+      assert.equal(await readFile(join(workspace, "child-result.txt"), "utf8"), "first child result\n");
+      assert.match(await readFile(childSessionFiles.get(oldSessionId)!, "utf8"), /First child result is ready/);
 
       const prepared = await recoveryEngine.prepareCombinedRecovery({
         entryId: parentUserEntryId,

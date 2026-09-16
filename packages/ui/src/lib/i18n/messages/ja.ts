@@ -44,6 +44,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': 'ナレッジ内容が必要です',
   'harness.knowledge.conflict': 'この提案は更新されています。最新の一覧を読み込みました。',
   'harness.threads.open': 'サブタスクを開く',
+  'harness.threads.transcript': '会話履歴を表示',
+  'harness.threads.transcriptReadOnly': '読み取り専用の履歴です。表示しても実行は開始されず、作業ディレクトリも復元されません。',
   'harness.sources.title': 'ウェブソース',
   'harness.sources.pin': 'ソースを固定',
   'harness.sources.unpin': '固定を解除',

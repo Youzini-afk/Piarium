@@ -10,6 +10,7 @@ import {
   createThreadMergeService,
   createThreadUpdateService,
   createThreadReadService,
+  createThreadHistoryService,
   createThreadSendService,
   createThreadWaitService,
 } from "./thread-services.js";
@@ -24,6 +25,8 @@ import { executeTodoTool } from "./todo-tool.js";
 import { executeRecall } from "./recall-tool.js";
 import { proposeUserMessageSuggestion } from "./knowledge-suggestions.js";
 import { prepareZone2Threads } from "./zone2-threads.js";
+import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.js";
+import { formatZone2Thread } from "./zone2.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
 import {
@@ -127,11 +130,15 @@ export function createShellExecService(host: HarnessServiceHost): HarnessService
           output: result.outputSoFar,
           complete: false,
         });
-        host.observationCursors.set(ctx.sessionId, "shell", result.id, {
-          offset: Buffer.byteLength(result.outputSoFar, "utf8"),
-        });
+        const observed = await host.observationCursors.prepare(ctx.sessionId, "shell", result.id, async () => ({
+          cursor: { offset: Buffer.byteLength(result.outputSoFar, "utf8") },
+          result: undefined,
+        }));
+        if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(observed.commit, observed.abort);
+        else observed.commit();
         return {
           ...result,
+          observationRef: observed.observationRef,
           command: params.command,
           display: presented.display,
           organized: presented.organized,
@@ -186,7 +193,7 @@ export function createShellReadService(host: HarnessServiceHost): HarnessService
       });
       if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pending.commit, pending.abort);
       else pending.commit();
-      return pending.result;
+      return { ...pending.result, observationRef: pending.observationRef };
     },
   };
 }
@@ -553,17 +560,16 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
         contextUsage: params.contextUsage ?? null,
       });
       let threads = null;
+      let pendingThreads: Awaited<ReturnType<typeof prepareZone2Threads>> | undefined;
       if (host.threadRegistry && ctx.workspaceId) {
         try {
-          const pendingThreads = await prepareZone2Threads({
+          pendingThreads = await prepareZone2Threads({
             registry: host.threadRegistry,
             cursors: host.observationCursors,
           }, {
             sessionId: ctx.sessionId,
             workspaceId: ctx.workspaceId,
           });
-          if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(pendingThreads.commit, pendingThreads.abort);
-          else pendingThreads.commit();
           threads = pendingThreads.result;
         } catch (error) {
           threads = {
@@ -586,19 +592,43 @@ export function createZone2AssembleService(host: HarnessServiceHost): HarnessSer
             }];
           })
         : [];
-      const content = assembleZone2Content({ ...result.material, threads, reviews }, { eventCursor: result.eventCursor });
-      return { content, eventCursor: result.eventCursor };
+      try {
+        const selected = selectNewZone2Material({ ...result.material, threads, reviews }, params.knownMaterial);
+        const now = Date.now();
+        const content = assembleZone2Content(selected.material, { eventCursor: result.eventCursor, now });
+        const observationRefs: string[] = [];
+        if (pendingThreads && threads?.status === "ready") {
+          const pending = pendingThreads;
+          const shown = new Set(threads.items.filter((thread) => content?.includes(formatZone2Thread(thread, now)))
+            .map((thread) => thread.id));
+          const overlapShown = Boolean(threads.overlapWarning && content?.includes(`overlap warning: ${threads.overlapWarning}`));
+          if (shown.size || overlapShown) {
+            observationRefs.push(pending.observationRef);
+            const commit = () => pending.commitPresented(shown, overlapShown);
+            if (ctx.deferResponseDelivery) ctx.deferResponseDelivery(commit, pending.abort);
+            else commit();
+          } else pending.abort();
+        }
+        return { content, eventCursor: result.eventCursor, observationRefs, materialRevisions: selected.receiptsFor(content) };
+      } catch (error) {
+        pendingThreads?.abort();
+        throw error;
+      }
     },
   };
 }
 
-export function createCompactionAfterService(host: HarnessServiceHost): HarnessService<"compaction.after"> {
+export function createContextRetainedService(host: HarnessServiceHost): HarnessService<"context.retained"> {
   return {
-    handle: async (_params, ctx: HarnessServiceContext) => {
-      host.observationCursors.clearObserver(ctx.sessionId);
-      host.threadRegistry?.clearCursorsForSession(ctx.sessionId);
-
-      host.onSessionCompacted?.(ctx.sessionId);
+    handle: async (params, ctx: HarnessServiceContext) => {
+      if (!Array.isArray(params.retainedObservationRefs) || !params.retainedObservationRefs.every((ref) => typeof ref === "string")
+        || typeof params.retainedGit !== "boolean") {
+        throw new HarnessServiceError("invalid-params", "Retained context requires explicit native-history receipts");
+      }
+      const retained = new Set(params.retainedObservationRefs);
+      host.observationCursors.retainObserver(ctx.sessionId, retained);
+      host.threadRegistry?.retainCursorsForSession(ctx.sessionId, retained);
+      if (!params.retainedGit) host.onSessionCompacted?.(ctx.sessionId);
       return { acknowledged: true };
     },
   };
@@ -616,7 +646,9 @@ export function createTodoUpsertService(host: HarnessServiceHost): HarnessServic
         deps,
         params.branchEntryIds,
       );
-      return { text: result.text };
+      return { text: result.text, materialRevisions: {
+        "block:plan": zone2MaterialRevision({ label: "plan", content: result.content }),
+      } };
     },
   };
 }
@@ -787,7 +819,7 @@ export function registerHarnessServices(
     router.register("zone2.assemble", createZone2AssembleService(host));
   }
   // Every Host can acknowledge compaction and reset observer baselines.
-  router.register("compaction.after", createCompactionAfterService(host));
+  router.register("context.retained", createContextRetainedService(host));
   if (host.todoDepsProvider) {
     router.register("todo.upsert", createTodoUpsertService(host));
   }
@@ -806,6 +838,7 @@ export function registerHarnessServices(
     router.register("thread.list", createThreadListService(host));
     router.register("thread.wait", createThreadWaitService(host));
     router.register("thread.read", createThreadReadService(host));
+    router.register("thread.history", createThreadHistoryService(host));
     router.register("thread.kill", createThreadKillService(host));
   }
   if (host.threadRegistry && host.threadSendToSession) {

@@ -729,6 +729,8 @@ export class HostController {
       case "session.snapshot":
         this.#sessionHost.assertSession(readString(params, "sessionId"));
         return this.#sessionHost.snapshot();
+      case "session.input.capture":
+        return this.#sessionHost.captureInput(readString(params, "sessionId"));
       case "session.entries":
         {
           const scope = optionalString(params, "scope") ?? "branch";
@@ -836,6 +838,18 @@ export class HostController {
             readAgentInputContext(params),
           ),
         };
+      case "agent.threadRequest":
+        return this.#sessionHost.requestThreadMessage(
+          readString(params, "sessionId"),
+          readString(params, "messageId"),
+          readString(params, "text", { allowEmpty: true }),
+        );
+      case "agent.notify":
+        return this.#sessionHost.notify(
+          readString(params, "sessionId"),
+          readString(params, "messageId"),
+          readString(params, "text", { allowEmpty: true }),
+        );
       case "agent.followUp":
         return {
           accepted: await this.#sessionHost.followUp(

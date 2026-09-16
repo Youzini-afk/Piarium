@@ -42,6 +42,8 @@ export const dict = {
   'harness.knowledge.contentRequired': 'Le contenu de la connaissance est requis',
   'harness.knowledge.conflict': 'Cette suggestion a changé. La liste récente a été rechargée.',
   'harness.threads.open': 'Ouvrir la tâche',
+  'harness.threads.transcript': 'Voir la transcription',
+  'harness.threads.transcriptReadOnly': 'Historique en lecture seule. La consultation ne démarre pas d’exécution et ne restaure pas le répertoire de travail.',
   'harness.sources.title': 'Sources web',
   'harness.sources.pin': 'Épingler la source',
   'harness.sources.unpin': 'Désépingler la source',

@@ -58,6 +58,11 @@ export async function rebaseBranchOntoParentRevision(
   const oldBase = stateOf(oldBaseRead.entries);
   const head = stateOf(headRead.entries);
   const newBase = stateOf(newBaseRead.entries);
+  // A blob hash alone is not authority. Keep the exact branch/revision/path
+  // entry attached to each state object instead of choosing an arbitrary path
+  // that happens to have identical bytes.
+  const contentSources = new Map([...oldBaseRead.entries, ...headRead.entries, ...newBaseRead.entries]
+    .flatMap((entry) => entry.state.kind === "regular-file" ? [[entry.state, entry] as const] : []));
 
   const paths = [...new Set([...Object.keys(oldBase), ...Object.keys(head), ...Object.keys(newBase)])].sort();
   const changes: Record<string, RecoveryState> = {};
@@ -76,10 +81,18 @@ export async function rebaseBranchOntoParentRevision(
       baseState: base,
       parentState: parent,
       childState: child,
-      readContent: async (state) => state.kind === "regular-file" ? store.getObject(state.objectHash) : null,
+      readContent: async (state) => {
+        if (state.kind !== "regular-file") return null;
+        const source = contentSources.get(state);
+        if (!source) throw new Error(`Baseline source is unavailable: ${file}`);
+        const bytes = await store.readContent(source, options?.signal ? { signal: options.signal } : undefined);
+        if (bytes === null) throw new Error(`Baseline source is unavailable: ${file}`);
+        return bytes;
+      },
     });
     switch (plan.decision) {
       case "identical":
+        break;
       case "keep-parent":
         updatedFromParent.push(file);
         break;

@@ -128,6 +128,16 @@ export interface HostMethodMap {
     params: { sessionId: string };
     result: { aborted: boolean };
   };
+  /** Host-only passive delivery; deliberately absent from the surface method catalog. */
+  "agent.notify": {
+    params: { sessionId: string; messageId: string; text: string };
+    result: { accepted: boolean; alreadyDelivered: boolean };
+  };
+  /** Host-only idempotent execution request; receipt lives in the native Pi session. */
+  "agent.threadRequest": {
+    params: { sessionId: string; messageId: string; text: string };
+    result: { accepted: boolean; alreadyDelivered: boolean };
+  };
   "agent.followUp": {
     params: { images?: ImageAttachment[]; inputContext?: AgentInputContext; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
@@ -338,6 +348,11 @@ export interface HostMethodMap {
   "session.list": {
     params: { cwd?: string };
     result: SessionSummary[];
+  };
+  /** Host-only snapshot of Pi's current committed input, never a parent-history capability. */
+  "session.input.capture": {
+    params: { sessionId: string };
+    result: Pick<import("./harness-threads.js").ThreadInheritedContext, "text" | "anchors" | "images"> | null;
   };
   "session.entries": {
     params: { scope?: "all" | "branch"; sessionId: string };

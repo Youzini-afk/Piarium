@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { existsSync, type Dirent } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -16,12 +16,11 @@ import {
   hasTrustRequiringProjectResources,
   ProjectTrustStore,
   SessionManager,
-  sessionEntryToContextMessages,
   type SessionEntry as NativeSessionEntry,
   type SessionTreeNode as NativeSessionTreeNode,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { getSupportedThinkingLevels, type Api, type Context, type Model } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   PIARIUM_RECOVERY_NAVIGATION_MARKER_SCHEMA_VERSION,
   PIARIUM_RECOVERY_NAVIGATION_MARKER_TYPE,
@@ -98,6 +97,8 @@ import {
   setPackageSourceEnabled,
 } from "./package-activation.js";
 import { HostError } from "./errors.js";
+import { captureInheritedInput } from "./harness/inherited-input.js";
+import { createThreadInputExtension, THREAD_NOTIFICATION_TYPE } from "./harness/thread-input-extension.js";
 import {
   AgentProviderBridge,
   createAgentProviderBridgeExtension,
@@ -849,7 +850,7 @@ export class SessionHost {
       followUp: [...session.getFollowUpMessages()],
       followUpMode: session.followUpMode,
       harness: { context: this.#contextRuntimeState() },
-      isCompacting: session.isCompacting,
+      isCompacting: session.isCompacting || this.#contextPreparation?.isCommitting() === true,
       isStreaming: session.isStreaming,
       leafId: session.sessionManager.getLeafId(),
       ...(model === undefined ? {} : { model }),
@@ -875,6 +876,33 @@ export class SessionHost {
       timestamp: header.timestamp,
       ...(header.version === undefined ? {} : { version: header.version }),
     };
+  }
+
+  async captureInput(sessionId: string): Promise<HostMethodResult<"session.input.capture">> {
+    this.assertSession(sessionId);
+    const bridge = this.#hostServicesBridge;
+    const signal = this.session.agent.signal;
+    return captureInheritedInput(this.session, async (handle) => {
+      if (!bridge) throw new HostError("unavailable", "Source output transfer is not available");
+      const parts: string[] = [];
+      let offset = 0;
+      let total: number | undefined;
+      do {
+        signal?.throwIfAborted();
+        const length = Math.min(64 * 1024, total === undefined ? 64 * 1024 : total - offset);
+        const slice = handle.startsWith("out_")
+          ? await bridge.request("output.read", { handle, offset, length }, { ...(signal ? { signal } : {}) })
+          : await bridge.request("shell.read", { id: handle, offset, length }, { ...(signal ? { signal } : {}) });
+        total ??= slice.total;
+        if (slice.offset !== offset || slice.nextOffset < offset || slice.nextOffset > total
+          || (slice.nextOffset === offset && offset < total)) {
+          throw new HostError("unavailable", "Source output transfer returned a non-advancing or changed range");
+        }
+        parts.push(slice.text);
+        offset = slice.nextOffset;
+      } while (offset < total);
+      return parts.join("");
+    });
   }
 
   entries(sessionId: string, scope: "branch" | "all"): SessionEntriesResult {
@@ -1377,6 +1405,90 @@ export class SessionHost {
       },
       { deliverAs },
     );
+  }
+
+  /**
+   * A passive thread message is durable input, not a follow-up instruction to
+   * run another turn. Pi owns both the message and its retained idempotency
+   * receipt; replay after a lost Host acknowledgement cannot append it twice.
+   */
+  readonly #threadRequests = new Map<string, { fingerprint: string; task: Promise<HostMethodResult<"agent.threadRequest">> }>();
+
+  /** Native receipts distinguish accepted input from an uncertain execution trigger. */
+  async requestThreadMessage(sessionId: string, messageId: string, text: string): Promise<HostMethodResult<"agent.threadRequest">> {
+    this.assertSession(sessionId);
+    const session = this.session;
+    const key = JSON.stringify([sessionId, messageId]);
+    const fingerprint = createHash("sha256").update(text).digest("hex");
+    const active = this.#threadRequests.get(key);
+    if (active) {
+      if (active.fingerprint !== fingerprint) throw new HostError("invalid_params", "Message identity is already bound to different input");
+      return active.task;
+    }
+    const receiptType = "piarium.thread.request-receipt";
+    const receipts = session.sessionManager.getEntries().filter((entry) => entry.type === "custom" && entry.customType === receiptType);
+    const latest = receipts.findLast((entry) => entry.type === "custom" && (entry.data as { messageId?: unknown } | undefined)?.messageId === messageId);
+    const receipt = (latest?.type === "custom" ? latest.data : undefined) as { fingerprint?: unknown; state?: unknown } | undefined;
+    if (receipt) {
+      if (receipt.fingerprint !== fingerprint) throw new HostError("invalid_params", "Message identity is already bound to different input");
+      if (receipt.state === "accepted") return { accepted: true, alreadyDelivered: true };
+      throw new HostError("agent_run_failed", receipt.state === "failed"
+        ? "This request's execution trigger previously failed; inspect the retained request before issuing a new request identity"
+        : "This request's execution trigger has an unconfirmed receipt; it will not be blindly replayed");
+    }
+    // Defer the work one microtask so concurrent callers observe the same operation.
+    const task = Promise.resolve().then(async (): Promise<HostMethodResult<"agent.threadRequest">> => {
+      await this.notify(sessionId, messageId, text);
+      const appendReceipt = (state: "dispatching" | "accepted" | "failed") => session.sessionManager.appendCustomEntry(receiptType, {
+        messageId, fingerprint, state,
+      });
+      appendReceipt("dispatching");
+      try {
+        const trigger = `Execute the addressed request ${JSON.stringify(messageId)} using its retained message above.`;
+        if (!session.isIdle) {
+          // Steering reaches the current run's next safe input boundary. A
+          // follow-up would manufacture an extra turn after a dependency wait.
+          await session.sendCustomMessage({ customType: "piarium.thread.execution", content: trigger,
+            display: false, details: { messageId } }, { deliverAs: "steer" });
+        } else {
+          const accepted = await this.prompt(sessionId, trigger);
+          if (!accepted.accepted) throw new Error("Pi did not accept the execution request");
+        }
+        appendReceipt("accepted");
+        return { accepted: true, alreadyDelivered: false };
+      } catch (error) {
+        appendReceipt("failed");
+        throw error;
+      }
+    });
+    this.#threadRequests.set(key, { fingerprint, task });
+    try { return await task; }
+    finally { if (this.#threadRequests.get(key)?.task === task) this.#threadRequests.delete(key); }
+  }
+
+  async notify(sessionId: string, messageId: string, text: string): Promise<HostMethodResult<"agent.notify">> {
+    this.assertSession(sessionId);
+    const customType = THREAD_NOTIFICATION_TYPE;
+    const existing = this.session.sessionManager.getEntries().find((entry) => {
+      if (entry.type !== "custom_message" || entry.customType !== customType) return false;
+      const details = entry.details as { messageId?: unknown } | undefined;
+      return details?.messageId === messageId;
+    });
+    if (existing?.type === "custom_message") {
+      if (existing.content !== text) {
+        throw new HostError("invalid_params", "Message identity is already bound to different input");
+      }
+      return { accepted: true, alreadyDelivered: true };
+    }
+    // nextTurn is an in-memory aside queue, and followUp can start another
+    // model turn. triggerTurn:false is Pi's persistent, non-waking input path.
+    await this.session.sendCustomMessage({
+      customType,
+      content: text,
+      display: true,
+      details: { messageId },
+    }, { triggerTurn: false });
+    return { accepted: true, alreadyDelivered: false };
   }
 
   async abort(sessionId: string): Promise<boolean> {
@@ -3021,6 +3133,11 @@ export class SessionHost {
               name: "piarium-tool-result-truncation",
             },
             {
+              factory: createThreadInputExtension(),
+              hidden: true,
+              name: "piarium-thread-input",
+            },
+            {
               factory: createZone2Extension({
                 bridge: hostServicesBridge,
               }),
@@ -3038,6 +3155,8 @@ export class SessionHost {
                     return modelRuntime.completeSimple(model, context, requestOptions);
                   },
                   getCompactionSettings: () => settingsManager.getCompactionSettings(),
+                  getExplicitKeepRecentTokens: () => settingsManager.getProjectSettings().compaction?.keepRecentTokens
+                    ?? settingsManager.getGlobalSettings().compaction?.keepRecentTokens,
                   getPreparationConfig: () => {
                     const resolved = contextConfigReader();
                     return {
@@ -3045,10 +3164,10 @@ export class SessionHost {
                       waterline: resolved.preparationWaterline,
                     };
                   },
-                  onCompaction: (params) => {
-                    void hostServicesBridge.request<"compaction.after">("compaction.after", params, {
+                  onRetention: (params) => {
+                    return hostServicesBridge.request<"context.retained">("context.retained", params, {
                       timeoutMs: 5_000,
-                    }).catch(() => undefined);
+                    }).then(() => undefined);
                   },
                   onFailure: (phase, message) => {
                     if (this.#contextConfigReader !== undefined) {
@@ -3314,6 +3433,15 @@ export class SessionHost {
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
       });
+      this.#contextPreparation?.attach(created.session, (event) => {
+        this.#emit("agent.event", {
+          event: projectAgentEvent(event, {
+            leafId: created.session.sessionManager.getLeafId(),
+            turnIndex: this.#turnIndex,
+          }),
+          sessionId: created.session.sessionId,
+        });
+      });
       const diagnostics = [
         ...services.diagnostics,
         ...services.resourceLoader.getExtensions().errors.map((entry) => ({
@@ -3360,6 +3488,10 @@ export class SessionHost {
       uiContext: this.ui.createContext(),
     });
     this.#unsubscribe = session.subscribe((event) => {
+      // The request adapter emits real automatic commit boundaries. Pi's
+      // cancelled post-turn probe must not lock input or flash a false boundary.
+      if (this.#contextPreparation?.isBound() && event.type.startsWith("compaction_")
+        && "reason" in event && event.reason !== "manual") return;
       if (event.type === "agent_start") this.#turnIndex = 0;
       if (event.type === "turn_start") this.#turnIndex += 1;
       const position = {

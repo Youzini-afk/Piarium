@@ -208,7 +208,9 @@ export function createDiagnosticsTool(bridge: HostServicesBridge, _sessionId: st
           path: params.path,
           ...(params.full === undefined ? {} : { full: params.full }),
         });
-        return formatDiagnosticsResult(result, params.path);
+        const formatted = formatDiagnosticsResult(result, params.path);
+        return { ...formatted, details: { ...(formatted.details as Record<string, unknown>),
+          ...(result.observationRef ? { observationRef: result.observationRef } : {}) } };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {

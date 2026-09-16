@@ -2,7 +2,7 @@
  * Phase 2 e2e integration test — todo and recall tools through the full
  * bridge → router → service → knowledge store chain.
  *
- * Also tests the zone2.assemble and compaction.after service handlers.
+ * Also tests the zone2.assemble and context.retained service handlers.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -193,15 +193,14 @@ describe("Phase 2 e2e integration", () => {
     }
   });
 
-  it("compaction.after → bridge → router → service: returns acknowledged", async () => {
+  it("context.retained → bridge → router → service: returns acknowledged", async () => {
     const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
     try {
-      const result = await bridge.request("compaction.after", {
-        summary: "test summary",
-        firstKeptEntryId: "test-entry",
-        tokensBefore: 50000,
+      const result = await bridge.request("context.retained", {
+        retainedObservationRefs: [],
+        retainedGit: false,
       });
-      assert.equal(result.acknowledged, true, "compaction.after should return acknowledged: true");
+      assert.equal(result.acknowledged, true, "context.retained should return acknowledged: true");
     } finally {
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }

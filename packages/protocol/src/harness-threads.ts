@@ -279,8 +279,27 @@ export interface ThreadWaitingFor {
   };
 }
 
+export interface ThreadBaselineUpdate {
+  operationId: string;
+  /** Kernel-owned staging branch; holds the selected parent base and planned result. */
+  stageBranchId: string;
+  parentBranchId: string;
+  parentResultRevision: number;
+  expectedWriteRevision: number;
+  originalRoot: string;
+  originalBaseRoot: string;
+  plannedRoot: string;
+  phase: "prepared" | "committed";
+  updatedFromParent: string[];
+  keptChildPaths: string[];
+  mergedPaths: string[];
+  conflicts: { path: string; reason?: string }[];
+}
+
 export interface ThreadWorktree {
   path: string;
+  /** Durable directory-apply/branch-CAS handoff. Never discarded on ambiguous failure. */
+  baselineUpdate?: ThreadBaselineUpdate;
   /**
    * Piarium-managed directory that owns `path` and every switch/snapshot
    * sibling. Destructive and Git-mutating operations reject records without
@@ -371,6 +390,8 @@ export interface ThreadWorktree {
 export interface ThreadInheritedContext {
   fromSessionId: string;
   capturedAt: string;
+  /** Original image bytes explicitly transferred with the fixed input. */
+  images?: import("./types.js").ImageAttachment[];
   text: string;
   anchors: string[];
 }
@@ -413,7 +434,7 @@ export interface ThreadMessagePeer {
   id: string;
 }
 
-export type ThreadMessageStatus = "pending" | "held" | "delivered" | "resolved";
+export type ThreadMessageStatus = "pending" | "held" | "delivered" | "resolved" | "failed";
 
 /**
  * Host-recorded directed message (D-285.6 / 3.18C). `in` records live on the
@@ -430,8 +451,12 @@ export interface ThreadMessageRecord {
   to: ThreadMessagePeer;
   kind: "inform" | "request";
   text: string;
+  /** Execution context policy is part of the idempotent request identity. */
+  context?: "continue" | "fresh";
   replyTo?: string;
   status: ThreadMessageStatus;
+  /** A known rejected execution attempt; not an uncertain transport acknowledgement. */
+  failure?: string;
   /** Run started by this request, when it scheduled execution. */
   runId?: string;
   at: string;
@@ -443,9 +468,12 @@ export interface ThreadMessageRecord {
  * as queued Threads when a slot frees.
  */
 export interface ThreadPendingContinuation {
+  /** Prepared before Run admission; persisted for an interrupted fresh launch. */
+  preparedInput?: string;
+  sourceRunId?: string;
   mode: "continue" | "fresh";
   task: string;
-  requestId?: string;
+  requestId: string;
   from: ThreadMessagePeer;
   at: string;
 }
@@ -500,7 +528,7 @@ export interface Thread {
    */
   messages?: ThreadMessageRecord[];
   /** Request parked behind a full shared execution budget (3.18C). */
-  pendingContinuation?: ThreadPendingContinuation;
+  pendingContinuations?: ThreadPendingContinuation[];
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -634,6 +662,10 @@ export interface ThreadRunFrozenConfig {
 }
 
 export interface ThreadRun {
+  /** Immutable delivery from this attempt, independent of the Thread's latest report. */
+  report?: ThreadReport;
+  /** Durable execution intent consumed atomically with this Run's admission. */
+  request?: ThreadPendingContinuation;
   id: string;
   threadId: string;
   attempt: number;
@@ -641,8 +673,10 @@ export interface ThreadRun {
   sessionId: string | null;
   /** Last published resultRevision known when this Run started, if any. */
   inputRevision?: number;
-  /** Frozen execution configuration for this Run (absent on pre-D-285 records). */
+  /** Frozen execution configuration. Required by the current Host catalog validator. */
   frozen?: ThreadRunFrozenConfig;
+  /** A real blocking wait yielded this Run's model slot. UI attention cannot reacquire it. */
+  executionYielded?: boolean;
   workerState: ThreadRunWorkerState;
   outcome: ThreadRunOutcome | null;
   exitReason: string | null;
@@ -658,7 +692,12 @@ export interface ThreadRun {
 // ── Observer cursor (incremental views, §9.3.7) ───────────────────
 
 export interface ThreadViewCursor {
+  /** Receipts for the raw observations this incremental view depends on. */
+  retainedBy?: string[];
+  /** Explicit addressed requests already shown, independent of UI/progress events. */
+  requestIds?: string[];
   eventSeq: number;
+  resultRevision?: number;
   lifecycle: ThreadLifecycle;
   attention: ThreadAttention;
   integration: ThreadIntegration;
@@ -706,6 +745,7 @@ export interface ThreadListItem {
 }
 
 export interface ThreadListResult {
+  observationRef?: string;
   text: string;
   threads: ThreadListItem[];
 }
@@ -716,6 +756,7 @@ export interface ThreadWaitParams {
 }
 
 export interface ThreadWaitResult {
+  observationRef?: string;
   text: string;
   done: number;
   running: number;
@@ -781,6 +822,9 @@ export type ThreadReadWhat = "blocks" | "report" | "steps";
 
 export interface ThreadReadParams {
   threadId: string;
+  /** Select an attempt or its published result instead of the latest projection. */
+  runId?: string;
+  resultRevision?: number;
   what?: ThreadReadWhat;
   since?: number;
   /** UTF-8 byte offset when paging a retrieval report. */

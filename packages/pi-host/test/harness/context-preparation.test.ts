@@ -2,10 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createContextPreparationExtension,
-  estimateRequestTokens,
 } from "../../src/harness/context-preparation.js";
-import type { SessionEntry, SessionMessageEntry } from "@earendil-works/pi-coding-agent";
+import { convertToLlm, type SessionEntry, type SessionMessageEntry } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { RequestBudgetObservation } from "../../src/harness/context-request-boundary.js";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ interface Harness {
   calls: RecordedCall[];
   failures: [string, string][];
   successes: string[];
-  compactions: { firstKeptEntryId: string; summary: string }[];
+  compactions: import("@piarium/protocol").ContextRetentionParams[];
   config: { enabled: boolean; waterline: number };
   entries: SessionEntry[];
   extension: ReturnType<typeof createContextPreparationExtension>;
@@ -147,7 +147,8 @@ const createHarness = (entries: SessionEntry[], tokensNow: number): Harness => {
     }),
     getPreparationConfig: () => harness.config,
     getCompactionSettings: () => ({ enabled: true, reserveTokens: 400, keepRecentTokens: 300 }),
-    onCompaction: (params) => harness.compactions.push(params),
+    getExplicitKeepRecentTokens: () => 300,
+    onRetention: (params) => { harness.compactions.push(params); },
     onFailure: (phase, message) => harness.failures.push([phase, message]),
     onSuccess: (phase) => harness.successes.push(phase),
   });
@@ -169,6 +170,14 @@ const fireContext = (harness: Harness, tokens: number, messages?: AgentMessage[]
     type: "context",
     messages: messages ?? harness.entries.flatMap((e) => e.type === "message" ? [e.message] : []),
   } as never, harness.ctx as never);
+  harness.extension.observeRequest({
+    model: harness.ctx.model as never,
+    context: { systemPrompt: harness.ctx.getSystemPrompt(),
+      tools: ["bash", "read"].map((name) => ({ name, description: name === "bash" ? "run a command" : "read a file", parameters: { type: "object" } as never })),
+      messages: convertToLlm(messages ?? harness.entries.flatMap((e) => e.type === "message" ? [e.message] : [])),
+    },
+    options: { sessionId: "session-1" }, inputTokens: tokens, reserveTokens: 400, needsSpace: false,
+  });
 };
 
 const compactEvent = (
@@ -214,7 +223,7 @@ describe("context preparation extension", () => {
     assert.equal(harness.calls.length, 1);
     // The summary request carries the schema-only tool prefix and no executor.
     const call = harness.calls[0]!;
-    assert.equal(call.options.toolChoice, "none");
+    assert.equal(call.options.toolChoice, undefined, "preserve the main request tool-choice shape without an executor");
     assert.equal(call.options.sessionId, "session-1");
     assert.equal(call.context.systemPrompt, "You are a coding agent.");
     const tools = call.context.tools as { name: string; description: string }[];
@@ -317,7 +326,7 @@ describe("context preparation extension", () => {
     assert.equal(harness.extension.status().candidate, "none");
   });
 
-  it("a failed synchronous commit defers to Pi's default and reports the commit phase", async () => {
+  it("a failed synchronous commit cancels without a second summarizer and reports the commit phase", async () => {
     const harness = createHarness(branchEntries(1_300), 1_300);
     const commitPromise = harness.handlers.get("session_before_compact")!(
       compactEvent(harness) as never, harness.ctx as never,
@@ -325,7 +334,7 @@ describe("context preparation extension", () => {
     await waitFor(() => harness.calls.length === 1);
     harness.calls[0]!.reject(new Error("rate limited"));
     const result = await commitPromise;
-    assert.equal(result, undefined);
+    assert.deepEqual(result, { cancel: true });
     assert.deepEqual(harness.failures, [["commit", "rate limited"]]);
   });
 
@@ -358,14 +367,60 @@ describe("context preparation extension", () => {
     assert.equal(harness.extension.status().candidate, "none");
   });
 
-  it("uses the last assistant usage for the request budget estimate", () => {
-    const messages: AgentMessage[] = [
-      userMessage("hi"),
-      assistantMessage("reply", 640),
-      toolResultMessage("x".repeat(400)),
-    ];
-    const estimate = estimateRequestTokens(messages);
-    assert.equal(estimate.usageTokens, 640);
-    assert.ok(estimate.tokens > 640);
+  it("calibrates a matching real request once without adding cached tokens twice", () => {
+    const observation = new RequestBudgetObservation();
+    const context = { systemPrompt: "stable prefix", messages: convertToLlm([userMessage("hello")]) };
+    const response = okResponse("answer");
+    response.usage = { ...usage(1_000), input: 100, cacheRead: 700, cacheWrite: 100, output: 100 };
+    observation.record("same-config", context, response);
+    assert.equal(observation.estimate("same-config", context), 900);
+    observation.clear();
+    assert.ok(observation.estimate("same-config", context) < 100);
+  });
+});
+
+
+describe("D-284 acceptance regressions", () => {
+  it("rebinds observation retention on branch navigation without preparing a summary", async () => {
+    const note: SessionEntry = { id: "kept-note", parentId: null, timestamp: new Date().toISOString(),
+      type: "custom_message", customType: "piarium-context", content: "observed facts", display: false,
+      details: { observationRefs: ["kept-receipt"], gitObserved: true } };
+    const harness = createHarness([note], 10);
+    await harness.handlers.get("session_tree")!({ type: "session_tree" } as never, harness.ctx as never);
+    assert.deepEqual(harness.compactions.at(-1), { retainedObservationRefs: ["kept-receipt"], retainedGit: true });
+    harness.entries = [entry("other", null, userMessage("a different branch"))];
+    await harness.handlers.get("session_tree")!({ type: "session_tree" } as never, harness.ctx as never);
+    assert.deepEqual(harness.compactions.at(-1), { retainedObservationRefs: [], retainedGit: false });
+    assert.equal(harness.calls.length, 0);
+  });
+  for (const stopReason of ["aborted", "length"] as const) {
+    it(`never adopts a ${stopReason} summary with nonempty partial text`, async () => {
+      const harness = createHarness(branchEntries(1_300), 1_300);
+      fireContext(harness, 1_300);
+      harness.calls[0]!.resolve({ ...okResponse("Only the first half of the requirements."), stopReason });
+      await new Promise<void>((resolve) => setTimeout(resolve, 5));
+      assert.equal(harness.extension.status().candidate, "none");
+      assert.equal(harness.failures.length, 1);
+    });
+  }
+
+  it("cancels already-running preparation when the user disables background maintenance", () => {
+    const harness = createHarness(branchEntries(1_300), 1_300);
+    fireContext(harness, 1_300);
+    harness.config.enabled = false;
+    fireContext(harness, 1_350);
+    assert.equal(harness.calls[0]!.options.signal?.aborted, true);
+    assert.equal(harness.extension.status().candidate, "none");
+  });
+
+  it("does not fall through to a second summarizer after a failed explicit commit", async () => {
+    const harness = createHarness(branchEntries(1_300), 1_300);
+    const commit = harness.handlers.get("session_before_compact")!(
+      compactEvent(harness) as never, harness.ctx as never,
+    );
+    await waitFor(() => harness.calls.length === 1);
+    harness.calls[0]!.reject(new Error("summary request failed"));
+    assert.deepEqual(await commit, { cancel: true });
+    assert.equal(harness.calls.length, 1);
   });
 });

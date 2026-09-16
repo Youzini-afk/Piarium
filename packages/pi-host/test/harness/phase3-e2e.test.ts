@@ -18,7 +18,7 @@ import {
   createThreadsTool,
   createWaitTool,
 } from "../../src/harness/thread-tools.js";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, resolvePresets } from "@piarium/protocol";
+import { resolvePresets } from "@piarium/protocol";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 const SESSION_ID = "p3-e2e-session";
@@ -108,10 +108,10 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
     ...(options.transportTimeoutMs !== undefined ? { defaultTimeoutMs: options.transportTimeoutMs } : {}),
   });
   registerHarnessServices(router, harnessServiceHost);
-  const emittedRequests: Array<{ method: string; timeoutMs?: number }> = [];
+  const emittedRequests: Array<{ method: string; params: unknown; timeoutMs?: number }> = [];
   const bridge = new HostServicesBridge({
     emit: (_event, data) => {
-      emittedRequests.push({ method: data.method, ...(data.timeoutMs === undefined ? {} : { timeoutMs: data.timeoutMs }) });
+      emittedRequests.push({ method: data.method, params: data.params, ...(data.timeoutMs === undefined ? {} : { timeoutMs: data.timeoutMs }) });
       void router.processEvent({ actor: ACTOR, kind: "host", envelope: { kind: "event", event: "harness.request", data } });
     },
     sessionId: SESSION_ID,
@@ -259,7 +259,7 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
       const unchanged = await harness.bridge.request("zone2.assemble", { sinceTurn: 2, branchEntryIds: [] });
       assert.equal(unchanged.content, null);
 
-      await harness.bridge.request("compaction.after", { summary: "summary", firstKeptEntryId: "entry", tokensBefore: 100 });
+      await harness.bridge.request("context.retained", { retainedObservationRefs: [], retainedGit: false });
       const reset = await harness.bridge.request("zone2.assemble", { sinceTurn: 3, branchEntryIds: [] });
       assert.match(reset.content ?? "", /completed.*conclusion: zone2 complete/);
     } finally {
@@ -396,13 +396,13 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
     }
   });
 
-  it("uses the explicit transport ceiling only as a deadline, not a cache wake schedule", async () => {
+  it("bounds dependency watching without imposing a second deadline on root-slot readmission", async () => {
     const harness = await setup({ transportTimeoutMs: 200 });
     try {
       await executeTool(createWaitTool(harness.bridge, SESSION_ID), { timeout_ms: 50 });
       const request = harness.emittedRequests.find((entry) => entry.method === "thread.wait");
-      assert.equal(request?.timeoutMs, 5_050);
-      assert.ok((request?.timeoutMs ?? 0) < HARNESS_MAX_REQUEST_TIMEOUT_MS);
+      assert.equal(request?.timeoutMs, 0);
+      assert.equal((request?.params as { timeoutMs?: number }).timeoutMs, 50);
     } finally {
       await harness.dispose();
     }

@@ -79,7 +79,9 @@ export class HostServicesBridge {
       resolveResponse = resolve;
       rejectResponse = reject;
     });
-    const timer = setTimeout(() => {
+    // A thread wait owns its dependency deadline. Reacquiring a root slot
+    // afterwards is cancellation/lifecycle-bound, not a second fixed timeout.
+    const timer = method === "thread.wait" && timeoutMs === 0 ? undefined : setTimeout(() => {
       const pending = this.#pending.get(requestId);
       if (!pending) return;
       this.#emitCancel({ requestId });

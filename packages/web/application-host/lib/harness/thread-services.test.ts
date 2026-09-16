@@ -1132,7 +1132,7 @@ describe("thread services", () => {
         serviceContext(),
       );
       expect(result).toMatchObject({ accepted: true, lifecycle: "active", delivery: "delivered", runId: run.id });
-      expect(sendToSession).toHaveBeenCalledWith(sessionId, "note this", { from: "the parent agent" });
+      expect(sendToSession).toHaveBeenCalledWith(sessionId, "note this", { messageId: expect.any(String), from: "the parent agent" });
       expect((await registry.getThreadById("workspace-1", thread.id))?.messages).toEqual([
         expect.objectContaining({ direction: "in", kind: "inform", status: "delivered" }),
       ]);
@@ -1167,8 +1167,8 @@ describe("thread services", () => {
       );
       expect(woken).toMatchObject({ accepted: true, delivery: "delivered", attention: "none" });
       // Held messages flush ahead of the request at the same boundary.
-      expect(sendToSession).toHaveBeenNthCalledWith(1, sessionId, "fyi only", { from: "the parent agent" });
-      expect(sendToSession).toHaveBeenNthCalledWith(2, sessionId, "do more", { from: "the parent agent", requestId: "req-wake" });
+      expect(sendToSession).toHaveBeenNthCalledWith(1, sessionId, "fyi only", { messageId: expect.any(String), from: "the parent agent" });
+      expect(sendToSession).toHaveBeenNthCalledWith(2, sessionId, "do more", { messageId: expect.any(String), from: "the parent agent", requestId: "req-wake" });
       expect((await registry.getThreadById("workspace-1", thread.id))?.attention).toBe("none");
     } finally {
       await registry.dispose();
@@ -1201,7 +1201,7 @@ describe("thread services", () => {
         threadCtx(answerer.sessionId),
       );
       expect(reply).toMatchObject({ accepted: true, delivery: "delivered", attention: "none" });
-      expect(sendToSession).toHaveBeenLastCalledWith(asker.sessionId, "count is 3", { from: `thread ${answerer.thread.id}` });
+      expect(sendToSession).toHaveBeenLastCalledWith(asker.sessionId, "count is 3", { messageId: expect.any(String), from: `thread ${answerer.thread.id}` });
       const askerNow = await registry.getThreadById("workspace-1", asker.thread.id);
       expect(askerNow?.attention).toBe("none");
       expect(askerNow?.waitingFor).toBeNull();
@@ -1273,15 +1273,15 @@ describe("thread services", () => {
     } as never);
     try {
       const parent = await runningThread(registry, { kind: "session", id: "root-1" }, "parent thread", 4);
-      const child = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "child thread");
-      const sibling = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "sibling thread");
+      const child = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "child thread", 4);
+      const sibling = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "sibling thread", 4);
       // to: "parent" resolves the parent thread for a nested caller.
       const up = await service.handle(
         { to: "parent", message: "question for you", from: "parent-agent" },
         threadCtx(child.sessionId),
       );
       expect(up).toMatchObject({ accepted: true, delivery: "delivered" });
-      expect(sendToSession).toHaveBeenCalledWith(parent.sessionId, "question for you", { from: `thread ${child.thread.id}` });
+      expect(sendToSession).toHaveBeenCalledWith(parent.sessionId, "question for you", { messageId: expect.any(String), from: `thread ${child.thread.id}` });
       // Sibling under the same parent thread is reachable.
       const sideways = await service.handle(
         { threadId: sibling.thread.id, message: "note", from: "parent-agent" },
@@ -1294,7 +1294,7 @@ describe("thread services", () => {
         threadCtx(parent.sessionId),
       );
       expect(session).toMatchObject({ accepted: true, delivery: "delivered" });
-      expect(sendToSession).toHaveBeenCalledWith("root-1", "answer", { from: `thread ${parent.thread.id}` });
+      expect(sendToSession).toHaveBeenCalledWith("root-1", "answer", { messageId: expect.any(String), from: `thread ${parent.thread.id}` });
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

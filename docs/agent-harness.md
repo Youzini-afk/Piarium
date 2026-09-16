@@ -1,6 +1,6 @@
 # Piarium agent harness
 
-Status: design accepted; D-284–D-286 context and task-thread changes are pending implementation; delivery facts are in agent-harness-status.md
+Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
 Last updated: 2026-09-16
 
@@ -15,7 +15,7 @@ Section 4 of [architecture.md](architecture.md) gives the process model this doc
 D-284 将上下文管理改为容量驱动的后台摘要准备与按需切换，保留前台无明显整理停顿的目标，已实施：持续 keeper /
 takeover 已删除，新链按 2.4A/B、2.6A/B 接线并经真 Pi+faux 纵切验证，当前事实见 status。
 D-285 接受以工作为中心的可续做线程、可选预设、定向通信与分段成果；D-286 补齐整套上下文原则及“工作可延续、上下文可重建”。
-D-285 的线程侧目标与尚未切换的角色/send/review/调度实现分开，交付不能仅凭文档描述。
+D-287 已按真实 Pi/Host/Rust 消费者验收并修正上下文收据、Run 准入、消息提交边界和物化 baseline handoff；证据见 status 与验收记录。
 
 ## 1. 决定
 
@@ -2004,14 +2004,14 @@ T4、完整 RunManifest、知识数据库迁移或沙箱不作为共同前置。
    `bash` 优先——在 Windows 上一天内可感。（`todo` 依赖 `block` 存储，随第 2 阶段交付。）
 1b. **web**：`webfetch` / `websearch`、抓取服务（SSRF、提取、PDF 转文本、缓存、Electron 离屏渲染）、搜索 provider 抽象、
    来源面板。可与 2 并行。
-2. **上下文层（下一主线 D-284）**：真实请求前预算、缓存友好的后台摘要准备、固定切点提交与较长近期原文、当前会话 history，
-   Zone 2 增量和剩余 keeper 消费者收口。`todo`、用户笔记、知识库与 suggestions 保持各自权威；删除持续 keeper 与三态接管。
+2. **上下文层（D-284/D-286/D-287，已完成）**：真实请求前预算、缓存友好的后台摘要准备、固定切点提交与较长近期原文、
+   当前/同 Thread 历史回读及 receipt-bound Zone 2 增量。`todo`、用户笔记、知识库与 suggestions 保持各自权威；持续 keeper 与三态接管已删除。
 3. **检索与子 agent 层**：`explore` 管线（多路召回、当前原文读取、单元排序与一次呈现；按 D-173 收敛职责与调度）、
    `file` / `symbol` 节点与 LSP / Git 采集器、`related`、LSP 导航工具（`symbols` / `definition` /
    `references` / `hover`）；原生子会话 worker 运行时按**线程**形态（第 9.3 节）交付：host 持久化的线程注册表与状态机、
    worker 丢失恢复、host 观察的活性与循环检测、`dispatch` / `threads` / `wait` / `send` / `read_thread` / `kill`、角色目录
-   与独立模型槽位、原生工作分支与按需物化、集成与回收、事件驱动等待、观察游标、线程侧栏与讨论线。D-285 下一步接通普通
-   派发、task/inherit/continue/fresh、定向消息、分段成果与共享执行调度，自动 review 改为显式开启。
+   与独立模型槽位、原生工作分支与按需物化、集成与回收、事件驱动等待、观察游标、线程侧栏与讨论线。D-285/D-287 已接通普通
+   派发、task/inherit/continue/fresh、定向消息、分段成果与共享执行调度；自动 review 默认关闭，仅在用户显式启用后运行。
 3b. **权限纵切（D-283，已完成）**：Host 静态授权与 scope、Piarium 原生唯一 `tool_call` 门、规范化权限对象、session grant / audit、Settings 与 Smart；旧 permission-system 双轨已删除。
 R. **Rust 系统内核与 Host 分层（D-252/D-282，已完成）**：R0–R6 已接管工作状态/恢复、磁盘/物化、进程/终端、文件/结构计算，
    并完成数据保留、取消/崩溃恢复、性能定标与发行矩阵接线。TS/Pi 保留上层职责；外部 runtime 和领域扩展沿此边界继续。

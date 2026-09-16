@@ -6,6 +6,7 @@ export const THREAD_CONTROL_TOOL_NAMES = [
   "wait",
   "send",
   "read_thread",
+  "history",
   "merge",
   "update",
   "kill",

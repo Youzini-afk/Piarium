@@ -126,15 +126,17 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
       `recovery-capture:${identity.workspaceId}:${randomUUID()}`,
     );
     if (captured.ownerId && captured.state.kind === "regular-file") {
-      if (_sessionId) {
-        const actor = await this.adapter.context(identity.workspaceId, "recovery-actor", {
+      // File capture can belong to a nested execution-directory grant. Recovery
+      // metadata still belongs to the owning workspace's record writer: transfer
+      // the transient owner to that exact grant, also for maintenance operations.
+      const recordWriter = await this.adapter.context(identity.workspaceId,
+        _sessionId ? "recovery-actor" : "recovery-maintenance", {
           owningWorkspace: identity.workspaceId,
           executionWorkspace: identity.workspaceId,
-          sessionId: _sessionId,
+          ...(_sessionId ? { sessionId: _sessionId } : { capabilities: ["recovery.maintenance"] }),
           pathScopes: [""],
         });
-        await actor.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
-      }
+      await recordWriter.client.rebindObjectOwner(identity.workspaceId, captured.ownerId);
       const key = this.key(identity.workspaceId, captured.state.objectHash);
       const owners = this.owners.get(key) ?? new Set<string>();
       owners.add(captured.ownerId);

@@ -291,14 +291,14 @@ server backend and current command set are not yet sufficient as the sole produc
 Direct workers are also where Piarium's own agent harness lives. The session worker overrides Pi's
 built-in `bash`, `edit`, `write`, and `grep` tools by name through the same `customTools` path the
 recovery journal already uses, and mounts in-process extension hooks for tail-appended turn context,
-post-tool feedback, and fixed-candidate context preparation (D-284). On every model request —
+post-tool feedback, and fixed-candidate context preparation (D-284/D-287). On every model request —
 including tool-loop continuations — the context hook compares the projected request size against a
 configurable waterline of the usable window (context window minus Pi's reserve). Once crossed, the
 extension fixes a branch- and model-bound preparation range and runs one derived summary request in
-the background over the same ModelRuntime: real system prompt, schema-only tools, `toolChoice: none`,
-no tool executor. The foreground turn keeps running; when Pi later reaches `session_before_compact`,
-the ready candidate is committed (or awaited, with a synchronous fallback), Pi persists the
-compaction entry, and `compaction.after` resets Host observation baselines. A `history` tool reads
+the background over the same ModelRuntime with the actual stable request prefix and no tool executor.
+The foreground turn keeps running. When a later request needs space, Pi commits the validated candidate at
+a safe paired boundary (or waits for the same candidate), persists the compaction entry, and reports which
+original observations remain in the retained context. A `history` tool reads
 summarized raw entries back from the session's own branch. The heavy services behind those tools —
 shell supervision, ranked search, diagnostics, output storage, and the TriviumDB workspace knowledge
 store — run in the application host and are reached over typed worker-to-host requests, never by
@@ -307,13 +307,14 @@ are specified in [agent-harness.md](agent-harness.md); which of its capabilities
 wired into a real session, proven by end-to-end evidence, or on by default is tracked only in
 [agent-harness-status.md](agent-harness-status.md).
 
-D-284's replacement context policy is implemented: one fixed-range summary is derived from the active
+D-284's replacement context policy is implemented and D-287 closes its consumers: one fixed-range summary is derived from the active
 model request near capacity while foreground work continues, then committed with retained original
 messages only when a later request needs room. Pi remains the session/history authority; request
 budgeting and summary scheduling stay in the TypeScript/Pi layer, not the Rust kernel. The continuous
 memory keeper, its coverage-driven takeover path, keeper nudges, block-based compaction coverage, and
 memory-mode UI are deleted; plans, user notes, accepted knowledge, and real event delivery remain.
-Background preparation is on by default and can be disabled independently of Pi's own automatic
+After compaction, observation receipts and material revisions are retained only when their original Pi messages remain in the
+active context; Zone 2 then emits changed material instead of rebuilding a dashboard every turn. Background preparation is on by default and can be disabled independently of Pi's own automatic
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
@@ -323,7 +324,7 @@ and independent plans/knowledge. A task can also start a fresh input view when i
 mostly obsolete. That refresh uses current rules and selected work evidence without discarding files,
 results, pending messages or the old Pi transcript, and does not require a background freshness model.
 
-D-285 accepts task-centered collaboration; plan 3.18A–D is implemented. A normal dispatch requires only
+D-285 accepts task-centered collaboration; plan 3.18A–E is implemented and independently corrected by D-287. A normal dispatch requires only
 `task` and inherits the caller's current model and active tools; presets are optional, resolve per-Run
 execution configuration, and `shared` worktree stays an explicit choice. Each Run freezes its model,
 tool allowlist, permission overlay, scope, worktree, prompt fragment, and input origin
@@ -341,8 +342,9 @@ base. `thread.update` (`threadUpdateBaseline`) rebases the calling thread's work
 selected parent result revision: a three-way plan keeps the thread's own deltas, adopts parent-only
 changes, merges clean text edits, and reports divergent paths as conflicts, while the kernel applies the
 complete new delta set and the `baseRef`/`parentRef` lineage atomically under the expected
-`writeRevision` CAS; materialized worktrees are refreshed onto the new baseline. Still pending under
-3.18E: the UI thread controls and old-path closure.
+`writeRevision` CAS. Materialized worktrees use a durable staging/Integration handoff with whole-directory
+revalidation before the child branch CAS; unfinished handoffs block publish, resume, restore and reclaim until startup or the next update reconciles them.
+Ask/Fresh/Note UI controls call the same durable message service as Pi tools with stable request identities.
 
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor

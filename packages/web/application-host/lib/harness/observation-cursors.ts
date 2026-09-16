@@ -1,6 +1,10 @@
+import { randomUUID } from "node:crypto";
+
 export type ObservationObjectKind = "diagnostics" | "shell" | "zone2-threads";
 
 export interface ObservationCursorEntry<T> {
+  /** Native-history receipts needed to interpret this incremental baseline. */
+  retainedBy: string[];
   observedAt: number;
   /** Store-local monotonic revision used for compare-and-swap. */
   revision: number;
@@ -20,6 +24,7 @@ export interface ObservationCursorEntry<T> {
  */
 export interface PendingObservation<TResult> {
   result: TResult;
+  observationRef: string;
   /**
    * Commit the cursor advancement after successful response delivery.
    * Returns true if the cursor was advanced, false if a newer observation
@@ -55,6 +60,7 @@ export interface ObservationCursorStore {
   ): Promise<PendingObservation<TResult>>;
   clearKind(observerSessionId: string, objectKind: ObservationObjectKind): void;
   clearObserver(observerSessionId: string): void;
+  retainObserver(observerSessionId: string, retainedRefs: ReadonlySet<string>): void;
   dispose(): void;
 }
 
@@ -123,8 +129,11 @@ export function createObservationCursorStore(
     objectKind: ObservationObjectKind,
     objectId: string,
     value: T,
+    observationRef = randomUUID(),
   ): ObservationCursorEntry<T> => {
+    const previous = readCursor<T>(observerSessionId, objectKind, objectId);
     const entry: ObservationCursorEntry<T> = {
+      retainedBy: [...(previous?.retainedBy ?? []), observationRef],
       observedAt: now(),
       revision: ++nextRevision,
       value: structuredClone(value),
@@ -201,6 +210,7 @@ export function createObservationCursorStore(
         const previous = readCursor<TCursor>(observerSessionId, objectKind, objectId);
         outcome = await task(previous);
         const baselineRevision = previous?.revision ?? null;
+        const observationRef = randomUUID();
         release();
         if (tails.get(key) === currentTail) tails.delete(key);
         let settled = false;
@@ -217,6 +227,7 @@ export function createObservationCursorStore(
         };
         return {
           result: outcome.result,
+          observationRef,
           commit: (): boolean => {
             if (settled) return false;
             let advanced = false;
@@ -224,7 +235,7 @@ export function createObservationCursorStore(
               const current = readCursor<TCursor>(observerSessionId, objectKind, objectId);
               const currentRevision = current?.revision ?? null;
               if (currentRevision === baselineRevision) {
-                writeCursor(observerSessionId, objectKind, objectId, outcome.cursor);
+                writeCursor(observerSessionId, objectKind, objectId, outcome.cursor, observationRef);
                 advanced = true;
               }
             }
@@ -262,6 +273,22 @@ export function createObservationCursorStore(
       invalidate(observerSessionId, "shell");
       invalidate(observerSessionId, "zone2-threads");
       observers.delete(observerSessionId);
+    },
+
+    retainObserver(observerSessionId, retainedRefs): void {
+      const kinds = observers.get(observerSessionId);
+      // A pending response prepared before compaction cannot resurrect a
+      // removed baseline. Retained committed cursors themselves stay unchanged.
+      for (const kind of ["diagnostics", "shell", "zone2-threads"] as const) {
+        invalidate(observerSessionId, kind);
+        const entries = kinds?.get(kind);
+        if (!entries) continue;
+        for (const [id, entry] of entries) {
+          if (!entry.retainedBy.length || entry.retainedBy.some((ref) => !retainedRefs.has(ref))) entries.delete(id);
+        }
+        if (!entries.size) kinds!.delete(kind);
+      }
+      if (!kinds?.size) observers.delete(observerSessionId);
     },
 
     dispose(): void {

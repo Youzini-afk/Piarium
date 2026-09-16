@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { sliceUtf8ByBytes, type DiagnosticItem, type HarnessActorContext } from "@piarium/protocol";
 import { createLspDiagnosticsSnapshotService, type DiagnosticsProvider } from "./diagnostics-service.js";
-import { createCompactionAfterService, createShellExecService, createShellReadService } from "./harness-services.js";
+import { createContextRetainedService, createShellExecService, createShellReadService } from "./harness-services.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import type { HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
@@ -65,11 +65,11 @@ describe("incremental shell observation", () => {
         lastOutputAt: 900,
       }),
     };
-    let clearedThreadCursors = 0;
+    let retainedThreadCursors = 0;
     const host = {
       observationCursors: cursors,
       getShellSupervisor: () => supervisor,
-      threadRegistry: { clearCursorsForSession: () => { clearedThreadCursors += 1; } },
+      threadRegistry: { retainCursorsForSession: () => { retainedThreadCursors += 1; } },
     } as unknown as HarnessServiceHost;
     const service = createShellReadService(host);
 
@@ -94,8 +94,8 @@ describe("incremental shell observation", () => {
     const unchanged = await service.handle({ id: "sh_1" }, context());
     expect(unchanged).toMatchObject({ text: "", length: 0, running: false, exitCode: 0 });
 
-    await createCompactionAfterService(host).handle({ summary: "summary", firstKeptEntryId: "entry", tokensBefore: 10 }, context());
-    expect(clearedThreadCursors).toBe(1);
+    await createContextRetainedService(host).handle({ retainedObservationRefs: [], retainedGit: false }, context());
+    expect(retainedThreadCursors).toBe(1);
     const afterCompaction = await service.handle({ id: "sh_1" }, context());
     expect(afterCompaction).toMatchObject({ text: output, offset: 0, observation: { first: true } });
     cursors.dispose();

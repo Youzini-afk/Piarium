@@ -27,6 +27,8 @@ export interface HarnessAuthorizedPath {
 
 export interface HarnessServiceContext {
   actor: HarnessActorContext;
+  /** Set only by an authenticated Host UI adapter, never from worker params. */
+  requestSource?: "user";
   authorizedPaths: readonly HarnessAuthorizedPath[];
   sessionId: HarnessActorContext["sessionId"];
   workspaceId: HarnessActorContext["workspaceId"];
@@ -329,7 +331,10 @@ export const createHarnessRouter = (options: HarnessRouterOptions) => {
     const requestTimeoutMs = (typeof data.timeoutMs === "number" && data.timeoutMs > 0)
       ? Math.min(data.timeoutMs, HARNESS_MAX_REQUEST_TIMEOUT_MS)
       : defaultTimeoutMs;
-    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+    // Only the actor-scoped scheduler wait may outlive its dependency deadline.
+    // Worker cancellation, generation replacement, and Host disposal still abort it.
+    const timer = data.method === "thread.wait" && data.timeoutMs === 0
+      ? undefined : setTimeout(() => controller.abort(), requestTimeoutMs);
     try {
       const actor = await options.resolveActor(identity, controller.signal);
       if (!actor) {

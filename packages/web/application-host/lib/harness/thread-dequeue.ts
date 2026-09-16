@@ -1,5 +1,5 @@
-import type { Thread, ThreadParent } from "@piarium/protocol";
-import type { ThreadRegistry, ThreadRegistryOptions } from "./thread-registry.js";
+import type { Thread, ThreadParent, ThreadRun } from "@piarium/protocol";
+import { ThreadAdmissionError, type ThreadRegistry, type ThreadRegistryOptions } from "./thread-registry.js";
 import type { ThreadRuntime } from "./thread-runtime.js";
 
 export const createOnThreadDequeued = (options: {
@@ -17,25 +17,33 @@ export const createOnThreadDequeued = (options: {
     const registry = options.getRegistry();
     // A parked continuation promotes through the same admission gate as a
     // queued Thread: the request already passed admission in tryDequeue.
-    if (thread.pendingContinuation) {
-      const continuation = thread.pendingContinuation;
-      await registry.setPendingContinuation(workspaceId, thread.id, null);
+    if (thread.pendingContinuations?.length) {
+      const continuation = thread.pendingContinuations[0]!;
+      // Only startRun may consume this durable intent, in the same transaction
+      // that reserves a slot. Failed preparation leaves it available for retry.
       await runtime.continueRun({
         workspaceId,
         parent,
         threadId: thread.id,
         mode: continuation.mode,
         task: continuation.task,
+        from: continuation.from,
         ...(continuation.requestId !== undefined ? { requestId: continuation.requestId } : {}),
         admitted: true,
       }).then(({ runId }) => (
         continuation.requestId !== undefined && runId !== undefined
-          ? registry.patchThreadMessage(workspaceId, thread.id, continuation.requestId, { status: "delivered", runId })
+          ? registry.acknowledgeThreadMessages(workspaceId, thread.id, [continuation.requestId], runId)
           : undefined
       ));
       return;
     }
-    const run = await registry.startRun(workspaceId, thread.id);
+    let run: ThreadRun;
+    try {
+      run = await registry.startRun(workspaceId, thread.id);
+    } catch (error) {
+      if (error instanceof ThreadAdmissionError) return;
+      throw error;
+    }
     void runtime.spawn({
       workspaceId,
       parent,

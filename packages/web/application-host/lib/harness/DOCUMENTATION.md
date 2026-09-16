@@ -24,7 +24,6 @@ broker event stream ──→ HarnessRouter.processEvent()
                            ├── fs.lock      → Rust kernel file-resource lease + Documents identity
                            ├── lsp.diagnostics → LspDiagnosticsService
                            ├── lsp.diagnosticsSnapshot → LspDiagnosticsService
-                           ├── memory.blocks.* → KnowledgeStore block validator
                            ├── knowledge.suggest → workspace/user .tdb via existing suggestion accept policy
                            ├── zone2.assemble → Knowledge material + ThreadRegistry projection + source-thread <review>
                            └── thread.*     → ThreadRegistry + ThreadRuntime + native working state + verification bind / auto review / retrieval facts
@@ -158,6 +157,7 @@ dispatch time through `threadCaptureInputContext` — the last compaction summar
 plus the raw committed entries kept after it, rendered bounded — persists it on
 the manifest, and renders it in the child's initial prompt; a queued Thread
 never re-reads later parent state.
+The capture now comes from Pi's actual active context, preserving legal tool-call/result pairs, images and copied durable output bodies while excluding unfinished calls and future parent appends. A `fresh` Run gets a new session; its `history(run)` source is authorized only to retained Runs of that same Thread. Spawn, dequeue, lost resume, restore and continuation consume the new Run's frozen model/tools/permissions/scope rather than reconstructing them from long-lived Thread fields.
 
 `thread.send` carries directed messages inside one root task (3.18C). Reachable
 targets are relationship-bound: a Thread caller reaches its children, its
@@ -177,6 +177,7 @@ Run. Messages persist as `in`/`out` records on the Thread; `requestId` makes
 retries observe the recorded outcome instead of duplicating delivery or
 execution, and `replyTo` resolves both ledgers and clears the requester's
 `waitingFor: "thread"` mark.
+Pi accepts `inform` through a persistent non-waking custom message and accepts `request` through an idempotent native execution receipt. Host commits delivery only after that input boundary accepts it; failed delivery cannot resolve a dependency. The authenticated UI and Pi tools use the same message service and stable request identity.
 
 Execution admission is root-wide (`countActiveInRoot`): every implementation
 Run under the same root session — including nested Threads — shares the
@@ -340,69 +341,20 @@ separate planned sources.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
-Fans committed Documents mutations out to the active sessions in that
-workspace, keeps agent-authored changes out of Zone 2, correlates LSP
-diagnostics only with pending user edits, and projects event-cursor deltas,
-blocks, context usage, and prompt-relevant accepted knowledge. The cursor is
-also embedded in the durable hidden Pi message so a worker reload can resume.
-Successful Git status reads from both workbench APIs pass through Documents
-workspace resolution and a per-session deduplicating observer; this reuses the
-existing SCM refresh boundary and does not add a second Git poller.
-User-terminal command finish events come from Terminal Runtime OSC 633
-through `subscribeCommands` and `observeTerminalCommand`. Frames must
-carry this session's integration generation tag; untagged OSC is ignored.
-`putEvent` stores one event per target Pi session and treats
-`targetPiSessionId + commandId` as the idempotent key: all active Pi sessions in
-the workspace receive their own event, while a duplicate for one target neither
-inserts nor nudges again. PowerShell uses the command-start `LASTEXITCODE` baseline;
-when an unchanged nonzero status cannot be attributed to this command it records 1. The
-live PTY path does not replay finished commands after Host restart, so
-this is duplicate-delivery protection, not a restart replay log.
-Harness/agent shells stay `source: agent` and never enter
-`<user-terminal>`. `/bin/sh` is not treated as Bash. After a new event is
-stored, Host `memory.nudge` wakes the existing keeper; worker-unavailable
-and keeper failure do not fail the terminal.
-The same keeper receives accepted Pi steering, user plan revisions committed by
-the authenticated context route, and newly persisted child Run reports (D-238).
-Agent/keeper block writes do not trigger that user-plan observer. Registry emits
-the frozen Run/report pair after catalog publication; a stale retained report,
-an ordinary Thread projection, or repeated endRun cannot manufacture a return.
-Nested delivery resolves the live parent Thread session through the owning
-workspace, while its execution workspace may differ. Closed targets are not
-reopened. Material identity deduplicates external delivery; in-flight/cooldown
-requeue preserves the actual text, and off performs no model calls.
-The same Documents post-commit boundary drives an event-based symbol graph:
-known languages bind the file's disk text in the Host language view and replace
-one file's real `file -> defines -> symbol` graph together with the document
-revision the ranges were computed from, unavailable servers preserve the last
-graph, and deletes remove it. Ranges derived from an editor buffer are never
-stored, so a consumer can check a range against a named text. There is no
-startup repository scan.
-Model-produced memory block operations return through `memory.blocks.apply` and
-are validated and applied in order here; model scheduling remains in pi-host.
-Blocks are branch revisions: readers choose the closest ancestor revision for
-each label, descendant writes copy on write, and deletes create branch-local
-tombstones. UI routes resolve the active Pi branch on the Host rather than
-accepting branch identity from the renderer. Keeper coverage records only the
-context-producing session entries used by a fully accepted material update,
-together with that update's complete branch path and visible block revisions.
-Compaction rechecks Pi's actual removal boundary, branch, and block revisions;
-any mismatch falls back to Pi for that request. Coverage remains an in-memory
-observation, is cleared after compaction, and is rebuilt by the next material
-keeper update rather than pretending to survive a Host restart. Compaction
-facts currently expose only reliably recorded touched files; diagnostics
-without resolution events and recovery checkpoints without a session query
-are omitted.
-Active child threads are added to every parent Zone 2 turn, while settled
-threads use a separate observer cursor and appear only after their event
-sequence changes. Nested child sessions resolve their owning Thread from the
+The context runtime fans committed user-originated Documents changes, version-bound diagnostics, existing Git refreshes, and generation-tagged user-terminal commands to the Pi sessions that own that workspace. Harness/agent writes stay out of this observation channel. Terminal events remain idempotent per target Pi session and command identity; the runtime does not invent shell history after restart.
+
+Zone 2 is an incremental delivery channel rather than a repeated dashboard. Shell, diagnostics and Thread projections prepare a cursor update and commit it only after their bytes are accepted into the response. The hidden Pi message stores receipt IDs plus material revisions. After a real compaction, pi-host derives the retained receipts from Pi's active context and Host keeps only cursor baselines whose complete source chain remains present. A ready background summary does not alter cursors.
+
+Plans, user notes and accepted knowledge keep their existing authorities. `zone2-material.ts` compares their current revisions with revisions present in retained Pi messages, emits only changed or explicitly removed material, and acknowledges only sections fully represented in the final budgeted response. Context usage remains in the normal UI and is not appended as model input every turn. There is no keeper nudge, coverage takeover, `memory_edit`, decisions-block suggestion loop, or second context store.
+
+Active, queued and settled Thread projections use the same receipt-bound observer cursor and appear only after their event sequence or overlap fact changes. Nested child sessions resolve their owning Thread from the
 Host session binding (`sessionId → owning workspace / thread / run`) after
 catalog/run reconciliation, not from the execution workspace Documents assigns
 to scratch or materialized cwd. A missing or mismatched owner is denied; it
 cannot skip the thread tool allowlist. Knowledge, recall, suggestions, and
 Zone 2 knowledge resolve that owning workspace. Documents, LSP, shell, paths,
 and workspace semantic index stay on the execution workspace.
-Run launch includes a tagged snapshot of the parent's then-current blocks. At
+A Run whose launch manifest explicitly carries blocks includes a tagged snapshot of the parent's then-current blocks. At
 settlement the runtime combines explicitly headed report sections, tagged
 decision deviations, the child block snapshot, metrics, transcript bounds, and
 worktree facts before the registry commits the terminal Run and report together.
@@ -417,7 +369,7 @@ and dirty-state barrier cover controlled writers. A mixed baseline is retryable 
 branch assembled from different moments. New virtual regular files receive the umask-derived default mode without
 creating a probe file in the user tree, so apply and compensation compare full `sameState` identities.
 
-Production WorkingState authority is the Rust format-v9 immutable root store; the old TS trie/catalog and local
+Production WorkingState authority is the Rust format-v10 immutable root store; the old TS trie/catalog and local
 materializer remain test fixtures only. Direct read, grep/find/ls/explore pin, virtual write, baseline capture,
 materialization input, result publication, history release, and deletion use asynchronous root/path/domain APIs and
 do not retain an expanded workspace tree or a callback projection as a second production authority. Old internal
@@ -499,6 +451,7 @@ Result records freeze their publish-time provenance — `baseRoot` plus per-path
 `baseStates`/`pathStates` validated by the kernel against the published roots — so
 an older revision still resolves against its original baseline after the rebase.
 Materialized worktrees are refreshed onto the new baseline under the same gate.
+A materialized update creates a staging branch, applies the planned directory change through the Rust durable Integration path, recaptures the complete execution directory, then CAS-updates the child branch. Its Registry handoff blocks bind/spawn/settle/partial publish/continue/restore/reclaim/lost resume until completion or startup reconciliation; deletion releases the staging branch. Virtual rebase performs one revision-bound CAS and reports a conflict instead of running a fixed retry loop.
 Idle reclaim runs only after the session closes, a durable result exists, and the
 Documents authority confirms that no related controlled writer or user remains.
 User archive keeps the report, transcript reference, native results, and original
@@ -698,8 +651,7 @@ The harness is wired in `packages/web/application-host/index.ts`:
   Host's discovered interpreters. Unreadable settings and an invalid
   `harness.shell` value are reported as unavailable.
 - **Drop**: `harnessServiceHost.dropSession()` retires the shell supervisor
-  and clears session-scoped output entries, observation cursors, and the
-  in-memory keeper coverage evidence. Its commands remain visible to reclamation
+  and clears session-scoped output entries and observation cursors. Its commands remain visible to reclamation
   until `closeSessionShell()` confirms shutdown and writer release.
 - **Dispose**: `harnessServiceHost.dispose()` disposes all sessions and
   global services.

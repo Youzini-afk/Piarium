@@ -38,6 +38,8 @@ export const dict = {
   'harness.knowledge.contentRequired': 'Knowledge content is required',
   'harness.knowledge.conflict': 'This suggestion was already changed. The latest review list was loaded.',
   'harness.threads.open': 'Open thread',
+  'harness.threads.transcript': 'View transcript',
+  'harness.threads.transcriptReadOnly': 'Read-only history. Viewing does not start a Run or restore the working directory.',
   'harness.sources.title': 'Web sources',
   'harness.sources.pin': 'Pin source',
   'harness.sources.unpin': 'Unpin source',

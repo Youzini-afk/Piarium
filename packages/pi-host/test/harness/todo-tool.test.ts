@@ -8,7 +8,7 @@ describe("todo tool", () => {
     const tool = createTodoTool({
       request: async (_method: string, params: Record<string, unknown>) => {
         requests.push(params);
-        return { text: "plan updated" };
+        return { text: "plan updated", materialRevisions: { "block:plan": "plan-revision" } };
       },
     } as never);
     let prompts = 0;
@@ -25,7 +25,7 @@ describe("todo tool", () => {
     assert.equal(prompts, 0);
     assert.equal(requests.length, 1);
     assert.equal(requests[0]?.confirmed, undefined);
-    assert.deepEqual(result.details, {});
+    assert.deepEqual(result.details, { materialRevisions: { "block:plan": "plan-revision" } });
   });
 
 });

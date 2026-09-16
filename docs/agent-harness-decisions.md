@@ -34,7 +34,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 60 |
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 51 |
-| [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 57 |
+| [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 
 ## 决策索引
@@ -321,6 +321,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-281 | 2026-09-15 | R5 原生文件/结构计算：固定视图、生产消费者与索引输入收口 | accepted / implemented / R5 complete | — | plan/status R5；architecture；rust-kernel-design；kernel/Harness/search/structure/semantic documentation；native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-282 | 2026-09-15 | R0/R6 收口：有回执的传输窗口、真实发行面、遗留清理与受控资源证据 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-283 | 2026-09-15 | 现有 Harness 优先收口：原生权限唯一权威与 Web 配置闭环 | accepted / implemented / Harness closure complete | — | plan 0.4/0.7/1b.7/3b；status 1b.3–1b.7 / 3b.1–3b.3；architecture/code | [stage-r-kernel](decisions/stage-r-kernel.md) |
-| D-284 | 2026-09-16 | 上下文无感续接：固定摘要后台准备、容量按需切换与较长原文 | accepted design / implementation pending | — | 设计 8.4 及关联消费者；plan 2.4A/B、2.6A/B；status；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
-| D-285 | 2026-09-16 | 任务线程、可选预设、定向消息、共享执行准入与连续交付 | accepted design / 3.18A–D implemented（E待实施） | — | 设计9.2/9.3及关联策略；plan3.18A–E；status；architecture4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
-| D-286 | 2026-09-16 | 完整上下文取舍与过期背景fresh：工作身份/成果独立于活跃输入 | accepted design / context与fresh侧已随D-284/3.18B落地，线程侧消费进行中；补充D-284 | — | 设计8.0/8.4.7/8.4.8；plan2.4/2.6/3.18B；status；architecture4.4 | [context-knowledge](decisions/context-knowledge.md) |
+| D-284 | 2026-09-16 | 上下文无感续接：固定摘要后台准备、容量按需切换与较长原文 | implemented / wired；consumer acceptance corrected by D-287 | D-287 | 设计 8.4 及关联消费者；plan 2.4A/B、2.6A/B；status；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
+| D-285 | 2026-09-16 | 任务线程、可选预设、定向消息、共享执行准入与连续交付 | implemented / wired；state-machine acceptance corrected by D-287 | D-287 | 设计9.2/9.3及关联策略；plan3.18A–E；status；architecture4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-286 | 2026-09-16 | 完整上下文取舍与过期背景fresh：工作身份/成果独立于活跃输入 | implemented / wired；retained-source acceptance corrected by D-287 | D-287 | 设计8.0/8.4.7/8.4.8；plan2.4/2.6/3.18B；status；architecture4.4 | [context-knowledge](decisions/context-knowledge.md) |
+| D-287 | 2026-09-16 | D-284–D-286 验收收口：原文收据、消息提交边界、Run 准入与物化 baseline handoff | implementation correction / accepted | — | acceptance 2026-09-16；status 2.4A/B、2.6A/B、3.18A–E；Harness/Kernel/Recovery documentation | [workingstate-threads](decisions/workingstate-threads.md) |

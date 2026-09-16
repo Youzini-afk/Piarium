@@ -253,7 +253,7 @@ export interface HarnessServiceHost {
    * rendered as bounded text plus history anchors. Null when the session has
    * no capturable material.
    */
-  threadCaptureInputContext?: ((input: { sessionId: string }) => Promise<{ text: string; anchors: string[] } | null>) | null;
+  threadCaptureInputContext?: ((input: { sessionId: string }) => Promise<Pick<import("@piarium/protocol").ThreadInheritedContext, "text" | "anchors" | "images"> | null>) | null;
   /**
    * Start a new Run on a settled Thread for an execution `request`
    * (D-285.5/3.18B): `continue` resumes the retained session; `fresh`
@@ -321,8 +321,9 @@ export interface HarnessServiceHost {
     conflicts: { path: string; reason?: string }[];
     message?: string;
   }>) | null;
-  threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>) | null;
+  threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
+  threadHistoryEntries: ((sessionId: string) => Promise<import("@piarium/protocol").SessionEntriesResult>) | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
   hasActor(identity: HarnessActorIdentity): boolean;
@@ -450,8 +451,9 @@ export interface HarnessServiceHostOptions {
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   threadUpdateBaseline?: HarnessServiceHost["threadUpdateBaseline"];
   requireThreadMergeJournal?: boolean;
-  threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>;
+  threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string; messageId?: string }) => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
+  threadHistoryEntries?: NonNullable<HarnessServiceHost["threadHistoryEntries"]>;
   verification?: VerificationCoordinator;
   storeRetrievalArtifact?: HarnessServiceHost["storeRetrievalArtifact"];
   readRetrievalArtifact?: HarnessServiceHost["readRetrievalArtifact"];
@@ -514,6 +516,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadUpdateBaseline = options.threadUpdateBaseline ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
   const threadTranscriptReader = options.threadTranscriptReader ?? null;
+  const threadHistoryEntries = options.threadHistoryEntries ?? null;
   const verification = options.verification ?? createVerificationCoordinator();
   const commitAgentInputContext = options.commitAgentInputContext ?? ((_sessionId, context) => ({
     // A Host without a snapshot authority may acknowledge disk/unavailable
@@ -746,6 +749,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,
     threadSendToSession,
     threadTranscriptReader,
+    threadHistoryEntries,
     verification,
     commitAgentInputContext,
     releaseAgentInputContext,

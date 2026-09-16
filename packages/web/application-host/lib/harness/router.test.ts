@@ -455,3 +455,28 @@ describe("harness router", () => {
     router.dispose();
   });
 });
+
+
+describe("scheduler wait admission transport", () => {
+  it("does not time out thread.wait admission but disposal cancels the handler", async () => {
+    let signal: AbortSignal | undefined;
+    const router = createHarnessRouter({
+      defaultTimeoutMs: 10, respond: async () => undefined,
+      resolveActor: async () => resolvedActor(["control.thread"]),
+    });
+    router.register("thread.wait", {
+      handle: async (_params, ctx) => {
+        signal = ctx.signal;
+        await new Promise<void>((resolve) => ctx.signal.addEventListener("abort", () => resolve(), { once: true }));
+        return { text: "cancelled", done: 0, running: 0, waiting: 0, queued: 0, timedOut: false };
+      },
+    });
+    const pending = router.processEvent(harnessEvent("thread.wait", { timeoutMs: 5 }, { timeoutMs: 0 }));
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(signal!.aborted).toBe(false);
+    router.dispose();
+    await pending;
+    expect(signal!.aborted).toBe(true);
+  });
+});

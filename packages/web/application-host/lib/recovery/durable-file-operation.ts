@@ -912,10 +912,12 @@ export const undoBranchIntegrationOnDirectory = async (
 
 export const reconcileInterruptedIntegrationOperations = async (
   context: DurableFileOperationContext,
+  options?: { operationId?: string },
 ): Promise<{ compensated: string[]; needsAttention: string[]; aborted: string[]; completed: string[] }> => {
     const result = { compensated: [] as string[], needsAttention: [] as string[], aborted: [] as string[], completed: [] as string[] };
     for (const summary of await context.durableRecoveryStore.listOperations(context.identity.workspaceId, "integration")) {
       const operationId = typeof summary.operationId === "string" ? summary.operationId : "";
+      if (options?.operationId && operationId !== options.operationId) continue;
       if (!operationId || ["complete", "aborted", "compensated", "needs-attention", "conflict", "undone"].includes(String(summary.state))) continue;
       const operation = await kernelOperation(context, operationId);
       const data = kernelOperationData(operation);

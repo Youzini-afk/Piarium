@@ -10,6 +10,7 @@ import type { Zone2Thread, Zone2Threads } from "./zone2.js";
 
 interface Zone2ThreadCursor {
   eventSeqByThread: Record<string, number>;
+  overlapWarning: string | null;
 }
 
 export interface Zone2ThreadProjectionOptions {
@@ -55,8 +56,7 @@ const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: Thr
   for (const { thread } of snapshots) {
     if (thread.lifecycle === "archived" || thread.integration === "merged") continue;
     const paths = new Set<string>();
-    const legacyScope = (thread as Thread & { scope?: string[] }).scope;
-    const scope = thread.manifest?.scope ?? legacyScope;
+    const scope = thread.manifest.scope;
     if (scope && Array.isArray(scope)) {
       for (const s of scope) paths.add(s);
     }
@@ -92,22 +92,21 @@ const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: Thr
 };
 
 /**
- * Builds the per-turn thread snapshot for one session. Active work is always
- * present; terminal work appears only when its event sequence changed for this
- * observer. The cursor is separate from the explicit `threads` tool cursor.
+ * Model input carries changed facts, not a repeated UI dashboard. The cursor
+ * is separate from the explicit `threads` tool and advances only for the
+ * items the formatter actually presented.
  */
 const zone2ThreadTask = (
   options: Zone2ThreadProjectionOptions,
   workspaceId: string,
   parent: ThreadParent,
+  prepared?: (cursor: Zone2ThreadCursor, previous: Zone2ThreadCursor | undefined) => void,
 ) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
   const snapshots = await options.registry.listThreadSnapshots(workspaceId, parent);
   const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
   const selected = snapshots
     .filter(({ thread }) => (
-      thread.lifecycle === "active"
-      || thread.lifecycle === "queued"
-      || previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq
+      previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq
     ))
     .toSorted((left, right) => (
       priority(left.thread) - priority(right.thread)
@@ -115,12 +114,15 @@ const zone2ThreadTask = (
       || left.thread.id.localeCompare(right.thread.id)
     ));
   const overlapWarning = computeOverlapWarning(snapshots);
+  const cursor = { eventSeqByThread, overlapWarning };
+  prepared?.(cursor, previous?.value);
   return {
-    cursor: { eventSeqByThread },
+    cursor,
     result: {
       status: "ready",
       items: selected.map(({ thread, activeRun }) => projectThread(thread, activeRun)),
-      ...(overlapWarning ? { overlapWarning } : {}),
+      ...(overlapWarning !== (previous?.value.overlapWarning ?? null)
+        ? { overlapWarning: overlapWarning ?? "previous path overlap cleared" } : {}),
     },
   };
 };
@@ -160,12 +162,33 @@ export async function projectZone2Threads(
 export async function prepareZone2Threads(
   options: Zone2ThreadProjectionOptions,
   input: { sessionId: string; workspaceId: string },
-): Promise<PendingObservation<Zone2Threads>> {
+): Promise<PendingObservation<Zone2Threads> & {
+  commitPresented(ids: ReadonlySet<string>, overlapPresented: boolean): boolean;
+}> {
   const scope = await zone2Scope(options, input);
-  return options.cursors.prepare(
+  let next!: Zone2ThreadCursor;
+  let previous: Zone2ThreadCursor | undefined;
+  const pending = await options.cursors.prepare(
     input.sessionId,
     "zone2-threads",
     scope.objectId,
-    zone2ThreadTask(options, scope.workspaceId, scope.parent),
+    zone2ThreadTask(options, scope.workspaceId, scope.parent, (cursor, baseline) => {
+      next = cursor;
+      previous = baseline;
+    }),
   );
+  return {
+    ...pending,
+    commitPresented(ids, overlapPresented) {
+      // Budget omission is not delivery. Keep each unpresented fact pending.
+      for (const id of Object.keys(next.eventSeqByThread)) {
+        if (ids.has(id)) continue;
+        const old = previous?.eventSeqByThread[id];
+        if (old === undefined) delete next.eventSeqByThread[id];
+        else next.eventSeqByThread[id] = old;
+      }
+      if (!overlapPresented) next.overlapWarning = previous?.overlapWarning ?? null;
+      return pending.commit();
+    },
+  };
 }

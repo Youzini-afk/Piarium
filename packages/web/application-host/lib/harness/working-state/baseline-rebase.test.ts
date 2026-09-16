@@ -103,6 +103,7 @@ describe("baseline-rebase", () => {
     const outcome = await rebaseBranchOntoParentRevision(rootStore, "child", "parent", r2);
     expect(outcome.status).toBe("committed");
     expect(outcome.updatedFromParent).toContain("parent-owned.txt");
+    expect(outcome.updatedFromParent).not.toContain("shared.txt");
     expect(outcome.keptChildPaths).toContain("child-owned.txt");
     expect(outcome.conflicts).toEqual([]);
 

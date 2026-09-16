@@ -405,157 +405,24 @@ describe("thread registry", () => {
     await failing.dispose();
   });
 
-  it("imports a legacy parent array once the workspace relation is known", async () => {
-    const legacyPath = join(dataDir, "threads", "test-host", `${PARENT.id}.json`);
-    await mkdir(dirname(legacyPath), { recursive: true });
-    const legacy = [{
-      id: "thread-legacy", parentSessionId: PARENT.id, sessionId: "child-legacy", forkPoint: null,
-      brief: "legacy", role: "check", createdBy: "agent", kind: "implementation", worktree: null,
-      status: "running", flags: { workerLost: false, stalled: false, looping: false }, waitingFor: null,
-      lastActivityAt: "2026-09-04T00:01:00.000Z", steps: 2, tokens: { input: 1, output: 2, cacheRead: 3 },
-      costUsd: null, lastToolCall: null, diffStats: null, report: null, exitReason: null,
-      createdAt: "2026-09-04T00:00:00.000Z", updatedAt: "2026-09-04T00:01:00.000Z", eventSeq: 4, hidden: false,
-    }];
-    writeFileSync(legacyPath, JSON.stringify(legacy), "utf8");
-    const [thread] = await registry.listThreads(WORKSPACE, PARENT);
-    expect(thread).toMatchObject({ id: "thread-legacy", lifecycle: "active", activeRunId: expect.any(String) });
-    expect(await registry.getActiveRun(WORKSPACE, thread!.id)).toMatchObject({ attempt: 1, sessionId: "child-legacy", workerState: "running" });
-    expect(readFileSync(legacyPath, "utf8")).toBe(JSON.stringify(legacy));
+  it("does not import an obsolete parent catalog or alter its bytes", async () => {
+    const oldPath = join(dataDir, "threads", "test-host", `${PARENT.id}.json`);
+    await mkdir(dirname(oldPath), { recursive: true });
+    const original = JSON.stringify([{ id: "old-thread", role: "check", status: "running" }]);
+    await writeFile(oldPath, original, "utf8");
+    expect(await registry.listThreads(WORKSPACE, PARENT)).toEqual([]);
+    expect(await readFile(oldPath, "utf8")).toBe(original);
   });
 
-  it("migrates schema v1 reports from an ephemeral trace handle on the next write", async () => {
-    const thread = await registry.createThread(createInput());
-    const run = await registry.startRun(WORKSPACE, thread.id);
-    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-v1");
-    await registry.completeThread(WORKSPACE, thread.id, report());
+  it("rejects obsolete internal versions without reconstructing missing permissions or rewriting data", async () => {
     const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v1 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<{ report: Record<string, unknown> | null }>;
-    };
-    v1.schemaVersion = 1;
-    delete (v1.threads[0] as Record<string, unknown>).manifest;
-    const currentReport = v1.threads[0]!.report!;
-    delete currentReport.transcriptRef;
-    currentReport.traceHandle = "out_legacy";
-    await writeFile(path, JSON.stringify(v1), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.report?.transcriptRef).toEqual({
-      runtimeId: "pi",
-      sessionId: "child-v1",
-      fromEntryId: null,
-      toEntryId: null,
-    });
-    await registry.setAttention(WORKSPACE, thread.id, "stalled");
-    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
-  });
-
-  it("reads schema v2 threads without a frozen model and upgrades on mutation", async () => {
-    const thread = await registry.createThread(createInput());
-    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v2 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<Record<string, unknown>>;
-    };
-    v2.schemaVersion = 2;
-    delete v2.threads[0]!.model;
-    delete v2.threads[0]!.manifest;
-    await writeFile(path, JSON.stringify(v2), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.model).toBeNull();
-    await registry.setAttention(WORKSPACE, thread.id, "stalled");
-    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
-  });
-
-  it("reads schema v3 threads by deriving their frozen launch manifest", async () => {
-    const thread = await registry.createThread(createInput({
-      preset: "check",
-      scope: ["packages/web"],
-      tools: ["read"],
-      worktree: "shared",
-    }));
-    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v3 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<Record<string, unknown>>;
-    };
-    v3.schemaVersion = 3;
-    delete v3.threads[0]!.manifest;
-    await writeFile(path, JSON.stringify(v3), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest).toMatchObject({
-      carryBlocks: true,
-      tools: expect.arrayContaining(["read", "bash", "grep"]),
-      // The stripped manifest cannot recover the explicit shared choice, so the
-      // v3 derivation falls back to the preset's isolated default (D-285).
-      worktree: "isolated",
-    });
-  });
-
-  it("upgrades schema v4 manifests with the historical carry-block default", async () => {
-    const thread = await registry.createThread(createInput({ carryBlocks: false }));
-    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v4 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<{ manifest: Record<string, unknown> }>;
-    };
-    v4.schemaVersion = 4;
-    delete v4.threads[0]!.manifest.carryBlocks;
-    await writeFile(path, JSON.stringify(v4), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.carryBlocks).toBe(true);
-  });
-
-  it("upgrades schema v6 manifests with no draft baseline", async () => {
-    const thread = await registry.createThread(createInput());
-    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v6 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<{ manifest: Record<string, unknown> }>;
-    };
-    v6.schemaVersion = 6;
-    delete v6.threads[0]!.manifest.draftBaselineId;
-    await writeFile(path, JSON.stringify(v6), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.manifest.draftBaselineId).toBeNull();
-    await registry.setAttention(WORKSPACE, thread.id, "stalled");
-    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
-  });
-
-  it("upgrades schema v7 worktrees with an explicit preparation stage", async () => {
-    const thread = await registry.createThread(createInput());
-    await registry.setWorktree(WORKSPACE, thread.id, {
-      path: "D:/worktrees/v7-thread",
-      base: "base",
-      materialized: false,
-    });
-    const path = threadCatalogPath(dataDir, "test-host", WORKSPACE);
-    const v7 = JSON.parse(await readFile(path, "utf8")) as {
-      schemaVersion: number;
-      threads: Array<{ worktree: Record<string, unknown> | null }>;
-    };
-    v7.schemaVersion = 7;
-    delete v7.threads[0]!.worktree?.preparationStage;
-    await writeFile(path, JSON.stringify(v7), "utf8");
-    await registry.dispose();
-
-    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
-    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.worktree).toMatchObject({
-      materialized: false,
-      preparationStage: "materialize",
-    });
-    await registry.setAttention(WORKSPACE, thread.id, "stalled");
-    expect(JSON.parse(await readFile(path, "utf8")).schemaVersion).toBe(THREAD_REGISTRY_SCHEMA_VERSION);
+    await mkdir(dirname(path), { recursive: true });
+    for (const schemaVersion of [1, 4, 7, 8]) {
+      const original = JSON.stringify({ schemaVersion, workspaceId: WORKSPACE, threads: [], runs: [] });
+      await writeFile(path, original, "utf8");
+      await expect(registry.listThreads(WORKSPACE, PARENT)).rejects.toMatchObject({ code: "corrupt" });
+      expect(await readFile(path, "utf8")).toBe(original);
+    }
   });
 
   it("converts a live discussion by ending its old Run and starting a same-session implementation Run atomically", async () => {
@@ -818,6 +685,7 @@ describe("thread registry", () => {
   const parked = (overrides: Partial<ThreadPendingContinuation> = {}): ThreadPendingContinuation => ({
     mode: "continue",
     task: "resume this",
+    requestId: "queued-request",
     from: { kind: "session", id: "parent-1" },
     at: "2026-09-05T00:00:00.000Z",
     ...overrides,
@@ -843,14 +711,16 @@ describe("thread registry", () => {
       hostId: "test-host",
       onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
     });
-    const blocker = await registry.createThread(createInput({ brief: "blocker", concurrency: 1 }));
-    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
-    await registry.markRunRunning(WORKSPACE, blocker.id, blockerRun.id, "child-blocker");
     const settled = await registry.createThread(createInput({ brief: "settled", concurrency: 1 }));
     const settledRun = await registry.startRun(WORKSPACE, settled.id);
     await registry.endRun(WORKSPACE, settled.id, settledRun.id, "success", null, report());
+    // Finish the earlier work before the blocker claims the only slot.
+    // A fixture must not bypass the production admission invariant.
+    const blocker = await registry.createThread(createInput({ brief: "blocker", concurrency: 1 }));
+    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
+    await registry.markRunRunning(WORKSPACE, blocker.id, blockerRun.id, "child-blocker");
     // The request arrived while the budget was full — it parks on the Thread.
-    await registry.setPendingContinuation(WORKSPACE, settled.id, parked());
+    await registry.enqueueContinuation(WORKSPACE, settled.id, parked());
     expect(await registry.tryDequeue(WORKSPACE, PARENT)).toBeNull();
     expect(dequeued).toEqual([]);
     // Freeing the slot promotes the parked continuation like a queued Thread.
@@ -895,12 +765,17 @@ describe("thread registry", () => {
     const queued = await registry.createThread(createInput({ brief: "queued", concurrency: 1 }));
     // The full budget keeps the sibling queued.
     expect(await registry.tryDequeue(WORKSPACE, PARENT)).toBeNull();
-    // Marking a dependency wait releases the slot and promotes the sibling.
+    // A display-only mark is not execution admission. The actually blocking
+    // wait yields with the current Run identity and then promotes the sibling.
     await registry.setAttention(WORKSPACE, waiter.id, "thread", { kind: "thread", text: "Waiting on a child" });
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(1);
+    await registry.yieldExecutionSlot(WORKSPACE, waiter.id, waiterRun.id, { kind: "thread", text: "Waiting on a child" });
     expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(0);
     expect(dequeued).toEqual([queued.id]);
-    // Returning from the wait re-admits the slot.
+    // Clearing attention alone cannot reclaim the slot.
     await registry.setAttention(WORKSPACE, waiter.id, "none");
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(0);
+    await registry.awaitExecutionSlot(WORKSPACE, waiter.id, waiterRun.id, new AbortController().signal);
     expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(1);
   });
 
@@ -909,7 +784,7 @@ describe("thread registry", () => {
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, report());
     await registry.recordThreadMessage(WORKSPACE, thread.id, message({ id: "held-1", to: { kind: "thread", id: thread.id } }));
-    await registry.setPendingContinuation(WORKSPACE, thread.id, parked({ requestId: "req-7" }));
+    await registry.enqueueContinuation(WORKSPACE, thread.id, parked({ requestId: "req-7" }));
     await registry.dispose();
 
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
@@ -917,7 +792,7 @@ describe("thread registry", () => {
     expect(reloaded?.messages).toEqual([
       expect.objectContaining({ id: "held-1", direction: "in", status: "held" }),
     ]);
-    expect(reloaded?.pendingContinuation).toMatchObject({ mode: "continue", task: "resume this", requestId: "req-7" });
+    expect(reloaded?.pendingContinuations?.[0]).toMatchObject({ mode: "continue", task: "resume this", requestId: "req-7" });
   });
 
   it("rejects a catalog containing malformed message records", async () => {
@@ -949,7 +824,7 @@ describe("thread registry", () => {
     await vi.waitFor(() => { expect(freed).toEqual([PARENT]); });
   });
 
-  it("records messages idempotently and delivers pending messages exactly once", async () => {
+  it("keeps pending reads non-destructive and advances only explicit consumer receipts", async () => {
     const thread = await registry.createThread(createInput());
     const held = message({ id: "m-1", to: { kind: "thread", id: thread.id } });
     await registry.recordThreadMessage(WORKSPACE, thread.id, held);
@@ -959,10 +834,15 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.messages).toHaveLength(1);
     await registry.recordThreadMessage(WORKSPACE, thread.id, message({ id: "m-2", to: { kind: "thread", id: thread.id }, status: "pending" }));
     // The current request's own record is excluded from the boundary flush.
-    const taken = await registry.takePendingThreadMessages(WORKSPACE, thread.id, "m-2");
+    const taken = await registry.listPendingThreadMessages(WORKSPACE, thread.id, "m-2");
     expect(taken.map((entry) => entry.id)).toEqual(["m-1"]);
-    // The flush marked them delivered — a restart or retry cannot redeliver.
-    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([expect.objectContaining({ id: "m-2" })]);
-    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
+    // Reading and even reopening do not claim the consumer accepted anything.
+    await registry.dispose();
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    expect((await registry.listPendingThreadMessages(WORKSPACE, thread.id)).map((entry) => entry.id)).toEqual(["m-1", "m-2"]);
+    await registry.acknowledgeThreadMessages(WORKSPACE, thread.id, ["m-1"]);
+    expect(await registry.listPendingThreadMessages(WORKSPACE, thread.id)).toEqual([expect.objectContaining({ id: "m-2" })]);
+    await registry.acknowledgeThreadMessages(WORKSPACE, thread.id, ["m-2"]);
+    expect(await registry.listPendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
   });
 });

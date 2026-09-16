@@ -44,6 +44,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': '지식 내용이 필요합니다',
   'harness.knowledge.conflict': '이 제안이 이미 변경되어 최신 목록을 불러왔습니다.',
   'harness.threads.open': '하위 작업 열기',
+  'harness.threads.transcript': '대화 기록 보기',
+  'harness.threads.transcriptReadOnly': '읽기 전용 기록입니다. 조회해도 실행이 시작되거나 작업 디렉터리가 복원되지 않습니다.',
   'harness.sources.title': '웹 출처',
   'harness.sources.pin': '출처 고정',
   'harness.sources.unpin': '출처 고정 해제',

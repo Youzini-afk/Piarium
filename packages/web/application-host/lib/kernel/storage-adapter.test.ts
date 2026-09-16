@@ -21,6 +21,29 @@ const kernelPath = path.join(repositoryRoot, "kernel", "target", "release", proc
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 
+it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant regardless of construction order", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-grant-identity-"));
+  const client = createKernelClient({ hostId: "grant-identity", storageRoot: path.join(root, "storage"),
+    buildVersion, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "grant-identity", storageRoot: path.join(root, "storage"),
+    resolveWorkspaceRoot: async () => root });
+  try {
+    await client.start();
+    const first = await adapter.context("workspace", "recovery-maintenance", {
+      owningWorkspace: "workspace", executionWorkspace: "workspace", pathScopes: [""], capabilities: ["recovery.maintenance"],
+    });
+    const second = await adapter.context("workspace", "recovery-maintenance", {
+      capabilities: ["recovery.maintenance"], pathScopes: [""], executionWorkspace: "workspace", owningWorkspace: "workspace",
+    });
+    const bytes = Buffer.from("same-authority-bytes");
+    const owned = await first.client.putBlob(bytes, "grant-order-input");
+    try {
+      const read = await second.client.getBlob(owned.hash, { ownerId: owned.ownerId });
+      assert.deepEqual(Buffer.from(read.bytesBase64, "base64"), bytes);
+    } finally { await first.client.releaseBlob(owned.ownerId); }
+  } finally { await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
 it.skipIf(!hasReleaseKernel)("release kernel owns working-state roots, pinned reads, scoped lists, virtual writes, and base reverts", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-kernel-working-state-"));
   const workspace = path.join(root, "workspace");

@@ -13,7 +13,8 @@ import {
   type HarnessThreadSnapshot,
   type HarnessThreadState,
 } from './harnessThreadPresentation';
-import type { WorkspaceThreadSpace } from '@piarium/protocol';
+import type { SessionEntriesResult, WorkspaceThreadSpace } from '@piarium/protocol';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { parseHarnessSessionBlockResponse, type HarnessSessionBlock } from './harnessBlockPresentation';
 import {
   harnessKnowledgeKey,
@@ -28,6 +29,8 @@ import { useHarnessThreadState } from './HarnessThreadStateContext';
 import { HarnessThreadIntegrationPanel } from './HarnessThreadIntegrationPanel';
 import { HarnessThreadResultHistory } from './HarnessThreadResultHistory';
 import { useWebSources, useWebSourcesStore } from '@/stores/useWebSourcesStore';
+
+const LazyThreadTimeline = React.lazy(() => import('./PiTimeline').then((module) => ({ default: module.PiTimeline })));
 
 const stateKey: Record<HarnessThreadState, `harness.threads.state.${HarnessThreadState}`> = {
   queued: 'harness.threads.state.queued',
@@ -71,7 +74,9 @@ export const HarnessThreadsPanel: React.FC<{
   fallbackCwd?: string;
 }> = ({ workspaceId, parentSessionId, fallbackCwd }) => {
   const { t } = useI18n();
-  const openSession = usePiSessionStore((state) => state.openSession);
+  const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
+  const [historyPreview, setHistoryPreview] = React.useState<{ result: SessionEntriesResult; brief: string; cwd?: string } | null>(null);
+  React.useEffect(() => { setHistoryPreview(null); }, [workspaceId, parentSessionId]);
   const threadState = useHarnessThreadState();
   const threads = threadState.threads;
   const webSources = useWebSources(parentSessionId);
@@ -92,6 +97,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
+  const messageRequests = React.useRef(new Map<string, { id: string; text: string; mode: string; inFlight: boolean }>());
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
 
@@ -172,36 +178,36 @@ export const HarnessThreadsPanel: React.FC<{
   }, [parentSessionId, reloadSpace, t, threadState]);
 
   const openThread = React.useCallback(async (entry: HarnessThreadSnapshot) => {
+    const sessionId = entry.activeRun?.sessionId ?? entry.thread.report?.transcriptRef.sessionId;
+    if (!sessionId) return;
+    const target = `${workspaceId}\u0000${parentSessionId}`;
     setThreadAction(entry.thread.id);
     try {
-      // Settled threads can have reclaimed directories too. The Host restores
-      // the materialization and Run binding before the UI selects the session.
-      const restored = await applyThreadMutation(
-        `${encodeURIComponent(entry.thread.id)}/restore`, 'harness.threads.restoreFailed',
-      );
-      const sessionId = restored.activeRun?.sessionId;
-      const worktree = restored.thread.worktree;
-      if (!sessionId || restored.thread.lifecycle === 'archived' || worktree?.materialized === false) {
-        throw new Error(t('harness.threads.restoreFailed'));
-      }
-      const cwd = worktree?.path ?? fallbackCwd;
-      await openSession({
-        sessionId,
-        ...(cwd ? { cwd } : {}),
-        ...(restored.thread.model ? { model: restored.thread.model } : {}),
-        ...(restored.thread.manifest.scope.length > 0 ? { scope: restored.thread.manifest.scope } : {}),
-        tools: restored.thread.manifest.tools,
-      });
+      // Catalog preview reads native Pi history without a worker, a new Run,
+      // or materializing a reclaimed execution directory.
+      const result = await prefetchSession(sessionId);
+      if (spaceTargetRef.current !== target) return;
+      const cwd = entry.thread.worktree?.path ?? fallbackCwd;
+      setHistoryPreview({ result, brief: entry.thread.brief, ...(cwd ? { cwd } : {}) });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('harness.threads.restoreFailed'));
     } finally {
       setThreadAction((current) => current === entry.thread.id ? null : current);
     }
-  }, [applyThreadMutation, fallbackCwd, openSession, t]);
+  }, [prefetchSession, workspaceId, parentSessionId, fallbackCwd, t]);
 
   const sendThreadMessage = React.useCallback(async (entry: HarnessThreadSnapshot, mode: 'request' | 'fresh' | 'inform') => {
     const text = (messageDrafts[entry.thread.id] ?? '').trim();
     if (!text) return;
+    const target = `${workspaceId}\u0000${parentSessionId}`;
+    const key = `${target}\u0000${entry.thread.id}`;
+    let operation = messageRequests.current.get(key);
+    if (operation?.inFlight) return;
+    if (!operation || operation.text !== text || operation.mode !== mode) {
+      operation = { id: crypto.randomUUID(), text, mode, inFlight: false };
+      messageRequests.current.set(key, operation);
+    }
+    operation.inFlight = true;
     setThreadAction(entry.thread.id);
     try {
       const response = await runtimeFetch(
@@ -211,6 +217,7 @@ export const HarnessThreadsPanel: React.FC<{
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: text,
+            requestId: operation.id,
             kind: mode === 'inform' ? 'inform' : 'request',
             ...(mode === 'fresh' ? { context: 'fresh' } : {}),
           }),
@@ -218,7 +225,15 @@ export const HarnessThreadsPanel: React.FC<{
       );
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(readError(payload, t('harness.threads.sendFailed')));
-      setMessageDrafts((current) => ({ ...current, [entry.thread.id]: '' }));
+      const result = payload && typeof payload === 'object' && 'result' in payload
+        ? payload.result as { accepted?: unknown; messageId?: unknown } : undefined;
+      if (result?.accepted !== true || result.messageId !== operation.id) {
+        throw new Error(t('harness.threads.sendFailed'));
+      }
+      messageRequests.current.delete(key);
+      if (spaceTargetRef.current !== target) return;
+      setMessageDrafts((current) => (current[entry.thread.id] ?? '').trim() === text
+        ? { ...current, [entry.thread.id]: '' } : current);
       if (payload && typeof payload === 'object' && 'thread' in payload) {
         try {
           threadState.merge(parseHarnessThreadMutation(payload));
@@ -231,9 +246,10 @@ export const HarnessThreadsPanel: React.FC<{
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('harness.threads.sendFailed'));
     } finally {
+      operation.inFlight = false;
       setThreadAction((current) => current === entry.thread.id ? null : current);
     }
-  }, [messageDrafts, parentSessionId, t, threadState]);
+  }, [messageDrafts, parentSessionId, t, threadState, workspaceId]);
 
   const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
     if (convertingThreadId) return;
@@ -605,9 +621,8 @@ export const HarnessThreadsPanel: React.FC<{
         ) : null}
         {threads.map((entry) => {
           const state = projectHarnessThreadState(entry);
-          // An archived Run retains its transcript session id for recovery, but
-          // that session is closed and must not be opened from the stale cwd.
-          const sessionId = entry.thread.lifecycle === 'archived' ? undefined : entry.activeRun?.sessionId;
+          // A closed/reclaimed thread still has readable native history.
+          const sessionId = entry.activeRun?.sessionId ?? entry.thread.report?.transcriptRef.sessionId;
           const converting = convertingThreadId === entry.thread.id;
           const occupancy = space?.threads.find((item) => item.threadId === entry.thread.id);
           const busy = threadAction === entry.thread.id;
@@ -622,7 +637,7 @@ export const HarnessThreadsPanel: React.FC<{
               <button
                 type="button"
                 disabled={!sessionId || busy || deletionPending}
-                title={sessionId ? t('harness.threads.open') : undefined}
+                title={sessionId ? t('harness.threads.transcript') : undefined}
                 onClick={() => {
                   if (!sessionId) return;
                   void openThread(entry);
@@ -922,6 +937,20 @@ export const HarnessThreadsPanel: React.FC<{
 
   return (
     <>
+      <Dialog open={historyPreview !== null} onOpenChange={(open) => { if (!open) setHistoryPreview(null); }}>
+        <DialogContent className="flex h-[80dvh] max-w-[90vw] flex-col">
+          <DialogHeader>
+            <DialogTitle>{t('harness.threads.transcript')}</DialogTitle>
+            <DialogDescription>{historyPreview?.brief} — {t('harness.threads.transcriptReadOnly')}</DialogDescription>
+          </DialogHeader>
+          {historyPreview ? (
+            <React.Suspense fallback={<div role="status">{t('sessions.sidebar.group.empty.loadingSessions')}</div>}>
+              <LazyThreadTimeline sessionId={historyPreview.result.sessionId} entries={historyPreview.result.entries}
+                leafId={historyPreview.result.leafId} cwd={historyPreview.cwd ?? ''} toolExecutions={{}} />
+            </React.Suspense>
+          ) : null}
+        </DialogContent>
+      </Dialog>
       <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
           <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>

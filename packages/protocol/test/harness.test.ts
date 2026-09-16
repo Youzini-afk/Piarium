@@ -42,10 +42,9 @@ describe("harness protocol", () => {
     assert.equal(HARNESS_METHOD_CAPABILITY[request.method], "read.output");
     const todo = { items: [], branchEntryIds: [] } satisfies HarnessServiceMap["todo.upsert"]["params"];
     const compact = {
-      firstKeptEntryId: "entry-1",
-      summary: "summary",
-      tokensBefore: 100,
-    } satisfies HarnessServiceMap["compaction.after"]["params"];
+      retainedObservationRefs: [],
+      retainedGit: false,
+    } satisfies HarnessServiceMap["context.retained"]["params"];
     assert.equal("sessionId" in todo, false);
     assert.equal("sessionId" in compact, false);
   });

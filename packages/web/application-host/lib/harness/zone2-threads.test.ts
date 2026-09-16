@@ -54,7 +54,7 @@ describe("Zone 2 thread projection", () => {
     try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
   });
 
-  it("keeps active work visible and emits a settled update only once", async () => {
+  it("emits active and settled facts only when they change", async () => {
     const thread = await registry.createThread(input());
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-1");
@@ -67,7 +67,7 @@ describe("Zone 2 thread projection", () => {
     const first = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
     const second = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });
     expect(first.status === "ready" ? first.items : []).toMatchObject([{ id: thread.id, workerState: "running", steps: 3 }]);
-    expect(second.status === "ready" ? second.items : []).toHaveLength(1);
+    expect(second.status === "ready" ? second.items : []).toHaveLength(0);
 
     await registry.completeThread(WORKSPACE, thread.id, report());
     const completed = await projectZone2Threads(options, { sessionId: PARENT.id, workspaceId: WORKSPACE });

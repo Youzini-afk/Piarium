@@ -28,6 +28,8 @@ export const dict: Record<I18nKey, string> = {
   'harness.knowledge.contentRequired': 'Потрібен вміст знання',
   'harness.knowledge.conflict': 'Ця пропозиція змінилася. Завантажено актуальний список.',
   'harness.threads.open': 'Відкрити завдання',
+  'harness.threads.transcript': 'Переглянути розмову',
+  'harness.threads.transcriptReadOnly': 'Історія лише для читання. Перегляд не запускає виконання й не відновлює робочий каталог.',
   'harness.sources.title': 'Вебджерела',
   'harness.sources.pin': 'Закріпити джерело',
   'harness.sources.unpin': 'Відкріпити джерело',

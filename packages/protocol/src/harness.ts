@@ -37,6 +37,7 @@ import type {
 import type { AgentInputContext, JsonValue } from "./types.js";
 
 export interface OutputSlice {
+  observationRef?: string;
   text: string;
   offset: number;
   length: number;
@@ -73,6 +74,7 @@ export interface ShellExecResultCompleted {
 }
 
 export interface ShellExecResultBackground {
+  observationRef?: string;
   kind: "background";
   id: string;
   waitedMs: number;
@@ -175,6 +177,7 @@ export interface DiagnosticItem {
 export type LanguageTextProvenance = "disk" | "surface-draft";
 
 export interface DiagnosticsResult {
+  observationRef?: string;
   status: "ready" | "pending" | "unavailable";
   snapshot?: string;
   /** Text identity the diagnosed document was bound to. */
@@ -386,6 +389,8 @@ export type WorkingBranchEnsureMaterializedResult =
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
+  /** Revisions still represented by raw retained Pi context, not by a summary. */
+  knownMaterial?: Record<string, string>;
   afterEventId?: number;
   contextUsage?: { used: number; window: number };
   query?: string;
@@ -398,17 +403,19 @@ export interface Zone2AssembleParams {
 }
 
 export interface Zone2AssembleResult {
+  observationRefs?: string[];
+  materialRevisions?: Record<string, string>;
   content: string | null;
   eventCursor: number;
 }
 
-export interface CompactionAfterParams {
-  summary: string;
-  firstKeptEntryId: string;
-  tokensBefore: number;
+export interface ContextRetentionParams {
+  /** Opaque receipts still present in Pi's raw input after a cut or navigation. */
+  retainedObservationRefs: string[];
+  retainedGit: boolean;
 }
 
-export interface CompactionAfterResult {
+export interface ContextRetentionResult {
   acknowledged: boolean;
 }
 
@@ -420,6 +427,7 @@ export interface TodoUpsertParams {
 
 export interface TodoUpsertResult {
   text: string;
+  materialRevisions?: Record<string, string>;
 }
 
 export interface RecallSearchParams {
@@ -1119,7 +1127,7 @@ export interface HarnessServiceMap {
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
-  "compaction.after": { params: CompactionAfterParams; result: CompactionAfterResult };
+  "context.retained": { params: ContextRetentionParams; result: ContextRetentionResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
   "knowledge.suggest": { params: KnowledgeSuggestParams; result: KnowledgeSuggestResult };
@@ -1130,6 +1138,7 @@ export interface HarnessServiceMap {
   "thread.wait": { params: ThreadWaitParams; result: ThreadWaitResult };
   "thread.send": { params: ThreadSendParams; result: ThreadSendResult };
   "thread.read": { params: ThreadReadParams; result: ThreadReadResult };
+  "thread.history": { params: import("./harness-history.js").HistoryReadParams & { runId: string }; result: import("./harness-history.js").HistoryReadResult };
   "thread.merge": { params: ThreadMergeParams; result: ThreadMergeResult };
   "thread.update": { params: ThreadUpdateParams; result: ThreadUpdateResult };
   "thread.kill": { params: ThreadKillParams; result: ThreadKillResult };
@@ -1221,7 +1230,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "web.search": "read.web",
   "zone2.assemble": "context.session",
-  "compaction.after": "context.session",
+  "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
   "knowledge.suggest": "context.session",
@@ -1231,6 +1240,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "thread.wait": "control.thread",
   "thread.send": "control.thread",
   "thread.read": "control.thread",
+  "thread.history": "context.session",
   "thread.merge": "control.thread",
   "thread.update": "control.thread",
   "thread.kill": "control.thread",
@@ -1292,7 +1302,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.search",
   "zone2.assemble",
-  "compaction.after",
+  "context.retained",
   "todo.upsert",
   "recall.search",
   "knowledge.suggest",
@@ -1302,6 +1312,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "thread.wait",
   "thread.send",
   "thread.read",
+  "thread.history",
   "thread.merge",
   "thread.update",
   "thread.kill",
@@ -1346,6 +1357,8 @@ export interface HarnessRequestData {
    * uses it instead of its own default so a deliberately long call such as
    * `thread.wait` is not aborted at the default 30s. Clamped by the router
    * to `HARNESS_MAX_REQUEST_TIMEOUT_MS`; absent means "use the default".
+   * Only `thread.wait` accepts 0: its dependency timeout is in params, while
+   * execution-slot reacquisition remains bound to cancellation and actor lifetime.
    */
   timeoutMs?: number;
 }

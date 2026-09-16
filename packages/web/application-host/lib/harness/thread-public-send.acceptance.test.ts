@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PiMessage, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime, type ThreadRuntimeOptions, type ThreadSessionAdapter } from "./thread-runtime.js";
-import { createThreadSendService } from "./thread-services.js";
+import { createUserThreadSendAdapter } from "./thread-ui-adapter.js";
 import { registerHarnessThreadRoutes } from "./thread-routes.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
@@ -92,8 +92,8 @@ const createInput = (): CreateThreadInput => ({
 });
 
 /**
- * Public-chain acceptance: the real Express route, the same `sendToThread`
- * callback shape index.ts injects, the real send service, the real registry,
+ * Public-chain acceptance: the real Express route, the same authenticated
+ * UI adapter index.ts injects, the real send service, the real registry,
  * and the real runtime — only the session boundary is a fake adapter.
  */
 describe("harness thread public send chain", () => {
@@ -113,6 +113,8 @@ describe("harness thread public send chain", () => {
       open: vi.fn(async (input) => snapshot(input.sessionId, input.cwd)),
       prompt: vi.fn(async (_sessionId, text) => { sent.push(text); }),
       send: vi.fn(async (_sessionId, text) => { sent.push(text); }),
+      notify: vi.fn(async (_sessionId, text) => { sent.push(text); }),
+      request: vi.fn(async (_sessionId, text) => { sent.push(text); }),
       abort: vi.fn(async () => {}),
       close: vi.fn(async () => {}),
       snapshot: vi.fn(async (sessionId) => snapshot(sessionId, sessionId === "parent-1" ? "/workspace" : "/workspace/thread")),
@@ -144,46 +146,20 @@ describe("harness thread public send chain", () => {
       },
     });
 
-    // The same wiring index.ts performs: the route's sendToThread callback
-    // builds a HarnessServiceContext and delegates to the send service.
+    // Use the production adapter, not a test copy of its actor construction.
     const host = {
       threadRegistry: registry,
       threadSendToSession: (sessionId: string, message: string, meta: { from: string; requestId?: string }) =>
         runtime.send(sessionId, message, meta),
       threadContinueRun: (input: Parameters<typeof runtime.continueRun>[0]) => runtime.continueRun(input),
     } as unknown as HarnessServiceHost;
-    const sendService = createThreadSendService(host);
 
     app = express();
     app.use(express.json());
     registerHarnessThreadRoutes(app, {
       registry,
       runtime,
-      sendToThread: async (input) => {
-        const { workspaceId } = await runtime.scopeForSession(input.parentSessionId);
-        return sendService.handle({
-          threadId: input.threadId,
-          message: input.message,
-          from: "user",
-          ...(input.kind === undefined ? {} : { kind: input.kind }),
-          ...(input.context === undefined ? {} : { context: input.context }),
-          ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
-          ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
-        }, {
-          actor: {
-            authorityInstanceId: "ui-thread-routes",
-            sessionId: input.parentSessionId,
-            workerId: "ui-thread-routes",
-            workerGeneration: 0,
-            workspaceId,
-            grantedCapabilities: [],
-          },
-          authorizedPaths: [],
-          sessionId: input.parentSessionId,
-          workspaceId,
-          signal: input.signal,
-        });
-      },
+      sendToThread: createUserThreadSendAdapter(() => host, runtime),
     });
   });
 
@@ -246,6 +222,9 @@ describe("harness thread public send chain", () => {
       .expect(200);
     expect(response.body.result).toMatchObject({ accepted: true, delivery: "delivered" });
     expect(sent.some((text) => text.includes("scope changed") && text.includes("the user"))).toBe(true);
+    expect(sessionAdapter.notify).toHaveBeenCalledTimes(1);
+    expect(sessionAdapter.prompt).toHaveBeenCalledTimes(1); // initial task only
+    expect(sessionAdapter.send).not.toHaveBeenCalled();
   });
 
   it("replays an idempotent requestId without scheduling a second Run", async () => {

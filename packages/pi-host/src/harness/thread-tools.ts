@@ -70,6 +70,8 @@ const ThreadSendParams = Type.Object({
 
 const ThreadReadParams = Type.Object({
   threadId: Type.String(),
+  runId: Type.Optional(Type.String({ description: "Read a fixed Run's delivery and transcript, even while a later attempt is running or failed." })),
+  resultRevision: Type.Optional(Type.Integer({ minimum: 1, description: "Read the report bound to this published result revision." })),
   what: Type.Optional(Type.Union([
     Type.Literal("blocks"),
     Type.Literal("report"),
@@ -206,7 +208,8 @@ export function createThreadsTool(bridge: HostServicesBridge, _sessionId: string
           ...(params.full !== undefined ? { full: params.full } : {}),
         });
         const typed = result as ThreadListResult;
-        return { content: [{ type: "text", text: typed.text }], details: { count: typed.threads.length } };
+        return { content: [{ type: "text", text: typed.text }], details: { count: typed.threads.length,
+          ...(typed.observationRef ? { observationRef: typed.observationRef } : {}) } };
       } catch (error) {
         return threadErrorResult("threads", error);
       }
@@ -218,10 +221,10 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "wait",
     label: "Wait",
-    description: "Block until any sub-agent thread changes state or timeout. Timeout is a normal result, not an error. Done threads include full report.",
-    promptSnippet: "wait: block until a teammate changes state (timeout is normal)",
+    description: "Wait for a thread result, an addressed request/reply, actionable attention, or timeout. Routine progress and inform messages do not wake the model. A yielded Run resumes only after reacquiring the shared execution slot.",
+    promptSnippet: "wait: await a result or addressed dependency (timeout is normal)",
     promptGuidelines: [
-      "wait blocks until a teammate changes state; timeout is a normal result, not an error.",
+      "wait ignores routine progress and ordinary inform messages. Timeout ends dependency watching, but resuming model work still waits for shared execution admission.",
     ],
     parameters: ThreadWaitParams,
     executionMode: "sequential",
@@ -231,17 +234,19 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
           params.timeout_ms ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
           HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
         );
-        // Pass timeout + 5s buffer to bridge so the bridge/router don't
-        // time out before the service's internal wait timeout fires.
+        // The Host applies waitTimeout to dependency watching, then reacquires
+        // execution admission. Cancellation/disposal, not a second fixed timer,
+        // bounds that latter wait.
         const result = await bridge.request<"thread.wait">("thread.wait", {
           ...(params.ids !== undefined ? { ids: params.ids } : {}),
           timeoutMs: waitTimeout,
-        }, { timeoutMs: Math.min(waitTimeout + 5_000, HARNESS_MAX_REQUEST_TIMEOUT_MS), ...(signal ? { signal } : {}) });
+        }, { timeoutMs: 0, ...(signal ? { signal } : {}) });
         const typed = result as ThreadWaitResult;
         return {
           content: [{ type: "text", text: typed.text }],
           details: {
             done: typed.done,
+            ...(typed.observationRef ? { observationRef: typed.observationRef } : {}),
             running: typed.running,
             waiting: typed.waiting,
             queued: typed.queued,
@@ -249,6 +254,9 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
           },
         };
       } catch (error) {
+        // An indeterminate wait failure cannot authorize another model request
+        // while this Run may still have yielded its execution slot.
+        if (!(error instanceof HarnessRequestError) || ["failed", "timeout", "unavailable"].includes(error.code)) _ctx?.abort();
         return threadErrorResult("wait", error);
       }
     },
@@ -278,7 +286,9 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
         });
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;
-        return { content: [{ type: "text", text: typed.accepted ? `sent to ${params.threadId} (${state})` : "not accepted" }], details: { accepted: typed.accepted, lifecycle: typed.lifecycle, attention: typed.attention } };
+        return { content: [{ type: "text", text: typed.accepted
+          ? `message ${typed.messageId ?? ""} to ${params.to === "parent" ? "parent" : params.threadId}: ${typed.delivery ?? "accepted"} (${state})${typed.runId ? `; Run ${typed.runId}` : ""}. Delivery is not execution completion.`
+          : "not accepted" }], details: typed };
       } catch (error) {
         return threadErrorResult("send", error);
       }
@@ -290,7 +300,7 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
   return defineTool({
     name: "read_thread",
     label: "Read Thread",
-    description: "Read a sub-agent thread's notes. Default 'blocks' (progress/decisions/errors), 'report' for final report, 'steps' for transcript slice.",
+    description: "Read a teammate's notes, delivery report or transcript slice. Use runId or resultRevision for an immutable earlier delivery; viewing never executes work.",
     promptSnippet: "read_thread: read a teammate's notes (blocks), report, or steps",
     promptGuidelines: [
       "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
@@ -301,6 +311,8 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
       try {
         const result = await bridge.request<"thread.read">("thread.read", {
           threadId: params.threadId,
+          ...(params.runId === undefined ? {} : { runId: params.runId }),
+          ...(params.resultRevision === undefined ? {} : { resultRevision: params.resultRevision }),
           ...(params.what !== undefined ? { what: params.what } : {}),
           ...(params.since !== undefined ? { since: params.since } : {}),
           ...(params.offset !== undefined ? { offset: params.offset } : {}),
