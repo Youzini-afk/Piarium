@@ -32,7 +32,7 @@
   "scripts": {
     "dev": "bun run build:watch",
     "dev:server": "bun run build:application-host && node server/index.js",
-    "dev:server:watch": "bun run prepare:application-host && nodemon --exitcrash --watch application-host --ext js,ts --exec \"bun run build:application-host:raw && node server/index.js\"",
+    "dev:server:watch": "bun run prepare:application-host && nodemon --exitcrash --watch application-host --ext js,ts --exec \"node scripts/run-application-host-dev.mjs\"",
     "prepare:application-host": "bun run --cwd ../application-client build && bun run --cwd ../runtime-broker build && bun run --cwd ../extension-host build",
     "build:application-host:raw": "node scripts/build-application-host.mjs",
     "build:application-host:types": "node scripts/build-application-host-types.mjs",

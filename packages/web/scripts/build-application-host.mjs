@@ -3,7 +3,9 @@
  * Build helper for the Application Host.
  *
  * Compiles packages/web/application-host to a staging directory, then
- * atomically replaces packages/web/server with the staged output.
+ * atomically replaces packages/web/server with the staged output. Development
+ * launchers can instead request a private generation so a running or stale
+ * Host never has to release packages/web/server before the next Host starts.
  *
  * Application Host source is TypeScript. Non-code assets (templates and
  * runtime fixtures) are copied as-is after compilation.
@@ -15,13 +17,19 @@
 import { pruneLegacyHostArtifacts } from '../../../scripts/host-production-boundary.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 
 const repoRoot = path.resolve(import.meta.dirname, '..', '..', '..');
 const webRoot = path.join(repoRoot, 'packages', 'web');
 const sourceDir = path.join(webRoot, 'application-host');
-const outputDir = path.join(webRoot, 'server');
+const devOutputArg = process.argv.indexOf('--dev-output');
+const devOutputName = devOutputArg >= 0 ? process.argv[devOutputArg + 1] : null;
+if (devOutputArg >= 0 && (!devOutputName || !/^\.application-host-dev-\d+$/.test(devOutputName))) {
+  throw new Error('--dev-output requires a private .application-host-dev-<pid> directory name');
+}
+const outputDir = devOutputName
+  ? path.join(webRoot, devOutputName)
+  : path.join(webRoot, 'server');
 
 const log = (message) => process.stdout.write(`[build:application-host] ${message}\n`);
 
@@ -34,6 +42,7 @@ const removeGeneratedOutputs = () => {
   for (const entry of fs.readdirSync(webRoot, { withFileTypes: true })) {
     if (
       entry.name.startsWith('.application-host-staging-')
+      || entry.name.startsWith('.application-host-dev-')
       || entry.name.startsWith('.application-host-types-staging-')
       || entry.name.startsWith('.application-host-types-backup-')
       || entry.name.startsWith('.server-backup-')
@@ -56,18 +65,20 @@ if (process.argv.includes('--clean')) {
 // ── Step 1: Compile to a staging directory ───────────────────────────────
 
 const stagingDir = path.join(webRoot, `.application-host-staging-${process.pid}`);
+const buildDir = devOutputName ? outputDir : stagingDir;
 
-const cleanStaging = () => {
+const cleanBuildDir = () => {
   try {
-    fs.rmSync(stagingDir, { recursive: true, force: true });
+    fs.rmSync(buildDir, { recursive: true, force: true });
   } catch {
     // best-effort
   }
 };
 
 try {
-  // Clean any previous staging
-  cleanStaging();
+  // A private development generation is compiled in place. Production builds
+  // still compile to staging before swapping the public server/ directory.
+  cleanBuildDir();
 
   // Run tsc with a unique outDir to avoid concurrent build conflicts.
   // Use process.execPath (node) to run tsc.js directly — avoids both
@@ -97,7 +108,7 @@ try {
   const tscResult = spawnSync(process.execPath, [
     tscJs,
     '-p', configPath,
-    '--outDir', stagingDir,
+    '--outDir', buildDir,
   ], {
     cwd: webRoot,
     stdio: 'inherit',
@@ -133,24 +144,34 @@ try {
       }
     }
   };
-  copyAssets(sourceDir, stagingDir);
+  copyAssets(sourceDir, buildDir);
 
   // ── Step 3: Validate staging ───────────────────────────────────────────
-  const indexJs = path.join(stagingDir, 'index.js');
+  const indexJs = path.join(buildDir, 'index.js');
   if (!fs.existsSync(indexJs)) {
     throw new Error('Staging directory does not contain index.js');
   }
-  const indexDeclaration = path.join(stagingDir, 'index.d.ts');
-  const publicContract = path.join(stagingDir, 'public-contract.js');
+  const indexDeclaration = path.join(buildDir, 'index.d.ts');
+  const publicContract = path.join(buildDir, 'public-contract.js');
   if (!fs.existsSync(indexDeclaration) || !fs.existsSync(publicContract)) {
     throw new Error('Staging directory does not contain the typed public Host contract');
   }
 
-  const boundary = pruneLegacyHostArtifacts(stagingDir);
+  const boundary = pruneLegacyHostArtifacts(buildDir);
   log(`Production boundary: ${boundary.runtimeModules} reachable modules; ${boundary.removedArtifacts} legacy/test artifacts excluded.`);
-  log(`Staging complete: ${stagingDir}`);
+  log(`${devOutputName ? 'Development generation' : 'Staging'} complete: ${buildDir}`);
 
-  // ── Step 4: Atomically replace server/ ─────────────────────────────────
+  // ── Step 4: Publish the compiled generation ─────────────────────────────
+  // Development runs use a private generation. Rebuilding packages/web/server
+  // in place is unsafe on Windows because an earlier Host (or an indexer) can
+  // retain a directory handle and make the otherwise valid rename fail with
+  // EPERM. The private generation is disposable and leaves server/ untouched.
+  if (devOutputName) {
+    log('Build complete.');
+    process.exit(0);
+  }
+
+  // Production/package builds keep the atomic server/ replacement contract.
   // On Windows, we can't atomically rename over an existing directory.
   // Strategy: rename old server/ to a backup, rename staging to server/,
   // then remove the backup. If the rename fails, restore the backup.
@@ -178,7 +199,7 @@ try {
 
   log('Build complete.');
 } catch (error) {
-  cleanStaging();
+  cleanBuildDir();
   log(`Build failed: ${error.message}`);
   process.exit(1);
 }

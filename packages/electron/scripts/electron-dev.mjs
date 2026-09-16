@@ -9,6 +9,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 const electronDir = path.join(repoRoot, 'packages/electron');
+const developmentKernel = path.join(
+  repoRoot,
+  'kernel',
+  'target',
+  'release',
+  process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel',
+);
 const preferredHmrUiPort = Number(process.env.PIARIUM_HMR_UI_PORT || '5173');
 const preferredHmrApiPort = Number(process.env.PIARIUM_HMR_API_PORT || '3901');
 
@@ -205,7 +212,8 @@ async function stopChildTree(child) {
 
 async function main() {
   const electronExecutable = ensureElectronInstalled();
-  console.log('[electron:dev] building Pi runtime worker and broker...');
+  console.log('[electron:dev] building Rust kernel, Pi runtime worker, and broker...');
+  await runProcess('bun', ['run', 'kernel:build']);
   await runProcess('bun', ['run', '--cwd', 'packages/runtime-broker', 'build']);
   await runProcess('bun', ['run', '--cwd', 'packages/electron', 'bundle:main']);
 
@@ -225,6 +233,7 @@ async function main() {
         PIARIUM_ELECTRON_DEV: '1',
         PIARIUM_HMR_UI_PORT: hmrUiPort,
         PIARIUM_HMR_API_PORT: hmrApiPort,
+        PIARIUM_KERNEL_PATH: developmentKernel,
         PIARIUM_DISABLE_PWA_DEV: '1',
       },
     });
@@ -243,6 +252,7 @@ async function main() {
       ...(useBundledUi ? { PIARIUM_ELECTRON_USE_BUNDLED_UI: '1' } : {}),
       PIARIUM_HMR_UI_PORT: hmrUiPort,
       PIARIUM_HMR_API_PORT: hmrApiPort,
+      PIARIUM_KERNEL_PATH: developmentKernel,
       PIARIUM_DISABLE_PWA_DEV: '1',
     },
   });
