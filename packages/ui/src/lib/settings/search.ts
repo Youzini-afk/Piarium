@@ -30,6 +30,21 @@ export interface SettingsSearchAvailabilityContext extends SettingsRuntimeContex
 }
 
 const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
+  { id: 'harness.tools', page: 'harness-tools', titleKey: 'settings.page.harness.section.tools', keywords: ['bash', 'grep', 'apply_patch', 'diagnostics', 'tools'] },
+  { id: 'harness.shell', page: 'harness-tools', titleKey: 'settings.page.harness.shell.label', descriptionKey: 'settings.page.harness.bash.waitMs.description', keywords: ['shell', 'powershell', 'wsl', 'background'] },
+  { id: 'harness.output', page: 'harness-tools', titleKey: 'settings.page.harness.section.output', keywords: ['bytes', 'output', 'KiB'] },
+  { id: 'harness.permissions.mode', page: 'harness-permissions', titleKey: 'settings.page.harness.permissions.mode.label', keywords: ['smart', 'approval', 'bypass', 'permission'] },
+  { id: 'harness.permissions.rules', page: 'harness-permissions', titleKey: 'settings.harness.rules.title', keywords: ['allow', 'deny', 'ask', 'regex', 'rules'] },
+  { id: 'harness.models.retrieval', page: 'harness-models', titleKey: 'settings.harness.models.retrieval', keywords: ['explore', 'retrievalAgent', 'model'] },
+  { id: 'harness.models.execution', page: 'harness-models', titleKey: 'settings.harness.models.execution', keywords: ['quickImplement', 'hardImplement', 'frontend', 'model'] },
+  { id: 'harness.models.assistance', page: 'harness-models', titleKey: 'settings.harness.models.assistance', keywords: ['review', 'check', 'reader', 'suggestions', 'permissionJudge', 'model'] },
+  { id: 'harness.review', page: 'harness-models', titleKey: 'settings.page.harness.section.review', keywords: ['review', 'gate'] },
+  { id: 'harness.context', page: 'harness-context', titleKey: 'settings.page.harness.context.backgroundPreparation', keywords: ['compaction', 'context'] },
+  { id: 'harness.embedding', page: 'harness-retrieval', titleKey: 'settings.page.harness.section.embedding', keywords: ['embedding', 'MiniLM', 'vector'] },
+  { id: 'harness.rerank', page: 'harness-retrieval', titleKey: 'settings.page.harness.section.rerank', keywords: ['rerank', 'ranking'] },
+  { id: 'harness.web.search', page: 'harness-web', titleKey: 'settings.page.harness.section.web', keywords: ['brave', 'tavily', 'exa', 'jina', 'searxng', 'API key', 'search'] },
+  { id: 'harness.web.render', page: 'harness-web', titleKey: 'settings.page.harness.web.render', keywords: ['browser', 'webfetch', 'render'] },
+  { id: 'harness.web.domains', page: 'harness-web', titleKey: 'settings.page.harness.web.domains.title', keywords: ['domain', 'allow', 'block'] },
   {
     id: 'appearance.language',
     page: 'appearance',

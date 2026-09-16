@@ -68,6 +68,14 @@ surfaces drive refresh and subscriptions; hidden surfaces should not keep langua
 or extension work alive. The concrete store and editor lifetimes are documented by their owning
 modules rather than repeated here.
 
+Agent Harness has a dedicated Settings navigation group: tools/execution, permissions, model roles,
+context, code retrieval, Web access, and the existing knowledge catalog. Its pages share the native Pi
+settings authority through a serial, revision-bound autosave controller. UI changes are optimistic;
+later edits remain queued while an earlier write completes. Failed writes retain the edits and retry
+against a refreshed snapshot. Text commits on a typing pause, blur, or Enter; related inference fields
+are submitted together once complete. A successful write never resets another field's in-progress text.
+Web credentials use their existing authenticated credential endpoint, outside the settings payload.
+
 `HarnessThreadResultHistory` opens on demand inside a Thread card and uses the application-client
 history DTOs. It shows retained versions and Host-provided protection reasons, freezes branch/revision
 selection before confirmation, and refreshes the existing Thread/space projection after release.

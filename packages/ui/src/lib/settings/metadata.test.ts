@@ -68,7 +68,7 @@ describe('settings metadata', () => {
     expect(slugs).toContain('plugins');
     expect(slugs).toContain('plugin-settings');
     expect(slugs).toContain('extensions');
-    expect(metadata.find((page) => page.slug === 'knowledge')?.group).toBe('pi');
+    expect(metadata.find((page) => page.slug === 'knowledge')?.group).toBe('harness');
     expect(metadata.find((page) => page.slug === 'language-support')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'runtime')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'providers')?.group).toBe('pi');
