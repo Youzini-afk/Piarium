@@ -2,10 +2,10 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
-import { useUIStore } from '@/stores/useUIStore';
+import { LEFT_SIDEBAR_DEFAULT_WIDTH, useUIStore } from '@/stores/useUIStore';
 
-const SIDEBAR_CONTENT_WIDTH = 280;
-const SIDEBAR_MIN_WIDTH = 280;
+const SIDEBAR_CONTENT_WIDTH = LEFT_SIDEBAR_DEFAULT_WIDTH;
+const SIDEBAR_MIN_WIDTH = 224;
 const SIDEBAR_MAX_WIDTH = 500;
 
 interface SidebarProps {
@@ -20,6 +20,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, className, topBar }) => {
     const { t } = useI18n();
     const sidebarWidth = useUIStore((state) => state.sidebarWidth);
+    const hasManuallyResized = useUIStore((state) => state.hasManuallyResizedLeftSidebar);
     const setSidebarWidth = useUIStore((state) => state.setSidebarWidth);
     const [isResizing, setIsResizing] = React.useState(false);
     const startXRef = React.useRef(0);
@@ -63,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
 
     const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
-        Math.max(SIDEBAR_MIN_WIDTH, sidebarWidth || SIDEBAR_CONTENT_WIDTH)
+        Math.max(SIDEBAR_MIN_WIDTH, hasManuallyResized ? sidebarWidth : SIDEBAR_CONTENT_WIDTH)
     );
     const appliedWidth = isOpen ? openWidth : 0;
 

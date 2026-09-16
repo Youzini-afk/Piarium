@@ -6,7 +6,6 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
-import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -455,9 +454,8 @@ export const MainLayout: React.FC = () => {
                                         </div>
                                     </div>
                                 </div>
-                                <div className="border-t border-border" data-page-scroll-lock="true">
+                                <div data-page-scroll-lock="true">
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.before" />
-                                    <ErrorBoundary><ContextPanelRail /></ErrorBoundary>
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.after" />
                                 </div>
                             </div>

@@ -17,8 +17,8 @@ folder and reload it without restarting the application.
 4. Select your theme from the dropdown.
 
 Built-in theme names and style descriptions follow the interface language. Original palette names
-remain recognizable, and the picker previews each variant's actual background, text, and primary
-accent colors. Custom names/descriptions remain author-owned; changing the interface language never
+remain recognizable, and the picker previews each variant's actual background, primary accent and
+syntax colors. Custom names/descriptions remain author-owned; changing the interface language never
 rewrites theme JSON or stored theme IDs.
 
 ## Surfaces and accents
@@ -30,13 +30,14 @@ hover/selection/focus in `interactive`. A theme can retain warm, cool, or ink-li
 using its primary accent as every panel background. Error/success and code colors retain their own
 meaning. Light and dark variants need their own contrast choices rather than identical accent values.
 
-The built-in Piarium palette uses neutral grays with copper actions and focus indicators. Other
-built-in palettes keep their characteristic surfaces and accent hue. Across all presets, user-message
-backgrounds come from `surface.subtle`; Markdown headings, inline code and list markers use readable
-surface text, while links and syntax remain independently colored. Tool results use opaque muted
-surfaces rather than stacking translucent tints. Secondary text and solid-action labels are tuned for
+Built-in palettes share neutral work surfaces and text, with distinct accent and syntax colors. The
+accent remains visible in primary buttons, softly tinted selected rows/chips and focus indicators;
+it does not wash over whole panels. User messages use a raised neutral background. Markdown headings,
+inline code and list markers use surface text, while links and syntax remain independently colored.
+Tool results use opaque muted surfaces rather than stacking translucent tints. Interface typography
+stays consistent when switching built-in themes; code keeps its monospace font. Secondary text and solid-action labels are tuned for
 at least 4.5:1 contrast against their defined surfaces, including the action hover/active states.
-Custom palettes retain their explicit component overrides.
+Custom palettes retain their explicit surface, component and font overrides.
 
 ## Theme location
 

@@ -754,13 +754,13 @@ const PiSortedActivityGroup: React.FC<{
 
   return (
     <section
-      className="overflow-hidden rounded-lg border border-[var(--tools-border)] bg-[var(--tools-background)]"
+      className="min-w-0"
       data-pi-sorted-activity="true"
     >
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left typography-meta text-muted-foreground hover:bg-[var(--tools-header-hover)]"
+        className="flex w-full items-center gap-2 rounded-md px-1 py-1.5 text-left typography-meta text-muted-foreground hover:bg-interactive-hover"
         aria-expanded={expanded}
       >
         <Icon
@@ -770,13 +770,13 @@ const PiSortedActivityGroup: React.FC<{
             running ? 'animate-spin text-primary' : 'text-[var(--status-success)]',
           )}
         />
-        <span className="font-medium text-foreground/85">{t('chat.piActivity.title')}</span>
+        <span className="font-medium">{t('chat.piActivity.title')}</span>
         {latestLabel ? <span className="min-w-0 flex-1 truncate">· {latestLabel}</span> : <span className="flex-1" />}
         <span className="typography-micro">{projection.activity.length}</span>
         <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 transition-transform', expanded && 'rotate-180')} />
       </button>
       {expanded ? (
-        <div className="space-y-2 border-t border-border/50 px-3 py-2">
+        <div className="ml-2 space-y-2 border-l border-border py-2 pl-3">
           {projection.activity.map((item) => {
             return (
               <React.Fragment key={item.id}>

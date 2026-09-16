@@ -2628,7 +2628,7 @@ export const ContextPanel: React.FC = () => {
     postEmbeddedVisibilityToChats();
   }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
-  // The rail switches between surfaces (modes); the in-panel strip only lists
+  // The menu switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
   // preview targets).
   const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview';
@@ -2836,10 +2836,6 @@ export const ContextPanel: React.FC = () => {
           1px between the collapsed and expanded states. */}
       {isOpen && !isExpanded && (
         <div aria-hidden="true" className="absolute left-0 top-0 z-40 h-full w-px bg-border" />
-      )}
-      {/* Divider between the panel and the icon rail on its right. */}
-      {isOpen && (
-        <div aria-hidden="true" className="absolute right-0 top-0 z-40 h-full w-px bg-border" />
       )}
       {!isExpanded && (
         <div

@@ -6,7 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 
 function Palette({ theme }: { theme: Theme }) {
   return <span aria-hidden="true" className="flex shrink-0 -space-x-0.5">
-    {[theme.colors.surface.background, theme.colors.surface.foreground, theme.colors.primary.base].map((color, index) => (
+    {[theme.colors.surface.background, theme.colors.primary.base, theme.colors.syntax.base.keyword, theme.colors.syntax.base.string].map((color, index) => (
       <span key={index} className="size-3 rounded-full border border-border/70" style={{ backgroundColor: color }} />
     ))}
   </span>;

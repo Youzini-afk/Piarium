@@ -6,7 +6,7 @@
     --oc-safe-area-bottom: 0px;
     --oc-safe-area-bottom-visual: 0px;
     --oc-safe-area-left: 0px;
-    --oc-header-height: 56px;
+    --oc-header-height: 40px;
     --oc-visual-viewport-offset-top: 0px;
     --oc-visual-viewport-height: 100dvh;
     --oc-wco-left-inset: 0px;
@@ -35,16 +35,16 @@
     --popover-foreground: #262626;
     --primary: #b35017;
     --primary-foreground: #ffffff;
-    --secondary: #f4f4f4;
+    --secondary: #f3f3f3;
     --secondary-foreground: #262626;
-    --muted: #f4f4f4;
-    --muted-foreground: #656565;
-    --accent: #eeeeee;
+    --muted: #f3f3f3;
+    --muted-foreground: #626262;
+    --accent: #ededed;
     --accent-foreground: #262626;
     --destructive: #b7493f;
     --destructive-foreground: #ffffff;
-    --border: #dedede;
-    --input: #dedede;
+    --border: #dddddd;
+    --input: #dddddd;
     --ring: #b3501755;
     --radius: 0.4375rem;
     --chart-1: #2d72c4;
@@ -52,13 +52,13 @@
     --chart-3: #b35017;
     --chart-4: #b7493f;
     --chart-5: #8d6c15;
-    --sidebar: #f4f4f4;
+    --sidebar: #f3f3f3;
     --sidebar-foreground: #262626;
     --sidebar-primary: #b35017;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #eeeeee;
+    --sidebar-accent: #ededed;
     --sidebar-accent-foreground: #262626;
-    --sidebar-border: #dedede;
+    --sidebar-border: #dddddd;
     --sidebar-ring: #b3501755;
   }
 
@@ -66,17 +66,17 @@
     /* Initial dark palette; matches the built-in Piarium theme before hydration. */
     --background: #171717;
     --foreground: #e7e7e7;
-    --card: #252525;
+    --card: #282828;
     --card-foreground: #e7e7e7;
-    --popover: #252525;
+    --popover: #282828;
     --popover-foreground: #e7e7e7;
     --primary: #da7c47;
     --primary-foreground: #000000;
-    --secondary: #1c1c1c;
+    --secondary: #1e1e1e;
     --secondary-foreground: #e7e7e7;
-    --muted: #1c1c1c;
-    --muted-foreground: #a1a1a1;
-    --accent: #222222;
+    --muted: #1e1e1e;
+    --muted-foreground: #a3a3a3;
+    --accent: #242424;
     --accent-foreground: #e7e7e7;
     --destructive: #da5b4a;
     --destructive-foreground: #000000;
@@ -89,11 +89,11 @@
     --chart-3: #da7c47;
     --chart-4: #da5b4a;
     --chart-5: #c67f13;
-    --sidebar: #1c1c1c;
+    --sidebar: #1e1e1e;
     --sidebar-foreground: #e7e7e7;
     --sidebar-primary: #da7c47;
     --sidebar-primary-foreground: #000000;
-    --sidebar-accent: #222222;
+    --sidebar-accent: #242424;
     --sidebar-accent-foreground: #e7e7e7;
     --sidebar-border: #333333;
     --sidebar-ring: #da7c4755;

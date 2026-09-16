@@ -192,7 +192,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
       <div
         className={cn(
           'group/session flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
-          isCurrent ? 'bg-interactive-active font-medium text-foreground' : 'hover:bg-interactive-hover hover:text-foreground',
+          isCurrent ? 'bg-interactive-selection font-medium text-foreground' : 'hover:bg-interactive-hover hover:text-foreground',
           selected && 'bg-interactive-selection text-foreground',
         )}
         onClick={(event) => {
@@ -829,76 +829,15 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
         )}
         aria-hidden={!isVisible}
       >
-        <div className="flex shrink-0 items-center gap-1 px-2.5 pt-1.5">
+        <div className="flex shrink-0 items-center gap-1 px-2.5 py-2">
           <button
             type="button"
             onClick={() => void handleCreate(null)}
-            className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 py-1 text-left typography-ui-label font-normal text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+            className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1.5 text-left typography-ui-label font-medium text-foreground hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
           >
             <Icon name="chat-new" className="size-4 shrink-0" />
             <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
           </button>
-        </div>
-
-        <div className="flex shrink-0 items-center gap-1 px-2.5 pb-1 pt-0.5">
-          {!runtime.isVSCode ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={() => workspaceEvents.requestDirectoryDialog()}
-                  className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                  aria-label={t('sessions.sidebar.header.actions.addProject')}
-                >
-                  <Icon name="folder-add" className="size-4" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.addProject')}</TooltipContent>
-            </Tooltip>
-          ) : null}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleOpenScheduledTasks}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                aria-label={t('sessions.sidebar.header.actions.scheduledTasks')}
-              >
-                <Icon name="calendar-schedule" className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.scheduledTasks')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleOpenMultiRun}
-                className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                aria-label={t('sessions.sidebar.header.actions.newMultiRun')}
-              >
-                <Icon name="git-merge" className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.newMultiRun')}</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleOpenArchive}
-                className={cn(
-                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-                  showArchived && 'bg-interactive-active text-foreground',
-                )}
-                aria-label={t('sessions.sidebar.nav.archive')}
-              >
-                <Icon name="archive" className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t('sessions.sidebar.nav.archive')}</TooltipContent>
-          </Tooltip>
-          <span className="min-w-0 flex-1" />
           <Tooltip>
             <TooltipTrigger asChild>
               <button
@@ -919,38 +858,39 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
             </TooltipTrigger>
             <TooltipContent side="bottom">{t('sessions.sidebar.header.actions.searchSessions')}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={selectionMode ? exitSelectionMode : enterSelectionMode}
-                className={cn(
-                  'flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground',
-                  selectionMode && 'bg-interactive-active text-foreground',
-                )}
-                aria-label={t(selectionMode
-                  ? 'sessions.sidebar.header.actions.exitSelection'
-                  : 'sessions.sidebar.header.actions.selectSessions')}
-                aria-pressed={selectionMode}
-              >
-                <Icon name={selectionMode ? 'checkbox' : 'checkbox-multiple'} className="size-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">{t(selectionMode
-              ? 'sessions.sidebar.header.actions.exitSelection'
-              : 'sessions.sidebar.header.actions.selectSessions')}</TooltipContent>
-          </Tooltip>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
                 className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
-                aria-label={t('sessions.sidebar.header.actions.sessionDisplayMode')}
+                aria-label={t('sessions.sidebar.header.actions.more')}
+                title={t('sessions.sidebar.header.actions.more')}
               >
-                <Icon name="equalizer-2" className="size-4" />
+                <Icon name="more" className="size-4" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-56">
+            <DropdownMenuContent align="end" className="min-w-56 overflow-y-auto">
+              {!runtime.isVSCode ? <DropdownMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
+                <Icon name="folder-add" className="size-4" />
+                {t('sessions.sidebar.header.actions.addProject')}
+              </DropdownMenuItem> : null}
+              <DropdownMenuItem onClick={handleOpenScheduledTasks}>
+                <Icon name="calendar-schedule" className="size-4" />
+                {t('sessions.sidebar.header.actions.scheduledTasks')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleOpenMultiRun}>
+                <Icon name="git-merge" className="size-4" />
+                {t('sessions.sidebar.header.actions.newMultiRun')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleOpenArchive}>
+                <Icon name="archive" className="size-4" />
+                {t('sessions.sidebar.nav.archive')}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={selectionMode ? exitSelectionMode : enterSelectionMode}>
+                <Icon name={selectionMode ? 'checkbox' : 'checkbox-multiple'} className="size-4" />
+                {t(selectionMode ? 'sessions.sidebar.header.actions.exitSelection' : 'sessions.sidebar.header.actions.selectSessions')}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
               <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
               <DropdownMenuRadioGroup
                 value={projectSortOrder}

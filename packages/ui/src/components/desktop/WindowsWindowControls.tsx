@@ -158,15 +158,15 @@ export const WindowsWindowControls = React.memo(function WindowsWindowControls({
   // icon cluster (app menu / sidebar / project actions) and avoids negative
   // margins so TitlebarLeftControls publishes an accurate reserved width —
   // otherwise the project-actions chevron overlaps the session title. Right
-  // side keeps a taller h-12 Windows-style hit target and cancels Header's
+  // side keeps an h-10 Windows-style hit target and cancels Header's
   // pr-3 edge padding so the close hit area reaches the window boundary.
   const buttonClassName = cn(
     'app-region-no-drag inline-flex items-center justify-center text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-    isLeft ? 'h-8 w-8 rounded-md' : 'h-12 w-11',
+    isLeft ? 'h-8 w-8 rounded-md' : 'h-10 w-10',
   );
   const containerClassName = isLeft
     ? 'app-region-no-drag mr-1 flex h-8 shrink-0 items-center'
-    : 'app-region-no-drag ml-1 -mr-3 flex h-12 shrink-0 items-center';
+    : 'app-region-no-drag ml-1 -mr-3 flex h-10 shrink-0 items-center';
 
   const renderControl = (action: DesktopWindowControlAction) => {
     if (action === 'minimize') {

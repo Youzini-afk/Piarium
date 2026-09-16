@@ -37,10 +37,10 @@ const buttonVariants = cva(
           "bg-interactive-hover text-foreground border border-border hover:bg-interactive-active",
         outline:
           "bg-transparent text-foreground border border-border hover:bg-interactive-hover hover:text-foreground",
-        // Persistent selection uses surface contrast; primary is reserved for actions.
+        // Selection is a localized theme accent, not a tint over the surrounding surface.
         chip: cn(
           "border border-border bg-transparent text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
-          "aria-pressed:bg-interactive-active aria-pressed:text-foreground aria-pressed:border-[var(--interactive-border-hover)]",
+          "aria-pressed:bg-interactive-selection aria-pressed:text-foreground aria-pressed:border-[var(--interactive-border-focus)]",
         ),
         secondary:
           "bg-interactive-hover text-foreground hover:bg-interactive-active",

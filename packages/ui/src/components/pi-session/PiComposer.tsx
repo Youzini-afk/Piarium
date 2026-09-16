@@ -8,6 +8,7 @@ import type {
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 import { isIMECompositionEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
@@ -189,7 +190,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
     canSend,
     sending,
   });
-  const footerIconButtonClass = 'flex size-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
+  const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const snippets = useSnippetsStore((state) => state.snippets);
   const languageContext = React.useMemo<ComposerLanguageContext>(() => ({
     attachmentFilenames: [],
@@ -440,7 +441,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
 
   return (
     <div className={cn(
-      'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-4',
+      'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-3',
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
     )} data-pi-composer-shell="true">
       <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>
@@ -575,7 +576,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             languageContext={languageContext}
             placeholder={t('chat.chatInput.placeholder.chat')}
             className={cn(
-              'min-h-[52px] w-full px-3 pb-2 pt-4 typography-markdown text-foreground md:typography-ui-label',
+              'min-h-[48px] w-full px-3 pb-1 pt-3 typography-markdown text-foreground md:typography-ui-label',
               isExpandedInput ? 'min-h-[40vh]' : 'max-h-[40vh]',
             )}
             maxLines={isExpandedInput ? 24 : 9}
@@ -623,8 +624,8 @@ export const PiComposer: React.FC<PiComposerProps> = ({
             />
           ) : null}
 
-          <div data-chat-input-footer="true" className="flex items-center justify-between gap-3 px-3 pb-2.5 pt-0.5">
-            <div className="flex min-w-0 items-center gap-1.5">
+          <div data-chat-input-footer="true" className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 px-2 pb-2 pt-0.5">
+            <div className="flex min-w-0 items-center gap-0.5">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -637,38 +638,28 @@ export const PiComposer: React.FC<PiComposerProps> = ({
                   event.target.value = '';
                 }}
               />
-              <Tooltip>
-                <TooltipTrigger asChild>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <button
                     type="button"
-                    onClick={() => fileInputRef.current?.click()}
                     className={footerIconButtonClass}
-                    aria-label={t('chat.chatInput.actions.addAttachment')}
+                    aria-label={t('chat.piComposer.options')}
+                    title={t('chat.piComposer.options')}
                   >
-                    <Icon name="add-circle" className="size-4" />
+                    <Icon name="add" className="size-4" />
                   </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">{t('chat.chatInput.actions.attachFiles')}</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={toggleExpandedInput}
-                    className={footerIconButtonClass}
-                    aria-label={isExpandedInput
-                      ? t('filesView.editor.exitFullscreen')
-                      : t('filesView.editor.fullscreen')}
-                  >
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="min-w-48">
+                  <DropdownMenuItem onClick={() => fileInputRef.current?.click()} className="gap-2.5 py-1.5">
+                    <Icon name="attachment-2" className="size-4" />
+                    {t('chat.chatInput.actions.attachFiles')}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={toggleExpandedInput} className="gap-2.5 py-1.5">
                     <Icon name={isExpandedInput ? 'fullscreen-exit' : 'fullscreen'} className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">
-                  {isExpandedInput
-                    ? t('filesView.editor.exitFullscreen')
-                    : t('filesView.editor.fullscreen')}
-                </TooltipContent>
-              </Tooltip>
+                    {isExpandedInput ? t('filesView.editor.exitFullscreen') : t('filesView.editor.fullscreen')}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.leading"
@@ -689,7 +680,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               )}
             </div>
 
-            <div className="flex min-w-0 shrink-0 items-center justify-end gap-2.5">
+            <div className="ml-auto flex min-w-0 items-center justify-end gap-1">
               {!isMobile ? modelControls : null}
               <WorkbenchContributionSlot
                 kind="composer-action"

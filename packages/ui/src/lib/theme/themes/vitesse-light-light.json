@@ -21,26 +21,26 @@
       "emphasis": "#248b5e"
     },
     "surface": {
-      "background": "#ffffff",
-      "foreground": "#2c2c28",
-      "muted": "#f2f0f0",
-      "mutedForeground": "#5b5c54cb",
-      "elevated": "#f7f7f7",
-      "elevatedForeground": "#393a34",
-      "overlay": "#ffffff80",
-      "subtle": "#f6f3f3"
+      "background": "#fcfcfc",
+      "foreground": "#262626",
+      "muted": "#f3f3f3",
+      "mutedForeground": "#626262",
+      "elevated": "#ffffff",
+      "elevatedForeground": "#262626",
+      "overlay": "#00000033",
+      "subtle": "#ededed"
     },
     "interactive": {
-      "border": "#dbd8d8",
-      "borderHover": "#cbc7c7",
-      "borderFocus": "#635454b8",
-      "selection": "#22222218",
-      "selectionForeground": "#393a34",
+      "border": "#dddddd",
+      "borderHover": "#b3b3b3",
+      "borderFocus": "#1c6b48",
+      "selection": "#1c6b481a",
+      "selectionForeground": "#262626",
       "focus": "#00000000",
       "focusRing": "#0000000050",
-      "cursor": "#CECDC3",
-      "hover": "#22222218",
-      "active": "#22222218"
+      "cursor": "#262626",
+      "hover": "#00000008",
+      "active": "#00000012"
     },
     "status": {
       "error": "#ab5959",
@@ -69,8 +69,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#ffffff",
-        "foreground": "#393a34",
+        "background": "#f3f3f3",
+        "foreground": "#262626",
         "comment": "#a0ada0",
         "keyword": "#1e754f",
         "string": "#b56959",
@@ -107,33 +107,33 @@
       }
     },
     "markdown": {
-      "heading1": "#2c2c28",
-      "heading2": "#2c2c28",
-      "heading3": "#2c2c28",
-      "heading4": "#2c2c28",
+      "heading1": "#262626",
+      "heading2": "#262626",
+      "heading3": "#262626",
+      "heading4": "#262626",
       "link": "#1e754f",
       "linkHover": "#1c6b48",
-      "inlineCode": "#2c2c28",
-      "inlineCodeBackground": "#f6f3f3",
-      "blockquote": "#5b5c54cb",
-      "blockquoteBorder": "#dbd8d8",
-      "listMarker": "#5b5c54cb"
+      "inlineCode": "#262626",
+      "inlineCodeBackground": "#ededed",
+      "blockquote": "#626262",
+      "blockquoteBorder": "#dddddd",
+      "listMarker": "#626262"
     },
     "chat": {
-      "userMessage": "#2c2c28",
-      "userMessageBackground": "#f6f3f3",
-      "assistantMessage": "#2c2c28",
-      "assistantMessageBackground": "#ffffff",
-      "timestamp": "#5b5c54cb",
-      "divider": "#dbd8d8"
+      "userMessage": "#262626",
+      "userMessageBackground": "#eeeeee",
+      "assistantMessage": "#262626",
+      "assistantMessageBackground": "#fcfcfc",
+      "timestamp": "#626262",
+      "divider": "#dddddd"
     },
     "tools": {
-      "background": "#f2f0f0",
-      "border": "#dbd8d8",
-      "headerHover": "#22222218",
-      "icon": "#5b5c54cb",
-      "title": "#2c2c28",
-      "description": "#5b5c54cb",
+      "background": "#f3f3f3",
+      "border": "#dddddd",
+      "headerHover": "#00000008",
+      "icon": "#626262",
+      "title": "#262626",
+      "description": "#626262",
       "edit": {
         "added": "#1e754f",
         "addedBackground": "#1e754f20",
@@ -145,9 +145,7 @@
   },
   "config": {
     "fonts": {
-      "sans": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
-      "mono": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace",
-      "heading": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
+      "mono": "ui-monospace, \"SFMono-Regular\", \"Menlo\", \"Cascadia Mono\", \"Segoe UI Mono\", monospace"
     },
     "transitions": {
       "fast": "150ms ease",

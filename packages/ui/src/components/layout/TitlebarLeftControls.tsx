@@ -87,7 +87,7 @@ export const TitlebarLeftControls: React.FC = () => {
         paddingLeft: 'var(--oc-titlebar-left-inset, 0.75rem)',
       }}
     >
-      <div ref={clusterRef} className="flex items-center gap-2">
+      <div ref={clusterRef} className="flex items-center gap-1">
         {usesFramelessChrome && windowControlsSide === 'left' ? (
           <WindowsWindowControls visible position="left" />
         ) : null}

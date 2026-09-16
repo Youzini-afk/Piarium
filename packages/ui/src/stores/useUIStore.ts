@@ -98,7 +98,7 @@ const CONTEXT_PANEL_MIN_WIDTH = 380;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
 const CONTEXT_PANEL_MAX_TABS = 12;
 const CONTEXT_PANEL_MAX_LABEL_LENGTH = 120;
-const LEFT_SIDEBAR_MIN_WIDTH = 280;
+export const LEFT_SIDEBAR_DEFAULT_WIDTH = 256;
 const activeMainTabByRuntime = new Map<string, MainTab>();
 
 const runtimeMemoryKey = (value?: string | null): string => {
@@ -809,7 +809,7 @@ export const useUIStore = create<UIStore>()(
         isMultiRunLauncherOpen: false,
         multiRunLauncherPrefillPrompt: '',
         isSidebarOpen: true,
-        sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
+        sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
         hasManuallyResizedLeftSidebar: false,
         contextPanelByDirectory: {},
         contextRailOrder: [],
@@ -955,7 +955,7 @@ export const useUIStore = create<UIStore>()(
             if (newOpen && !state.hasManuallyResizedLeftSidebar) {
               return {
                 isSidebarOpen: newOpen,
-                sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
+                sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
               };
             }
             return { isSidebarOpen: newOpen };
@@ -968,10 +968,10 @@ export const useUIStore = create<UIStore>()(
               if (!open) {
                 return state;
               }
-              if (!state.hasManuallyResizedLeftSidebar && state.sidebarWidth !== LEFT_SIDEBAR_MIN_WIDTH) {
+              if (!state.hasManuallyResizedLeftSidebar && state.sidebarWidth !== LEFT_SIDEBAR_DEFAULT_WIDTH) {
                 return {
                   isSidebarOpen: open,
-                  sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
+                  sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
                 };
               }
               return state;
@@ -979,7 +979,7 @@ export const useUIStore = create<UIStore>()(
             if (open && !state.hasManuallyResizedLeftSidebar) {
               return {
                 isSidebarOpen: open,
-                sidebarWidth: LEFT_SIDEBAR_MIN_WIDTH,
+                sidebarWidth: LEFT_SIDEBAR_DEFAULT_WIDTH,
               };
             }
             return { isSidebarOpen: open };
@@ -1008,7 +1008,7 @@ export const useUIStore = create<UIStore>()(
           set({ contextEditorTreeWidth: Math.min(480, Math.max(200, Math.round(width))) });
         },
 
-        // Rail entry point: activates the most recent tab of the requested
+        // Surface entry point: activates the most recent tab of the requested
         // mode, opens a fresh singleton tab when none exists, and toggles the
         // panel closed when the requested mode is already active and visible.
         openContextSurface: (directory, mode) => {
@@ -1037,7 +1037,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           // Content-driven modes need a payload (a preview URL or session);
-          // the rail renders them disabled until content exists. 'file' opens
+          // the surface menu hides them until content exists. 'file' opens
           // an empty editor whose embedded tree picks the first file.
           if (mode === 'preview' || mode === 'chat') {
             return;

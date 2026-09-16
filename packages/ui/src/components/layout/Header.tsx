@@ -17,6 +17,7 @@ import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/s
 
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
+import { ContextPanelMenu } from './ContextPanelMenu';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -1520,8 +1521,8 @@ export const Header: React.FC<HeaderProps> = ({
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
       // the right inset / titlebar height are owned by the window-controls overlay.
       paddingRight: 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
-      minHeight: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
-      height: 'max(3rem, var(--oc-wco-titlebar-height, 0px))',
+      minHeight: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
+      height: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
     };
   }, [isDesktopApp, isVSCode, usesFramelessChrome]);
 
@@ -1897,7 +1898,7 @@ export const Header: React.FC<HeaderProps> = ({
     <div
       onMouseDown={handleDragStart}
       className={cn(
-        'app-region-drag relative flex h-12 select-none items-center pr-3',
+        'app-region-drag relative flex h-10 select-none items-center pr-3',
         macosHeaderSizeClass
       )}
       style={webWindowControlsOverlayStyle}
@@ -2043,7 +2044,7 @@ export const Header: React.FC<HeaderProps> = ({
         )}
 
         {tabs.length > 0 && (
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--surface-muted)]/50 p-1">
+          <div className="flex items-center gap-0.5">
             {tabs.map((tab) => renderTab(tab))}
           </div>
         )}
@@ -2063,12 +2064,13 @@ export const Header: React.FC<HeaderProps> = ({
               showPercentIcon
               onClick={handleOpenContextPanel}
               pressed={isContextPanelActive}
-              className="mr-3.5"
+              className="mr-1.5"
               valueClassName="typography-ui-label font-medium leading-none text-foreground"
               percentIconClassName="h-4.5 w-4.5"
             />
           ) : null}
           {desktopSidebarActions}
+          <ContextPanelMenu />
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>

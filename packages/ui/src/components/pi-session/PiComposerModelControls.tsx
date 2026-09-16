@@ -121,7 +121,7 @@ export const PiComposerModelControls: React.FC<PiComposerModelControlsProps> = (
 
   return (
     <div
-      className="flex min-w-0 items-center justify-end gap-2.5"
+      className="flex min-w-0 items-center justify-end gap-1"
       data-pi-composer-model-controls="true"
     >
       <ModelSelector

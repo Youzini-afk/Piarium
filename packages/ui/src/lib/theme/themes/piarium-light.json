@@ -26,24 +26,24 @@
     "surface": {
       "background": "#fcfcfc",
       "foreground": "#262626",
-      "muted": "#f4f4f4",
-      "mutedForeground": "#656565",
+      "muted": "#f3f3f3",
+      "mutedForeground": "#626262",
       "elevated": "#ffffff",
       "elevatedForeground": "#262626",
       "overlay": "#00000033",
-      "subtle": "#eeeeee"
+      "subtle": "#ededed"
     },
     "interactive": {
-      "border": "#dedede",
-      "borderHover": "#b6b6b6",
+      "border": "#dddddd",
+      "borderHover": "#b3b3b3",
       "borderFocus": "#b35017",
-      "selection": "#00000012",
+      "selection": "#b350171a",
       "selectionForeground": "#262626",
       "focus": "#b35017",
       "focusRing": "#b3501755",
       "cursor": "#262626",
-      "hover": "#0000000d",
-      "active": "#00000014"
+      "hover": "#00000008",
+      "active": "#00000012"
     },
     "status": {
       "error": "#b7493f",
@@ -72,7 +72,7 @@
     },
     "syntax": {
       "base": {
-        "background": "#f4f4f4",
+        "background": "#f3f3f3",
         "foreground": "#262626",
         "comment": "#9dae9d",
         "keyword": "#15764e",
@@ -138,26 +138,26 @@
       "link": "#2e808f",
       "linkHover": "#296aa3",
       "inlineCode": "#262626",
-      "inlineCodeBackground": "#eeeeee",
-      "blockquote": "#656565",
-      "blockquoteBorder": "#dedede",
-      "listMarker": "#656565"
+      "inlineCodeBackground": "#ededed",
+      "blockquote": "#626262",
+      "blockquoteBorder": "#dddddd",
+      "listMarker": "#626262"
     },
     "chat": {
       "userMessage": "#262626",
       "userMessageBackground": "#eeeeee",
       "assistantMessage": "#262626",
       "assistantMessageBackground": "#fcfcfc",
-      "timestamp": "#656565",
-      "divider": "#dedede"
+      "timestamp": "#626262",
+      "divider": "#dddddd"
     },
     "tools": {
-      "background": "#f4f4f4",
-      "border": "#dedede",
-      "headerHover": "#0000000d",
-      "icon": "#656565",
+      "background": "#f3f3f3",
+      "border": "#dddddd",
+      "headerHover": "#00000008",
+      "icon": "#626262",
       "title": "#262626",
-      "description": "#656565",
+      "description": "#626262",
       "edit": {
         "added": "#2c751e",
         "addedBackground": "#2c751e25",

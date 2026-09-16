@@ -32,12 +32,26 @@ primary describes an action, status colors describe feedback, and syntax colors 
 When a third-party renderer needs resolved colors, `useThemeSystem()` is the adapter; ordinary React
 chrome uses CSS variables and semantic utility classes.
 
-Large surfaces and persistent selection use the palette's neutral surface hierarchy. Reserve primary
-color for prominent actions, links and focus; avoid tinting whole messages or panels. Built-in themes
-share this treatment while keeping their own surface hues and code/status colors. Default buttons are
-solid actions; secondary/outline/ghost variants and selected chips remain neutral. Menus use one border
+Built-in themes share neutral work surfaces and plain text; their identity appears in primary actions,
+localized selection fills, links, focus and code/status colors. Do not tint an entire panel or change
+the interface font when choosing a built-in palette. Custom themes may still supply explicit surface
+and font overrides. Default buttons are solid actions; secondary/outline/ghost variants stay quiet,
+and selected chips use the theme's selection color. Menus use one border
 and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
 UI labels use 14px, metadata 13px and small badges 12px at the default scale; body text stays 15px.
+
+The desktop Agent shell exposes auxiliary views through `ContextPanelMenu` in the titlebar, without
+a permanent right icon rail. The existing per-workspace panel state owns open tabs, widths and the
+last selection; closing it does not discard that state. The menu shows all available surfaces and
+the Git change count; choosing the visible surface keeps it open. Explicit file/terminal/review
+actions can still open the panel directly. Extension slots remain available.
+
+Default desktop navigation is 256px wide (manual widths are retained). New session and search stay
+visible; project/session management and display choices share one labeled menu. The titlebar is 40px except
+where native macOS or window-control-overlay insets require more. Composer attachment/fullscreen
+actions share a menu; model, permission and send controls stay directly available. Activity traces
+are expandable rows rather than another enclosing card. Keep readable content spacious while making
+tool chrome compact, and let narrow composer footers wrap rather than clip their actions.
 
 Common controls live under `src/components/ui`. `Button`, `dropdownTriggerVariants`, and the Settings
 primitives carry shared interaction chrome, sizes, focus behavior, and theme semantics. Extending a
