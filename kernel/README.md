@@ -17,8 +17,9 @@ bun run kernel:build
 
 Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
 `PIARIUM_KERNEL_PATH` (or use the release layout resolver). The kernel acquires an owner file in its
-storage root, rejects a second writer, and leaves a corrupt/future catalog as an error rather than an
-empty store.
+storage root, rejects a second writer, recreates obsolete internal catalog formats, and leaves a
+corrupt/future catalog as an error rather than an empty store. Recreation never touches workspace files,
+Git, native Pi data, or external configuration.
 
 R1 storage commands are domain operations: durable content-object installation, immutable trie roots,
 write-revision CAS, published revisions, pins, idempotent operation IDs, recovery records, and GC.

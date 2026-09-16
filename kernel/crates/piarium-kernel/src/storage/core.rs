@@ -144,10 +144,20 @@ impl Storage {
         } else {
             (None, true)
         };
-        let initialize_catalog = !catalog_existed || (format.is_none() && catalog_empty);
+        let mut initialize_catalog = !catalog_existed || (format.is_none() && catalog_empty);
+        let mut obsolete_catalog = None;
         if !initialize_catalog {
-            match format {
+            match format.as_deref() {
                 Some(value) if value == STORAGE_FORMAT_VERSION => {}
+                Some(value)
+                    if value
+                        .parse::<u64>()
+                        .ok()
+                        .zip(STORAGE_FORMAT_VERSION.parse::<u64>().ok())
+                        .is_some_and(|(found, current)| found < current) =>
+                {
+                    obsolete_catalog = Some(value.to_string());
+                }
                 Some(value) => {
                     return Err(KernelError::Storage(format!(
                         "unsupported catalog format version: {value}"
@@ -159,6 +169,33 @@ impl Storage {
                     ))
                 }
             }
+        }
+        if let Some(previous_format) = obsolete_catalog {
+            // Internal kernel formats have no compatibility contract. Once the
+            // storage lock is held, an older catalog can be discarded and
+            // recreated without touching workspace files, Git, Pi data, or
+            // external configuration. Future and corrupt catalogs still fail.
+            for suffix in ["", "-wal", "-shm"] {
+                let candidate = root.join(format!("catalog.sqlite{suffix}"));
+                match fs::remove_file(&candidate) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+            for directory in ["objects", "staging"] {
+                let candidate = root.join(directory);
+                match fs::remove_dir_all(&candidate) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+                fs::create_dir_all(candidate)?;
+            }
+            eprintln!(
+                "[piarium-kernel] recreated obsolete storage catalog format {previous_format} as {STORAGE_FORMAT_VERSION}"
+            );
+            initialize_catalog = true;
         }
         let conn = Connection::open(catalog_path)?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
