@@ -411,7 +411,10 @@ describe("retrieval thread public slice", () => {
         preset: "hard-implement",
         kind: "implementation",
         createdBy: "agent",
-        concurrency: 1,
+        // The parent Run occupies one root execution slot while it dispatches.
+        // Give the delegated retrieval Run a second slot so this vertical slice
+        // exercises execution rather than the queued-admission contract.
+        concurrency: 2,
         autoRun: true,
         worktree: "isolated",
         tools: ["dispatch", "wait", "read_thread"],

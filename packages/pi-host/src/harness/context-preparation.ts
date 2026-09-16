@@ -602,9 +602,10 @@ export function createContextPreparationExtension(
     pi.on("session_before_compact", async (event, ctx) => {
       // Pi's post-agent-end check is not request admission. The bound adapter
       // owns automatic commits; cancelled idle checks must never spend a model call.
-      if (boundary && event.reason !== "manual") return { cancel: true };
+      // Manual compaction remains a native Pi extension seam so a project
+      // extension can provide its own summary or Pi can run its normal fallback.
+      if (boundary) return event.reason === "manual" ? undefined : { cancel: true };
       try {
-        if (boundary) latestRequest = await boundary.currentRequest(event.signal);
         const compaction = await commitFromEvent(event, ctx, pi);
         return compaction === undefined ? { cancel: true } : { compaction };
       } catch (error) {

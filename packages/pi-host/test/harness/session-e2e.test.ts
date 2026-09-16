@@ -28,7 +28,7 @@ import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { createHarnessServiceHost, type HarnessServiceHostOptions } from "../../../web/application-host/lib/harness/service-host.js";
 import { createHarnessRouter } from "../../../web/application-host/lib/harness/router.js";
 import { registerHarnessServices } from "../../../web/application-host/lib/harness/harness-services.js";
-import { openWorkspaceKnowledge, type KnowledgeStore } from "../../../web/application-host/lib/knowledge/store.js";
+import { openWorkspaceKnowledge } from "../../../web/application-host/lib/knowledge/store.js";
 import { createKnowledgeContextRuntime } from "../../../web/application-host/lib/knowledge/context-runtime.js";
 import { createDocumentAuthority, type DocumentMutationObservation } from "../../../web/application-host/lib/documents/authority.js";
 import {
@@ -84,6 +84,7 @@ async function setupSession(options: {
   /** Answer for a `ui.select` dialog; undefined = dismiss. */
   answerDialog?: (request: UiRequest, index: number) => string | undefined;
   inferenceFetch?: typeof fetch;
+  observeHostEvent?: (event: HostEvent, data: unknown) => void;
 }) {
   const { root, faux } = options;
   const workspaceId = options.workspaceId ?? WORKSPACE_ID;
@@ -132,6 +133,7 @@ async function setupSession(options: {
   registerHarnessServices(router, harnessServiceHost);
 
   const emit = (<E extends HostEvent>(event: E, data: HostEventData<E>): void => {
+    options.observeHostEvent?.(event, data);
     if (event === "harness.cancel") {
       const payload = data as HostEventData<"harness.cancel">;
       const actor = {
@@ -774,6 +776,8 @@ describe("session e2e — context preparation chain", () => {
       const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 48_000, maxTokens: 800, reasoning: true }] });
       let releaseSummary!: () => void;
       const gate = new Promise<void>((resolve) => { releaseSummary = resolve; });
+      let markCompactionStarted!: () => void;
+      const compactionStarted = new Promise<void>((resolve) => { markCompactionStarted = resolve; });
       const summaries: { context: Context; reasoning?: string }[] = [];
       const foreground: Context[] = [];
       const compacted: string[] = [];
@@ -807,7 +811,16 @@ describe("session e2e — context preparation chain", () => {
       };
       faux.setResponses(Array.from({ length: 24 }, () => respond));
       try {
-        session = await setupSession({ root, faux, serviceHostOptions: { onSessionCompacted: (id) => compacted.push(id) } });
+        session = await setupSession({
+          root,
+          faux,
+          serviceHostOptions: { onSessionCompacted: (id) => compacted.push(id) },
+          observeHostEvent: (event, data) => {
+            if (event === "agent.event" && (data as { event?: { type?: string } }).event?.type === "compaction_start") {
+              markCompactionStarted();
+            }
+          },
+        });
         const created = await session.host.create(root);
         session.host.session.setThinkingLevel("high");
         await session.host.prompt(created.sessionId, "ORIGINAL-TASK-MARKER " + "alpha ".repeat(6_000));
@@ -832,7 +845,8 @@ describe("session e2e — context preparation chain", () => {
           await session!.host.prompt(created.sessionId, "NEW-WHILE-PREPARING-MARKER " + "delta ".repeat(10_000));
           await session!.host.session.waitForIdle();
         })();
-        await waitUntil(async () => session!.host.snapshot().isCompacting);
+        await compactionStarted;
+        assert.equal(session.host.snapshot().isCompacting, true);
         assert.equal(foreground.length, 3, "the capacity-bound request waits before reaching the provider");
         assert.equal(summaries.length, 1, "capacity waits on the same in-flight call");
         if (outcome === "cancel") await session.host.abort(created.sessionId);
@@ -2197,7 +2211,9 @@ describe("D-284 request admission", () => {
       }), "utf8");
       await writeFile(join(root, "material.txt"), Array.from({ length: 1_500 },
         (_, i) => `line ${i + 1}: ${"material ".repeat(8)}`).join("\n"), "utf8");
-      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 24_000, maxTokens: 800 }] });
+      // Keep the fourth request decisively beyond capacity even after the
+      // provider's measured-token calibration replaces the initial estimate.
+      const faux = registerFauxProvider({ models: [{ id: "faux-1", contextWindow: 20_000, maxTokens: 800 }] });
       let session: Awaited<ReturnType<typeof setupSession>> | undefined;
       const foreground: { compacted: boolean; chars: number }[] = [];
       let summaryCalls = 0;
