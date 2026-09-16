@@ -1793,7 +1793,7 @@ retrieval 默认 task，保留不携父 blocks 和专门事实协议的选择；
 已有线程继续由执行请求进入：工作和背景仍相关用 `continue`；工作延续但旧背景大半过期用 `fresh`（8.4.7）；不相关新任务
 新建 Thread。`send` 的 `kind:"request"` 对 settled 实现线程经 `threadContinueRun` 新建 Run：`continue` 重开保留会话
 原样续跑，`fresh` 按 2.6A 组装新输入开新会话（旧转录经 `previewSessionEntries` 可读，工作与结果保留）；普通 `inform`
-仍只投递不新建 Run，对 settled 线程按当前语义拒绝。
+仍只投递不新建 Run——对 settled/非运行线程作为耐久 held 记录留在 Thread 上，到下一次正常输入边界成批交付。
 需要时从选定结果重建已回收目录，沿实际权限和统一执行准入启动；新 Run 记录输入结果身份。普通 inform 不触发这些动作。
 
 只读讨论转实现保留工作与历史，按新 Run 授予实际工具/权限并准备工作分支。上下文可继续，也可 fresh；不强制新建“实现员工”。
@@ -1898,8 +1898,8 @@ attention——实践里最常见的"卡死"其实
 - `merge(id, resultRevision?)`：沿现有 Integration 消费固定成果；依赖线程纳入父变化是明确的工作状态更新，不靠 send 模拟。
 - `kill(id)`：停止执行并保留已发布结果，目录按真实 writer 与保留责任回收；普通通知不复活已取消/归档工作。
 
-这些是 D-285 的目标语义；3.18A 的任务中心派发与可选预设已实施，仅直接子 active/running 可收 send、per-parent slot、
-continue/fresh 与分段成果仍需要实际改造。
+这些是 D-285 的目标语义；3.18A–C 已实施：任务中心派发与可选预设、task/inherit 与 continue/fresh 续做、inform/request/
+replyTo 定向消息、同根共享执行名额与等待让出均已沿生产链接线；分段成果（3.18D）与 UI/旧路径收口（3.18E）仍待实施。
 无需先建设任务市场或通用工作流，公开入口必须能完成“派发—解决依赖—交付—使用—同线程续做”的一条纵切。
 
 #### 9.3.7 增量视图与送达

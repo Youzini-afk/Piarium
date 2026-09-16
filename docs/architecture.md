@@ -323,14 +323,19 @@ and independent plans/knowledge. A task can also start a fresh input view when i
 mostly obsolete. That refresh uses current rules and selected work evidence without discarding files,
 results, pending messages or the old Pi transcript, and does not require a background freshness model.
 
-D-285 accepts task-centered collaboration; plan 3.18A is implemented. A normal dispatch requires only
+D-285 accepts task-centered collaboration; plan 3.18A–C is implemented. A normal dispatch requires only
 `task` and inherits the caller's current model and active tools; presets are optional, resolve per-Run
 execution configuration, and `shared` worktree stays an explicit choice. Each Run freezes its model,
-tool allowlist, permission overlay, scope, worktree, prompt fragment, and input origin at start, and
-automatic review is opt-in by default. Still pending under 3.18B–E: `continue`/`fresh` input origins
-beyond `task`/`inherit`, directed parent/child/peer messages, shared per-root execution admission with
-waiting yield, and staged-result dependency integration. The current direct-child active-only send and
-per-parent slot accounting described elsewhere remain code facts until those parts complete.
+tool allowlist, permission overlay, scope, worktree, prompt fragment, and input origin
+(`task`/`inherit`/`continue`/`fresh`) at start, and automatic review is opt-in by default. `thread.send`
+carries `inform`/`request`/`replyTo` directed messages between relationship-bound targets inside one
+root task — children, the caller's own parent, and same-parent siblings — recorded durably on the
+Thread with `requestId` idempotency; `inform` never starts execution while `request` wakes a waiting
+target or continues a settled Thread as a new Run. Execution admission is shared per root session
+(`countActiveInRoot`): nested Threads count against the same budget, a Thread waiting on a dependency
+(`waitingFor: "thread"`) yields its slot, and queued Threads and parked `pendingContinuation` requests
+promote through the same `tryDequeue` gate when a slot frees. Still pending under 3.18D–E:
+staged-result dependency integration and the UI/old-path closure.
 
 Harness `bash` creates and attaches PTYs through that same terminal runtime. The runtime allocates
 process-wide `sh_N` identities and rejects owner/creation-identity reuse; the per-session supervisor
@@ -737,13 +742,20 @@ incremental views: `thread.list` and `thread.wait` only show changes
 since the observer's last cursor. `thread.wait` blocks until a thread
 changes state, the timeout fires, or the abort signal fires.
 
-Concurrency is enforced by the registry. A slot is occupied only by an active
-Thread whose current Run is `starting` or `running`; `queued` means created but not yet spawned, so it
-holds nothing. pi-host sends the parent session's frozen
+Concurrency is enforced by the registry and shared per root session
+(`countActiveInRoot`, 3.18C): a slot is occupied only by an active implementation
+Thread whose current Run is `starting` or `running` and which is not waiting on a
+dependency (`waitingFor: "thread"` yields its slot while blocked); `queued` means
+created but not yet spawned, so it holds nothing. Every Thread under the same
+root session — parent and nested children alike — counts against the same
+budget. pi-host sends the parent session's frozen
 `harness.dispatch.concurrency` with each dispatch (default 12; no unrelated
-hard ceiling). When `countActive >= concurrency` a dispatch is
-queued, and any terminal transition promotes the oldest queued thread
-through the `onThreadDequeued` callback whenever a Run ends or a queued Thread is cancelled.
+hard ceiling). When the root count reaches the budget a dispatch is
+queued, and any terminal transition promotes the oldest queued Thread or
+parked `pendingContinuation` request through `tryDequeue` — ordered by the
+parked time or `createdAt` — whenever a Run ends, a queued Thread is cancelled,
+or a waiting mark frees admission. `onAdmissionFreed` then drives the deferred
+lost-run resume recheck.
 Tearing a parent down suppresses dequeue: promoting a queued thread
 there would resurrect work the user just deleted.
 

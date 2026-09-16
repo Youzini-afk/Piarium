@@ -338,7 +338,7 @@ const parseParentBundle = (value: unknown, label: string): ParentVerificationBun
 const parseReviewRecord = (value: unknown, label: string): ResultReviewRecord => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is malformed`);
   const row = value as Record<string, unknown>;
-  const statuses = new Set(["running", "completed", "failed", "cancelled"]);
+  const statuses = new Set(["queued", "running", "completed", "failed", "cancelled"]);
   if (!isSafeInt(row.resultRevision) || Number(row.resultRevision) <= 0 || !statuses.has(row.status as string)
     || !isSafeInt(row.recordedAt) || (row.gate !== undefined && typeof row.gate !== "boolean")) {
     throw new Error(`${label} is malformed`);

@@ -144,8 +144,10 @@ before the parent result reaches the workspace. Killing or archiving a parent
 walks descendants in stable createdAt/id post-order and enters each child's own
 lifecycle serialization; restore is refused while an ancestor is archived or the
 cascade is in progress. Scope rejects a complete `..` segment, absolute paths,
-and drive-letter paths, not names such as `src/foo..bar`. Sibling threads do not talk;
-the root session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
+and drive-letter paths, not names such as `src/foo..bar`. Sibling threads may
+exchange directed messages inside their root task (below); they still cannot
+read each other's transcripts or control each other's Runs, and the root
+session list and Zone 2 projection stay on direct children. After a successful publish, only same-Run observations whose start/end
 identity matches the fixed result are bound to that `resultRevision`. A hidden
 review thread is then created with `startRun` + `spawn` (not `autoRun` alone).
 Draft merge records that disk commands cannot verify unsaved buffers.
@@ -155,14 +157,39 @@ Input origins are frozen per Run (`task`/`inherit`/`continue`/`fresh`). An
 dispatch time through `threadCaptureInputContext` — the last compaction summary
 plus the raw committed entries kept after it, rendered bounded — persists it on
 the manifest, and renders it in the child's initial prompt; a queued Thread
-never re-reads later parent state. `thread.send` distinguishes `inform`
-(delivery only; requires an active running session) from `request`: a `request`
-on a settled implementation Thread calls `threadContinueRun` to start a new
-Run — `continue` reopens the retained session and prompts the new task, `fresh`
-reads the closed transcript through `sessions.readEntries`
-(`previewSessionEntries`), assembles a rebuilt input via `assembleFreshInput`,
-and spawns a new session on the retained worktree. A request on an active
-Thread delivers like inform; `inform` on a settled Thread is still rejected.
+never re-reads later parent state.
+
+`thread.send` carries directed messages inside one root task (3.18C). Reachable
+targets are relationship-bound: a Thread caller reaches its children, its
+parent (`to: "parent"` resolves the parent Thread or session), and same-parent
+siblings; a session caller reaches its direct children; cross-root and
+unrelated targets are denied. `inform` only delivers — to a running session it
+lands at the next input boundary, to a waiting target it stays `held`, and to a
+settled or queued Thread it is recorded durably for the next Run's input; it
+never starts execution. `request` asks for execution: on a waiting target it
+delivers and clears the wait, on a settled implementation Thread it calls
+`threadContinueRun` to start a new Run — `continue` reopens the retained
+session and prompts the new task, `fresh` reads the closed transcript through
+`sessions.readEntries` (`previewSessionEntries`), assembles a rebuilt input via
+`assembleFreshInput`, and spawns a new session on the retained worktree. A
+request on an active Thread delivers like inform and never starts a second
+Run. Messages persist as `in`/`out` records on the Thread; `requestId` makes
+retries observe the recorded outcome instead of duplicating delivery or
+execution, and `replyTo` resolves both ledgers and clears the requester's
+`waitingFor: "thread"` mark.
+
+Execution admission is root-wide (`countActiveInRoot`): every implementation
+Run under the same root session — including nested Threads — shares the
+configured concurrency budget, and dispatch, dequeue, lost-run resume,
+continuations, and auto-review all pass through the same count. A Thread
+waiting on a real dependency (`waitingFor: "thread"`) relinquishes its slot;
+`setAttention` and `endRun` re-evaluate `tryDequeue`, which promotes the oldest
+queued Thread or parked `pendingContinuation` in FIFO order. A `request` that
+arrives while the budget is full parks on the Thread as `pendingContinuation`
+(`delivery: "scheduled"`) and promotes through the same gate when a slot
+frees. `onAdmissionFreed` drives the deferred lost-run resume recheck, and a
+`wait` blocked on dependencies marks the same yield before subscribing — the
+mark itself never wakes the waiter — then re-admits the slot when it returns.
 
 `retrieval` is a Thread preset, not a second explore tool. `thread.dispatch`
 freezes the retrieval model slot, read-only allowlist, and scope, and does not

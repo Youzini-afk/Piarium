@@ -419,6 +419,18 @@ const initialPrompt = (
       input.promptText ?? input.brief,
     ].filter((line): line is string => line !== null).join("\n");
 
+const messagePeerLabel = (peer: import("@piarium/protocol").ThreadMessagePeer): string => (
+  peer.kind === "thread" ? `thread ${peer.id}`
+    : peer.kind === "user" ? "the user"
+      : "the parent agent"
+);
+
+const pendingMessagesSection = (messages: readonly import("@piarium/protocol").ThreadMessageRecord[]): string => (
+  messages.map((message) => (
+    `- ${messagePeerLabel(message.from)}${message.kind === "request" ? ` (request ${message.id})` : ""}: ${message.text}`
+  )).join("\n")
+);
+
 const discussionPrompt = (
   input: SpawnThreadRunInput,
   parentBlocks?: Array<{ label: string; content: string }> | null,
@@ -2199,9 +2211,42 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       await options.registry.markRunRunning(input.workspaceId, input.threadId, input.runId, sessionId);
       options.onThreadSessionBound?.(sessionId, input.workspaceId);
       checkPreparation();
+      // A review Thread admitted after queuing upgrades its verification
+      // record from queued to running now that a Run exists (3.18C). Only a
+      // queued record is upgraded — a directly started review writes its own
+      // running record after this point and must not be pre-empted.
+      if (existing?.reviewOf && options.verification) {
+        const source = await options.registry.getThread(
+          input.workspaceId, input.parent, existing.reviewOf.sourceThreadId,
+        ).catch(() => null);
+        const review = source?.verification?.review;
+        const revision = existing.reviewOf.resultRevision;
+        if (source?.workBranchId
+          && review?.status === "queued"
+          && review.resultRevision === revision
+          && review.reviewThreadId === input.threadId) {
+          await projectVerification(source.workspaceId, source.id, revision, (store) => (
+            options.verification!.putReview(store, source.id, {
+              resultRevision: revision,
+              status: "running",
+              recordedAt: Date.now(),
+              reviewThreadId: input.threadId,
+              reviewRunId: input.runId,
+              ...(review.gate === true ? { gate: true } : {}),
+            }, revision, source.workBranchId!)
+          )).catch(reportError);
+        }
+      }
+      checkPreparation();
+      // Messages held while the Thread was queued flush into the first Run's
+      // input here — they never start execution on their own (3.18C).
+      const heldMessages = await options.registry.takePendingThreadMessages(input.workspaceId, input.threadId);
+      const basePrompt = input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks);
       await options.sessions.prompt(
         sessionId,
-        input.kind === "discussion" ? discussionPrompt(input, parentBlocks) : initialPrompt(input, parentBlocks),
+        heldMessages.length > 0
+          ? `${basePrompt}\n\nMessages delivered while this thread was queued:\n${pendingMessagesSection(heldMessages)}`
+          : basePrompt,
       );
       checkPreparation();
       if (virtualIsolated && mayMaterialize && effectiveSettings?.budget) {
@@ -2385,7 +2430,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     if (gate
       && gate.resultRevision === reviewed.resultRevision
       && gate.reviewThreadId === reviewThread.id
-      && gate.reviewRunId === reviewRunId) {
+      // A queued review's gate is bound to the Thread before a Run exists.
+      && (gate.reviewRunId === undefined || gate.reviewRunId === reviewRunId)) {
       await options.registry.setAttention(source.workspaceId, source.id, "none");
     }
   };
@@ -2433,7 +2479,16 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         },
         createAndStart: async (input) => {
           const { promptText, ...createInput } = input;
-          const thread = await options.registry.createThread(createInput);
+          // Auto-review shares the root execution budget (3.18C): when the
+          // pool is full the review Thread queues like any dispatch and the
+          // bespoke prompt survives in the manifest for the dequeue spawn.
+          const thread = await options.registry.createThread({
+            ...createInput,
+            ...(promptText ? { promptText } : {}),
+          });
+          if (await options.registry.countActiveInRoot(source.workspaceId, source.parent) >= createInput.concurrency) {
+            return thread;
+          }
           const run = await options.registry.startRun(source.workspaceId, thread.id);
           reviewAttempt = { reviewThreadId: thread.id, reviewRunId: run.id };
           try {
@@ -2469,27 +2524,27 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     await projectVerification(source.workspaceId, source.id, resultRevision, (store) => (
       options.verification!.putReview(store, source.id, {
         resultRevision,
-        status: "running",
+        status: reviewAttempt ? "running" : "queued",
         recordedAt: Date.now(),
         reviewThreadId,
         ...(reviewAttempt ? { reviewRunId: reviewAttempt.reviewRunId } : {}),
         gate: result.blocking,
       }, resultRevision, branchId)
     ));
-    if (result.blocking && reviewAttempt) {
+    if (result.blocking) {
       const current = await options.registry.getThread(source.workspaceId, source.parent, source.id);
       const review = current?.verification?.review;
-      if (review?.status === "running"
+      if ((review?.status === "running" || review?.status === "queued")
         && review.resultRevision === resultRevision
-        && review.reviewThreadId === reviewAttempt.reviewThreadId
-        && review.reviewRunId === reviewAttempt.reviewRunId) {
+        && review.reviewThreadId === reviewThreadId
+        && review.reviewRunId === reviewAttempt?.reviewRunId) {
         await options.registry.setAttention(source.workspaceId, source.id, "thread", {
           kind: "thread",
           text: `Waiting for review of result r${resultRevision}`,
           review: {
             resultRevision,
-            reviewThreadId: reviewAttempt.reviewThreadId,
-            reviewRunId: reviewAttempt.reviewRunId,
+            reviewThreadId,
+            ...(reviewAttempt ? { reviewRunId: reviewAttempt.reviewRunId } : {}),
           },
         });
       }
@@ -2965,6 +3020,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       const previous = await options.registry.getActiveRun(workspaceId, thread.id);
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
       if (resuming.has(thread.id)) continue;
+      // Lost-run resume shares the root execution budget (3.18C): when the
+      // pool is full the Thread stays lost until the next admission trigger.
+      if (await options.registry.countActiveInRoot(workspaceId, thread.parent) >= thread.manifest.concurrency) continue;
       resuming.add(thread.id);
       const task = (async () => {
         await publishPartialResult(workspaceId, parent, thread.id).catch(reportError);
@@ -3231,8 +3289,17 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return { workspaceId: scope.workspaceId, parent: scope.parent, thread: current, activeRun };
   };
 
-  const send = async (sessionId: string, message: string, from: "user" | "parent-agent"): Promise<void> => {
-    const text = `${from === "user" ? "Message from the user" : "Message from the parent agent"}:\n${message}`;
+  const send = async (
+    sessionId: string,
+    message: string,
+    meta: { from: string; requestId?: string },
+  ): Promise<void> => {
+    // `from` is a Host-derived sender label; `requestId` travels in the
+    // delivered text so the receiver can bind a replyTo to the real request.
+    const header = meta.requestId
+      ? `Message from ${meta.from} (request ${meta.requestId})`
+      : `Message from ${meta.from}`;
+    const text = `${header}:\n${message}`;
     const snapshot = await options.sessions.snapshot(sessionId);
     if (snapshot.busy || snapshot.isStreaming || snapshot.isCompacting) await options.sessions.send(sessionId, text);
     else await options.sessions.prompt(sessionId, text);
@@ -5223,17 +5290,41 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     threadId: string;
     mode: "continue" | "fresh";
     task: string;
-  }): Promise<{ runId: string }> => {
+    requestId?: string;
+    /** Skips the shared-budget admission check (dequeue path already gated). */
+    admitted?: boolean;
+    from?: import("@piarium/protocol").ThreadMessagePeer;
+  }): Promise<{ runId?: string }> => {
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
     if (thread.kind !== "implementation") {
       throw new ThreadRuntimeError("invalid-request", "Execution requests apply to implementation threads");
     }
-    if (thread.lifecycle !== "settled") {
-      throw new ThreadRuntimeError("conflict", `Thread is not settled: ${input.threadId}`);
-    }
     const previous = await options.registry.getActiveRun(input.workspaceId, thread.id);
+    const resumable = thread.lifecycle === "settled"
+      || (thread.lifecycle === "active" && (previous?.outcome === "lost" || previous?.workerState === "lost"));
+    if (!resumable) {
+      throw new ThreadRuntimeError("conflict", `Thread cannot continue from lifecycle ${thread.lifecycle}: ${input.threadId}`);
+    }
+    // Requests share the root execution budget (3.18C): a full pool parks the
+    // continuation on the Thread; the dequeue path promotes it when a slot frees.
+    if (!input.admitted && await options.registry.countActiveInRoot(input.workspaceId, input.parent) >= thread.manifest.concurrency) {
+      await options.registry.setPendingContinuation(input.workspaceId, thread.id, {
+        mode: input.mode,
+        task: input.task,
+        ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+        from: input.from ?? { kind: "user", id: "host" },
+        at: new Date().toISOString(),
+      });
+      return {};
+    }
     const retainedSessionId = thread.report?.transcriptRef.sessionId ?? previous?.sessionId ?? null;
+    // Held inbound messages fold into the new Run's input at the normal
+    // boundary; the request itself is excluded (it is `task`).
+    const pending = await options.registry.takePendingThreadMessages(input.workspaceId, thread.id, input.requestId);
+    const task = pending.length > 0
+      ? `${input.task}\n\nMessages delivered while waiting for this run:\n${pendingMessagesSection(pending)}`
+      : input.task;
     const run = await options.registry.startRun(input.workspaceId, thread.id, previous?.runtimeId ?? "pi", {
       allowSettled: true,
       inputOrigin: input.mode,
@@ -5289,7 +5380,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         await options.registry.markRunRunning(input.workspaceId, thread.id, run.id, snapshot.sessionId);
         options.onThreadSessionBound?.(snapshot.sessionId, input.workspaceId);
         scheduleStallTimer(binding);
-        await options.sessions.prompt(snapshot.sessionId, input.task);
+        await options.sessions.prompt(snapshot.sessionId, task);
         return { runId: run.id };
       }
       let entries: SessionEntriesResult["entries"] = [];
@@ -5311,7 +5402,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         if (retainedSessionId) results.push(`transcript: session ${retainedSessionId}`);
       }
       const fresh = assembleFreshInput({
-        task: input.task,
+        task,
         results,
         openItems: thread.report?.unresolved ?? [],
         carriedUserMessages: mined.carriedUserMessages,

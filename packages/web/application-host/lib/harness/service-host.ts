@@ -265,7 +265,15 @@ export interface HarnessServiceHost {
     threadId: string;
     mode: "continue" | "fresh";
     task: string;
-  }) => Promise<{ runId: string }>) | null;
+    /** Idempotency record excluded when pending messages flush into the input. */
+    requestId?: string;
+    /** Skip the shared-budget admission check (dequeue path already gated). */
+    admitted?: boolean;
+    /** Requester identity recorded on a parked continuation. */
+    from?: import("@piarium/protocol").ThreadMessagePeer;
+  }) => Promise<{ runId?: string }>) | null;
+  /** Retry lost Runs under a parent scope when the shared budget may have room. */
+  threadResumeLost?: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent) => Promise<void>) | null;
   threadKillSession: ((threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>) | null;
   requireThreadMergeJournal: boolean;
   threadApplyWorktreeDiff: ((
@@ -293,7 +301,7 @@ export interface HarnessServiceHost {
     operationId?: string;
     resultRevision?: number;
   }>) | null;
-  threadSendToSession: ((sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>) | null;
+  threadSendToSession: ((sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>) | null;
   threadTranscriptReader: ThreadTranscriptReader | null;
   registerSession(ctx: HarnessSessionContext): void;
   dropSession(sessionId: string, actor?: HarnessActorIdentity): void;
@@ -417,10 +425,11 @@ export interface HarnessServiceHostOptions {
   threadSpawnSession?: (input: import("./thread-registry.js").CreateThreadInput & { threadId: string; runId: string }) => Promise<{ sessionId: string }>;
   threadCaptureInputContext?: HarnessServiceHost["threadCaptureInputContext"];
   threadContinueRun?: HarnessServiceHost["threadContinueRun"];
+  threadResumeLost?: HarnessServiceHost["threadResumeLost"];
   threadKillSession?: (threadId: string, keepWorktree?: boolean, workspaceId?: string) => Promise<void>;
   threadApplyWorktreeDiff?: HarnessServiceHost["threadApplyWorktreeDiff"];
   requireThreadMergeJournal?: boolean;
-  threadSendToSession?: (sessionId: string, message: string, from: "user" | "parent-agent") => Promise<void>;
+  threadSendToSession?: (sessionId: string, message: string, meta: { from: string; requestId?: string }) => Promise<void>;
   threadTranscriptReader?: ThreadTranscriptReader;
   verification?: VerificationCoordinator;
   storeRetrievalArtifact?: HarnessServiceHost["storeRetrievalArtifact"];
@@ -478,6 +487,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const threadSpawnSession = options.threadSpawnSession ?? null;
   const threadCaptureInputContext = options.threadCaptureInputContext ?? null;
   const threadContinueRun = options.threadContinueRun ?? null;
+  const threadResumeLost = options.threadResumeLost ?? null;
   const threadKillSession = options.threadKillSession ?? null;
   const threadApplyWorktreeDiff = options.threadApplyWorktreeDiff ?? null;
   const threadSendToSession = options.threadSendToSession ?? null;
@@ -707,6 +717,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadSpawnSession,
     threadCaptureInputContext,
     threadContinueRun,
+    threadResumeLost,
     threadKillSession,
     threadApplyWorktreeDiff,
     requireThreadMergeJournal: options.requireThreadMergeJournal ?? false,

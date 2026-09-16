@@ -1074,7 +1074,7 @@ describe("thread runtime", () => {
       tokens: { input: 100, output: 20, cacheRead: 30 },
     });
     expect(sessionAdapter.close).not.toHaveBeenCalled();
-    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(0);
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(0);
 
     runtime.processEvent({
       kind: "host",
@@ -1360,7 +1360,7 @@ describe("thread runtime", () => {
 
   it("sends parent input, cancels before closing, and merges through the recorded worktree", async () => {
     const { thread } = await start();
-    await runtime.send("child-1", "Please also check tests", "parent-agent");
+    await runtime.send("child-1", "Please also check tests", { from: "the parent agent" });
     expect(sent.at(-1)).toContain("Message from the parent agent");
     const current = await registry.getThread(WORKSPACE, PARENT, thread.id);
     await registry.setWorktree(WORKSPACE, thread.id, { ...current!.worktree!, resultCommit: "fixed-result" });
@@ -3728,6 +3728,75 @@ describe("thread runtime", () => {
       mode: "continue",
       task: "again",
     })).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("continueRun parks the request on the Thread when the shared root budget is full", async () => {
+    const solo = { ...createInput(), concurrency: 1 };
+    // The sibling occupies the root's only slot.
+    const blocker = await registry.createThread(solo);
+    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
+    await runtime.spawn({ ...solo, threadId: blocker.id, runId: blockerRun.id });
+    // The settled Thread's own concurrency is 1 — the sibling fills it.
+    const thread = await registry.createThread(solo);
+    const settledRun = await registry.startRun(WORKSPACE, thread.id);
+    await runtime.spawn({ ...solo, threadId: thread.id, runId: settledRun.id });
+    await registry.endRun(WORKSPACE, thread.id, settledRun.id, "success", null, reportFor("child-1"));
+    await registry.recordThreadMessage(WORKSPACE, thread.id, {
+      id: "req-parked",
+      direction: "in",
+      from: { kind: "session", id: "parent-1" },
+      to: { kind: "thread", id: thread.id },
+      kind: "request",
+      text: "pick this up",
+      status: "pending",
+      at: "2026-09-05T00:00:00.000Z",
+    });
+    const result = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "pick this up",
+      requestId: "req-parked",
+    });
+    // Nothing starts; the request parks on the durable record for the dequeue
+    // path to promote when the slot frees.
+    expect(result).toEqual({});
+    const parkedThread = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(parkedThread?.lifecycle).toBe("settled");
+    expect(parkedThread?.pendingContinuation).toMatchObject({
+      mode: "continue",
+      task: "pick this up",
+      requestId: "req-parked",
+    });
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+  });
+
+  it("continueRun folds held messages into the new Run's input", async () => {
+    const { thread } = await settle();
+    await registry.recordThreadMessage(WORKSPACE, thread.id, {
+      id: "held-note",
+      direction: "in",
+      from: { kind: "session", id: "parent-1" },
+      to: { kind: "thread", id: thread.id },
+      kind: "inform",
+      text: "the API contract changed",
+      status: "held",
+      at: "2026-09-05T00:00:00.000Z",
+    });
+    await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "keep going",
+      requestId: "req-9",
+    });
+    const promptText = sent.at(-1) ?? "";
+    expect(promptText).toContain("keep going");
+    expect(promptText).toContain("the API contract changed");
+    // Held messages were consumed atomically — a retry cannot deliver them twice.
+    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
   });
 
   it("captureInputContext renders the committed summary plus retained raw material", async () => {

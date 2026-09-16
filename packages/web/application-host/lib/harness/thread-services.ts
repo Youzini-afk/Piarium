@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   DEFAULT_HARNESS_SETTINGS,
   formatRetrievalEvidenceText,
@@ -8,6 +9,8 @@ import {
   type RetrievalArtifactRef,
   type RetrievalEvidence,
   type Thread,
+  type ThreadMessagePeer,
+  type ThreadMessageRecord,
   type ThreadParent,
   type ThreadReadWhat,
   type ThreadRun,
@@ -208,7 +211,10 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
       assertOwnerTool(owner, "dispatch");
-      const concurrency = params.concurrency ?? registry.maxConcurrency;
+      // The execution budget is shared per root task (3.18C): a nested
+      // dispatch inherits the owning Thread's frozen budget rather than
+      // multiplying capacity by parent level.
+      const concurrency = owner?.manifest.concurrency ?? params.concurrency ?? registry.maxConcurrency;
       if (!Number.isSafeInteger(concurrency) || concurrency < 1) {
         throw new HarnessServiceError("invalid-params", "Thread concurrency must be a positive integer");
       }
@@ -235,7 +241,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       let isQueued: boolean;
       try {
-        isQueued = await registry.countActive(workspaceId, parent) >= concurrency;
+        isQueued = await registry.countActiveInRoot(workspaceId, parent) >= concurrency;
       } catch (error) {
         await captured.cleanup().catch(() => undefined);
         throw error;
@@ -544,19 +550,70 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
         params.timeoutMs ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
         HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
       );
+      // A Thread caller also watches its own record: inbound replies and
+      // messages land on it and complete dependency waits (3.18C).
+      const selfSnapshot = async (): Promise<ThreadSnapshot | null> => {
+        if (!owner) return null;
+        const self = await registry.getThreadById(workspaceId, owner.id);
+        if (!self) return null;
+        return { thread: self, activeRun: await registry.getActiveRun(workspaceId, self.id) };
+      };
+      // The caller's own record changes count too — but only relative to this
+      // wait's start, so a first-time wait does not return instantly.
+      const selfCursorFor = (snapshot: ThreadSnapshot): ThreadViewCursor => ({
+        eventSeq: snapshot.thread.eventSeq,
+        lifecycle: snapshot.thread.lifecycle,
+        attention: snapshot.thread.attention,
+        integration: snapshot.thread.integration,
+        activeRunId: snapshot.thread.activeRunId,
+        workerState: snapshot.activeRun?.workerState ?? null,
+        outcome: snapshot.activeRun?.outcome ?? null,
+        progressVersion: 0,
+        decisionsCount: 0,
+        diffStats: snapshot.thread.diffStats,
+        viewedAt: snapshot.thread.updatedAt,
+      });
+      const selfBaseline = await selfSnapshot();
+      let selfCursor: ThreadViewCursor | null = selfBaseline === null ? null : selfCursorFor(selfBaseline);
       const hasChanges = async (): Promise<boolean> => {
         const snapshots = await snapshotsFor(host, workspaceId, parent, true);
         const ids = params.ids ?? snapshots.map(({ thread }) => thread.id);
-        return snapshots.some((snapshot) => (
+        if (snapshots.some((snapshot) => (
           ids.includes(snapshot.thread.id)
           && cursorChanged(snapshot, registry.getCursor(observer, snapshot.thread.id))
-        ));
+        ))) return true;
+        const self = await selfSnapshot();
+        return self !== null && selfCursor !== null && cursorChanged(self, selfCursor);
       };
       let timedOut = false;
       if (!await hasChanges()) {
+        // A Thread blocked here waits on real dependencies — it relinquishes
+        // its model execution slot so queued work in the same root can run
+        // (3.18C). The mark precedes the subscription: it publishes a registry
+        // change itself, so the self baseline is refreshed and the wait never
+        // wakes on its own yield mark.
+        let markedYield = false;
+        if (owner) {
+          const current = await registry.getThreadById(workspaceId, owner.id).catch(() => null);
+          if (current?.attention === "none") {
+            const marked = await registry.setAttention(workspaceId, owner.id, "thread", {
+              kind: "thread",
+              text: params.ids?.length ? `Waiting on ${params.ids.join(", ")}` : "Waiting for thread changes",
+            }).catch(() => null);
+            if (marked?.waitingFor?.kind === "thread") {
+              markedYield = true;
+              const self = await selfSnapshot();
+              if (self) selfCursor = selfCursorFor(self);
+            }
+          }
+        }
         let wake!: (reason: "change") => void;
         const changed = new Promise<"change">((resolve) => { wake = resolve; });
-        const unsubscribe = registry.subscribeToChanges(workspaceId, parent, () => wake("change"));
+        // Children changes wake through the caller-as-parent scope; replies,
+        // sibling activity, and self-marks wake through the caller's own
+        // parent scope.
+        const unsubscribers = [registry.subscribeToChanges(workspaceId, parent, () => wake("change"))];
+        if (owner) unsubscribers.push(registry.subscribeToChanges(workspaceId, owner.parent, () => wake("change")));
         let timeout: ReturnType<typeof setTimeout> | undefined;
         const elapsed = new Promise<"timeout">((resolve) => {
           timeout = setTimeout(() => resolve("timeout"), timeoutMs);
@@ -566,17 +623,41 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
           else ctx.signal.addEventListener("abort", () => resolve("abort"), { once: true });
         });
         try {
-          const reason = await Promise.race([changed, elapsed, aborted]);
-          if (reason === "abort") throw new DOMException("Thread wait aborted", "AbortError");
-          timedOut = reason === "timeout" && !await hasChanges();
+          // The re-check covers anything that landed between the first check
+          // and the subscription, including during the yield mark itself.
+          if (!await hasChanges()) {
+            const reason = await Promise.race([changed, elapsed, aborted]);
+            if (reason === "abort") throw new DOMException("Thread wait aborted", "AbortError");
+            timedOut = reason === "timeout" && !await hasChanges();
+          }
         } finally {
           if (timeout) clearTimeout(timeout);
-          unsubscribe();
+          for (const unsubscribe of unsubscribers) unsubscribe();
+          // Re-admit the slot only if our yield mark is still the wait in
+          // force — a review gate or request wake placed meanwhile survives.
+          if (markedYield && owner) {
+            const current = await registry.getThreadById(workspaceId, owner.id).catch(() => null);
+            if (current?.waitingFor?.kind === "thread" && current.waitingFor.review === undefined) {
+              await registry.setAttention(workspaceId, owner.id, "none").catch(() => undefined);
+            }
+          }
+        }
+      }
+      // Messages held while the caller waited flush at this normal boundary.
+      if (owner && host.threadSendToSession) {
+        const held = await registry.takePendingThreadMessages(workspaceId, owner.id).catch(() => []);
+        for (const heldMessage of held) {
+          await host.threadSendToSession(ctx.sessionId, heldMessage.text, {
+            from: messagePeerLabel(heldMessage.from),
+            ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
+          }).catch(() => undefined);
         }
       }
       const all = await snapshotsFor(host, workspaceId, parent, true);
       const ids = params.ids ?? all.map(({ thread }) => thread.id);
       const targets = all.filter(({ thread }) => ids.includes(thread.id));
+      const self = await selfSnapshot();
+      if (self && cursorChanged(self, registry.getCursor(observer, self.thread.id))) targets.push(self);
       const done = targets.filter(({ thread }) => thread.lifecycle === "settled" || thread.lifecycle === "archived");
       const queued = targets.filter(({ thread }) => thread.lifecycle === "queued");
       const running = targets.filter(({ thread, activeRun }) => (
@@ -619,15 +700,35 @@ export function createThreadWaitService(host: HarnessServiceHost): HarnessServic
   };
 }
 
+const messagePeerLabel = (peer: ThreadMessagePeer): string => (
+  peer.kind === "thread" ? `thread ${peer.id}`
+    : peer.kind === "user" ? "the user"
+      : "the parent agent"
+);
+
+const peerEquals = (left: ThreadParent, right: ThreadParent): boolean => (
+  left.kind === right.kind && left.id === right.id
+);
+
+const continueError = (error: unknown): never => {
+  if (error instanceof ThreadRuntimeError) {
+    const code = error.code === "not-found"
+      ? "not-found"
+      : error.code === "conflict" || error.code === "invalid-request"
+        ? "invalid-params"
+        : "unavailable";
+    throw new HarnessServiceError(code, error.message, error.retryable);
+  }
+  throw error;
+};
+
 export function createThreadSendService(host: HarnessServiceHost): HarnessService<"thread.send"> {
   return {
     handle: async (params, ctx) => {
       const registry = host.threadRegistry;
       if (!registry || !host.threadSendToSession) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
-      const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
+      const { workspaceId, owner } = await resolveOwningContext(host, ctx);
       assertOwnerTool(owner, "send");
-      const thread = await registry.getThread(workspaceId, parent, params.threadId);
-      if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
       const kind = params.kind ?? "inform";
       if (params.context !== undefined && kind !== "request") {
         throw new HarnessServiceError(
@@ -635,51 +736,242 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           "context only applies to an execution request (kind: \"request\")",
         );
       }
-      if (thread.lifecycle !== "active") {
-        // An explicit execution request on a settled implementation Thread
-        // starts a new Run (D-285.5/3.18B) — it does not merely reopen send.
-        if (kind === "request" && thread.lifecycle === "settled") {
-          if (!host.threadContinueRun) {
-            throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
-          }
-          try {
-            const { runId } = await host.threadContinueRun({
-              workspaceId,
-              parent,
-              threadId: thread.id,
-              mode: params.context ?? "continue",
-              task: params.message,
-            });
-            return { accepted: true, lifecycle: "active", attention: "none", runId };
-          } catch (error) {
-            if (error instanceof ThreadRuntimeError) {
-              const code = error.code === "not-found"
-                ? "not-found"
-                : error.code === "conflict" || error.code === "invalid-request"
-                  ? "invalid-params"
-                  : "unavailable";
-              throw new HarnessServiceError(code, error.message, error.retryable);
-            }
-            throw error;
-          }
-          return { accepted: true, lifecycle: "active", attention: "none" };
+      if (params.to === "parent" && params.threadId !== undefined) {
+        throw new HarnessServiceError("invalid-params", "to: \"parent\" and threadId are mutually exclusive");
+      }
+      if (params.to !== "parent" && params.threadId === undefined) {
+        throw new HarnessServiceError("invalid-params", "send requires a threadId or to: \"parent\"");
+      }
+      // Sender identity is Host-derived from the session binding — a caller
+      // can never claim to be the user or another Thread (3.18C).
+      const fromPeer: ThreadMessagePeer = owner
+        ? { kind: "thread", id: owner.id }
+        : params.from === "user"
+          ? { kind: "user", id: ctx.sessionId }
+          : { kind: "session", id: ctx.sessionId };
+      const fromLabel = messagePeerLabel(fromPeer);
+
+      // Resolve the target: own parent, or a relationship-bound Thread.
+      let targetSessionId: string | null = null;
+      let target: Thread | null = null;
+      if (params.to === "parent") {
+        if (!owner) throw new HarnessServiceError("invalid-params", "A root session has no parent to send to");
+        if (owner.parent.kind === "session") targetSessionId = owner.parent.id;
+        else {
+          target = await registry.getThreadById(workspaceId, owner.parent.id);
+          if (!target) throw new HarnessServiceError("not-found", `Thread not found: ${owner.parent.id}`);
         }
-        throw new HarnessServiceError("unavailable", `Thread is not active: ${params.threadId}`);
+      } else {
+        const candidate = await registry.getThreadById(workspaceId, params.threadId!);
+        if (!candidate) throw new HarnessServiceError("not-found", `Thread not found: ${params.threadId}`);
+        // Reachability follows actual root-task relationships, not shared
+        // workspace membership: children, the parent, and same-parent
+        // siblings for a Thread caller; direct children for a session.
+        const related = owner
+          ? (candidate.parent.kind === "thread" && candidate.parent.id === owner.id)
+            || (owner.parent.kind === "thread" && owner.parent.id === candidate.id)
+            || peerEquals(candidate.parent, owner.parent)
+          : candidate.parent.kind === "session" && candidate.parent.id === ctx.sessionId;
+        if (!related) {
+          throw new HarnessServiceError("denied", `Thread is outside the caller's root-task relationships: ${candidate.id}`);
+        }
+        target = candidate;
       }
+
+      const requestId = params.requestId ?? `msg-${randomUUID().slice(0, 8)}`;
+      const recordedAt = new Date().toISOString();
+      const deliveryOf = (status: ThreadMessageRecord["status"]): "delivered" | "held" | "scheduled" => (
+        status === "pending" ? "scheduled" : status === "held" ? "held" : "delivered"
+      );
+
+      // Idempotent retry: a recorded request returns its outcome instead of
+      // delivering or scheduling again (3.18C).
+      if (params.requestId !== undefined) {
+        const priorIn = target?.messages?.find((m) => m.direction === "in" && m.id === params.requestId);
+        const priorOut = owner?.messages?.find((m) => m.direction === "out" && m.id === params.requestId);
+        const prior = priorIn ?? priorOut;
+        if (prior) {
+          return {
+            accepted: true,
+            lifecycle: target?.lifecycle ?? "active",
+            attention: target?.attention ?? "none",
+            messageId: prior.id,
+            delivery: deliveryOf(prior.status),
+            ...(prior.runId ? { runId: prior.runId } : {}),
+          };
+        }
+      }
+
+      const recordInbound = (status: ThreadMessageRecord["status"], runId?: string) => (
+        registry.recordThreadMessage(workspaceId, target!.id, {
+          id: requestId,
+          direction: "in",
+          from: fromPeer,
+          to: { kind: "thread", id: target!.id },
+          kind,
+          text: params.message,
+          ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
+          status,
+          ...(runId !== undefined ? { runId } : {}),
+          at: recordedAt,
+        })
+      );
+      const recordOutbound = (status: ThreadMessageRecord["status"], runId?: string) => (
+        owner
+          ? registry.recordThreadMessage(workspaceId, owner.id, {
+              id: requestId,
+              direction: "out",
+              from: fromPeer,
+              to: target ? { kind: "thread", id: target.id } : { kind: "session", id: targetSessionId! },
+              kind,
+              text: params.message,
+              ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
+              status,
+              ...(runId !== undefined ? { runId } : {}),
+              at: recordedAt,
+            })
+          : Promise.resolve(null)
+      );
+      // A replyTo resolves the matching request on both ledgers: the caller's
+      // inbound copy and the target's outstanding dependency.
+      const resolveReply = async (): Promise<boolean> => {
+        if (params.replyTo === undefined) return false;
+        let satisfied = false;
+        if (owner) {
+          const mine = owner.messages?.find((m) => m.direction === "in" && m.id === params.replyTo && m.status !== "resolved");
+          if (mine) await registry.patchThreadMessage(workspaceId, owner.id, params.replyTo, { status: "resolved" });
+        }
+        const theirs = target?.messages?.find((m) => m.direction === "out" && m.id === params.replyTo && m.status !== "resolved");
+        if (theirs) {
+          await registry.patchThreadMessage(workspaceId, target!.id, params.replyTo, { status: "resolved" });
+          satisfied = true;
+        }
+        return satisfied;
+      };
+
+      // Session target — the caller Thread's parent session. Sessions carry
+      // no message ledger; delivery goes straight to the input boundary.
+      if (targetSessionId !== null) {
+        await host.threadSendToSession(targetSessionId, params.message, {
+          from: fromLabel,
+          ...(kind === "request" ? { requestId } : {}),
+        });
+        await recordOutbound("delivered");
+        return { accepted: true, lifecycle: "active", attention: "none", messageId: requestId, delivery: "delivered" };
+      }
+      const thread = target!;
+      if (thread.lifecycle === "archived") {
+        throw new HarnessServiceError("unavailable", `Thread is archived: ${thread.id}`);
+      }
+      if (thread.deletion) {
+        throw new HarnessServiceError("unavailable", `Thread is being deleted: ${thread.id}`);
+      }
+      const dependencySatisfied = await resolveReply();
+
+      if (thread.lifecycle === "queued") {
+        // Held messages flush into the first Run's prompt at dequeue.
+        await recordInbound("pending");
+        await recordOutbound(kind === "request" ? "pending" : "delivered");
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
+      }
+
       const run = await registry.getActiveRun(workspaceId, thread.id);
-      if (!run?.sessionId || run.workerState !== "running") {
-        throw new HarnessServiceError("unavailable", `Thread has no running session: ${params.threadId}`);
+      const lostWorker = thread.lifecycle === "active"
+        && (run?.outcome === "lost" || run?.workerState === "lost");
+
+      if (thread.lifecycle === "settled" || lostWorker) {
+        if (kind === "inform") {
+          // Notifications never resurrect finished work; they ride the next
+          // Run's input when one is requested (3.18C).
+          await recordInbound("held");
+          await recordOutbound("delivered");
+          return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "held" };
+        }
+        if (!host.threadContinueRun) {
+          throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
+        }
+        // Record first so a retry cannot double-schedule while the Run starts.
+        await recordInbound("pending");
+        await recordOutbound("pending");
+        let continued: { runId?: string };
+        try {
+          continued = await host.threadContinueRun({
+            workspaceId,
+            parent: thread.parent,
+            threadId: thread.id,
+            mode: params.context ?? "continue",
+            task: params.message,
+            requestId,
+            from: fromPeer,
+          });
+        } catch (error) {
+          return continueError(error);
+        }
+        if (continued.runId === undefined) {
+          return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
+        }
+        await registry.patchThreadMessage(workspaceId, thread.id, requestId, { status: "delivered", runId: continued.runId });
+        if (owner) {
+          await registry.patchThreadMessage(workspaceId, owner.id, requestId, { status: "delivered", runId: continued.runId }).catch(() => undefined);
+        }
+        return { accepted: true, lifecycle: "active", attention: "none", runId: continued.runId, messageId: requestId, delivery: "delivered" };
       }
-      // A request on an already-active Thread delivers like inform — it never
-      // starts a second Run on a live worker.
-      await host.threadSendToSession(run.sessionId, params.message, params.from);
-      const updated = thread.attention === "user" || thread.attention === "permission"
-        ? await registry.setAttention(workspaceId, thread.id, "none")
-        : thread;
+
+      // lifecycle === "active" with a live or starting Run.
+      if (!run || run.workerState === "exited" || (run.workerState === "running" && !run.sessionId)) {
+        // Mid-settle or pre-bind: hold until the next normal input boundary.
+        await recordInbound("held");
+        await recordOutbound("delivered");
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "held" };
+      }
+      if (run.workerState === "starting" && !run.sessionId) {
+        // The Run's prompt is still being built; the message flushes into it.
+        await recordInbound("pending");
+        await recordOutbound("delivered");
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
+      }
+
+      const waiting = thread.waitingFor;
+      const deliver = async (): Promise<void> => {
+        // Held messages flush first so the session sees them in order.
+        const held = await registry.takePendingThreadMessages(workspaceId, thread.id, requestId);
+        for (const heldMessage of held) {
+          await host.threadSendToSession!(run.sessionId!, heldMessage.text, {
+            from: messagePeerLabel(heldMessage.from),
+            ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
+          });
+        }
+        await host.threadSendToSession!(run.sessionId!, params.message, {
+          from: fromLabel,
+          ...(kind === "request" ? { requestId } : {}),
+        });
+      };
+
+      if (kind === "inform" && !dependencySatisfied && waiting !== null) {
+        // A waiting Thread keeps waiting: ordinary notifications record for
+        // the next boundary instead of waking the model (3.18C).
+        await recordInbound("held");
+        await recordOutbound("delivered");
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "held" };
+      }
+      await deliver();
+      await recordInbound("delivered");
+      await recordOutbound("delivered");
+      // A request supersedes a dependency wait; a satisfying reply completes
+      // the wait it was bound to. User/permission waits stay — a person is
+      // still owed an answer.
+      let attention = thread.attention;
+      if (waiting?.kind === "thread" && (kind === "request" || dependencySatisfied)) {
+        const updated = await registry.setAttention(workspaceId, thread.id, "none");
+        attention = updated?.attention ?? "none";
+      }
       return {
         accepted: true,
-        lifecycle: updated?.lifecycle ?? thread.lifecycle,
-        attention: updated?.attention ?? thread.attention,
+        lifecycle: "active",
+        attention,
+        runId: run.id,
+        messageId: requestId,
+        delivery: "delivered",
       };
     },
   };

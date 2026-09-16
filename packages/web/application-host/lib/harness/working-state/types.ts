@@ -328,7 +328,8 @@ export interface ParentVerificationBundle {
 
 export interface ResultReviewRecord {
   resultRevision: number;
-  status: "running" | "completed" | "failed" | "cancelled";
+  /** `queued` is dispatched behind a full shared execution budget; `running` has a bound Run. */
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
   recordedAt: number;
   reviewThreadId?: string;
   reviewRunId?: string;

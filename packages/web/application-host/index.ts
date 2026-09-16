@@ -1355,6 +1355,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         console.error('[HarnessThreads] Failed to record dequeued thread failure:', errorMessage(endError));
       },
     }),
+    onAdmissionFreed: (workspaceId, parent) => {
+      // A freed shared-budget slot retries deferred work: lost-run resume
+      // rechecks admission per Thread before starting anything (3.18C).
+      void threadRuntime?.resumeLostForParent(workspaceId, parent).catch((error: unknown) => {
+        console.error('[HarnessThreads] Lost-run resume after freed admission failed:', errorMessage(error));
+      });
+    },
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
   for (const failure of threadRegistryStartup.failures) {
@@ -2331,9 +2338,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     threadApplyWorktreeDiff: (workspaceId, parent, threadId, resultRevision, executionId, extras) => (
       threadRuntime!.merge(workspaceId, parent, threadId, resultRevision, executionId, extras)
     ),
-    threadSendToSession: (sessionId, message, from) => threadRuntime!.send(sessionId, message, from),
+    threadSendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
     threadCaptureInputContext: (input) => threadRuntime!.captureInputContext(input.sessionId),
     threadContinueRun: (input) => threadRuntime!.continueRun(input),
+    threadResumeLost: (workspaceId, parent) => threadRuntime!.resumeLostForParent(workspaceId, parent),
   });
   harnessShellActivity.hasActiveCommandAtDirectory = (directory) => (
     harnessServiceHost.hasActiveCommandAtDirectory(directory)

@@ -31,7 +31,10 @@ import type {
   ThreadKind,
   ThreadLifecycle,
   ThreadLaunchManifest,
+  ThreadMessagePeer,
+  ThreadMessageRecord,
   ThreadParent,
+  ThreadPendingContinuation,
   ThreadReport,
   ThreadRun,
   ThreadRunInputOrigin,
@@ -167,6 +170,8 @@ export interface CreateThreadInput {
   tools: string[];
   permissions: unknown;
   systemPromptFragment?: string;
+  /** Bespoke first-Run prompt that survives queuing (auto-review threads). */
+  promptText?: string;
   autoRun: boolean;
   hidden?: boolean;
   reviewOf?: ThreadReviewOf;
@@ -180,6 +185,12 @@ export interface ThreadRegistryOptions {
   /** A report newly persisted by this completed Run, including failure/cancellation. */
   onThreadReturned?: (workspaceId: string, parent: ThreadParent, threadId: string, run: ThreadRun, report: ThreadReport) => void;
   onThreadDequeued?: (workspaceId: string, parent: ThreadParent, thread: Thread) => Promise<void>;
+  /**
+   * Fires whenever the shared root execution budget may have freed a slot —
+   * after a dequeue pass or when a Thread marks a dependency wait. Consumers
+   * re-check admission and retry deferred work (lost-run resume).
+   */
+  onAdmissionFreed?: (workspaceId: string, parent: ThreadParent) => void | Promise<void>;
   onObserverError?: (error: unknown) => void;
   onThreadRemoved?: (workspaceId: string, threadId: string) => void | Promise<void>;
   maxConcurrency?: number;
@@ -413,7 +424,37 @@ const isWaitingFor = (value: unknown): value is ThreadWaitingFor | null => (
     && isString(value.text)
     && (value.review === undefined || (value.kind === "thread" && isRecord(value.review)
       && Number.isSafeInteger(value.review.resultRevision) && Number(value.review.resultRevision) > 0
-      && isString(value.review.reviewThreadId) && isString(value.review.reviewRunId))))
+      && isString(value.review.reviewThreadId)
+      && (value.review.reviewRunId === undefined || isString(value.review.reviewRunId)))))
+);
+
+const isMessagePeer = (value: unknown): value is ThreadMessagePeer => (
+  isRecord(value)
+  && (value.kind === "session" || value.kind === "thread" || value.kind === "user")
+  && isString(value.id)
+);
+
+const isMessageRecord = (value: unknown): value is ThreadMessageRecord => (
+  isRecord(value)
+  && isString(value.id)
+  && (value.direction === "in" || value.direction === "out")
+  && isMessagePeer(value.from)
+  && isMessagePeer(value.to)
+  && (value.kind === "inform" || value.kind === "request")
+  && isString(value.text)
+  && (value.replyTo === undefined || isString(value.replyTo))
+  && (value.status === "pending" || value.status === "held" || value.status === "delivered" || value.status === "resolved")
+  && (value.runId === undefined || isString(value.runId))
+  && isString(value.at)
+);
+
+const isPendingContinuation = (value: unknown): value is ThreadPendingContinuation => (
+  isRecord(value)
+  && (value.mode === "continue" || value.mode === "fresh")
+  && isString(value.task)
+  && (value.requestId === undefined || isString(value.requestId))
+  && isMessagePeer(value.from)
+  && isString(value.at)
 );
 
 const isDiffStats = (value: unknown): value is ThreadDiffStats | null => (
@@ -551,6 +592,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && Array.isArray(value.tools) && value.tools.every(isString)
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && (value.permissions === undefined || isRecord(value.permissions))
+  && (value.promptText === undefined || isString(value.promptText))
 );
 
 const isLaunchManifestV4 = (value: unknown): value is Omit<ThreadLaunchManifest, "carryBlocks" | "draftBaselineId"> => (
@@ -656,6 +698,8 @@ const isThread = (value: unknown): value is Thread => {
     && (value.integrationBinding === undefined || isIntegrationBinding(value.integrationBinding))
     && (value.verification === undefined || isVerificationProjection(value.verification))
     && (value.reviewOf === undefined || isReviewOf(value.reviewOf))
+    && (value.messages === undefined || (Array.isArray(value.messages) && value.messages.every(isMessageRecord)))
+    && (value.pendingContinuation === undefined || isPendingContinuation(value.pendingContinuation))
     && isNullableString(value.activeRunId)
     && isString(value.createdAt)
     && isString(value.updatedAt)
@@ -1680,6 +1724,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           tools: [...new Set(input.tools)],
           worktree: input.worktree,
           permissions: normalizeFrozenHarnessPermissions(input.permissions),
+          ...(input.promptText !== undefined ? { promptText: input.promptText } : {}),
         },
         createdBy: input.createdBy,
         kind: input.kind,
@@ -1802,16 +1847,49 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return null;
   };
 
-  const countActive = async (workspaceId: string, parent: ThreadParent): Promise<number> => {
-    const catalog = await catalogForScope(workspaceId, parent);
+  /**
+   * Root session id for a Thread parent scope — the ancestor chain's session.
+   * The shared execution budget is accounted per root task, so nested
+   * dispatch cannot multiply it by parent level (3.18C).
+   */
+  const rootSessionFor = (catalog: ThreadCatalogDocument, parent: ThreadParent): string | null => {
+    const seen = new Set<string>();
+    let current = parent;
+    while (current.kind === "thread") {
+      if (seen.has(current.id)) return null;
+      seen.add(current.id);
+      const owner = findThread(catalog, current.id);
+      if (!owner) return null;
+      current = owner.parent;
+    }
+    return current.id;
+  };
+
+  const countActiveInCatalog = (catalog: ThreadCatalogDocument, root: string | null): number => {
+    if (root === null) return 0;
     return catalog.threads.filter((thread) => {
       // User discussion threads keep an idle worker attached between messages;
       // they are not delegated model work and must not permanently occupy the
       // parent's implementation concurrency slots.
-      if (!parentEquals(thread.parent, parent) || thread.kind !== "implementation" || thread.lifecycle !== "active") return false;
+      if (thread.kind !== "implementation" || thread.lifecycle !== "active") return false;
+      // A Thread waiting on a real dependency (a requested answer or a review
+      // gate) relinquishes its model execution slot while it waits; sessions,
+      // processes, writers, and worktrees stay occupied regardless.
+      if (thread.waitingFor?.kind === "thread") return false;
       const run = activeRunFor(catalog, thread);
-      return run?.workerState === "starting" || run?.workerState === "running";
+      if (run?.workerState !== "starting" && run?.workerState !== "running") return false;
+      return rootSessionFor(catalog, thread.parent) === root;
     }).length;
+  };
+
+  /**
+   * Active Runs consuming the root task's shared execution budget (3.18C).
+   * Every admission decision — dispatch, dequeue, lost-run resume,
+   * continuation, review — must go through this count.
+   */
+  const countActiveInRoot = async (workspaceId: string, parent: ThreadParent): Promise<number> => {
+    const catalog = await catalogForScope(workspaceId, parent);
+    return countActiveInCatalog(catalog, rootSessionFor(catalog, parent));
   };
 
   const startRun = async (
@@ -2028,17 +2106,104 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     threadId: string,
     attention: ThreadAttention,
     waitingFor: ThreadWaitingFor | null = null,
+  ): Promise<Thread | null> => {
+    const updated = await mutateWorkspace(workspaceId, (catalog) => {
+      const thread = findThread(catalog, threadId);
+      if (!thread) return { value: null, changed: [], write: false };
+      if ((attention === "user" || attention === "permission" || attention === "thread") && waitingFor === null) {
+        throw new Error(`${attention} attention requires waitingFor details`);
+      }
+      if (waitingFor !== null && waitingFor.kind !== attention) {
+        throw new Error(`${attention} attention does not match ${waitingFor.kind} waiting details`);
+      }
+      thread.attention = attention;
+      thread.waitingFor = waitingFor;
+      touchThread(catalog, thread);
+      return { value: thread, changed: [thread] };
+    });
+    // Marking a dependency wait relinquishes the Thread's model execution
+    // slot; promote queued work in the same root immediately (3.18C).
+    if (updated && attention === "thread") {
+      void tryDequeue(workspaceId, updated.parent).catch(reportObserverError);
+    }
+    return updated;
+  };
+
+  const MESSAGE_LEDGER_LIMIT = 64;
+
+  const pruneMessages = (messages: ThreadMessageRecord[]): ThreadMessageRecord[] => {
+    if (messages.length <= MESSAGE_LEDGER_LIMIT) return messages;
+    // Undelivered records are never pruned; resolved/delivered history yields first.
+    const pending = new Set(messages.filter((message) => message.status === "pending" || message.status === "held"));
+    const room = Math.max(0, MESSAGE_LEDGER_LIMIT - pending.size);
+    const kept = new Set(messages.filter((message) => !pending.has(message)).slice(-room));
+    return messages.filter((message) => pending.has(message) || kept.has(message));
+  };
+
+  const recordThreadMessage = async (
+    workspaceId: string,
+    threadId: string,
+    message: ThreadMessageRecord,
+  ): Promise<ThreadMessageRecord> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) throw new Error(`Unknown thread: ${threadId}`);
+    const ledger = [...(thread.messages ?? [])];
+    // Idempotent: a retry carrying the same requestId observes the recorded
+    // outcome instead of duplicating delivery or execution.
+    const existing = ledger.find((entry) => entry.direction === message.direction && entry.id === message.id);
+    if (existing) return { value: existing, changed: [], write: false };
+    ledger.push(structuredClone(message));
+    thread.messages = pruneMessages(ledger);
+    touchThread(catalog, thread);
+    return { value: message, changed: [thread] };
+  });
+
+  const patchThreadMessage = async (
+    workspaceId: string,
+    threadId: string,
+    messageId: string,
+    patch: { status?: ThreadMessageRecord["status"]; runId?: string },
+  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    const entry = thread.messages?.find((message) => message.id === messageId);
+    if (!entry) return { value: null, changed: [], write: false };
+    if (patch.status !== undefined) entry.status = patch.status;
+    if (patch.runId !== undefined) entry.runId = patch.runId;
+    touchThread(catalog, thread);
+    return { value: entry, changed: [thread] };
+  });
+
+  /**
+   * Inbound messages awaiting a normal input boundary. Atomically marks them
+   * delivered so a restart or retry cannot deliver them twice.
+   */
+  const takePendingThreadMessages = async (
+    workspaceId: string,
+    threadId: string,
+    excludeId?: string,
+  ): Promise<ThreadMessageRecord[]> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    const pending = thread?.messages?.filter((message) => (
+      message.direction === "in"
+      && message.id !== excludeId
+      && (message.status === "pending" || message.status === "held")
+    )) ?? [];
+    if (!thread || pending.length === 0) return { value: [], changed: [], write: false };
+    for (const message of pending) message.status = "delivered";
+    touchThread(catalog, thread);
+    return { value: pending.map((message) => structuredClone(message)), changed: [thread] };
+  });
+
+  const setPendingContinuation = async (
+    workspaceId: string,
+    threadId: string,
+    continuation: ThreadPendingContinuation | null,
   ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
     const thread = findThread(catalog, threadId);
     if (!thread) return { value: null, changed: [], write: false };
-    if ((attention === "user" || attention === "permission" || attention === "thread") && waitingFor === null) {
-      throw new Error(`${attention} attention requires waitingFor details`);
-    }
-    if (waitingFor !== null && waitingFor.kind !== attention) {
-      throw new Error(`${attention} attention does not match ${waitingFor.kind} waiting details`);
-    }
-    thread.attention = attention;
-    thread.waitingFor = waitingFor;
+    if (continuation === null) delete thread.pendingContinuation;
+    else thread.pendingContinuation = structuredClone(continuation);
     touchThread(catalog, thread);
     return { value: thread, changed: [thread] };
   });
@@ -2615,20 +2780,37 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
   };
 
   async function tryDequeue(workspaceId: string, parent: ThreadParent): Promise<Thread | null> {
-    const key = scopeKey(workspaceId, parent);
-    if (dequeueing.has(key)) return null;
     const catalog = await catalogForScope(workspaceId, parent);
+    const root = rootSessionFor(catalog, parent);
+    // Dequeue and admission are root-wide: the oldest candidate anywhere under
+    // the root task wins a freed slot, regardless of which scope freed it.
+    const key = root !== null
+      ? scopeKey(workspaceId, { kind: "session", id: root })
+      : scopeKey(workspaceId, parent);
+    if (dequeueing.has(key)) return null;
     const next = catalog.threads
-      .filter((thread) => parentEquals(thread.parent, parent) && thread.lifecycle === "queued")
-      .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))[0] ?? null;
-    if (next && await countActive(workspaceId, parent) >= next.manifest.concurrency) return null;
-    if (!next || !options.onThreadDequeued) return structuredClone(next);
+      .filter((thread) => {
+        if (thread.kind !== "implementation") return false;
+        const candidate = thread.lifecycle === "queued"
+          || (thread.lifecycle === "settled" && thread.pendingContinuation !== undefined);
+        if (!candidate) return false;
+        return rootSessionFor(catalog, thread.parent) === root;
+      })
+      .toSorted((left, right) => (
+        (left.pendingContinuation?.at ?? left.createdAt).localeCompare(right.pendingContinuation?.at ?? right.createdAt)
+      ))[0] ?? null;
+    if (next && countActiveInCatalog(catalog, root) >= next.manifest.concurrency) return null;
+    if (!next || !options.onThreadDequeued) {
+      if (next === null) await Promise.resolve(options.onAdmissionFreed?.(workspaceId, parent)).catch(reportObserverError);
+      return structuredClone(next);
+    }
     dequeueing.add(key);
     try {
-      await options.onThreadDequeued(workspaceId, parent, structuredClone(next));
+      await options.onThreadDequeued(workspaceId, next.parent, structuredClone(next));
       return structuredClone(next);
     } finally {
       dequeueing.delete(key);
+      await Promise.resolve(options.onAdmissionFreed?.(workspaceId, parent)).catch(reportObserverError);
     }
   }
 
@@ -2748,13 +2930,17 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     getSessionBinding,
     bindRunSession,
     unbindRunSession,
-    countActive,
+    countActiveInRoot,
     startRun,
     markRunRunning,
     endRun,
     setPendingEvidence,
     updateRunProgress,
     setAttention,
+    recordThreadMessage,
+    patchThreadMessage,
+    takePendingThreadMessages,
+    setPendingContinuation,
     setIntegration,
     setIntegrationBinding,
     invalidateIntegrationBinding,

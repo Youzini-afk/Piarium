@@ -15,6 +15,26 @@ export const createOnThreadDequeued = (options: {
     const runtime = options.getRuntime();
     if (!runtime) throw new Error("Thread runtime is not ready");
     const registry = options.getRegistry();
+    // A parked continuation promotes through the same admission gate as a
+    // queued Thread: the request already passed admission in tryDequeue.
+    if (thread.pendingContinuation) {
+      const continuation = thread.pendingContinuation;
+      await registry.setPendingContinuation(workspaceId, thread.id, null);
+      await runtime.continueRun({
+        workspaceId,
+        parent,
+        threadId: thread.id,
+        mode: continuation.mode,
+        task: continuation.task,
+        ...(continuation.requestId !== undefined ? { requestId: continuation.requestId } : {}),
+        admitted: true,
+      }).then(({ runId }) => (
+        continuation.requestId !== undefined && runId !== undefined
+          ? registry.patchThreadMessage(workspaceId, thread.id, continuation.requestId, { status: "delivered", runId })
+          : undefined
+      ));
+      return;
+    }
     const run = await registry.startRun(workspaceId, thread.id);
     void runtime.spawn({
       workspaceId,
@@ -39,6 +59,7 @@ export const createOnThreadDequeued = (options: {
       ...(thread.manifest.systemPromptFragment
         ? { systemPromptFragment: thread.manifest.systemPromptFragment }
         : {}),
+      ...(thread.manifest.promptText ? { promptText: thread.manifest.promptText } : {}),
     }).catch(async (error: unknown) => {
       try {
         await registry.endRun(workspaceId, thread.id, run.id, "failure", formatError(error));

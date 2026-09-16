@@ -274,7 +274,8 @@ export interface ThreadWaitingFor {
   review?: {
     resultRevision: number;
     reviewThreadId: string;
-    reviewRunId: string;
+    /** Absent while the review Thread is still queued for admission. */
+    reviewRunId?: string;
   };
 }
 
@@ -392,12 +393,61 @@ export interface ThreadLaunchManifest {
   worktree: "none" | "shared" | "isolated";
   /** Frozen Host permission overlay. Nested children inherit or narrow it. */
   permissions?: PermissionPolicy;
+  /**
+   * Bespoke first-Run prompt that cannot be reconstructed from the manifest
+   * fields (auto-review threads). Persisted so a queued Thread still receives
+   * its intended input when admission promotes it.
+   */
+  promptText?: string;
 }
 
 export interface ThreadTokens {
   input: number;
   output: number;
   cacheRead: number;
+}
+
+/** A party to a directed thread message: a Thread, its parent session, or the user. */
+export interface ThreadMessagePeer {
+  kind: "session" | "thread" | "user";
+  id: string;
+}
+
+export type ThreadMessageStatus = "pending" | "held" | "delivered" | "resolved";
+
+/**
+ * Host-recorded directed message (D-285.6 / 3.18C). `in` records live on the
+ * target Thread and drive dedupe, boundary delivery, and replyTo resolution;
+ * `out` records on the sender Thread mark an outstanding dependency a reply
+ * can complete. Records persist so retries and restarts cannot duplicate
+ * delivery or execution.
+ */
+export interface ThreadMessageRecord {
+  /** Caller-supplied requestId for idempotent retries; Host-generated otherwise. */
+  id: string;
+  direction: "in" | "out";
+  from: ThreadMessagePeer;
+  to: ThreadMessagePeer;
+  kind: "inform" | "request";
+  text: string;
+  replyTo?: string;
+  status: ThreadMessageStatus;
+  /** Run started by this request, when it scheduled execution. */
+  runId?: string;
+  at: string;
+}
+
+/**
+ * An execution request that arrived while the shared root execution budget
+ * was full. The parked continuation promotes through the same admission path
+ * as queued Threads when a slot frees.
+ */
+export interface ThreadPendingContinuation {
+  mode: "continue" | "fresh";
+  task: string;
+  requestId?: string;
+  from: ThreadMessagePeer;
+  at: string;
 }
 
 export interface ThreadDiffStats {
@@ -443,6 +493,14 @@ export interface Thread {
   verification?: ThreadVerificationProjection;
   /** Hidden auto-review thread bound to one published source revision. */
   reviewOf?: ThreadReviewOf;
+  /**
+   * Directed message ledger (inbound queue plus sender-side outstanding
+   * requests). Inbound `pending`/`held` records flush into the next normal
+   * input boundary; they never start execution by themselves.
+   */
+  messages?: ThreadMessageRecord[];
+  /** Request parked behind a full shared execution budget (3.18C). */
+  pendingContinuation?: ThreadPendingContinuation;
   activeRunId: string | null;
   createdAt: string;
   updatedAt: string;
@@ -529,7 +587,7 @@ export interface ThreadReviewFinding {
 
 export interface ThreadReviewProjection {
   resultRevision: number;
-  status: "none" | "running" | "completed" | "failed" | "cancelled";
+  status: "none" | "queued" | "running" | "completed" | "failed" | "cancelled";
   reviewThreadId?: string;
   reviewRunId?: string;
   /** True only while this exact review identity is the configured completion gate. */
@@ -667,13 +725,21 @@ export interface ThreadWaitResult {
 }
 
 export interface ThreadSendParams {
-  threadId: string;
+  /**
+   * Target Thread. Reachable targets are relationship-bound (3.18C): a Thread
+   * caller may reach its children, its parent, and same-parent siblings; a
+   * session caller may reach its direct children.
+   */
+  threadId?: string;
+  /** `parent` targets the caller Thread's own parent (Thread or session). */
+  to?: "parent";
   message: string;
   from: "user" | "parent-agent";
   /**
-   * `inform` only delivers the message to a running session. `request` asks
-   * for execution: on a settled implementation Thread it starts a new Run
-   * (D-285.5/3.18B).
+   * `inform` only delivers the message — it never starts execution and does
+   * not wake a waiting target. `request` asks for execution: it wakes a
+   * waiting target, and on a settled implementation Thread it starts a new
+   * Run (D-285.5/3.18B) or parks behind the shared execution budget.
    */
   kind?: "inform" | "request";
   /**
@@ -682,6 +748,17 @@ export interface ThreadSendParams {
    * input on a new session while results, files, and the old transcript stay.
    */
   context?: "continue" | "fresh";
+  /**
+   * Idempotency key. A retry carrying the same requestId returns the recorded
+   * outcome instead of delivering or scheduling again.
+   */
+  requestId?: string;
+  /**
+   * Binds this message to a request the caller previously received. The reply
+   * resolves the outstanding request records and completes the requester's
+   * dependency wait.
+   */
+  replyTo?: string;
 }
 
 export interface ThreadSendResult {
@@ -690,6 +767,14 @@ export interface ThreadSendResult {
   attention: ThreadAttention;
   /** Set when the send started a new Run (request on a settled Thread). */
   runId?: string;
+  /** Recorded message id; use it as `replyTo` when answering a request. */
+  messageId?: string;
+  /**
+   * `delivered` reached the session input boundary now; `held` was recorded
+   * for the next boundary or Run input; `scheduled` parked execution behind
+   * the shared root budget.
+   */
+  delivery?: "delivered" | "held" | "scheduled";
 }
 
 export type ThreadReadWhat = "blocks" | "report" | "steps";
