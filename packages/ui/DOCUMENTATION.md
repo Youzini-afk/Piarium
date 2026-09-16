@@ -32,6 +32,13 @@ primary describes an action, status colors describe feedback, and syntax colors 
 When a third-party renderer needs resolved colors, `useThemeSystem()` is the adapter; ordinary React
 chrome uses CSS variables and semantic utility classes.
 
+Large surfaces and persistent selection use the palette's neutral surface hierarchy. Reserve primary
+color for prominent actions, links and focus; avoid tinting whole messages or panels. Built-in themes
+share this treatment while keeping their own surface hues and code/status colors. Default buttons are
+solid actions; secondary/outline/ghost variants and selected chips remain neutral. Menus use one border
+and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
+UI labels use 14px, metadata 13px and small badges 12px at the default scale; body text stays 15px.
+
 Common controls live under `src/components/ui`. `Button`, `dropdownTriggerVariants`, and the Settings
 primitives carry shared interaction chrome, sizes, focus behavior, and theme semantics. Extending a
 shared primitive is preferable when several callers genuinely need the same missing shape; a local

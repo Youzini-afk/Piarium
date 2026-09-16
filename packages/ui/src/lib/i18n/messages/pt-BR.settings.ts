@@ -3831,7 +3831,7 @@
 
   "settings.harness.models.noModel": "Sem modelo auxiliar",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Cinzas quentes com destaques acobreados.",
+  "settings.theme.preset.piarium.description": "Cinzas neutros com destaques acobreados.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Tons de papel e tinta com destaques quentes.",
   "settings.theme.preset.fields-of-the-shire.name": "Campos do Condado",

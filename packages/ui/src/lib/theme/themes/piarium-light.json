@@ -2,7 +2,7 @@
   "metadata": {
     "id": "piarium-light",
     "name": "Piarium",
-    "description": "The Piarium signature - Vitesse syntax on warm paper with Flexoki accents, harmonized in OKLCH (light variant)",
+    "description": "Neutral surfaces, copper accents and Vitesse syntax (light variant)",
     "author": "Piarium",
     "version": "1.0.0",
     "variant": "light",
@@ -10,7 +10,7 @@
       "light",
       "brand",
       "hybrid",
-      "warm",
+      "neutral",
       "paper"
     ]
   },
@@ -24,24 +24,24 @@
       "emphasis": "#9a4310"
     },
     "surface": {
-      "background": "#fdfcfa",
-      "foreground": "#393a34",
-      "muted": "#f7f6f4",
-      "mutedForeground": "#5c5c54",
-      "elevated": "#f8f7f5",
-      "elevatedForeground": "#393a34",
-      "overlay": "#39393420",
-      "subtle": "#f7f6f4"
+      "background": "#fcfcfc",
+      "foreground": "#262626",
+      "muted": "#f4f4f4",
+      "mutedForeground": "#656565",
+      "elevated": "#ffffff",
+      "elevatedForeground": "#262626",
+      "overlay": "#00000033",
+      "subtle": "#eeeeee"
     },
     "interactive": {
-      "border": "#e5e1de",
-      "borderHover": "#cbc7c2",
+      "border": "#dedede",
+      "borderHover": "#b6b6b6",
       "borderFocus": "#b35017",
-      "selection": "#b350172b",
-      "selectionForeground": "#393a34",
+      "selection": "#00000012",
+      "selectionForeground": "#262626",
       "focus": "#b35017",
       "focusRing": "#b3501755",
-      "cursor": "#393a34",
+      "cursor": "#262626",
       "hover": "#0000000d",
       "active": "#00000014"
     },
@@ -72,8 +72,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#f4f3f1",
-        "foreground": "#393a34",
+        "background": "#f4f4f4",
+        "foreground": "#262626",
         "comment": "#9dae9d",
         "keyword": "#15764e",
         "string": "#c25f4b",
@@ -131,33 +131,33 @@
       }
     },
     "markdown": {
-      "heading1": "#1e754f",
-      "heading2": "#1e754f",
-      "heading3": "#1e754f",
-      "heading4": "#393a34",
+      "heading1": "#262626",
+      "heading2": "#262626",
+      "heading3": "#262626",
+      "heading4": "#262626",
       "link": "#2e808f",
       "linkHover": "#296aa3",
-      "inlineCode": "#1a8446",
-      "inlineCodeBackground": "#f4f3f1",
-      "blockquote": "#6b6b63",
-      "blockquoteBorder": "#d8d5d0",
-      "listMarker": "#1e754f99"
+      "inlineCode": "#262626",
+      "inlineCodeBackground": "#eeeeee",
+      "blockquote": "#656565",
+      "blockquoteBorder": "#dedede",
+      "listMarker": "#656565"
     },
     "chat": {
-      "userMessage": "#393a34",
-      "userMessageBackground": "#fbf4f0",
-      "assistantMessage": "#393a34",
-      "assistantMessageBackground": "#fdfcfa",
-      "timestamp": "#6b6b63",
-      "divider": "#d8d5d0"
+      "userMessage": "#262626",
+      "userMessageBackground": "#eeeeee",
+      "assistantMessage": "#262626",
+      "assistantMessageBackground": "#fcfcfc",
+      "timestamp": "#656565",
+      "divider": "#dedede"
     },
     "tools": {
-      "background": "#efeeec50",
-      "border": "#d8d5d099",
+      "background": "#f4f4f4",
+      "border": "#dedede",
       "headerHover": "#0000000d",
-      "icon": "#6b6b63",
-      "title": "#393a34",
-      "description": "#6b6b63",
+      "icon": "#656565",
+      "title": "#262626",
+      "description": "#656565",
       "edit": {
         "added": "#2c751e",
         "addedBackground": "#2c751e25",

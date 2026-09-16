@@ -3685,7 +3685,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "Sans modèle auxiliaire",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Gris chauds et accents cuivrés.",
+  "settings.theme.preset.piarium.description": "Gris neutres et accents cuivrés.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Tons de papier et d’encre, accents chauds.",
   "settings.theme.preset.fields-of-the-shire.name": "Champs de la Comté",

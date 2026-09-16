@@ -3477,7 +3477,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "補助モデルを使用しない",
   "settings.theme.preset.piarium.name": "Piarium（既定）",
-  "settings.theme.preset.piarium.description": "暖かなグレーと銅色のアクセント。",
+  "settings.theme.preset.piarium.description": "ニュートラルなグレーと銅色のアクセント。",
   "settings.theme.preset.flexoki.name": "Flexoki・紙とインク",
   "settings.theme.preset.flexoki.description": "紙とインクの色調に暖色のアクセント。",
   "settings.theme.preset.fields-of-the-shire.name": "ホビット庄の野原",

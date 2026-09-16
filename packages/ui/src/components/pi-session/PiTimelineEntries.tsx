@@ -273,7 +273,7 @@ const SubagentRunView: React.FC<{
               {agent.durationMs !== undefined && <span>{formatDuration(agent.durationMs)}</span>}
             </div>
             {agent.currentTool && (
-              <div className="rounded-md bg-primary/5 px-2 py-1.5 typography-meta text-foreground">
+              <div className="rounded-md bg-interactive-hover px-2 py-1.5 typography-meta text-foreground">
                 <span className="text-muted-foreground">Current tool · </span>
                 <code>{agent.currentTool}</code>
                 {agent.currentToolArgs && <pre className="mt-1 whitespace-pre-wrap break-words font-mono typography-micro">{agent.currentToolArgs}</pre>}
@@ -754,13 +754,13 @@ const PiSortedActivityGroup: React.FC<{
 
   return (
     <section
-      className="overflow-hidden rounded-xl border border-border/60 bg-muted/10"
+      className="overflow-hidden rounded-lg border border-[var(--tools-border)] bg-[var(--tools-background)]"
       data-pi-sorted-activity="true"
     >
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left typography-meta text-muted-foreground hover:bg-muted/25"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left typography-meta text-muted-foreground hover:bg-[var(--tools-header-hover)]"
         aria-expanded={expanded}
       >
         <Icon
@@ -865,7 +865,7 @@ export const PiTurnUserMessage: React.FC<{
   }, [messageText, t]);
   return (
     <article id={entry ? `pi-entry-${entry.id}` : undefined} className="group/message ml-auto max-w-[85%]">
-      <div className="rounded-2xl rounded-br-md border border-primary/5 bg-[var(--chat-user-message-bg)] px-5 py-3 text-foreground">
+      <div className="rounded-xl bg-[var(--chat-user-message-bg)] px-4 py-3 text-[var(--chat-user-message)]">
         <PiUserContentView content={message.content} messageId={messageId} />
       </div>
       {status ? (

@@ -3832,7 +3832,7 @@
 
   "settings.harness.models.noModel": "보조 모델 사용 안 함",
   "settings.theme.preset.piarium.name": "Piarium (기본)",
-  "settings.theme.preset.piarium.description": "따뜻한 회색과 구릿빛 강조색.",
+  "settings.theme.preset.piarium.description": "중성 회색과 구릿빛 강조색.",
   "settings.theme.preset.flexoki.name": "Flexoki · 종이와 잉크",
   "settings.theme.preset.flexoki.description": "종이와 잉크 색조에 따뜻한 강조색.",
   "settings.theme.preset.fields-of-the-shire.name": "샤이어의 들판",

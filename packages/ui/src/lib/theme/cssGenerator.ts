@@ -86,7 +86,7 @@ export class CSSVariableGenerator {
     vars.push(`  --primary-foreground: ${theme.colors.primary.foreground} !important;`);
 
     vars.push(`  --secondary: ${theme.colors.surface.muted} !important;`);
-    vars.push(`  --secondary-foreground: ${theme.colors.surface.mutedForeground} !important;`);
+    vars.push(`  --secondary-foreground: ${theme.colors.surface.foreground} !important;`);
 
     vars.push(`  --accent: ${theme.colors.surface.subtle} !important;`);
     vars.push(`  --accent-foreground: ${theme.colors.surface.foreground} !important;`);
@@ -105,7 +105,7 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
       vars.push(`  --sidebar-base-rgb: ${sidebarBaseRgb} !important;`);
     }
     vars.push(`  --sidebar: var(--sidebar-base) !important;`);
-    vars.push(`  --sidebar-foreground: ${theme.colors.surface.mutedForeground} !important;`);
+    vars.push(`  --sidebar-foreground: ${theme.colors.surface.foreground} !important;`);
     vars.push(`  --sidebar-primary: ${theme.colors.primary.base} !important;`);
     vars.push(`  --sidebar-primary-foreground: ${theme.colors.primary.foreground} !important;`);
     vars.push(`  --sidebar-accent-base: ${theme.colors.surface.subtle} !important;`);
@@ -391,19 +391,18 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateMarkdownColors(markdown: Record<string, string>, theme: Theme): string[] {
     const vars: string[] = [];
     const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
 
-    vars.push(`  --markdown-heading1: ${markdown.heading1 || primary};`);
-    vars.push(`  --markdown-heading2: ${markdown.heading2 || this.opacity(primary, 0.9)};`);
-    vars.push(`  --markdown-heading3: ${markdown.heading3 || this.opacity(primary, 0.8)};`);
+    vars.push(`  --markdown-heading1: ${markdown.heading1 || theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-heading2: ${markdown.heading2 || theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-heading3: ${markdown.heading3 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading4: ${markdown.heading4 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${markdown.link || primary};`);
     vars.push(`  --markdown-link-hover: ${markdown.linkHover || theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || chatBackground};`);
+    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || theme.colors.surface.subtle};`);
     vars.push(`  --markdown-blockquote: ${markdown.blockquote || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || theme.colors.interactive.border};`);
-    vars.push(`  --markdown-list-marker: ${markdown.listMarker || this.opacity(primary, 0.6)};`);
+    vars.push(`  --markdown-list-marker: ${markdown.listMarker || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-bold: ${markdown.bold || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-italic: ${markdown.italic || this.opacity(theme.colors.surface.foreground, 0.9)};`);
     vars.push(`  --markdown-strikethrough: ${markdown.strikethrough || theme.colors.surface.mutedForeground};`);
@@ -415,19 +414,18 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateDefaultMarkdownColors(theme: Theme): string[] {
     const vars: string[] = [];
     const primary = theme.colors.primary.base;
-    const chatBackground = theme.colors.chat?.background || theme.colors.surface.background;
 
-    vars.push(`  --markdown-heading1: ${primary};`);
-    vars.push(`  --markdown-heading2: ${this.opacity(primary, 0.9)};`);
-    vars.push(`  --markdown-heading3: ${this.opacity(primary, 0.8)};`);
+    vars.push(`  --markdown-heading1: ${theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-heading2: ${theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-heading3: ${theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading4: ${theme.colors.surface.foreground};`);
     vars.push(`  --markdown-link: ${primary};`);
     vars.push(`  --markdown-link-hover: ${theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${theme.colors.syntax.base.string};`);
-    vars.push(`  --markdown-inline-code-bg: ${chatBackground};`);
+    vars.push(`  --markdown-inline-code: ${theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-inline-code-bg: ${theme.colors.surface.subtle};`);
     vars.push(`  --markdown-blockquote: ${theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-blockquote-border: ${theme.colors.interactive.border};`);
-    vars.push(`  --markdown-list-marker: ${this.opacity(primary, 0.6)};`);
+    vars.push(`  --markdown-list-marker: ${theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-bold: ${theme.colors.surface.foreground};`);
     vars.push(`  --markdown-italic: ${this.opacity(theme.colors.surface.foreground, 0.9)};`);
     vars.push(`  --markdown-strikethrough: ${theme.colors.surface.mutedForeground};`);
@@ -470,12 +468,12 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateToolColors(tools: Theme['colors']['tools'], theme: Theme): string[] {
     const vars: string[] = [];
 
-    vars.push(`  --tools-background: ${tools?.background || this.opacity(theme.colors.surface.muted, 0.2)};`);
-    vars.push(`  --tools-border: ${tools?.border || this.opacity(theme.colors.interactive.border, 0.3)};`);
-    vars.push(`  --tools-header-hover: ${tools?.headerHover || this.opacity(theme.colors.surface.muted, 0.3)};`);
+    vars.push(`  --tools-background: ${tools?.background || theme.colors.surface.muted};`);
+    vars.push(`  --tools-border: ${tools?.border || theme.colors.interactive.border};`);
+    vars.push(`  --tools-header-hover: ${tools?.headerHover || theme.colors.interactive.hover};`);
     vars.push(`  --tools-icon: ${tools?.icon || theme.colors.surface.mutedForeground};`);
     vars.push(`  --tools-title: ${tools?.title || theme.colors.surface.foreground};`);
-    vars.push(`  --tools-description: ${tools?.description || this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
+    vars.push(`  --tools-description: ${tools?.description || theme.colors.surface.mutedForeground};`);
 
     if (tools?.edit) {
       vars.push(`  --tools-edit-added: ${tools.edit.added || theme.colors.status.success};`);
@@ -501,12 +499,12 @@ const sidebarBaseRgb = hexToRgb(theme.colors.surface.muted);
   private generateDefaultToolColors(theme: Theme): string[] {
     const vars: string[] = [];
 
-    vars.push(`  --tools-background: ${this.opacity(theme.colors.surface.muted, 0.2)};`);
-    vars.push(`  --tools-border: ${this.opacity(theme.colors.interactive.border, 0.3)};`);
-    vars.push(`  --tools-header-hover: ${this.opacity(theme.colors.surface.muted, 0.3)};`);
+    vars.push(`  --tools-background: ${theme.colors.surface.muted};`);
+    vars.push(`  --tools-border: ${theme.colors.interactive.border};`);
+    vars.push(`  --tools-header-hover: ${theme.colors.interactive.hover};`);
     vars.push(`  --tools-icon: ${theme.colors.surface.mutedForeground};`);
     vars.push(`  --tools-title: ${theme.colors.surface.foreground};`);
-    vars.push(`  --tools-description: ${this.opacity(theme.colors.surface.mutedForeground, 0.6)};`);
+    vars.push(`  --tools-description: ${theme.colors.surface.mutedForeground};`);
 
     vars.push(`  --tools-edit-added: ${theme.colors.status.success};`);
     vars.push(`  --tools-edit-added-bg: ${this.addTransparency(this.removeTransparency(theme.colors.status.successBackground), 0.15)};`);

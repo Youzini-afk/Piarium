@@ -13,8 +13,8 @@
     --oc-wco-right-inset: 0px;
     --oc-wco-titlebar-height: 0px;
     --ui-regular-font-weight: 400;
-    --oc-scrollbar-thumb: oklch(0.32 0.03 50 / 0.4);
-    --oc-scrollbar-thumb-hover: oklch(0.32 0.03 50 / 0.6);
+    --oc-scrollbar-thumb: color-mix(in srgb, var(--foreground) 22%, transparent);
+    --oc-scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 35%, transparent);
     --padding-scale: 1;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */
@@ -22,80 +22,81 @@
     --text-code: 0.8125rem;
     --text-ui-header: 0.9375rem;
     --text-ui-label: 0.8750rem;
-    --text-meta: 0.875rem;
-    --text-micro: 0.875rem;
+    --text-meta: 0.8125rem;
+    --text-micro: 0.75rem;
     --text-settings-page-title: 1.125rem;
 
-    /* Default Light Theme */
-    --background: oklch(0.97 0.02 85); /* Warm sand background */
-    --foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --card: oklch(0.99 0.01 90); /* Bright sand card */
-    --card-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --popover: oklch(0.99 0.01 90); /* Bright sand popover */
-    --popover-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --primary: oklch(0.65 0.2 55); /* Primary accent - orange */
-    --primary-foreground: oklch(0.99 0.01 90); /* Light text on primary */
-    --secondary: oklch(0.92 0.02 80); /* Light sand */
-    --secondary-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --muted: oklch(0.9 0.015 75); /* Muted sand */
-    --muted-foreground: oklch(0.45 0.02 50); /* Medium warm text */
-    --accent: oklch(0.92 0.02 80); /* Light sand accent */
-    --accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --destructive: oklch(0.55 0.25 25); /* Warm red */
-    --destructive-foreground: oklch(0.99 0.01 90); /* Light text */
-    --border: oklch(0.85 0.02 70); /* Warm border */
-    --input: oklch(0.88 0.02 75); /* Input background */
-    --ring: oklch(0.65 0.2 55); /* Focus ring color */
-    --radius: 0.5625rem;
-    --chart-1: oklch(0.58 0.15 230); /* Blue */
-    --chart-2: oklch(0.58 0.15 145); /* Oasis green */
-    --chart-3: oklch(0.65 0.2 55); /* Orange */
-    --chart-4: oklch(0.55 0.18 30); /* Rose */
-    --chart-5: oklch(0.6 0.16 85); /* Golden sand */
-    --sidebar: oklch(0.95 0.02 80); /* Slightly darker sand */
-    --sidebar-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --sidebar-primary: oklch(0.65 0.2 55); /* Primary accent */
-    --sidebar-primary-foreground: oklch(0.99 0.01 90); /* Light text */
-    --sidebar-accent: oklch(0.9 0.02 75); /* Light sand accent */
-    --sidebar-accent-foreground: oklch(0.25 0.02 40); /* Dark warm text */
-    --sidebar-border: oklch(0.85 0.02 70); /* Warm border */
-    --sidebar-ring: oklch(0.65 0.2 55); /* Focus ring */
+    /* Initial light palette; matches the built-in Piarium theme before hydration. */
+    --background: #fcfcfc;
+    --foreground: #262626;
+    --card: #ffffff;
+    --card-foreground: #262626;
+    --popover: #ffffff;
+    --popover-foreground: #262626;
+    --primary: #b35017;
+    --primary-foreground: #ffffff;
+    --secondary: #f4f4f4;
+    --secondary-foreground: #262626;
+    --muted: #f4f4f4;
+    --muted-foreground: #656565;
+    --accent: #eeeeee;
+    --accent-foreground: #262626;
+    --destructive: #b7493f;
+    --destructive-foreground: #ffffff;
+    --border: #dedede;
+    --input: #dedede;
+    --ring: #b3501755;
+    --radius: 0.4375rem;
+    --chart-1: #2d72c4;
+    --chart-2: #5f8d3d;
+    --chart-3: #b35017;
+    --chart-4: #b7493f;
+    --chart-5: #8d6c15;
+    --sidebar: #f4f4f4;
+    --sidebar-foreground: #262626;
+    --sidebar-primary: #b35017;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eeeeee;
+    --sidebar-accent-foreground: #262626;
+    --sidebar-border: #dedede;
+    --sidebar-ring: #b3501755;
   }
 
   .dark {
-    /* Default Dark Theme - using OKLCH color space */
-    --background: oklch(0.16 0.01 30); /* #151313 */
-    --foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --card: oklch(0.19 0.01 40); /* #1C1B1A */
-    --card-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --popover: oklch(0.24 0.01 40); /* #282726 */
-    --popover-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --primary: oklch(0.77 0.17 85); /* #edb449 - golden sand */
-    --primary-foreground: oklch(0.16 0.01 30); /* #151313 */
-    --secondary: oklch(0.29 0.01 40); /* #343331 */
-    --secondary-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --muted: oklch(0.33 0.01 40); /* #403E3C */
-    --muted-foreground: oklch(0.75 0.02 80); /* #b6b4ab */
-    --accent: oklch(0.29 0.01 40); /* #343331 */
-    --accent-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --destructive: oklch(0.65 0.15 30); /* #d98678 */
-    --destructive-foreground: oklch(0.9 0.02 80); /* #e1dcd0 */
-    --border: oklch(0.31 0.01 35); /* #393836 */
-    --input: oklch(0.33 0.01 40); /* #403E3C */
-    --ring: oklch(0.77 0.17 85); /* #edb449 */
-    --chart-1: oklch(0.68 0.12 230); /* #5aa9d9 - blue */
-    --chart-2: oklch(0.68 0.12 145); /* #81af6c - green */
-    --chart-3: oklch(0.7 0.13 95); /* #c2974d - yellow */
-    --chart-4: oklch(0.65 0.14 45); /* #d8886d - coral */
-    --chart-5: oklch(0.68 0.12 55); /* #d29470 - orange */
-    --sidebar: oklch(0.16 0.01 30); /* #151313 */
-    --sidebar-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --sidebar-primary: oklch(0.77 0.17 85); /* #edb449 */
-    --sidebar-primary-foreground: oklch(0.16 0.01 30); /* #151313 */
-    --sidebar-accent: oklch(0.24 0.01 40); /* #282726 */
-    --sidebar-accent-foreground: oklch(0.85 0.02 90); /* #cdccc3 */
-    --sidebar-border: oklch(0.31 0.01 35); /* #393836 */
-    --sidebar-ring: oklch(0.77 0.17 85); /* #edb449 */
+    /* Initial dark palette; matches the built-in Piarium theme before hydration. */
+    --background: #171717;
+    --foreground: #e7e7e7;
+    --card: #252525;
+    --card-foreground: #e7e7e7;
+    --popover: #252525;
+    --popover-foreground: #e7e7e7;
+    --primary: #da7c47;
+    --primary-foreground: #000000;
+    --secondary: #1c1c1c;
+    --secondary-foreground: #e7e7e7;
+    --muted: #1c1c1c;
+    --muted-foreground: #a1a1a1;
+    --accent: #222222;
+    --accent-foreground: #e7e7e7;
+    --destructive: #da5b4a;
+    --destructive-foreground: #000000;
+    --border: #333333;
+    --input: #333333;
+    --ring: #da7c4755;
+    --radius: 0.4375rem;
+    --chart-1: #479fe6;
+    --chart-2: #76ad4f;
+    --chart-3: #da7c47;
+    --chart-4: #da5b4a;
+    --chart-5: #c67f13;
+    --sidebar: #1c1c1c;
+    --sidebar-foreground: #e7e7e7;
+    --sidebar-primary: #da7c47;
+    --sidebar-primary-foreground: #000000;
+    --sidebar-accent: #222222;
+    --sidebar-accent-foreground: #e7e7e7;
+    --sidebar-border: #333333;
+    --sidebar-ring: #da7c4755;
   }
 
   * {
@@ -106,10 +107,6 @@
   :root body,
   :root #root {
     background-color: var(--background);
-  }
-
-  body {
-    color: hsl(var(--foreground));
   }
 
   * {
@@ -185,15 +182,10 @@
     display: list-item !important;
   }
 
-  /* Remove focus rings globally (except inputs/textareas/dropdowns/selects/explicit accent rings) */
-  *:focus:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
-  }
-
-  *:focus-visible:not(input):not(textarea):not([data-slot="dropdown-menu-content"]):not([data-slot="dropdown-menu-sub-content"]):not([data-slot="select-content"]):not(.focus-ring-accent):not([data-focus-ring="accent"]) {
-    outline: none !important;
-    box-shadow: none !important;
+  /* Keyboard navigation stays visible; pointer clicks do not paint a focus ring. */
+  :where(button, a[href], summary, [role="button"], [role="tab"], [role="checkbox"], [role="switch"]):focus-visible {
+    outline: 2px solid var(--interactive-focus, var(--ring));
+    outline-offset: 2px;
   }
 
   .focus-ring-accent:focus-visible,

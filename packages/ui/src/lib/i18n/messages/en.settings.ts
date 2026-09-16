@@ -3830,7 +3830,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "No auxiliary model",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Warm neutrals with copper accents.",
+  "settings.theme.preset.piarium.description": "Neutral grays with copper accents.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Paper and ink tones with warm accents.",
   "settings.theme.preset.fields-of-the-shire.name": "Fields of the Shire",

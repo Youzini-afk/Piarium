@@ -30,6 +30,14 @@ hover/selection/focus in `interactive`. A theme can retain warm, cool, or ink-li
 using its primary accent as every panel background. Error/success and code colors retain their own
 meaning. Light and dark variants need their own contrast choices rather than identical accent values.
 
+The built-in Piarium palette uses neutral grays with copper actions and focus indicators. Other
+built-in palettes keep their characteristic surfaces and accent hue. Across all presets, user-message
+backgrounds come from `surface.subtle`; Markdown headings, inline code and list markers use readable
+surface text, while links and syntax remain independently colored. Tool results use opaque muted
+surfaces rather than stacking translucent tints. Secondary text and solid-action labels are tuned for
+at least 4.5:1 contrast against their defined surfaces, including the action hover/active states.
+Custom palettes retain their explicit component overrides.
+
 ## Theme location
 
 | Platform | Default path |

@@ -2,7 +2,7 @@
   "metadata": {
     "id": "piarium-dark",
     "name": "Piarium",
-    "description": "The Piarium signature - Vitesse syntax over deep neutrals with Flexoki accents, harmonized in OKLCH (dark variant)",
+    "description": "Neutral surfaces, copper accents and Vitesse syntax (dark variant)",
     "author": "Piarium",
     "version": "1.0.0",
     "variant": "dark",
@@ -10,7 +10,7 @@
       "dark",
       "brand",
       "hybrid",
-      "warm",
+      "neutral",
       "ink"
     ]
   },
@@ -24,24 +24,24 @@
       "emphasis": "#fd9b66"
     },
     "surface": {
-      "background": "#0c0b0a",
-      "foreground": "#dbd7ca",
-      "muted": "#131211",
-      "mutedForeground": "#8f8b81",
-      "elevated": "#181715",
-      "elevatedForeground": "#dbd7ca",
+      "background": "#171717",
+      "foreground": "#e7e7e7",
+      "muted": "#1c1c1c",
+      "mutedForeground": "#a1a1a1",
+      "elevated": "#252525",
+      "elevatedForeground": "#e7e7e7",
       "overlay": "#00000099",
-      "subtle": "#171616"
+      "subtle": "#222222"
     },
     "interactive": {
-      "border": "#242323",
-      "borderHover": "#504e4c",
+      "border": "#333333",
+      "borderHover": "#4a4a4a",
       "borderFocus": "#da7c47",
-      "selection": "#da7c472b",
-      "selectionForeground": "#dbd7ca",
+      "selection": "#ffffff1f",
+      "selectionForeground": "#e7e7e7",
       "focus": "#da7c47",
       "focusRing": "#da7c4755",
-      "cursor": "#dbd7ca",
+      "cursor": "#e7e7e7",
       "hover": "#ffffff12",
       "active": "#ffffff1f"
     },
@@ -72,8 +72,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#131211",
-        "foreground": "#dbd7ca",
+        "background": "#1c1c1c",
+        "foreground": "#e7e7e7",
         "comment": "#728772",
         "keyword": "#34983a",
         "string": "#d58373",
@@ -131,33 +131,33 @@
       }
     },
     "markdown": {
-      "heading1": "#dbd7ca",
-      "heading2": "#dbd7ca",
-      "heading3": "#dbd7ca",
-      "heading4": "#dbd7ca",
+      "heading1": "#e7e7e7",
+      "heading2": "#e7e7e7",
+      "heading3": "#e7e7e7",
+      "heading4": "#e7e7e7",
       "link": "#5d99a9",
       "linkHover": "#6ba7b8",
-      "inlineCode": "#76ad4f",
-      "inlineCodeBackground": "#211f1d",
-      "blockquote": "#8f8b81",
-      "blockquoteBorder": "#302e2b",
-      "listMarker": "#4d934e99"
+      "inlineCode": "#e7e7e7",
+      "inlineCodeBackground": "#222222",
+      "blockquote": "#a1a1a1",
+      "blockquoteBorder": "#333333",
+      "listMarker": "#a1a1a1"
     },
     "chat": {
-      "userMessage": "#dbd7ca",
-      "userMessageBackground": "#25170e",
-      "assistantMessage": "#dbd7ca",
-      "assistantMessageBackground": "#0c0b0a",
-      "timestamp": "#8f8b81",
-      "divider": "#302e2b"
+      "userMessage": "#e7e7e7",
+      "userMessageBackground": "#222222",
+      "assistantMessage": "#e7e7e7",
+      "assistantMessageBackground": "#171717",
+      "timestamp": "#a1a1a1",
+      "divider": "#333333"
     },
     "tools": {
-      "background": "#13121150",
-      "border": "#302e2b99",
-      "headerHover": "#ffffff0d",
-      "icon": "#ada9a0",
-      "title": "#dbd7ca",
-      "description": "#aba9a3",
+      "background": "#1c1c1c",
+      "border": "#333333",
+      "headerHover": "#ffffff12",
+      "icon": "#a1a1a1",
+      "title": "#e7e7e7",
+      "description": "#a1a1a1",
       "edit": {
         "added": "#4d934e",
         "addedBackground": "#4d934e25",

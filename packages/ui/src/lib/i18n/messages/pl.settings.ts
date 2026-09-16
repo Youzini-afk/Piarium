@@ -3831,7 +3831,7 @@
   "settings.harness.role.permissionJudge.description": "Ocenia żądania narzędzi w trybie inteligentnym.",
   "settings.harness.models.noModel": "Bez modelu pomocniczego",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Ciepłe szarości z miedzianymi akcentami.",
+  "settings.theme.preset.piarium.description": "Neutralne szarości z miedzianymi akcentami.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Barwy papieru i atramentu z ciepłymi akcentami.",
   "settings.theme.preset.fields-of-the-shire.name": "Pola Shire",

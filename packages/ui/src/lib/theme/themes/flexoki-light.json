@@ -15,8 +15,8 @@
   "colors": {
     "primary": {
       "base": "#BC5215",
-      "hover": "#F9AE77",
-      "active": "#DA702C",
+      "hover": "#986a49",
+      "active": "#b55d25",
       "foreground": "#fffdf4",
       "muted": "#BC521580",
       "emphasis": "#F9AE77"
@@ -135,27 +135,27 @@
       "heading4": "#100F0F",
       "link": "#205EA6",
       "linkHover": "#4385BE",
-      "inlineCode": "#24837B",
-      "inlineCodeBackground": "#f6f5ee",
-      "blockquote": "#6F6E69",
-      "blockquoteBorder": "#DAD8CE",
-      "listMarker": "#AD830199"
+      "inlineCode": "#100F0F",
+      "inlineCodeBackground": "#f7f4ec",
+      "blockquote": "#686663",
+      "blockquoteBorder": "#e6e4db",
+      "listMarker": "#686663"
     },
     "chat": {
       "userMessage": "#100F0F",
       "userMessageBackground": "#f7f4ec",
       "assistantMessage": "#100F0F",
       "assistantMessageBackground": "#fffdf4",
-      "timestamp": "#6F6E69",
-      "divider": "#DAD8CE"
+      "timestamp": "#686663",
+      "divider": "#e6e4db"
     },
     "tools": {
-      "background": "#f6f5ee50",
-      "border": "#b4b2a980",
-      "headerHover": "#DAD8CE",
-      "icon": "#6F6E69",
+      "background": "#f6f5ee",
+      "border": "#e6e4db",
+      "headerHover": "#76736f20",
+      "icon": "#686663",
       "title": "#100F0F",
-      "description": "#6F6E69",
+      "description": "#686663",
       "edit": {
         "added": "#66800B",
         "addedBackground": "#66800B25",

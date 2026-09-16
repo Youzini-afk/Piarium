@@ -192,7 +192,7 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
       <div
         className={cn(
           'group/session flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
-          isCurrent ? 'bg-interactive-active text-foreground' : 'hover:bg-interactive-hover/60 hover:text-foreground',
+          isCurrent ? 'bg-interactive-active font-medium text-foreground' : 'hover:bg-interactive-hover hover:text-foreground',
           selected && 'bg-interactive-selection text-foreground',
         )}
         onClick={(event) => {

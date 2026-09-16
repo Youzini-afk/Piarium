@@ -14,7 +14,7 @@ type TextareaProps = React.ComponentProps<"textarea"> & {
   resizedHeight?: number | null;
   onResizeHeightChange?: (height: number) => void;
   /**
-   * AlignUI "simple" mode: render a bare textarea (no compound wrapper).
+   * Render a bare textarea (no compound wrapper).
    * Used for chat composer or anywhere the textarea is embedded inside an
    * existing styled container.
    */
@@ -164,17 +164,16 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         onPointerDown={focusInnerTextarea}
         style={effectiveResizedHeight !== null ? { height: `${effectiveResizedHeight}px` } : undefined}
         className={cn(
-          "group/textarea relative flex w-full flex-col rounded-[var(--radius-xl)] bg-[var(--surface-elevated)] pb-2.5",
-          "ring-1 ring-inset ring-border/60 transition duration-200 ease-out",
-          "hover:[&:not(:focus-within)]:bg-[var(--surface-subtle)]",
-          "has-[[disabled]]:pointer-events-none has-[[disabled]]:bg-[var(--surface-subtle)] has-[[disabled]]:ring-transparent",
+          "group/textarea relative flex w-full flex-col rounded-md border border-input bg-transparent pb-2.5",
+          "transition-[border-color,box-shadow] duration-150",
+          "has-[[disabled]]:pointer-events-none has-[[disabled]]:opacity-50",
           !hasError && [
-            "hover:[&:not(:focus-within)]:ring-transparent",
-            "focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]",
+            "hover:border-[var(--interactive-border-hover)]",
+            "focus-within:border-[var(--interactive-border-focus)] focus-within:ring-2 focus-within:ring-[var(--interactive-focus-ring)]",
           ],
           hasError && [
-            "ring-[var(--status-error)]",
-            "focus-within:ring-2 focus-within:ring-[var(--status-error)]",
+            "border-[var(--status-error)]",
+            "focus-within:ring-2 focus-within:ring-[var(--status-error-border)]",
           ],
           outerClassName,
         )}

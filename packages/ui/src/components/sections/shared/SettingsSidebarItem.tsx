@@ -68,9 +68,9 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
   return (
     <div
       className={cn(
-        'group relative flex items-center rounded-md px-1.5 py-0.5 transition-all duration-200',
+        'group relative flex items-center rounded-md px-1.5 py-1 transition-colors duration-150',
         selected
-          ? 'bg-interactive-selection'
+          ? 'bg-interactive-active'
           : 'hover:bg-interactive-hover',
         className
       )}
@@ -83,13 +83,13 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
         >
           <div className="flex items-center gap-1.5">
             {icon}
-            <span className="typography-ui-label font-normal truncate text-foreground">
+            <span className={cn('typography-ui-label truncate text-foreground', selected ? 'font-medium' : 'font-normal')}>
               {title}
             </span>
           </div>
 
           {metadata && (
-            <div className="typography-micro text-muted-foreground/60 truncate leading-tight">
+            <div className="typography-micro text-muted-foreground truncate leading-snug">
               {metadata}
             </div>
           )}
@@ -101,7 +101,7 @@ export const SettingsSidebarItem: React.FC<SettingsSidebarItemProps> = ({
               <Button
                 size="icon"
                 variant="ghost"
-                className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100"
+                className="h-6 w-6 flex-shrink-0 -mr-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100 data-[popup-open]:opacity-100"
               >
                 <RiMore2Line className="h-3.5 w-3.5" />
               </Button>

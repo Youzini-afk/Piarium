@@ -133,27 +133,27 @@
       "heading4": "#C0CAF5",
       "link": "#7DCFFF",
       "linkHover": "#7AA2F7",
-      "inlineCode": "#9ECE6A",
-      "inlineCodeBackground": "#111428",
-      "blockquote": "#E0AF68",
-      "blockquoteBorder": "#25283B",
-      "listMarker": "#7AA2F799"
+      "inlineCode": "#C0CAF5",
+      "inlineCodeBackground": "#15192b",
+      "blockquote": "#8890b3",
+      "blockquoteBorder": "#2d2f43",
+      "listMarker": "#8890b3"
     },
     "chat": {
       "userMessage": "#C0CAF5",
-      "userMessageBackground": "#171b30",
+      "userMessageBackground": "#15192b",
       "assistantMessage": "#C0CAF5",
       "assistantMessageBackground": "#0F111A",
-      "timestamp": "#7A88CF",
-      "divider": "#25283B"
+      "timestamp": "#8890b3",
+      "divider": "#2d2f43"
     },
     "tools": {
-      "background": "#11142880",
-      "border": "#393e5c80",
-      "headerHover": "#13172A",
-      "icon": "#7A88CF",
+      "background": "#111428",
+      "border": "#2d2f43",
+      "headerHover": "#272E49",
+      "icon": "#8890b3",
       "title": "#C0CAF5",
-      "description": "#a4adda",
+      "description": "#8890b3",
       "edit": {
         "added": "#9ECE6A",
         "addedBackground": "#9ECE6A25",

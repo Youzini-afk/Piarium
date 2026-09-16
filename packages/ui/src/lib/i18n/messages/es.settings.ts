@@ -3831,7 +3831,7 @@
 
   "settings.harness.models.noModel": "Sin modelo auxiliar",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Grises cálidos con acentos cobrizos.",
+  "settings.theme.preset.piarium.description": "Grises neutros con acentos cobrizos.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Tonos de papel y tinta con acentos cálidos.",
   "settings.theme.preset.fields-of-the-shire.name": "Campos de la Comarca",

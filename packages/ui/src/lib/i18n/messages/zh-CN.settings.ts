@@ -3832,7 +3832,7 @@
 
   "settings.harness.models.noModel": "不使用辅助模型",
   "settings.theme.preset.piarium.name": "Piarium（默认）",
-  "settings.theme.preset.piarium.description": "暖灰底色，铜橙色点缀。",
+  "settings.theme.preset.piarium.description": "中性灰底色，铜橙色点缀。",
   "settings.theme.preset.flexoki.name": "墨韵 · Flexoki",
   "settings.theme.preset.flexoki.description": "纸墨质感，搭配暖色强调。",
   "settings.theme.preset.fields-of-the-shire.name": "夏尔田野 · Fields of the Shire",

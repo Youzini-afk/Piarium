@@ -3830,7 +3830,7 @@
   "settings.harness.role.permissionJudge.description": "Оцінює запити інструментів у розумному режимі.",
   "settings.harness.models.noModel": "Без допоміжної моделі",
   "settings.theme.preset.piarium.name": "Piarium",
-  "settings.theme.preset.piarium.description": "Теплі сірі тони з мідними акцентами.",
+  "settings.theme.preset.piarium.description": "Нейтральні сірі тони з мідними акцентами.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Тони паперу й чорнила з теплими акцентами.",
   "settings.theme.preset.fields-of-the-shire.name": "Поля Ширу",

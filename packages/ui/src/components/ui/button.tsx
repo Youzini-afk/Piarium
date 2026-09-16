@@ -4,22 +4,6 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { Slot } from "@/components/ui/slot"
 
-// Flat tinted buttons: very pale tinted fill (a desaturated version of the
-// border tone) + saturated tinted border + saturated tinted text. No
-// elevation. Dark theme mixes into transparent over the surface so the tone
-// sits atop the dark background.
-const TINT_PRIMARY = [
-  "bg-[color-mix(in_srgb,var(--primary-base)_10%,var(--background))]",
-  "text-[var(--primary-base)]",
-  "border border-[color-mix(in_srgb,var(--primary-base)_12%,transparent)]",
-  "hover:bg-[color-mix(in_srgb,var(--primary-base)_16%,var(--background))]",
-  "active:bg-[color-mix(in_srgb,var(--primary-base)_22%,var(--background))]",
-  "dark:bg-[color-mix(in_srgb,var(--primary-base)_16%,transparent)]",
-  "dark:border-[color-mix(in_srgb,var(--primary-base)_20%,transparent)]",
-  "dark:hover:bg-[color-mix(in_srgb,var(--primary-base)_22%,transparent)]",
-  "dark:active:bg-[color-mix(in_srgb,var(--primary-base)_30%,transparent)]",
-].join(" ")
-
 const TINT_DESTRUCTIVE = [
   "bg-[color-mix(in_srgb,var(--status-error)_7%,var(--background))]",
   "text-[var(--status-error)]",
@@ -34,9 +18,9 @@ const TINT_DESTRUCTIVE = [
 
 const buttonVariants = cva(
   [
-    "group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-[10px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] typography-ui-label font-medium lowercase tracking-[0.01em] shrink-0 select-none",
+    "group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md typography-ui-label font-medium shrink-0 select-none",
     "transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none",
-    "focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]",
+    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
     "disabled:pointer-events-none disabled:opacity-50",
     "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
@@ -44,28 +28,19 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: TINT_PRIMARY,
+        default: "border border-transparent bg-primary text-primary-foreground hover:bg-[var(--primary-hover)] active:bg-[var(--primary-active)]",
         destructive: cn(
           TINT_DESTRUCTIVE,
           "focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
         ),
         neutral:
-          "bg-interactive-hover text-foreground border border-border/60 hover:bg-interactive-active",
+          "bg-interactive-hover text-foreground border border-border hover:bg-interactive-active",
         outline:
-          "bg-[var(--surface-elevated)] text-foreground border border-border/60 hover:bg-interactive-hover hover:text-foreground",
-        // Flat chip for "one-of-N" toggles. Unselected: hairline border + hover
-        // fill. Selected (aria-pressed): same tinted palette as the default
-        // button (pale primary fill + primary text + soft primary border).
+          "bg-transparent text-foreground border border-border hover:bg-interactive-hover hover:text-foreground",
+        // Persistent selection uses surface contrast; primary is reserved for actions.
         chip: cn(
-          "border border-border/60 bg-transparent text-foreground hover:bg-interactive-hover hover:text-foreground",
-          "aria-pressed:bg-[color-mix(in_srgb,var(--primary-base)_10%,var(--background))]",
-          "aria-pressed:text-[var(--primary-base)]",
-          "aria-pressed:border-[color-mix(in_srgb,var(--primary-base)_12%,transparent)]",
-          "aria-pressed:hover:bg-[color-mix(in_srgb,var(--primary-base)_16%,var(--background))]",
-          "aria-pressed:hover:text-[var(--primary-base)]",
-          "dark:aria-pressed:bg-[color-mix(in_srgb,var(--primary-base)_16%,transparent)]",
-          "dark:aria-pressed:border-[color-mix(in_srgb,var(--primary-base)_20%,transparent)]",
-          "dark:aria-pressed:hover:bg-[color-mix(in_srgb,var(--primary-base)_22%,transparent)]",
+          "border border-border bg-transparent text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
+          "aria-pressed:bg-interactive-active aria-pressed:text-foreground aria-pressed:border-[var(--interactive-border-hover)]",
         ),
         secondary:
           "bg-interactive-hover text-foreground hover:bg-interactive-active",
@@ -75,9 +50,9 @@ const buttonVariants = cva(
       },
       size: {
         default: "h-9 px-3.5 has-[>svg]:px-3",
-        sm: "h-8 gap-1.5 px-2.5 has-[>svg]:px-2 rounded-[9px] supports-[corner-shape:squircle]:rounded-[50px]",
-        xs: "h-6 gap-1 px-2 typography-micro has-[>svg]:px-1.5 rounded-[7px] supports-[corner-shape:squircle]:rounded-[50px]",
-        lg: "h-10 px-4 has-[>svg]:px-3.5 rounded-[12px] supports-[corner-shape:squircle]:rounded-[50px]",
+        sm: "h-8 gap-1.5 px-2.5 has-[>svg]:px-2",
+        xs: "h-6 gap-1 px-2 typography-micro has-[>svg]:px-1.5 rounded",
+        lg: "h-10 px-4 has-[>svg]:px-3.5",
         icon: "size-9",
       },
     },
