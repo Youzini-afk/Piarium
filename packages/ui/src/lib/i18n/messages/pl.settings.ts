@@ -1,5 +1,7 @@
 ﻿export const settingsDict = {
-  "contextPanel.menu.open": "Panele pracy",
+  "contextPanel.actions.openPanel": "Otwórz panel pracy",
+  "contextRail.actions.expand": "Rozwiń ikony paneli",
+  "contextRail.actions.collapse": "Zwiń ikony paneli",
   "chat.piComposer.options": "Załączniki i opcje wprowadzania",
   "sessions.sidebar.header.actions.more": "Opcje sesji i projektów",
   'settings.providers.page.openCodeGo.title': 'Śledzenie użycia OpenCode Go',

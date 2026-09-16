@@ -24,10 +24,10 @@ export type ContextSurfaceDescriptor = {
   icon: IconName;
   labelKey: I18nKey;
   /**
-   * 'always' surfaces can be opened empty from the surface menu.
+   * 'always' surfaces can be opened empty from the icon rail.
    * 'has-content' surfaces are content-driven: they need an existing tab of
    * their mode (a preview URL emitted, a split session) and stay hidden on
-   * the menu until one exists.
+   * the rail until one exists.
    */
   availability: 'always' | 'has-content';
   /** Short explanation of this surface. */

@@ -1,5 +1,7 @@
 ﻿export const settingsDict = {
-  "contextPanel.menu.open": "工作面板",
+  "contextPanel.actions.openPanel": "開啟工作面板",
+  "contextRail.actions.expand": "展開右側圖示列",
+  "contextRail.actions.collapse": "收合右側圖示列",
   "chat.piComposer.options": "附件與輸入選項",
   "sessions.sidebar.header.actions.more": "對話與專案選項",
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 用量追蹤',

@@ -40,11 +40,12 @@ and selected chips use the theme's selection color. Menus use one border
 and a restrained shadow, inputs keep a visible border on hover, and keyboard focus must remain visible.
 UI labels use 14px, metadata 13px and small badges 12px at the default scale; body text stays 15px.
 
-The desktop Agent shell exposes auxiliary views through `ContextPanelMenu` in the titlebar, without
-a permanent right icon rail. The existing per-workspace panel state owns open tabs, widths and the
-last selection; closing it does not discard that state. The menu shows all available surfaces and
-the Git change count; choosing the visible surface keeps it open. Explicit file/terminal/review
-actions can still open the panel directly. Extension slots remain available.
+The desktop Agent shell separates two titlebar controls in `ContextPanelControls`: double chevrons
+show/hide the right icon rail, and the panel icon toggles the last workspace panel directly. Rail
+visibility is a persisted UI preference and never changes panel visibility. The existing per-workspace
+panel state retains tabs, widths, expanded layout and the active tab across close/reopen; only a workspace
+without retained tabs starts with the file view. The rail switches surfaces and displays Git change
+counts. Explicit file/terminal/review actions still open the panel directly. Extension slots remain available.
 
 Default desktop navigation is 256px wide (manual widths are retained). New session and search stay
 visible; project/session management and display choices share one labeled menu. The titlebar is 40px except

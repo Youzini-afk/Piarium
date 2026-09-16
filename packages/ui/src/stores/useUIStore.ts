@@ -487,6 +487,7 @@ interface UIStore {
   hasManuallyResizedLeftSidebar: boolean;
   contextPanelByDirectory: Record<string, ContextPanelDirectoryState>;
   contextRailOrder: string[];
+  isContextRailOpen: boolean;
   contextEditorTreeVisible: boolean;
   contextEditorTreeWidth: number;
   notesPanelHeight: number;
@@ -631,6 +632,7 @@ interface UIStore {
   setSidebarOpen: (open: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setContextRailOrder: (order: string[]) => void;
+  toggleContextRail: () => void;
   toggleContextEditorTree: () => void;
   setContextEditorTreeWidth: (width: number) => void;
   openContextSurface: (directory: string, mode: ContextPanelMode) => void;
@@ -647,6 +649,7 @@ interface UIStore {
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
   closeContextPanelTab: (directory: string, tabID: string) => void;
   closeContextPanel: (directory: string) => void;
+  toggleContextPanel: (directory: string) => void;
   toggleContextPanelExpanded: (directory: string) => void;
   setContextPanelWidth: (directory: string, mode: ContextPanelMode, width: number) => void;
   setNotesPanelHeight: (height: number) => void;
@@ -813,6 +816,7 @@ export const useUIStore = create<UIStore>()(
         hasManuallyResizedLeftSidebar: false,
         contextPanelByDirectory: {},
         contextRailOrder: [],
+        isContextRailOpen: false,
         contextEditorTreeVisible: true,
         contextEditorTreeWidth: 240,
         notesPanelHeight: 112,
@@ -990,6 +994,8 @@ export const useUIStore = create<UIStore>()(
           set({ sidebarWidth: width, hasManuallyResizedLeftSidebar: true });
         },
 
+        toggleContextRail: () => set((state) => ({ isContextRailOpen: !state.isContextRailOpen })),
+
         setContextRailOrder: (order) => {
           const sanitized = Array.isArray(order)
             ? order.filter((id, index) => typeof id === 'string' && id.trim() !== '' && order.indexOf(id) === index)
@@ -1037,7 +1043,7 @@ export const useUIStore = create<UIStore>()(
           }
 
           // Content-driven modes need a payload (a preview URL or session);
-          // the surface menu hides them until content exists. 'file' opens
+          // the icon rail hides them until content exists. 'file' opens
           // an empty editor whose embedded tree picks the first file.
           if (mode === 'preview' || mode === 'chat') {
             return;
@@ -1336,6 +1342,23 @@ export const useUIStore = create<UIStore>()(
 
             return { contextPanelByDirectory: clampContextPanelRoots(byDirectory, 20) };
           });
+        },
+
+        toggleContextPanel: (directory) => {
+          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
+          if (!normalizedDirectory) return;
+          const state = get();
+          const current = state.contextPanelByDirectory[normalizedDirectory];
+          if (current?.isOpen) {
+            state.closeContextPanel(normalizedDirectory);
+            return;
+          }
+          const activeTabId = resolveActiveContextPanelTabID(current?.tabs ?? [], current?.activeTabId ?? null);
+          if (activeTabId) {
+            state.setActiveContextPanelTab(normalizedDirectory, activeTabId);
+          } else {
+            state.openContextSurface(normalizedDirectory, 'file');
+          }
         },
 
         toggleContextPanelExpanded: (directory) => {
@@ -2257,6 +2280,7 @@ export const useUIStore = create<UIStore>()(
           sidebarWidth: state.sidebarWidth,
           contextPanelByDirectory: state.contextPanelByDirectory,
           contextRailOrder: state.contextRailOrder,
+          isContextRailOpen: state.isContextRailOpen,
           contextEditorTreeVisible: state.contextEditorTreeVisible,
           contextEditorTreeWidth: state.contextEditorTreeWidth,
           notesPanelHeight: state.notesPanelHeight,

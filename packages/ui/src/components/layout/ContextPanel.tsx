@@ -2628,7 +2628,7 @@ export const ContextPanel: React.FC = () => {
     postEmbeddedVisibilityToChats();
   }, [darkThemeId, lightThemeId, postChatSettingsSyncToEmbeddedChat, postEmbeddedVisibilityToChats, postThemeSyncToEmbeddedChat, tabs, themeMode]);
 
-  // The menu switches between surfaces (modes); the in-panel strip only lists
+  // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
   // preview targets).
   const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview';

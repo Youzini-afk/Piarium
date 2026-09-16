@@ -17,7 +17,7 @@ import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/s
 
 import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
-import { ContextPanelMenu } from './ContextPanelMenu';
+import { ContextPanelControls } from './ContextPanelControls';
 import { usePiSessionStore } from '@/stores/usePiSessionStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
@@ -2070,7 +2070,7 @@ export const Header: React.FC<HeaderProps> = ({
             />
           ) : null}
           {desktopSidebarActions}
-          <ContextPanelMenu />
+          <ContextPanelControls />
           <WindowsWindowControls visible={usesFramelessChrome && windowControlsSide === 'right'} position="right" />
         </div>
       </div>

@@ -6,6 +6,7 @@ import { SidebarTopBar } from './SidebarTopBar';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
+import { ContextPanelRail } from './ContextPanelRail';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CommandPalette } from '../ui/CommandPalette';
 import { HelpDialog } from '../ui/HelpDialog';
@@ -50,6 +51,7 @@ const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/Se
 
 export const MainLayout: React.FC = () => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
+    const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
     const setIsMobile = useUIStore((state) => state.setIsMobile);
     const isSessionSwitcherOpen = useUIStore((state) => state.isSessionSwitcherOpen);
@@ -456,6 +458,7 @@ export const MainLayout: React.FC = () => {
                                 </div>
                                 <div data-page-scroll-lock="true">
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.before" />
+                                    {isContextRailOpen ? <ErrorBoundary><ContextPanelRail /></ErrorBoundary> : null}
                                     <WorkbenchContributionSlot kind="panel" slot="workbench.bottom.after" />
                                 </div>
                             </div>

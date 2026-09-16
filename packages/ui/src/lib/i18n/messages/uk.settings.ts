@@ -1,5 +1,7 @@
 ﻿export const settingsDict = {
-  "contextPanel.menu.open": "Робочі панелі",
+  "contextPanel.actions.openPanel": "Відкрити робочу панель",
+  "contextRail.actions.expand": "Розгорнути значки панелей",
+  "contextRail.actions.collapse": "Згорнути значки панелей",
   "chat.piComposer.options": "Вкладення та параметри введення",
   "sessions.sidebar.header.actions.more": "Параметри сеансів і проєктів",
   'settings.providers.page.openCodeGo.title': 'Відстеження використання OpenCode Go',

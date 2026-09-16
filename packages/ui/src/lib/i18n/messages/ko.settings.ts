@@ -1,5 +1,7 @@
 ﻿export const settingsDict = {
-  "contextPanel.menu.open": "작업 패널",
+  "contextPanel.actions.openPanel": "작업 패널 열기",
+  "contextRail.actions.expand": "패널 아이콘 펼치기",
+  "contextRail.actions.collapse": "패널 아이콘 접기",
   "chat.piComposer.options": "첨부 및 입력 옵션",
   "sessions.sidebar.header.actions.more": "세션 및 프로젝트 옵션",
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 사용량 추적',

@@ -2,7 +2,9 @@
 
 export const settingsDict = {
   ...englishSettingsDict,
-  "contextPanel.menu.open": "ワークスペースパネル",
+  "contextPanel.actions.openPanel": "ワークスペースパネルを開く",
+  "contextRail.actions.expand": "パネルアイコンを展開",
+  "contextRail.actions.collapse": "パネルアイコンを折りたたむ",
   "chat.piComposer.options": "添付と入力のオプション",
   "sessions.sidebar.header.actions.more": "セッションとプロジェクトのオプション",
   'settings.providers.page.openCodeGo.title': 'OpenCode Go 使用量追跡',
