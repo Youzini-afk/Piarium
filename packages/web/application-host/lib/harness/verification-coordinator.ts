@@ -138,8 +138,8 @@ const sameRoot = (left: string, right: string): boolean => normalizedRoot(left) 
 const reviewIdentityMatches = (left: ResultReviewRecord, right: ResultReviewRecord): boolean => (
   left.reviewThreadId !== undefined
   && right.reviewThreadId === left.reviewThreadId
-  && left.reviewRunId !== undefined
-  && right.reviewRunId === left.reviewRunId
+  // A queued record has no Run yet; pin the Run identity only once recorded.
+  && (left.reviewRunId === undefined || right.reviewRunId === left.reviewRunId)
 );
 
 export function createVerificationCoordinator(initialRuntime?: VerificationCoordinatorRuntime) {
@@ -554,9 +554,13 @@ export function createVerificationCoordinator(initialRuntime?: VerificationCoord
     const existing = await store.getReviewRecord(threadId, record.resultRevision);
     if (existing) {
       if (existing.status === "completed") return projectFromRootStore(store, threadId, currentResultRevision);
-      if (record.status === "running") {
-        if (existing.status === "running") return projectFromRootStore(store, threadId, currentResultRevision);
-      } else if (existing.status !== "running") {
+      const inFlight = (status: ResultReviewRecord["status"]): boolean => status === "queued" || status === "running";
+      if (inFlight(record.status)) {
+        // In-flight records never regress a further-along state.
+        if (existing.status === "running" || (existing.status === "queued" && record.status === "queued")) {
+          return projectFromRootStore(store, threadId, currentResultRevision);
+        }
+      } else if (!inFlight(existing.status)) {
         return projectFromRootStore(store, threadId, currentResultRevision);
       } else if (existing.reviewThreadId || existing.reviewRunId) {
         if (!reviewIdentityMatches(existing, record)) return projectFromRootStore(store, threadId, currentResultRevision);

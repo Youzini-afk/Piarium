@@ -52,16 +52,19 @@ const ThreadWaitParams = Type.Object({
 });
 
 const ThreadSendParams = Type.Object({
-  threadId: Type.String(),
+  threadId: Type.Optional(Type.String({ description: "Target thread — a child, sibling, or the parent thread. Omit when to=parent" })),
+  to: Type.Optional(Type.Literal("parent", { description: "Send to the caller thread's own parent instead of a threadId" })),
   message: Type.String(),
   kind: Type.Optional(Type.Union([
     Type.Literal("inform"),
     Type.Literal("request"),
-  ], { description: "inform only delivers the message; request asks for execution — on a settled thread it starts a new Run" })),
+  ], { description: "inform only delivers the message without waking a waiting thread; request asks for execution — on a settled thread it starts a new Run" })),
   context: Type.Optional(Type.Union([
     Type.Literal("continue"),
     Type.Literal("fresh"),
   ], { description: "For a request on a settled thread: continue resumes its retained session (default); fresh rebuilds the input on a new session" })),
+  requestId: Type.Optional(Type.String({ description: "Idempotency key — a retry with the same id returns the recorded outcome instead of duplicating delivery" })),
+  replyTo: Type.Optional(Type.String({ description: "The requestId of a request you are answering — completes the requester's wait" })),
 });
 
 const ThreadReadParams = Type.Object({
@@ -250,7 +253,7 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
   return defineTool({
     name: "send",
     label: "Send",
-    description: "Send a message to a sub-agent thread. Wakes idle or waiting-for-input threads. kind: 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). Message is marked as from parent agent.",
+    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait.",
     promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
     promptGuidelines: [],
     parameters: ThreadSendParams,
@@ -258,11 +261,14 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
         const result = await bridge.request<"thread.send">("thread.send", {
-          threadId: params.threadId,
+          ...(params.threadId !== undefined ? { threadId: params.threadId } : {}),
+          ...(params.to !== undefined ? { to: params.to } : {}),
           message: params.message,
           from: "parent-agent",
           ...(params.kind !== undefined ? { kind: params.kind } : {}),
           ...(params.context !== undefined ? { context: params.context } : {}),
+          ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+          ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
         });
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;

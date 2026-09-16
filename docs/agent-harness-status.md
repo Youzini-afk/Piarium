@@ -25,15 +25,22 @@ memory-mode UI 与旧协议字段已删除；`harness.context` 设置取代 `har
 后台准备。摘要质量与真实缓存收益在使用中观察，faux 只证明接线。
 
 **D-285/D-286部分实施中。** D-286的上下文侧已随D-284落地（预算/摘要/回读/原文保留见上）；`fresh-input`构造接缝
-（任务、仍有效要求、成果、未决项、历史锚点）已由settled线程的`fresh`新Run消费。D-285的3.18A/B已落地：
+（任务、仍有效要求、成果、未决项、历史锚点）已由settled线程的`fresh`新Run消费。D-285的3.18A/B/C已落地：
 dispatch改为任务中心（`task`必填、`preset`可选、`input`可选`task|inherit`），普通派发继承发起者当前模型与活动工具，
 `shared`只作显式选择，Run启动时冻结模型/工具/权限/scope/worktree/prompt片段/inputOrigin（`task|inherit|continue|fresh`），
 Thread持久化与UI投影改用`preset`（旧`role`记录仅在历史导入边界读取），嵌套preset-less派发的工具声明不得超出父Run
 冻结allowlist，自动review默认关闭。`input:"inherit"`在派发时经Host接缝捕获父会话已提交输入（已提交摘要+边界后
 保留原文，有界渲染），固化进manifest并随dequeue/spawn进入子会话提示；`send`的`kind:"request"`对settled实现线程
 新建Run——`continue`重开保留会话原样续跑，`fresh`用协议`assembleFreshInput`重建输入开新会话，旧转录经
-`previewSessionEntries`读取、工作现场与结果保留。仍待实施：inform/request定向路由的完整语义（replyTo、授权兄弟、
-跨根拒绝）、同根共享执行调度与等待让出、分段成果与依赖更新；countActive仍按parent分别统计，waiting仍不释放名额。
+`previewSessionEntries`读取、工作现场与结果保留。3.18C已落地：`send`支持`inform`/`request`/`replyTo`定向消息，
+目标范围从实际根任务关系解析（父/子/同根兄弟，`to:"parent"`解析父Thread或父会话），跨根与无关目标拒绝；消息作为
+耐久`in`/`out`记录持久化在Thread上，`requestId`幂等重试观察已记录结局而不重复投递/执行，`replyTo`解析实际请求并
+解除`waitingFor:"thread"`等待；`inform`对运行中目标经runtime投递、对settled/排队目标按held停放、不新建Run，
+`request`对settled线程经`threadContinueRun`准入续做、名额满时把`pendingContinuation`停在Thread上由dequeue提升；
+执行准入按同根（`countActiveInRoot`）统计，`waitingFor:"thread"`的等待让出名额，`setAttention`/`endRun`触发
+`tryDequeue`提升排队线程或停放的续做，`onAdmissionFreed`回调驱动lost恢复复查；wait服务对Thread调用方标记依赖
+等待（先标记后订阅，自身标记不唤醒自己）、返回时按同一边界flush held消息并重新准入。仍待实施：分段成果与依赖
+纳入父修订（3.18D）、UI线程控件与旧路径收口（3.18E）。
 
 **D-282 已完成 R0/R6，并据此完成阶段 R。** R0–R6 的生产责任均已按各自可执行契约接管：Rust kernel 统一拥有工作状态/恢复元数据、文件资源与物化、受管进程/PTY、固定视图文件与结构计算；TypeScript Application Host 保留产品策略、公开 API、Documents/Registry 协调、知识与模型编排，Pi worker 保留 Agent loop、provider、会话和扩展。R0 的 request-credit、取消/断线和发行身份，R6 的 Desktop/Web/云/VS Code 产物、旧原生依赖与测试实现清理、真实 surface 纵切及资源测量均已进入默认生产/发行路径。阶段 R 不再是当前实施主线。
 
@@ -159,7 +166,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **2.4A/B（D-284）** 请求预算与后台摘要准备 | pi-host / protocol | ✓ | ✓ | `context-preparation.test.ts`（12：水位下不准备、固定范围/分支/模型绑定、候选失效条件、在飞复用、split-turn 前缀、失败后不卡死）；`session-e2e.test.ts` context preparation 链（真 Pi+faux：后台摘要挂起时前台回合完成、压缩复用候选不二次摘要、schema-only 工具+toolChoice none+无执行器、同 system prompt） | ✓（`harness.context.preparation.enabled` 默认开，可独立关闭） | 候选缺失/失效时同步准备；摘要失败不截断历史、不带病提交 | 软水位 75%/规划目标 60% 为可配置默认非实测最优；faux 不证明真实模型质量或缓存收益；第二次准备由压缩后仍超水位触发属合法行为 |
 | **2.6A/B（D-284）** 按需切换、history 与旧消费者收口 | pi-host / host / ui | ✓ | ✓ | 同上 e2e（压缩提交→`compaction.after`→history 读回被摘要原文→后续真实回合用回读材料）；`history-fresh.test.ts`（10：分支总览、原文回读、query+path 过滤、未知 entry、上限提示）；keeper/coverage/memory_edit/memory-mode UI/旧协议字段与 `memory.blocks.*`/`compaction.before` 服务已删除 | ✓ | 容量不足候选未完则等待同次调用，不先截断；摘要请求自身超窗沿同一机制收束 | Zone 2/知识/线程观察基线只在真实 `session_compact` 后重置，候选 ready 不动游标；retired `memory.mode:"off"` 作为迁移读关闭后台准备 |
 | **上下文完整取舍/fresh（D-286）** | pi-host / host / ui | 部分 | 部分 | `history-fresh.test.ts`（`buildFreshInput`：任务/有效要求/成果/未决/锚点、限量截断、无携带价值时诚实空输入、session goal 兜底）；`host/thread-runtime.test.ts`（fresh Run 经 `assembleFreshInput` 重建输入开新会话、旧转录 `readEntries` 读取、worktree 复用） | — | — | fresh 构造接缝已实现并由 settled 线程 `fresh` Run 消费；不依赖新评分/清洗模型 |
-| **3.18A–E（D-285）** 可续做任务线程与定向协作 | protocol / pi-host / host / ui | — | Partial（3.18A/B） | `protocol/test/harness-threads.test.ts`（preset/frozen契约）；`host/presets.test.ts`（可选预设解析、无便宜/强标签）；`host/thread-services.test.ts`（preset-less继承、显式shared、未知preset拒绝、嵌套工具越权denied、inherit捕获、request→settled新Run、context无request拒绝）；`host/thread-runtime.test.ts`（continue重开保留会话、fresh重建输入、无保留会话诚实失败、active拒绝、captureInputContext渲染）；`host/dequeue-permissions.test.ts`（排队inherit线程的frozen origin+继承上下文进spawn提示）；`host/thread-registry.test.ts`（frozen写入、legacy role归一化）；`host/review-sensor.test.ts`（review默认关）；`pi-host/test/harness/phase3b-e2e.test.ts`（preset askBefore） | — | 任务中心派发、可选预设、Run冻结、preset持久化/UI、嵌套工具约束、review默认关、task/inherit输入与continue/fresh续做已上线；定向路由完整语义、共享准入、分段成果仍走旧语义 | 3.18C–E待实施；角色旧路径已删除，无双写 |
+| **3.18A–E（D-285）** 可续做任务线程与定向协作 | protocol / pi-host / host / ui | — | Partial（3.18A–C） | `protocol/test/harness-threads.test.ts`（preset/frozen契约）；`host/presets.test.ts`（可选预设解析、无便宜/强标签）；`host/thread-services.test.ts`（preset-less继承、显式shared、未知preset拒绝、嵌套工具越权denied、inherit捕获、request→settled新Run、context无request拒绝、inform运行中投递、waiting目标held/request唤醒投递、replyTo解析双账本并解除等待、重复requestId不重投、跨根/无关目标denied、to:parent与兄弟可达、满额停放scheduled、lost重准入、queued/archived/not-found状态、wait让出名额与返回重准入、答复唤醒等待者）；`host/thread-runtime.test.ts`（continue重开保留会话、fresh重建输入、无保留会话诚实失败、active拒绝、满额pendingContinuation停放、held消息折进新Run输入、captureInputContext渲染）；`host/thread-registry.test.ts`（frozen写入、legacy role归一化、pendingContinuation经同根预算提升、嵌套同根计数、等待让位提升排队者、消息与停放续做跨重载持久化、畸形消息记录corrupt拒绝、空位onAdmissionFreed通知、消息幂等记录与原子一次交付）；`host/dequeue-permissions.test.ts`（排队inherit线程的frozen origin+继承上下文进spawn提示）；`host/review-sensor.test.ts`（review默认关）；`pi-host/test/harness/phase3b-e2e.test.ts`（preset askBefore） | — | 任务中心派发、可选预设、Run冻结、preset持久化/UI、嵌套工具约束、review默认关、task/inherit输入、continue/fresh续做、inform/request/replyTo定向消息、耐久消息账本与幂等、同根共享执行名额、等待让出与dequeue/续做/lost恢复统一准入已上线；分段成果与依赖纳入父修订仍待实施 | 3.18D–E待实施；角色旧路径已删除，无双写 |
 | **3.1** 符号图采集器与查询 | host knowledge | ✓ | ✓（defines + imports/connects/associates + 解析出的 references/calls；explore 路径候选 + 摘录注解 + `related`） | `knowledge/store.test.ts`（节点/边、代际、match、反向 import、紧凑候选 close/reopen 后补关系；resolved relation 行的固定/未固定、重解析替换、目标删除级联、staleTarget、generation 消亡；D-246 anchor 批次重解析两缩一缩空、不同 anchor 隔离）；`knowledge/relations.test.ts`（真 supervisor+fixture 的 collect→持久化、piggyback record、无库降级）；`import-resolve.test.ts`；`symbol-runtime.test.ts`；`catalog-scan.test.ts`（并发扫描合并、无事件正文修改后重扫、连接移除/恢复、不重采集消费文件）；`typescript-service.test.ts`（D-246：显式根、嵌套首文件 cross-file caller、无根回退 cwd 不猜、setWorkspaceRoot 生命周期）；`related-scope.test.ts`（D-246：scope 过滤定义/引用/importers/connections、anchor 外拒绝、partial 组合状态、pathInRoots 一致性） | ✓（随 Documents mutation + 打开后火忘冷扫描；resolved 行由查询期 collector 与 lsp 导航回写） | 未知语言只 touch file；结构 unavailable 保留最后图；范围绑定磁盘 revision，脏缓冲不入图——resolved 行同样只持久化磁盘绑定答案，跨文件站点一律 unpinned、目标 revision 移动报 staleTarget（D-240）。未确认关联仅存在 file metadata，不建 link 节点 | D-236 已移除同名闸门再访的重读/重解析；extractor 3 使旧目录下次重采集。当前 2520 文件冷建 185767.1 ms、显式未变重扫 10314.095 ms，详见下方观察；没有同语料改前对照。D-140/D-141 的 18.4/4.8 分钟保留为历史。仍不冷启 LSP——resolved 行只在真实查询驱动下由已运行的语言视图产生；目录限 TS/TSX/JS/JSX。D-237 已补完整重扫的外部删除对账：missing 确认、代际条件删除与排队取消；失败/截断/未知 inventory 保留旧图。D-240 已接 references/calls 边与 relation collector；D-246 返工修正 LSP 根推断（来自 initialize 而非首个文件父目录）、related/explore actor scope 贯穿、权威 anchor 批次重解析（清掉消失 site）、partial 组合状态、explore 公开链暴露 findReferences/findCallers/findCalls；PageRank/多跳仍未做。完整桌面冷建未实测 |
 | **3.15** 快速 explore：查询上下文、分组计划、成组选段与局部补查（D-175–D-189） | protocol / host / pi-host | ✓ | ✓ | `explore-query-run.test.ts`（start 到达即读、原问题词法与慢语义并行、同文件晚到语义重建、稳定 viewId、required 组、单元来源排名、来源终态与冻结）；`explore-query-services.test.ts`（固定来源、完整 actor、受限 scope、取消与响应未送达、fixed roots 传递）；`router.test.ts` / `service-host.test.ts`（授权 cancel、request actor key、session 换代清理）；`semantic/runtime.test.ts`（查询取消停止等待）；`explore-model.test.ts` / `explore-tool.test.ts` / `host-services-bridge.test.ts`（模型输入、Host accepted、补查失败保留首选、timeout/dispose 实传 cancel）；`session-e2e.test.ts`「runs plan expressions through ModelRuntime…」（公开 `explore` → `completeSimple` → 新表达搜索 → 最终原文）；`knowledge/store.test.ts` / `knowledge/semantic/store.test.ts`（scope 内 Top-K、`.` 快路径、文档更新删除） | ✓（公开 `explore` 默认；配置 `models.explore` 后同一路径启用模型，未配置保留算法/向量） | 未配置或调用失败保留已取得材料，不回退主模型；取消/失败/不可用/无命中/截止未完成分列 | 真实 `models.explore` 质量与墙钟未观察，不作为启用门。120s/8s 是尚未按真实 provider 定标的工作预算，不是 SLO。D-189 已让受限 scope 的图/向量后端在有效 roots 内计算 Top-K，reverse importer 在截断前过滤；`.` / 空 roots 保留未受限语义快路径。native ONNX 当前批不能被 JS signal 硬抢占，取消会停止等待并丢弃迟到结果。远程嵌入、向量复用、语义草稿覆盖与专用 reranker 见 3.16B–E；router 取消与超时目前同为 `timeout` 码；`harness-e2e` #3 是既有 D-103 |
 | **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（user/operator-only resolver、项目 provider 重定向隔离、binding 竞态、cancel→fetch、endpoint/credential space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`（旧手工 consumer 链）；`semantic-workspace.e2e.test.ts`（D-235：共用生产装配、真实 SessionHost/HTTP adapter、双执行目录路由、无效配置/失败状态）；`workspace-runtime.test.ts`（配置与取消生命周期） | ✓（未配置远程时本地 MiniLM；配置有效即走远程同一 space） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库语义召回已按 2.8 / D-196 单独接线，不回退 MiniLM。Host 从不接收或持久化 provider secret |
@@ -279,7 +286,7 @@ bytes、catalog 文件和 WAL 文件大小，并暴露 operation/temporary owner
 ## 当前缺口与后续顺序
 
 **D-284上下文阶段已完成（keeper/takeover 已删除，见矩阵 2.4A/B、2.6A/B）。当前主线是D-285任务线程与D-286的
-线程侧消费（task/inherit/continue/fresh），随后推进外部runtime / research profile。** 顺序见plan3.18A–E。
+线程侧消费（3.18A–C已落地，D分段成果与E收口待实施），随后推进外部runtime / research profile。** 顺序见plan3.18A–E。
 本轮核对的决定性入口：
 
 - `context` hook 已在每次真实请求前（含回合内继续）做预算检查；摘要请求沿同一 ModelRuntime 派生，保留真实
@@ -288,13 +295,16 @@ bytes、catalog 文件和 WAL 文件大小，并暴露 operation/temporary owner
   计划/用户笔记/accepted knowledge 保留在 Host block store，不再按 memory 名称隐藏。
 - 未取得新方案的真实摘要耗时、缓存命中或首次续接延迟；75% 准备水位与 60% 压缩后目标是已明确的首版工程默认，不是测量结论。
 
-D-285现状对照（3.18B后）：`harness-presets.ts`绑定模型/工具/worktree，`thread-tools.ts`的dispatch只须`task`、
-`preset`/`input`可选，`send`带`kind`/`context`；Run已写入frozen配置（含全部四类inputOrigin）；`harness-settings.ts`
+D-285现状对照（3.18C后）：`harness-presets.ts`绑定模型/工具/worktree，`thread-tools.ts`的dispatch只须`task`、
+`preset`/`input`可选，`send`带`kind`/`context`/`requestId`/`replyTo`/`to`；Run已写入frozen配置（含全部四类inputOrigin）；`harness-settings.ts`
 默认自动review关闭。`thread-runtime.ts`的`captureInputContext`把父会话已提交摘要+边界后原文渲染为有界继承上下文，
-`continueRun`对settled线程按`continue`/`fresh`分路（重开保留会话 vs 新会话+`assembleFreshInput`输入）；
-`thread-services.ts`的send服务把`kind:"request"`路由到新Run，`inform`仍只投active会话。
-`thread-registry.ts:countActive/tryDequeue`仍按parent统计且startRun自身无统一准入。
-代码调度不是已实现共享池的父等子闭锁；其当前问题是嵌套按层扩张和等待不让出执行名额，改共享池时需一起解决等待进展。
+`continueRun`对settled线程按`continue`/`fresh`分路（重开保留会话 vs 新会话+`assembleFreshInput`输入），名额满时把
+`pendingContinuation`停在Thread上由dequeue提升、held消息折进新Run输入；`thread-services.ts`的send服务按关系授权
+（子/父/同根兄弟），`inform`对运行中目标投递、对settled/排队目标held停放，`request`唤醒等待或对settled续做，
+`replyTo`解析双账本并解除`waitingFor:"thread"`。`thread-registry.ts`执行准入按`countActiveInRoot`同根统计，
+`waitingFor:"thread"`让出名额，`setAttention`/`endRun`触发`tryDequeue`（按`pendingContinuation.at`/`createdAt` FIFO），
+`onAdmissionFreed`驱动lost恢复复查；wait服务对Thread调用方先标记依赖等待后订阅、返回时按边界flush并重新准入。
+startRun自身仍不做准入判断——准入统一在dispatch/dequeue/continueRun/resumeLost层，与3.18C设计一致。
 
 **3.15 A–D 已接入生产调用链（D-176–D-189）。** 公开入口仍是 pi-host `explore`。Host 持有短生命周期查询：开始时固定问题、
 范围与 `inputContext`，原问题词法/图/语义与计划模型并行；新表达真正执行搜索；候选模型看到最终挑选前的当前单元；Host

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createThreadRegistry } from "./thread-registry.js";
-import { createThreadDispatchService, createThreadKillService, createThreadMergeService, createThreadSendService } from "./thread-services.js";
+import { createThreadDispatchService, createThreadKillService, createThreadMergeService, createThreadSendService, createThreadWaitService } from "./thread-services.js";
 import { createThreadRuntime, ThreadRuntimeError } from "./thread-runtime.js";
 import type { AgentInputContext, SessionEntriesResult, SessionSnapshot, SessionStats, SessionSummary } from "@piarium/protocol";
 
@@ -233,7 +233,7 @@ describe("thread services", () => {
     const service = createThreadDispatchService({
       threadRegistry: {
         maxConcurrency: 12,
-        countActive: vi.fn(async () => 0),
+        countActiveInRoot: vi.fn(async () => 0),
         createThread: vi.fn(),
       },
       threadSpawnSession: vi.fn(),
@@ -312,7 +312,7 @@ describe("thread services", () => {
     const service = createThreadDispatchService({
       threadRegistry: {
         maxConcurrency: 12,
-        countActive: vi.fn(async () => 0),
+        countActiveInRoot: vi.fn(async () => 0),
         createThread: vi.fn(),
       },
       threadSpawnSession: vi.fn(),
@@ -377,7 +377,7 @@ describe("thread services", () => {
     const service = createThreadDispatchService({
       threadRegistry: {
         maxConcurrency: 12,
-        countActive: vi.fn(async () => 0),
+        countActiveInRoot: vi.fn(async () => 0),
         createThread: vi.fn(async () => { throw new Error("catalog write failed"); }),
       },
       threadSpawnSession: vi.fn(),
@@ -432,7 +432,9 @@ describe("thread services", () => {
         task: "Read the parent-frozen fact",
         model: { providerId: "test", modelId: "retrieval" },
       }, nestedCtx);
-      expect(first.queued).toBe(false);
+      // The owner itself occupies the shared root budget (concurrency 1), so
+      // every nested dispatch queues until the owner yields its slot (3.18C).
+      expect(first.queued).toBe(true);
       expect(queued.queued).toBe(true);
       expect(queuedRetrieval.queued).toBe(true);
       const retrieval = await registry.getThread(
@@ -454,7 +456,8 @@ describe("thread services", () => {
       expect(await registry.listThreads("workspace-1", { kind: "session", id: "root-session" })).toEqual([
         expect.objectContaining({ id: parent.id }),
       ]);
-      expect(spawn).toHaveBeenCalledOnce();
+      // Nothing spawns while the owner still holds the shared budget.
+      expect(spawn).not.toHaveBeenCalled();
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });
@@ -1006,13 +1009,13 @@ describe("thread services", () => {
         kind: "request",
       }, serviceContext());
       expect(result).toMatchObject({ accepted: true, lifecycle: "active", runId: "run-2" });
-      expect(continueRun).toHaveBeenCalledWith({
+      expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
         workspaceId: "workspace-1",
         parent: { kind: "session", id: "parent-1" },
         threadId: thread.id,
         mode: "continue",
         task: "Apply the review feedback",
-      });
+      }));
       expect(sendToSession).not.toHaveBeenCalled();
     } finally {
       await registry.dispose();
@@ -1045,22 +1048,29 @@ describe("thread services", () => {
     }
   });
 
-  it("rejects a plain send to a settled Thread and context without a request", async () => {
+  it("holds a plain inform to a settled Thread and rejects context without a request", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-settled-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
     const continueRun = vi.fn(async () => ({ runId: "run-4" }));
+    const sendToSession = vi.fn(async () => {});
     const service = createThreadSendService({
       threadRegistry: registry,
-      threadSendToSession: vi.fn(async () => {}),
+      threadSendToSession: sendToSession,
       threadContinueRun: continueRun,
     } as never);
     try {
       const { thread } = await settledThread(registry);
-      await expect(service.handle({
+      // inform is recorded for the next Run's input — it never starts one.
+      const held = await service.handle({
         threadId: thread.id,
         message: "still there?",
         from: "parent-agent",
-      }, serviceContext())).rejects.toMatchObject({ harnessCode: "unavailable" });
+      }, serviceContext());
+      expect(held).toMatchObject({ accepted: true, lifecycle: "settled", delivery: "held" });
+      const recorded = await registry.getThreadById("workspace-1", thread.id);
+      expect(recorded?.messages).toEqual([
+        expect.objectContaining({ direction: "in", kind: "inform", text: "still there?", status: "held" }),
+      ]);
       await expect(service.handle({
         threadId: thread.id,
         message: "still there?",
@@ -1068,6 +1078,401 @@ describe("thread services", () => {
         context: "fresh",
       }, serviceContext())).rejects.toMatchObject({ harnessCode: "invalid-params" });
       expect(continueRun).not.toHaveBeenCalled();
+      expect(sendToSession).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  // --- Directed messaging and shared root admission (D-285.6 / 3.18C) ---
+
+  const runningThread = async (
+    registry: ReturnType<typeof createThreadRegistry>,
+    parent: { kind: "session" | "thread"; id: string },
+    brief: string,
+    concurrency = 2,
+  ) => {
+    const thread = await registry.createThread({
+      workspaceId: "workspace-1",
+      parent,
+      brief,
+      kind: "implementation" as const,
+      createdBy: "agent" as const,
+      concurrency,
+      autoRun: true,
+      worktree: "isolated" as const,
+      tools: ["send", "wait", "dispatch", "read", "edit"],
+      permissions: {},
+    });
+    const run = await registry.startRun("workspace-1", thread.id);
+    const sessionId = `session-${thread.id}`;
+    await registry.markRunRunning("workspace-1", thread.id, run.id, sessionId);
+    return { thread, run, sessionId };
+  };
+
+  const threadCtx = (sessionId: string) => ({
+    ...serviceContext(),
+    sessionId,
+    actor: { ...serviceContext().actor, sessionId },
+  });
+
+  it("delivers inform to a running target without starting a Run", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-inform-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+      threadContinueRun: vi.fn(),
+    } as never);
+    try {
+      const { thread, run, sessionId } = await runningThread(registry, { kind: "session", id: "parent-1" }, "work");
+      const result = await service.handle(
+        { threadId: thread.id, message: "note this", from: "parent-agent" },
+        serviceContext(),
+      );
+      expect(result).toMatchObject({ accepted: true, lifecycle: "active", delivery: "delivered", runId: run.id });
+      expect(sendToSession).toHaveBeenCalledWith(sessionId, "note this", { from: "the parent agent" });
+      expect((await registry.getThreadById("workspace-1", thread.id))?.messages).toEqual([
+        expect.objectContaining({ direction: "in", kind: "inform", status: "delivered" }),
+      ]);
+      const runs = await registry.listRuns("workspace-1", thread.id);
+      expect(runs).toHaveLength(1);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("holds inform for a waiting target and delivers a request that clears the wait", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-waiting-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+    } as never);
+    try {
+      const { thread, sessionId } = await runningThread(registry, { kind: "session", id: "parent-1" }, "work");
+      await registry.setAttention("workspace-1", thread.id, "thread", { kind: "thread", text: "Waiting on a child" });
+      const held = await service.handle(
+        { threadId: thread.id, message: "fyi only", from: "parent-agent" },
+        serviceContext(),
+      );
+      expect(held).toMatchObject({ accepted: true, delivery: "held" });
+      expect(sendToSession).not.toHaveBeenCalled();
+      const woken = await service.handle(
+        { threadId: thread.id, message: "do more", from: "parent-agent", kind: "request", requestId: "req-wake" },
+        serviceContext(),
+      );
+      expect(woken).toMatchObject({ accepted: true, delivery: "delivered", attention: "none" });
+      // Held messages flush ahead of the request at the same boundary.
+      expect(sendToSession).toHaveBeenNthCalledWith(1, sessionId, "fyi only", { from: "the parent agent" });
+      expect(sendToSession).toHaveBeenNthCalledWith(2, sessionId, "do more", { from: "the parent agent", requestId: "req-wake" });
+      expect((await registry.getThreadById("workspace-1", thread.id))?.attention).toBe("none");
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("resolves the actual request on replyTo and completes the requester's wait", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-reply-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+    } as never);
+    try {
+      const asker = await runningThread(registry, { kind: "session", id: "root-1" }, "asker");
+      const answerer = await runningThread(registry, { kind: "session", id: "root-1" }, "answerer");
+      // Asker requests an answer from its sibling.
+      const sent = await service.handle(
+        { threadId: answerer.thread.id, message: "what is the count?", from: "parent-agent", kind: "request", requestId: "req-1" },
+        threadCtx(asker.sessionId),
+      );
+      expect(sent).toMatchObject({ accepted: true, delivery: "delivered", messageId: "req-1" });
+      // The asker waits on the dependency and yields its slot.
+      await registry.setAttention("workspace-1", asker.thread.id, "thread", { kind: "thread", text: "Waiting on answerer" });
+      // Sibling answers with replyTo — the reply resolves both ledgers and clears the wait.
+      const reply = await service.handle(
+        { threadId: asker.thread.id, message: "count is 3", from: "parent-agent", replyTo: "req-1" },
+        threadCtx(answerer.sessionId),
+      );
+      expect(reply).toMatchObject({ accepted: true, delivery: "delivered", attention: "none" });
+      expect(sendToSession).toHaveBeenLastCalledWith(asker.sessionId, "count is 3", { from: `thread ${answerer.thread.id}` });
+      const askerNow = await registry.getThreadById("workspace-1", asker.thread.id);
+      expect(askerNow?.attention).toBe("none");
+      expect(askerNow?.waitingFor).toBeNull();
+      expect(askerNow?.messages?.find((m) => m.id === "req-1" && m.direction === "out")?.status).toBe("resolved");
+      const answererNow = await registry.getThreadById("workspace-1", answerer.thread.id);
+      expect(answererNow?.messages?.find((m) => m.id === "req-1" && m.direction === "in")?.status).toBe("resolved");
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("returns the recorded outcome for a duplicate requestId instead of re-delivering", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-dedupe-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+    } as never);
+    try {
+      const { thread } = await runningThread(registry, { kind: "session", id: "parent-1" }, "work");
+      const params = { threadId: thread.id, message: "run it", from: "parent-agent" as const, kind: "request" as const, requestId: "req-dupe" };
+      const first = await service.handle(params, serviceContext());
+      const retry = await service.handle(params, serviceContext());
+      expect(first).toMatchObject({ accepted: true, delivery: "delivered", messageId: "req-dupe" });
+      expect(retry).toMatchObject({ accepted: true, messageId: "req-dupe" });
+      expect(sendToSession).toHaveBeenCalledTimes(1);
+      expect((await registry.listRuns("workspace-1", thread.id))).toHaveLength(1);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects targets outside the caller's root-task relationships", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-scope-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    try {
+      const mine = await runningThread(registry, { kind: "session", id: "parent-1" }, "mine");
+      const foreign = await runningThread(registry, { kind: "session", id: "other-root" }, "foreign");
+      // A session caller only reaches its own children.
+      await expect(service.handle(
+        { threadId: foreign.thread.id, message: "hi", from: "parent-agent" },
+        serviceContext(),
+      )).rejects.toMatchObject({ harnessCode: "denied" });
+      // A thread caller cannot reach a cousin under a different root.
+      await expect(service.handle(
+        { threadId: foreign.thread.id, message: "hi", from: "parent-agent" },
+        threadCtx(mine.sessionId),
+      )).rejects.toMatchObject({ harnessCode: "denied" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("reaches the caller's own parent and siblings", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-family-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+    } as never);
+    try {
+      const parent = await runningThread(registry, { kind: "session", id: "root-1" }, "parent thread", 4);
+      const child = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "child thread");
+      const sibling = await runningThread(registry, { kind: "thread", id: parent.thread.id }, "sibling thread");
+      // to: "parent" resolves the parent thread for a nested caller.
+      const up = await service.handle(
+        { to: "parent", message: "question for you", from: "parent-agent" },
+        threadCtx(child.sessionId),
+      );
+      expect(up).toMatchObject({ accepted: true, delivery: "delivered" });
+      expect(sendToSession).toHaveBeenCalledWith(parent.sessionId, "question for you", { from: `thread ${child.thread.id}` });
+      // Sibling under the same parent thread is reachable.
+      const sideways = await service.handle(
+        { threadId: sibling.thread.id, message: "note", from: "parent-agent" },
+        threadCtx(child.sessionId),
+      );
+      expect(sideways).toMatchObject({ accepted: true, delivery: "delivered" });
+      // A root child sending to its parent session.
+      const session = await service.handle(
+        { to: "parent", message: "answer", from: "parent-agent" },
+        threadCtx(parent.sessionId),
+      );
+      expect(session).toMatchObject({ accepted: true, delivery: "delivered" });
+      expect(sendToSession).toHaveBeenCalledWith("root-1", "answer", { from: `thread ${parent.thread.id}` });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("records a parked request behind a full shared budget and reports scheduled", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-parked-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({}));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const { thread } = await settledThread(registry);
+      const result = await service.handle({
+        threadId: thread.id,
+        message: "run when free",
+        from: "parent-agent",
+        kind: "request",
+        requestId: "req-park",
+      }, serviceContext());
+      expect(result).toMatchObject({ accepted: true, lifecycle: "settled", delivery: "scheduled" });
+      const recorded = await registry.getThreadById("workspace-1", thread.id);
+      expect(recorded?.messages).toEqual([
+        expect.objectContaining({ direction: "in", id: "req-park", kind: "request", status: "pending" }),
+      ]);
+      // A retry with the same id returns the parked outcome — no second schedule.
+      const retry = await service.handle({
+        threadId: thread.id,
+        message: "run when free",
+        from: "parent-agent",
+        kind: "request",
+        requestId: "req-park",
+      }, serviceContext());
+      expect(retry).toMatchObject({ accepted: true, delivery: "scheduled" });
+      expect(continueRun).toHaveBeenCalledTimes(1);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("re-admits a lost worker through the continuation path on request", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-lost-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-lost-2" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const { thread } = await runningThread(registry, { kind: "session", id: "parent-1" }, "work");
+      // The worker is lost (host restart semantics) while the Thread stays active.
+      await registry.reconcileWorkspace("workspace-1", new Set());
+      const result = await service.handle({
+        threadId: thread.id,
+        message: "come back",
+        from: "parent-agent",
+        kind: "request",
+      }, serviceContext());
+      expect(result).toMatchObject({ accepted: true, delivery: "delivered", runId: "run-lost-2" });
+      expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
+        threadId: thread.id,
+        mode: "continue",
+        task: "come back",
+      }));
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("reports accurate status for queued, archived, and deleted targets", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-status-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: vi.fn(),
+    } as never);
+    try {
+      const queued = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "parent-1" },
+        brief: "queued",
+        kind: "implementation",
+        createdBy: "agent",
+        concurrency: 1,
+        autoRun: true,
+        worktree: "isolated",
+        tools: [],
+        permissions: {},
+      });
+      const queuedSend = await service.handle(
+        { threadId: queued.id, message: "later", from: "parent-agent" },
+        serviceContext(),
+      );
+      expect(queuedSend).toMatchObject({ accepted: true, lifecycle: "queued", delivery: "scheduled" });
+      const { thread } = await settledThread(registry);
+      await registry.archiveThread("workspace-1", thread.id);
+      await expect(service.handle(
+        { threadId: thread.id, message: "hi", from: "parent-agent" },
+        serviceContext(),
+      )).rejects.toMatchObject({ harnessCode: "unavailable", message: expect.stringContaining("archived") });
+      await expect(service.handle(
+        { threadId: "thread-missing", message: "hi", from: "parent-agent" },
+        serviceContext(),
+      )).rejects.toMatchObject({ harnessCode: "not-found" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("yields the shared execution slot while a thread waits and re-admits on return", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-wait-yield-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadWaitService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    try {
+      const owner = await runningThread(registry, { kind: "session", id: "root-1" }, "owner", 1);
+      // The owner occupies the whole shared budget.
+      expect(await registry.countActiveInRoot("workspace-1", { kind: "thread", id: owner.thread.id })).toBe(1);
+      const pending = service.handle({ timeoutMs: 300 }, threadCtx(owner.sessionId));
+      // The blocked wait marks a dependency wait — the slot is released.
+      await vi.waitFor(async () => {
+        expect((await registry.getThreadById("workspace-1", owner.thread.id))?.waitingFor?.kind).toBe("thread");
+      });
+      expect(await registry.countActiveInRoot("workspace-1", { kind: "thread", id: owner.thread.id })).toBe(0);
+      const result = await pending;
+      expect(result.timedOut).toBe(true);
+      // Returning re-admits the slot.
+      expect((await registry.getThreadById("workspace-1", owner.thread.id))?.waitingFor).toBeNull();
+      expect(await registry.countActiveInRoot("workspace-1", { kind: "thread", id: owner.thread.id })).toBe(1);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("wakes a waiting thread caller when a reply lands on its own record", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-wait-wake-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const waitService = createThreadWaitService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    const sendService = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    try {
+      const asker = await runningThread(registry, { kind: "session", id: "root-1" }, "asker");
+      const answerer = await runningThread(registry, { kind: "session", id: "root-1" }, "answerer");
+      await sendService.handle(
+        { threadId: answerer.thread.id, message: "count?", from: "parent-agent", kind: "request", requestId: "req-wake-1" },
+        threadCtx(asker.sessionId),
+      );
+      const waiting = waitService.handle({ timeoutMs: 5_000 }, threadCtx(asker.sessionId));
+      await vi.waitFor(async () => {
+        expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor?.kind).toBe("thread");
+      });
+      // The sibling's reply is a change on the caller's own record — the wait
+      // completes without polling.
+      await sendService.handle(
+        { threadId: asker.thread.id, message: "three", from: "parent-agent", replyTo: "req-wake-1" },
+        threadCtx(answerer.sessionId),
+      );
+      const result = await waiting;
+      expect(result.timedOut).toBe(false);
+      expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor).toBeNull();
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

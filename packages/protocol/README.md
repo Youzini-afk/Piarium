@@ -64,7 +64,7 @@ language server read itself, which LSP cannot attribute to a version.
 | `thread.dispatch` | `{ task, preset?, input?, scope?, worktree? }` | `ThreadDispatchResult` | Dispatch a sub-agent thread; `input: "inherit"` fixes the parent's committed input at dispatch |
 | `thread.list` | `{ ids?, full? }` | `ThreadListResult` | List threads (incremental) |
 | `thread.wait` | `{ ids?, timeoutMs? }` | `ThreadWaitResult` | Block until thread state change |
-| `thread.send` | `{ threadId, message, from, kind?, context? }` | `ThreadSendResult` | `inform` (default) delivers only; `request` on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) |
+| `thread.send` | `{ threadId?, to?, message, from, kind?, context?, requestId?, replyTo? }` | `ThreadSendResult` | `inform` (default) delivers only — held durably for non-running targets, never starts a Run; `request` wakes a waiting target and on a settled thread starts a new Run (`context`: `continue` resumes the retained session, `fresh` rebuilds the input) or parks behind the shared root budget (`delivery: "scheduled"`). `to: "parent"` targets the caller's own parent; `requestId` is the idempotency key; `replyTo` answers a request and completes the requester's wait |
 | `thread.read` | `{ threadId, what?, since? }` | `ThreadReadResult` | Read thread notes/report/steps |
 | `thread.merge` | `{ threadId, resultRevision? }` | `ThreadMergeResult` | Integrate a fixed native result and identify disk, marker, or editor-surface conflicts |
 | `thread.kill` | `{ threadId, keepWorktree? }` | `ThreadKillResult` | Kill a thread |

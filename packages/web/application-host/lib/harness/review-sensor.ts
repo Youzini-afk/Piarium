@@ -79,11 +79,12 @@ export async function onPublishedResult(input: ReviewDispatchInput): Promise<Rev
     return { reviewDispatched: false, blocking: false, skippedReason: "no-review-preset" };
   }
   const current = input.existingReview;
+  const inFlight = current?.status === "queued" || current?.status === "running";
   if (current && current.resultRevision === resultRevision
-    && (current.status === "running" || current.status === "completed")) {
-    return { reviewDispatched: false, blocking: settings.gate && current.status === "running", skippedReason: "dedup" };
+    && (inFlight || current.status === "completed")) {
+    return { reviewDispatched: false, blocking: settings.gate && inFlight, skippedReason: "dedup" };
   }
-  if (current?.status === "running" && current.reviewThreadId && current.resultRevision !== resultRevision) {
+  if (inFlight && current?.reviewThreadId && current.resultRevision !== resultRevision) {
     await input.cancelReview?.(current.reviewThreadId);
   }
 
@@ -107,7 +108,8 @@ export async function onPublishedResult(input: ReviewDispatchInput): Promise<Rev
     preset: reviewPreset.id,
     kind: "implementation",
     createdBy: "agent",
-    concurrency: 12,
+    // Reviews draw from the same shared root budget as the source (3.18C).
+    concurrency: source.manifest.concurrency,
     model: reviewPreset.model,
     autoRun: true,
     worktree: "none",

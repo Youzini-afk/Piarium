@@ -4,6 +4,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import type { ThreadMessageRecord, ThreadPendingContinuation } from "@piarium/protocol";
 import {
   THREAD_REGISTRY_SCHEMA_VERSION,
   ThreadRegistryError,
@@ -62,12 +64,12 @@ describe("thread registry", () => {
     const thread = await registry.createThread(createInput());
     expect(thread.lifecycle).toBe("queued");
     expect(thread.activeRunId).toBeNull();
-    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(0);
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(0);
 
     const starting = await registry.startRun(WORKSPACE, thread.id);
     expect(starting.attempt).toBe(1);
     expect(starting.workerState).toBe("starting");
-    expect(await registry.countActive(WORKSPACE, PARENT)).toBe(1);
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(1);
 
     const running = await registry.markRunRunning(WORKSPACE, thread.id, starting.id, "child-session-1");
     expect(running.sessionId).toBe("child-session-1");
@@ -809,5 +811,158 @@ describe("thread registry", () => {
       lifecycle: "archived",
     });
     expect(await registry.getThread(WORKSPACE, PARENT, thread.id)).toMatchObject({ lifecycle: "archived" });
+  });
+
+  // --- Directed messaging, shared-root admission, and waiting slots (3.18C) ---
+
+  const parked = (overrides: Partial<ThreadPendingContinuation> = {}): ThreadPendingContinuation => ({
+    mode: "continue",
+    task: "resume this",
+    from: { kind: "session", id: "parent-1" },
+    at: "2026-09-05T00:00:00.000Z",
+    ...overrides,
+  });
+
+  const message = (overrides: Partial<ThreadMessageRecord> = {}): ThreadMessageRecord => ({
+    id: `msg-${randomUUID()}`,
+    direction: "in",
+    from: { kind: "session", id: "parent-1" },
+    to: { kind: "thread", id: "unused" },
+    kind: "inform",
+    text: "hello",
+    status: "held",
+    at: "2026-09-05T00:00:00.000Z",
+    ...overrides,
+  });
+
+  it("promotes a parked continuation through the shared root budget", async () => {
+    const dequeued: string[] = [];
+    await registry.dispose();
+    registry = createThreadRegistry({
+      dataDir,
+      hostId: "test-host",
+      onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
+    });
+    const blocker = await registry.createThread(createInput({ brief: "blocker", concurrency: 1 }));
+    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
+    await registry.markRunRunning(WORKSPACE, blocker.id, blockerRun.id, "child-blocker");
+    const settled = await registry.createThread(createInput({ brief: "settled", concurrency: 1 }));
+    const settledRun = await registry.startRun(WORKSPACE, settled.id);
+    await registry.endRun(WORKSPACE, settled.id, settledRun.id, "success", null, report());
+    // The request arrived while the budget was full — it parks on the Thread.
+    await registry.setPendingContinuation(WORKSPACE, settled.id, parked());
+    expect(await registry.tryDequeue(WORKSPACE, PARENT)).toBeNull();
+    expect(dequeued).toEqual([]);
+    // Freeing the slot promotes the parked continuation like a queued Thread.
+    await registry.endRun(WORKSPACE, blocker.id, blockerRun.id, "success", null, report());
+    expect(dequeued).toEqual([settled.id]);
+  });
+
+  it("counts nested threads against the same root admission domain", async () => {
+    const parent = await registry.createThread(createInput({ brief: "parent thread" }));
+    const parentRun = await registry.startRun(WORKSPACE, parent.id);
+    await registry.markRunRunning(WORKSPACE, parent.id, parentRun.id, "child-parent");
+    const nested = await registry.createThread(createInput({
+      brief: "nested",
+      parent: { kind: "thread", id: parent.id },
+    }));
+    const nestedRun = await registry.startRun(WORKSPACE, nested.id);
+    await registry.markRunRunning(WORKSPACE, nested.id, nestedRun.id, "child-nested");
+    const foreign = await registry.createThread(createInput({
+      brief: "foreign root",
+      parent: { kind: "session", id: "other-root" },
+    }));
+    const foreignRun = await registry.startRun(WORKSPACE, foreign.id);
+    await registry.markRunRunning(WORKSPACE, foreign.id, foreignRun.id, "child-foreign");
+    // Both the parent thread and its nested child consume the root's budget;
+    // the other root's work does not.
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(2);
+    expect(await registry.countActiveInRoot(WORKSPACE, { kind: "thread", id: nested.id })).toBe(2);
+    expect(await registry.countActiveInRoot(WORKSPACE, { kind: "session", id: "other-root" })).toBe(1);
+  });
+
+  it("releases the shared slot while a thread waits on a dependency", async () => {
+    const dequeued: string[] = [];
+    await registry.dispose();
+    registry = createThreadRegistry({
+      dataDir,
+      hostId: "test-host",
+      onThreadDequeued: async (_workspaceId, _parent, thread) => { dequeued.push(thread.id); },
+    });
+    const waiter = await registry.createThread(createInput({ brief: "waiter", concurrency: 1 }));
+    const waiterRun = await registry.startRun(WORKSPACE, waiter.id);
+    await registry.markRunRunning(WORKSPACE, waiter.id, waiterRun.id, "child-waiter");
+    const queued = await registry.createThread(createInput({ brief: "queued", concurrency: 1 }));
+    // The full budget keeps the sibling queued.
+    expect(await registry.tryDequeue(WORKSPACE, PARENT)).toBeNull();
+    // Marking a dependency wait releases the slot and promotes the sibling.
+    await registry.setAttention(WORKSPACE, waiter.id, "thread", { kind: "thread", text: "Waiting on a child" });
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(0);
+    expect(dequeued).toEqual([queued.id]);
+    // Returning from the wait re-admits the slot.
+    await registry.setAttention(WORKSPACE, waiter.id, "none");
+    expect(await registry.countActiveInRoot(WORKSPACE, PARENT)).toBe(1);
+  });
+
+  it("persists message records and a parked continuation across a reload", async () => {
+    const thread = await registry.createThread(createInput());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, report());
+    await registry.recordThreadMessage(WORKSPACE, thread.id, message({ id: "held-1", to: { kind: "thread", id: thread.id } }));
+    await registry.setPendingContinuation(WORKSPACE, thread.id, parked({ requestId: "req-7" }));
+    await registry.dispose();
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    const reloaded = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(reloaded?.messages).toEqual([
+      expect.objectContaining({ id: "held-1", direction: "in", status: "held" }),
+    ]);
+    expect(reloaded?.pendingContinuation).toMatchObject({ mode: "continue", task: "resume this", requestId: "req-7" });
+  });
+
+  it("rejects a catalog containing malformed message records", async () => {
+    const thread = await registry.createThread(createInput());
+    await registry.recordThreadMessage(WORKSPACE, thread.id, message({ id: "ok-1", to: { kind: "thread", id: thread.id } }));
+    await registry.dispose();
+
+    const catalogPath = threadCatalogPath(dataDir, "test-host", WORKSPACE);
+    const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as { threads: Array<{ messages?: unknown[] }> };
+    catalog.threads[0]!.messages = [{ id: "bad", direction: "sideways", status: "held" }];
+    writeFileSync(catalogPath, JSON.stringify(catalog));
+
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    await expect(registry.getThread(WORKSPACE, PARENT, thread.id)).rejects.toMatchObject({ code: "corrupt" });
+  });
+
+  it("notifies admission-freed when a slot opens with nothing queued", async () => {
+    const freed: ThreadParent[] = [];
+    await registry.dispose();
+    registry = createThreadRegistry({
+      dataDir,
+      hostId: "test-host",
+      onAdmissionFreed: async (_workspaceId, parent) => { freed.push(parent); },
+    });
+    const thread = await registry.createThread(createInput({ concurrency: 1 }));
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-1");
+    await registry.endRun(WORKSPACE, thread.id, run.id, "success", null, report());
+    await vi.waitFor(() => { expect(freed).toEqual([PARENT]); });
+  });
+
+  it("records messages idempotently and delivers pending messages exactly once", async () => {
+    const thread = await registry.createThread(createInput());
+    const held = message({ id: "m-1", to: { kind: "thread", id: thread.id } });
+    await registry.recordThreadMessage(WORKSPACE, thread.id, held);
+    // A retry carrying the same id observes the recorded entry, not a duplicate.
+    const again = await registry.recordThreadMessage(WORKSPACE, thread.id, held);
+    expect(again.id).toBe("m-1");
+    expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.messages).toHaveLength(1);
+    await registry.recordThreadMessage(WORKSPACE, thread.id, message({ id: "m-2", to: { kind: "thread", id: thread.id }, status: "pending" }));
+    // The current request's own record is excluded from the boundary flush.
+    const taken = await registry.takePendingThreadMessages(WORKSPACE, thread.id, "m-2");
+    expect(taken.map((entry) => entry.id)).toEqual(["m-1"]);
+    // The flush marked them delivered — a restart or retry cannot redeliver.
+    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([expect.objectContaining({ id: "m-2" })]);
+    expect(await registry.takePendingThreadMessages(WORKSPACE, thread.id)).toEqual([]);
   });
 });
