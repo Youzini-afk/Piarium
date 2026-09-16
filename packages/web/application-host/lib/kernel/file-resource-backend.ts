@@ -11,6 +11,7 @@ import type {
 } from "../recovery/journal-files.js";
 import { createRecoveryFileReader, normalizeResourceId, parseRecoveryState } from "../recovery/journal-files.js";
 import type { HostResourceOperation, HostResourceOperationGate } from "../recovery/durable-file-operation.js";
+import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from "./storage-adapter.js";
 
 export interface KernelExecutionRoot {
@@ -83,8 +84,12 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const execution = this.options.resolveExecutionRoot
       ? await this.options.resolveExecutionRoot(identity.canonicalRoot, identity.workspaceId)
       : { workspaceId: identity.workspaceId, canonicalRoot: identity.canonicalRoot };
-    const canonicalRoot = path.resolve(execution.canonicalRoot);
-    const requestedRoot = path.resolve(identity.canonicalRoot);
+    // Documents and a caller may name the same Windows directory through
+    // long and 8.3 forms. Resolve both through the filesystem before the
+    // containment check; this also prevents a symlink/reparse alias from
+    // turning a lexical child into an authority escape.
+    const canonicalRoot = await canonicalizePathIdentity(execution.canonicalRoot);
+    const requestedRoot = await canonicalizePathIdentity(identity.canonicalRoot, { allowMissing: true });
     const basePath = sameFsPath(canonicalRoot, requestedRoot) ? "" : relativeInside(canonicalRoot, requestedRoot);
     const authority = await this.adapter.fileAuthorityContext({
       owningWorkspaceId: identity.workspaceId,
