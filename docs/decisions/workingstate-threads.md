@@ -1281,7 +1281,7 @@ session 会扩大历史权限；固定重试 CAS 会掩盖并发写者；为了�
 
 影响：D-284–D-286 的实现状态由本条验收修正。新增 request-level context boundary、retained-context receipts、同 Thread
 `history(run)`、Pi passive notify/native request receipt、根级原子 admission、固定 delivery 读取和 materialized baseline
-handoff。状态与证据见 `agent-harness-acceptance-20260916.md`、status 2.4A/B、2.6A/B、3.18A–E 以及 Harness/Kernel/Recovery
+handoff。状态与证据见 status 2.4A/B、2.6A/B、3.18A–E 以及 Harness/Kernel/Recovery
 模块文档。
 
 状态：已实施并完成定向验收；真实付费 provider 质量、完整 packaged 点击链、其他平台真机和物理断电没有由本条外推。
