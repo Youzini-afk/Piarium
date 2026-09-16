@@ -3,10 +3,25 @@ import type { ThreadConflictResolution } from "@piarium/protocol";
 import type { ThreadResultHistoryReleaseParams } from "@piarium/application-client";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError, type ThreadRuntime } from "./thread-runtime.js";
+import { HarnessServiceError } from "./service-error.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
   runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "deleteUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">;
+  /**
+   * Delivers a directed message through the same `thread.send` routing the Pi
+   * tools use; the UI acts as the parent session, never a forged Thread peer.
+   */
+  sendToThread?: (input: {
+    parentSessionId: string;
+    threadId: string;
+    message: string;
+    kind?: "inform" | "request";
+    context?: "continue" | "fresh";
+    requestId?: string;
+    replyTo?: string;
+    signal: AbortSignal;
+  }) => Promise<unknown>;
   requireAuth?: RequestHandler;
 }
 
@@ -90,6 +105,15 @@ const parseIntegrationBody = (value: unknown): {
 };
 
 const sendError = (response: Response, error: unknown, fallback: string): void => {
+  if (error instanceof HarnessServiceError) {
+    const status = error.harnessCode === "invalid-params" ? 400
+      : error.harnessCode === "not-found" ? 404
+        : error.harnessCode === "denied" || error.harnessCode === "forbidden" ? 403
+          : error.harnessCode === "unavailable" || error.harnessCode === "timeout" || error.harnessCode === "expired" ? 503
+            : 500;
+    response.status(status).json({ code: error.harnessCode, error: error.message });
+    return;
+  }
   if (error instanceof ThreadRuntimeError) {
     const status = error.code === "invalid-request" ? 400
       : error.code === "not-found" ? 404
@@ -99,6 +123,31 @@ const sendError = (response: Response, error: unknown, fallback: string): void =
     return;
   }
   response.status(500).json({ error: error instanceof Error ? error.message : fallback });
+};
+
+const parseSendBody = (value: unknown): {
+  message: string;
+  kind?: "inform" | "request";
+  context?: "continue" | "fresh";
+  requestId?: string;
+  replyTo?: string;
+} => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ThreadRuntimeError("invalid-request", "Send request body is malformed");
+  const body = value as Record<string, unknown>;
+  const allowed = new Set(["message", "kind", "context", "requestId", "replyTo"]);
+  if (Object.keys(body).some((key) => !allowed.has(key))) throw new ThreadRuntimeError("invalid-request", "Send request contains unsupported fields");
+  if (typeof body.message !== "string" || !body.message.trim()) throw new ThreadRuntimeError("invalid-request", "message is required");
+  if (body.kind !== undefined && body.kind !== "inform" && body.kind !== "request") throw new ThreadRuntimeError("invalid-request", "kind must be inform or request");
+  if (body.context !== undefined && body.context !== "continue" && body.context !== "fresh") throw new ThreadRuntimeError("invalid-request", "context must be continue or fresh");
+  if (body.requestId !== undefined && (typeof body.requestId !== "string" || !body.requestId.trim())) throw new ThreadRuntimeError("invalid-request", "requestId must be a non-empty string");
+  if (body.replyTo !== undefined && (typeof body.replyTo !== "string" || !body.replyTo.trim())) throw new ThreadRuntimeError("invalid-request", "replyTo must be a non-empty string");
+  return {
+    message: body.message,
+    ...(body.kind === undefined ? {} : { kind: body.kind as "inform" | "request" }),
+    ...(body.context === undefined ? {} : { context: body.context as "continue" | "fresh" }),
+    ...(body.requestId === undefined ? {} : { requestId: body.requestId as string }),
+    ...(body.replyTo === undefined ? {} : { replyTo: body.replyTo as string }),
+  };
 };
 
 const parseHistoryRelease = (value: unknown): ThreadResultHistoryReleaseParams => {
@@ -117,7 +166,7 @@ const parseHistoryRelease = (value: unknown): ThreadResultHistoryReleaseParams =
 
 export function registerHarnessThreadRoutes(
   app: Express,
-  { registry, runtime, requireAuth = noAuth }: HarnessThreadRoutesOptions,
+  { registry, runtime, sendToThread, requireAuth = noAuth }: HarnessThreadRoutesOptions,
 ): void {
   app.get("/api/harness/sessions/:sessionId/threads", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
@@ -384,6 +433,45 @@ export function registerHarnessThreadRoutes(
         response.json(await runtime.deleteUser(workspaceId, parent, threadId));
       } catch (error) {
         sendError(response, error, "Unable to delete thread");
+      }
+    },
+  );
+
+  app.post(
+    "/api/harness/sessions/:sessionId/threads/:threadId/send",
+    requireAuth,
+    async (request: Request, response: Response) => {
+      response.setHeader("Cache-Control", "no-store");
+      const parentSessionId = sessionIdOf(request);
+      const threadId = threadIdOf(request);
+      if (!parentSessionId || !threadId) {
+        response.status(400).json({ error: "sessionId and threadId are required" });
+        return;
+      }
+      if (!sendToThread) {
+        response.status(503).json({ error: "Thread messaging is not configured" });
+        return;
+      }
+      try {
+        const cancellation = requestAbort(request, response);
+        const parsed = parseSendBody(request.body);
+        const result = await sendToThread({
+          parentSessionId,
+          threadId,
+          ...parsed,
+          signal: cancellation.signal,
+        });
+        cancellation.dispose();
+        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        response.json({
+          workspaceId,
+          parent,
+          result,
+          thread: await registry.getThread(workspaceId, parent, threadId),
+          activeRun: await registry.getActiveRun(workspaceId, threadId),
+        });
+      } catch (error) {
+        sendError(response, error, "Unable to deliver the thread message");
       }
     },
   );

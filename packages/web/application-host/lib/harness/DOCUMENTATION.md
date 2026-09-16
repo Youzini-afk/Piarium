@@ -518,6 +518,12 @@ session to a new Run; a failed restore stays archived and cannot open an occupie
 path. Restore of a descendant is refused while an ancestor is archived or being
 archived. The Documents reclaim guard remains held through deletion. Thread panel routes
 `GET /space` and archive/restore/reclaim share this Host projection.
+`POST .../threads/:threadId/send` delivers a directed message for the authenticated
+parent session through the same `thread.send` service the Pi Host tools use: the
+caller acts as the user, relationship authorization, the durable ledger, requestId
+idempotency, held/delivered semantics, and `continue`/`fresh` scheduling are
+identical. Service failures map `HarnessServiceError` codes to HTTP
+(400/403/404/503) instead of collapsing to 500.
 `GET .../threads/:threadId/history` and `POST .../history/release` manage selected
 old WorkingResult versions for the authenticated parent. Release holds the Thread
 lifecycle, storage lease, then a Registry snapshot guard while validating current

@@ -50,6 +50,7 @@ import { createHarnessServiceHost, deriveHarnessCapabilities } from './lib/harne
 import { discoverShells } from './lib/harness/shell-discovery.js';
 import { createHarnessSessionRegistration } from './lib/harness/session-registration.js';
 import { registerHarnessServices } from './lib/harness/harness-services.js';
+import { createThreadSendService } from './lib/harness/thread-services.js';
 import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/store.js';
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
@@ -1616,7 +1617,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const sessionId = parent.kind === 'session'
         ? parent.id
         : (await threadRegistry.getActiveRun(workspaceId, parent.id))?.sessionId;
-      if (!sessionId) return { enabled: true, gate: false };
+      if (!sessionId) return { enabled: false, gate: false };
       try {
         const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'settings.get', {});
         const global = recordOf(recordOf(snapshot).global).harness;
@@ -1783,6 +1784,32 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,
+    sendToThread: async (input) => {
+      const { workspaceId } = await threadRuntime!.scopeForSession(input.parentSessionId);
+      const service = createThreadSendService(harnessServiceHost);
+      return service.handle({
+        threadId: input.threadId,
+        message: input.message,
+        from: 'user',
+        ...(input.kind === undefined ? {} : { kind: input.kind }),
+        ...(input.context === undefined ? {} : { context: input.context }),
+        ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
+        ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      }, {
+        actor: {
+          authorityInstanceId: 'ui-thread-routes',
+          sessionId: input.parentSessionId,
+          workerId: 'ui-thread-routes',
+          workerGeneration: 0,
+          workspaceId,
+          grantedCapabilities: [],
+        },
+        authorizedPaths: [],
+        sessionId: input.parentSessionId,
+        workspaceId,
+        signal: input.signal,
+      });
+    },
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerHarnessContextRoutes(app, {

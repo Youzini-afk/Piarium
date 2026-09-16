@@ -316,4 +316,108 @@ describe("harness thread routes", () => {
       .delete("/api/harness/sessions/s/threads/thread-9")
       .expect(404, { code: "not-found", error: "Thread not found: thread-9" });
   });
+
+  it("delivers directed messages through the send callback and returns the thread projection", async () => {
+    const app = express();
+    app.use(express.json());
+    const sendToThread = vi.fn(async () => ({ status: "delivered", requestId: "req-1" }));
+    const getThread = vi.fn(async () => ({ id: "thread-1", lifecycle: "active" }));
+    const getActiveRun = vi.fn(async () => ({ id: "run-1", workerState: "running" }));
+    const scopeForSession = vi.fn(async () => ({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+    }));
+    registerHarnessThreadRoutes(app, {
+      registry: { getThread, getActiveRun } as never,
+      runtime: { scopeForSession } as never,
+      sendToThread,
+    });
+
+    const response = await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "please revisit the diff", kind: "request", context: "continue", requestId: "req-1" })
+      .expect(200);
+    expect(response.headers["cache-control"]).toBe("no-store");
+    expect(response.body).toEqual({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "session-1" },
+      result: { status: "delivered", requestId: "req-1" },
+      thread: { id: "thread-1", lifecycle: "active" },
+      activeRun: { id: "run-1", workerState: "running" },
+    });
+    expect(sendToThread).toHaveBeenCalledWith({
+      parentSessionId: "session-1",
+      threadId: "thread-1",
+      message: "please revisit the diff",
+      kind: "request",
+      context: "continue",
+      requestId: "req-1",
+      signal: expect.any(AbortSignal),
+    });
+  });
+
+  it("rejects malformed send bodies and reports missing configuration", async () => {
+    const app = express();
+    app.use(express.json());
+    const sendToThread = vi.fn();
+    registerHarnessThreadRoutes(app, {
+      registry: {} as never,
+      runtime: { scopeForSession: vi.fn() } as never,
+      sendToThread,
+    });
+
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "" })
+      .expect(400);
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "hi", kind: "shout" })
+      .expect(400);
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "hi", workspaceId: "spoofed" })
+      .expect(400);
+    expect(sendToThread).not.toHaveBeenCalled();
+
+    const unconfigured = express();
+    unconfigured.use(express.json());
+    registerHarnessThreadRoutes(unconfigured, {
+      registry: {} as never,
+      runtime: { scopeForSession: vi.fn() } as never,
+    });
+    await request(unconfigured)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "hi" })
+      .expect(503);
+  });
+
+  it("rejects send without authentication and maps service failures", async () => {
+    const app = express();
+    app.use(express.json());
+    const sendToThread = vi.fn();
+    registerHarnessThreadRoutes(app, {
+      registry: {} as never,
+      runtime: { scopeForSession: vi.fn() } as never,
+      sendToThread,
+      requireAuth: (_req, res) => { res.status(401).json({ error: "auth required" }); },
+    });
+    await request(app)
+      .post("/api/harness/sessions/session-1/threads/thread-1/send")
+      .send({ message: "hi" })
+      .expect(401);
+    expect(sendToThread).not.toHaveBeenCalled();
+
+    const failing = express();
+    failing.use(express.json());
+    registerHarnessThreadRoutes(failing, {
+      registry: {} as never,
+      runtime: { scopeForSession: vi.fn() } as never,
+      sendToThread: vi.fn(async () => { throw new ThreadRuntimeError("not-found", "Thread not found: thread-9"); }),
+    });
+    await request(failing)
+      .post("/api/harness/sessions/session-1/threads/thread-9/send")
+      .send({ message: "hi" })
+      .expect(404, { code: "not-found", error: "Thread not found: thread-9" });
+  });
 });

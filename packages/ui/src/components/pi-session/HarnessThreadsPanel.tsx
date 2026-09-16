@@ -91,6 +91,7 @@ export const HarnessThreadsPanel: React.FC<{
   const [space, setSpace] = React.useState<WorkspaceThreadSpace | null>(null);
   const [threadAction, setThreadAction] = React.useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = React.useState<string | null>(null);
+  const [messageDrafts, setMessageDrafts] = React.useState<Record<string, string>>({});
   const spaceTargetRef = React.useRef(`${workspaceId}\u0000${parentSessionId}`);
   spaceTargetRef.current = `${workspaceId}\u0000${parentSessionId}`;
 
@@ -197,6 +198,42 @@ export const HarnessThreadsPanel: React.FC<{
       setThreadAction((current) => current === entry.thread.id ? null : current);
     }
   }, [applyThreadMutation, fallbackCwd, openSession, t]);
+
+  const sendThreadMessage = React.useCallback(async (entry: HarnessThreadSnapshot, mode: 'request' | 'fresh' | 'inform') => {
+    const text = (messageDrafts[entry.thread.id] ?? '').trim();
+    if (!text) return;
+    setThreadAction(entry.thread.id);
+    try {
+      const response = await runtimeFetch(
+        `/api/harness/sessions/${encodeURIComponent(parentSessionId)}/threads/${encodeURIComponent(entry.thread.id)}/send`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: text,
+            kind: mode === 'inform' ? 'inform' : 'request',
+            ...(mode === 'fresh' ? { context: 'fresh' } : {}),
+          }),
+        },
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(readError(payload, t('harness.threads.sendFailed')));
+      setMessageDrafts((current) => ({ ...current, [entry.thread.id]: '' }));
+      if (payload && typeof payload === 'object' && 'thread' in payload) {
+        try {
+          threadState.merge(parseHarnessThreadMutation(payload));
+        } catch {
+          await threadState.reload();
+        }
+      } else {
+        await threadState.reload();
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('harness.threads.sendFailed'));
+    } finally {
+      setThreadAction((current) => current === entry.thread.id ? null : current);
+    }
+  }, [messageDrafts, parentSessionId, t, threadState]);
 
   const convertDiscussion = React.useCallback(async (entry: HarnessThreadSnapshot) => {
     if (convertingThreadId) return;
@@ -610,6 +647,21 @@ export const HarnessThreadsPanel: React.FC<{
                     ? {entry.thread.waitingFor.text}
                   </p>
                 ) : null}
+                {(() => {
+                  const last = entry.thread.messages?.[entry.thread.messages.length - 1];
+                  if (!last) return null;
+                  const peer = last.from.kind === 'user'
+                    ? t('harness.threads.peer.user')
+                    : last.from.kind === 'session'
+                      ? t('harness.threads.peer.session')
+                      : last.from.id;
+                  return (
+                    <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-muted-foreground/80">
+                      {last.direction === 'in' ? '↓' : '↑'} {peer} · {t(last.kind === 'request' ? 'harness.threads.msg.request' : 'harness.threads.msg.inform')}
+                      {(last.status === 'held' || last.status === 'pending') ? ` · ${t('harness.threads.msg.held')}` : ''}
+                    </p>
+                  );
+                })()}
                 {entry.thread.deletion ? (
                   <p className="mt-1 line-clamp-2 text-[10px] leading-4 text-[var(--status-warning)]">
                     {t('harness.threads.deleting')} · {entry.thread.deletion.phase}
@@ -701,6 +753,54 @@ export const HarnessThreadsPanel: React.FC<{
                   threadId={entry.thread.id}
                   onReleased={refreshAfterResultRelease}
                 />
+              ) : null}
+              {!deletionPending && entry.thread.kind === 'implementation' && entry.thread.lifecycle !== 'archived' ? (
+                <div className="flex items-center gap-1 border-t border-border/40 px-2 py-1.5">
+                  <input
+                    type="text"
+                    value={messageDrafts[entry.thread.id] ?? ''}
+                    disabled={busy}
+                    placeholder={t('harness.threads.askPlaceholder')}
+                    onChange={(event) => setMessageDrafts((current) => ({ ...current, [entry.thread.id]: event.target.value }))}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault();
+                        void sendThreadMessage(entry, 'request');
+                      }
+                    }}
+                    className="min-w-0 flex-1 rounded bg-background/60 px-1.5 py-1 text-[10px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-border disabled:opacity-50"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
+                    title={t('harness.threads.ask')}
+                    onClick={() => { void sendThreadMessage(entry, 'request'); }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    <Icon name={busy ? 'loader-4' : 'send-plane'} className={cn('size-3', busy && 'animate-spin')} />
+                    {t('harness.threads.ask')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
+                    title={t('harness.threads.fresh')}
+                    onClick={() => { void sendThreadMessage(entry, 'fresh'); }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    <Icon name="refresh" className="size-3" />
+                    {t('harness.threads.fresh')}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !(messageDrafts[entry.thread.id] ?? '').trim()}
+                    title={t('harness.threads.note')}
+                    onClick={() => { void sendThreadMessage(entry, 'inform'); }}
+                    className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-muted-foreground hover:bg-background/70 hover:text-foreground disabled:opacity-50"
+                  >
+                    <Icon name="sticky-note" className="size-3" />
+                    {t('harness.threads.note')}
+                  </button>
+                </div>
               ) : null}
               <div className="flex flex-wrap justify-end gap-1 border-t border-border/40 px-2 py-1">
                 {entry.thread.kind === 'discussion' && entry.thread.lifecycle === 'active' ? (

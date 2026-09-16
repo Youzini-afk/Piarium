@@ -1901,9 +1901,11 @@ attention——实践里最常见的"卡死"其实
   其发布时基线。普通消息和 fresh 续做都不能替代这次文件级更新。
 - `kill(id)`：停止执行并保留已发布结果，目录按真实 writer 与保留责任回收；普通通知不复活已取消/归档工作。
 
-这些是 D-285 的目标语义；3.18A–D 已实施：任务中心派发与可选预设、task/inherit 与 continue/fresh 续做、inform/request/
-replyTo 定向消息、同根共享执行名额与等待让出、不可变结果修订冻结溯源与 `update` 显式纳入父修订均已沿生产链接线；
-UI/旧路径收口（3.18E）仍待实施。
+这些是 D-285 的目标语义；3.18A–E 已实施：任务中心派发与可选预设、task/inherit 与 continue/fresh 续做、inform/request/
+replyTo 定向消息、同根共享执行名额与等待让出、不可变结果修订冻结溯源与 `update` 显式纳入父修订均已沿生产链接线。
+3.18E 收口：自动 review 默认关（父线程无会话同样默认关，唯一翻案是用户显式 `harness.review.enabled`）；UI 面板提供
+Ask/Fresh/Note 定向消息控件与最近消息来源/held 显示，经公开 `POST .../threads/:threadId/send` 走与 Pi Host 工具
+相同的 `thread.send` 服务；role-required、单向 send、永久执行 manifest、per-parent 准入等被替换路径已删除。
 无需先建设任务市场或通用工作流，公开入口必须能完成“派发—解决依赖—交付—使用—同线程续做”的一条纵切。
 
 #### 9.3.7 增量视图与送达
