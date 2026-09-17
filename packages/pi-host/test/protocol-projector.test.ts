@@ -50,6 +50,16 @@ const assistant = {
 } as unknown as AgentMessage;
 
 describe("Pi protocol projector", () => {
+  it("preserves a branch summary without a source entry", () => {
+    const message: AgentMessage = {
+      role: "branchSummary",
+      fromId: null,
+      summary: "Imported context",
+      timestamp: 123,
+    };
+    assert.deepEqual(projectMessage(message), message);
+  });
+
   it("projects assistant messages while stripping provider continuity metadata", () => {
     const projected = projectMessage(assistant);
     assert.equal(projected.role, "assistant");

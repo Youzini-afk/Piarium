@@ -12,7 +12,13 @@ export default tseslint.config([
     extends: [
       js.configs.recommended,
       tseslint.configs.recommended,
-      reactHooks.configs['recommended-latest'],
+      {
+        plugins: { 'react-hooks': reactHooks },
+        rules: {
+          'react-hooks/rules-of-hooks': 'error',
+          'react-hooks/exhaustive-deps': 'warn',
+        },
+      },
       reactRefresh.configs.vite,
     ],
     languageOptions: {
@@ -20,6 +26,10 @@ export default tseslint.config([
       globals: globals.browser,
     },
     rules: {
+      // Keep the existing ESLint 9 recommended rule set while upgrading ESLint.
+      'no-unassigned-vars': 'off',
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
       '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',

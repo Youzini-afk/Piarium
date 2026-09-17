@@ -112,7 +112,7 @@ export interface PiCustomMessage {
 }
 
 export interface PiBranchSummaryMessage {
-  fromId: string;
+  fromId: string | null;
   role: "branchSummary";
   summary: string;
   timestamp: number;

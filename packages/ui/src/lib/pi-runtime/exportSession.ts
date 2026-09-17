@@ -100,7 +100,7 @@ const formatMessage = (message: PiMessage, timestamp: string): string => {
       return `**Custom message: ${message.customType}**${detailLine(time)}\n\n${content || '*No textual content*'}${details}`;
     }
     case 'branchSummary':
-      return `**Branch summary**${detailLine(time, `from ${message.fromId}`)}\n\n${message.summary}`;
+      return `**Branch summary**${detailLine(time, message.fromId === null ? undefined : `from ${message.fromId}`)}\n\n${message.summary}`;
     case 'compactionSummary':
       return `**Compaction summary**${detailLine(time, `${message.tokensBefore} tokens before compaction`)}\n\n${message.summary}`;
     case 'unknown':

@@ -653,7 +653,7 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
   const sharedVirtualizerRef = useRef<SharedVirtualizer | null>(null);
   const instanceVirtualizerRef = useRef<Virtualizer | null>(null);
   const instanceWorkerPoolRef = useRef<unknown>(null);
-  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<PierreAnnotationData>['hunkSeparators'] | undefined>(undefined);
+  const instanceVirtualHunkSeparatorsRef = useRef<FileDiffOptions<PierreAnnotationData, undefined>['hunkSeparators'] | undefined>(undefined);
   const instanceFileDiffRef = useRef<FileDiffMetadata | undefined>(undefined);
   const instanceOldFileRef = useRef<FileContents | undefined>(undefined);
   const instanceNewFileRef = useRef<FileContents | undefined>(undefined);
@@ -865,16 +865,16 @@ export const PierreDiffViewer: React.FC<PierreDiffViewerProps> = ({
     if (!instance) {
       instance = sharedVirtualizer
         ? new VirtualizedFileDiff<PierreAnnotationData>(
-            options as FileDiffOptions<PierreAnnotationData>,
+            options as FileDiffOptions<PierreAnnotationData, undefined>,
             sharedVirtualizer.virtualizer,
             VIRTUAL_METRICS,
             workerPool,
           )
-        : new PierreFileDiff(options as FileDiffOptions<PierreAnnotationData>, workerPool);
+        : new PierreFileDiff(options as FileDiffOptions<PierreAnnotationData, undefined>, workerPool);
       diffInstanceRef.current = instance;
       lastAppliedSelectionRef.current = null;
     } else {
-      instance.setOptions(options as FileDiffOptions<PierreAnnotationData>);
+      instance.setOptions(options as FileDiffOptions<PierreAnnotationData, undefined>);
     }
 
     instanceVirtualizerRef.current = virtualizer;
