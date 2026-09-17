@@ -15,6 +15,13 @@ cargo check --manifest-path kernel/Cargo.toml
 bun run kernel:build
 ```
 
+The native parser uses tree-sitter 0.27 and Wasmtime 48; grammar admission checks the
+grammar ABI independently of the JavaScript tooling version. `cargo audit --file kernel/Cargo.lock`
+checks the Rust dependency graph in CI alongside the JavaScript audit. Dependabot tracks `/kernel`
+so runtime security upgrades also reach the lockfile. Native compute tests accept
+`PIARIUM_TEST_KERNEL_PATH` for a separately built release executable when a running development
+Host has locked the default executable on Windows.
+
 Release packaging must copy the resulting executable outside an Electron `app.asar` archive and set
 `PIARIUM_KERNEL_PATH` (or use the release layout resolver). The kernel acquires an owner file in its
 storage root, rejects a second writer, recreates obsolete internal catalog formats, and leaves a

@@ -4,7 +4,7 @@ use super::{Result,Shared};
 use crate::protocol_generated::KernelComputeGrammarParams;
 use serde_json::{json,Value};
 use sha2::{Digest,Sha256};
-use std::{collections::{HashMap,HashSet},fs,time::{Duration,Instant}};
+use std::{collections::{HashMap,HashSet},fs,ops::ControlFlow,time::{Duration,Instant}};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language,Node,Parser,Query,QueryCursor,QueryCursorOptions,ParseOptions,WasmStore,wasmtime};
 
@@ -47,7 +47,7 @@ impl SyntaxRuntime {
         let started=Instant::now();let budget=Duration::from_millis(budget_ms);
         let expired=||shared.check().is_err()||started.elapsed()>budget;
         let bytes=text.as_bytes();
-        let mut progress=|_:&tree_sitter::ParseState|expired();
+        let mut progress=|_:&tree_sitter::ParseState|if expired(){ControlFlow::Break(())}else{ControlFlow::Continue(())};
         let tree=parser.parse_with_options(&mut|offset,_|bytes.get(offset..).unwrap_or_default(),None,
             Some(ParseOptions::new().progress_callback(&mut progress)));
         shared.check()?;
@@ -111,10 +111,10 @@ impl SyntaxRuntime {
 fn matches<'tree>(language:&Language,source:&str,root:Node<'tree>,text:&[u8],expired:&impl Fn()->bool,
     mut consume:impl FnMut(Vec<(&str,Node<'tree>)>)->Result<()>)->Result<()>{
     let query=Query::new(language,source).map_err(|e|format!("unavailable: Grammar query is incompatible: {e}"))?;
-    let mut cursor=QueryCursor::new();let mut progress=|_:&tree_sitter::QueryCursorState|expired();
+    let mut cursor=QueryCursor::new();let mut progress=|_:&tree_sitter::QueryCursorState|if expired(){ControlFlow::Break(())}else{ControlFlow::Continue(())};
     let mut matches=cursor.matches_with_options(&query,root,text,QueryCursorOptions::new().progress_callback(&mut progress));
     while let Some(matched)=matches.next(){if expired(){return Err("failed: Structure query budget exhausted".into());}
-        consume(matched.captures.iter().map(|c|(query.capture_names()[c.index as usize],c.node)).collect())?;
+        consume(matched.captures().iter().map(|c|(query.capture_names()[c.index as usize],c.node)).collect())?;
     }
     drop(matches);
     if cursor.did_exceed_match_limit(){return Err("failed: Structure query match limit exceeded".into());}

@@ -30,6 +30,11 @@ jobs:
           node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun audit
+      - uses: taiki-e/install-action@26e9283f268b880168bdbd2c545dfcd60ec2c6ab # v2
+        with:
+          tool: cargo-audit@0.22.2
+      - name: Audit Rust kernel dependencies
+        run: cargo audit --file kernel/Cargo.lock
       - run: bun run test:docs
       - run: bun run docs:validate
       - run: bun run test:i18n

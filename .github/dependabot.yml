@@ -1,5 +1,15 @@
 version: 2
 updates:
+  - package-ecosystem: cargo
+    directory: /kernel
+    schedule:
+      interval: weekly
+    groups:
+      tree-sitter-wasm:
+        patterns:
+          - tree-sitter
+          - wasmtime*
+          - cranelift*
   - package-ecosystem: github-actions
     directory: /
     schedule:

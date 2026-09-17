@@ -11,7 +11,7 @@ export function createNativeComputeTestHarness() {
   let initialized: Promise<{ service: KernelComputeService; dispose(): Promise<void> }> | undefined;
   const get = () => initialized ??= (async () => {
     const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-    const kernelPath = path.join(repo, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+    const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repo, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
     await fs.access(kernelPath);
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-native-compute-fixture-"));
     const buildVersion = (JSON.parse(await fs.readFile(path.join(repo,"package.json"),"utf8")) as {version:string}).version;

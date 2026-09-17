@@ -5,6 +5,8 @@ used by the private executable are distributed under their upstream permissive l
 
 - `rusqlite` / `libsqlite3-sys` — MIT; SQLite itself is public domain.
 - `serde`, `serde_json`, `thiserror`, `uuid`, `sha2`, `hex`, and `base64` — MIT or Apache-2.0.
+- `tree-sitter` — MIT.
+- `wasmtime`, its C API, and Cranelift — Apache-2.0 with LLVM exceptions.
 
 The complete transitive source and license metadata remain available from crates.io using the exact
 versions in `Cargo.lock`; release automation must include this notice beside the staged executable.

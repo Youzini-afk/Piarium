@@ -13,7 +13,7 @@ import { createTreeSitterStructureProvider } from "../structure/tree-sitter-prov
 import { TYPESCRIPT_DEFINITION_QUERY, TYPESCRIPT_IMPORT_QUERY, TYPESCRIPT_LITERAL_CALL_QUERY } from "../structure/queries.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = path.join(repo, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repo, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
 const available = await fs.stat(kernelPath).then(() => true, () => false);
 if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native computation acceptance requires a release kernel");
 const it = test.skipIf(!available);
