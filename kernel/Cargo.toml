@@ -8,7 +8,7 @@ license = "AGPL-3.0-only"
 version = "0.1.0"
 
 [workspace.dependencies]
-base64 = "0.22.1"
+base64 = "0.23.1"
 hex = "0.4.3"
 fs2 = "0.4.3"
 rusqlite = { version = "0.32.1", features = ["bundled"] }
