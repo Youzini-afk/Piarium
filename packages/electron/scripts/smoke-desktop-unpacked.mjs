@@ -217,7 +217,12 @@ const child = spawn(appPath, [
   ...appArguments,
 ], {
   cwd: path.dirname(appPath),
-  env: { ...process.env, PIARIUM_STARTUP_PERF: '1' },
+  env: {
+    ...process.env,
+    PIARIUM_STARTUP_PERF: '1',
+    PIARIUM_DATA_DIR: userDataDir,
+    PIARIUM_WORKSPACE_ROOT: workspaceRoot,
+  },
   stdio: 'ignore',
 });
 let spawnError;
