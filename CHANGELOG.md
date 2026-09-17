@@ -5,6 +5,32 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.10
+
+Piarium 0.9.10 brings the native Agent Harness and Rust system kernel into the product, with
+durable task threads, background context preparation, and a cleaner workspace interface.
+
+- Move working state, recovery records, file operations, materialization, processes, and search
+  computation into a private Rust kernel shared by desktop and remote Application Hosts
+- Add task-centered threads with isolated branch views, nested dispatch, directed messages,
+  continue/fresh execution, fixed-result integration, and archive, restore, and deletion controls
+- Preserve unsaved editor drafts through reads, edits, thread baselines, and merge operations;
+  retain operation records and conditional compensation for interrupted changes
+- Prepare context compaction in the background, retain original recent material, and track observations
+  across compaction without repeatedly injecting unchanged context
+- Add native code exploration combining lexical, structural, graph, and semantic retrieval, optional
+  model-guided selection, configurable embedding/rerank providers, and evidence-focused retrieval threads
+- Bring tool permissions, web fetch, and configurable web search under native Harness settings;
+  add knowledge management and semantic recall through the existing provider bindings
+- Attach background commands to the same terminal process users can inspect and control, organize
+  command output, and project user terminal activity into workspace context
+- Give Agent Harness its own settings section with focused pages, automatic saving, and editable
+  permission rules; simplify the composer, sidebar, and activity presentation
+- Refresh built-in themes with neutral reading surfaces, themed buttons and selections, localized
+  names and palette previews; separate right-panel restoration from the collapsible icon rail
+- Fix Windows development builds locked by running Hosts and strengthen kernel lifecycle, CI,
+  Docker builds, and packaged runtime boundaries
+
 ## 0.9.9
 
 Piarium 0.9.9 turns the Agent and IDE workbenches into a more complete extension platform, hardens
