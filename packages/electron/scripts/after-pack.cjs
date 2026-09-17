@@ -194,6 +194,13 @@ module.exports = (context) => {
     stdio: 'inherit',
     windowsHide: true,
   });
+  execFileSync(packagingNode, [
+    path.join(__dirname, 'smoke-semantic-runtime.mjs'),
+    path.join(unpackedNodeModulesPath, '@piarium', 'web'),
+  ], {
+    stdio: 'inherit',
+    windowsHide: true,
+  });
 
   if (context.electronPlatformName !== 'darwin') return;
 

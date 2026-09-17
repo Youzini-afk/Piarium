@@ -13,6 +13,9 @@ const target = resolveTargetArchitecture();
 if (target.node !== process.arch) throw new Error('Native execution verification requires a matching architecture runner');
 const webRoot = path.join(repository, 'packages/web');
 const environment = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+execFileSync(process.execPath, [path.join(electronRoot, 'scripts/prepare-native-runtime.mjs')], {
+  cwd: electronRoot, stdio: 'inherit', windowsHide: true,
+});
 execFileSync(executable, [path.join(repository, 'scripts/smoke-kernel-release.mjs'), webRoot], {
   cwd: electronRoot, env: environment, stdio: 'inherit', windowsHide: true, timeout: 120_000,
 });
@@ -34,4 +37,7 @@ const source = `
 execFileSync(executable, ['--input-type=module', '-e', source], {
   cwd: electronRoot, env: environment, stdio: 'inherit', windowsHide: true, timeout: 30_000,
 });
-console.log('[electron] verified Rust release authority and TriviumDB under Electron');
+execFileSync(executable, [path.join(electronRoot, 'scripts/smoke-semantic-runtime.mjs'), webRoot], {
+  cwd: electronRoot, env: environment, stdio: 'inherit', windowsHide: true,
+});
+console.log('[electron] verified Rust release authority, TriviumDB, and MiniLM inference under Electron');

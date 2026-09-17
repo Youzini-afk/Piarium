@@ -93,8 +93,9 @@ That runs, in order:
 1. `build:web-assets` to build the web UI and copy it into `packages/electron/resources/web-dist`.
 2. `prepare:pi-runtime` to compile the Pi host bootstrap and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
-4. `verify:native` to start the manifest-verified release kernel and perform a durable TriviumDB
-   read/write through Electron's Node runtime. Storage and PTY no longer use Electron native addons.
+4. `verify:native` to prepare target native libraries, start the manifest-verified release kernel,
+   perform a durable TriviumDB read/write, and run real MiniLM inference through Electron's Node
+   runtime. Storage and PTY no longer use Electron native addons.
 5. `package.mjs` to build the target Rust kernel, stage it in `resources/kernel`, and run
    `electron-builder`. Its `afterPack` hook verifies the kernel identity/hash, keeps only the target
    TriviumDB binary and ONNX platform/architecture directory (including its companion libraries),
@@ -104,6 +105,23 @@ That runs, in order:
    package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.
 
 Build output goes to `packages/electron/dist`.
+
+### Native libraries built from source
+
+`prepare-native-runtime.mjs` supplies two binaries absent from the pinned npm packages:
+
+- Windows ARM64 builds TriviumDB 0.8.6 from commit
+  `2b840d0a05142f91e57d46bf30ebbde143440fa4`. The checked-in Bun patch makes its loader
+  select the actual Windows architecture. The native runner needs Rust and the ARM64 MSVC toolchain.
+- macOS Intel builds the ONNX Runtime 1.24.3 CPU library and Node-API binding from commit
+  `3a728b75062256951b6e19ce718907cf1a1d4cf0`, matching the installed JavaScript API. The
+  build uses Xcode command-line tools, Python 3, CMake 3.28 or newer, and Ninja.
+
+These recipes are part of normal native verification and packaging. They validate the installed
+dependency version, build from the fixed source revision, and check the resulting architecture.
+Verified payloads and hash receipts are cached under `~/.cache/piarium-native`; release jobs cache
+only those outputs, not source checkouts or build directories. The final packaged Host runs a real
+MiniLM inference as well, so successful compilation alone does not establish runtime support.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 

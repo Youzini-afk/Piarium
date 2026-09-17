@@ -428,6 +428,7 @@
     "electron",
   ],
   "patchedDependencies": {
+    "triviumdb@0.8.6": "bun-patches/triviumdb+0.8.6.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "@tanstack/virtual-core@3.17.3": "bun-patches/@tanstack+virtual-core+3.17.3.patch",
   },

@@ -62,6 +62,10 @@ const bunBinary = bunBinaryCandidates.find((candidate) => {
   return false;
 }) || (process.platform === 'win32' ? 'bun.exe' : 'bun');
 
+execFileSync(process.execPath, [path.join(electronDir, 'scripts', 'prepare-native-runtime.mjs')], {
+  cwd: electronDir, env, stdio: 'inherit', windowsHide: true,
+});
+
 execFileSync(process.execPath, [
   path.resolve(electronDir, '..', '..', 'scripts', 'build-kernel.mjs'),
   '--stage',
