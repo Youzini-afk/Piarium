@@ -9,7 +9,7 @@ import { createKernelClient } from "./kernel-client.js";
 import { KERNEL_REQUEST_WINDOW } from "./protocol.generated.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = path.join(repository, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repository, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
 const buildVersion = (JSON.parse(await fs.readFile(path.join(repository, "package.json"), "utf8")) as { version: string }).version;
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });

@@ -28,17 +28,28 @@ if (args.includes('--build')) {
   run(process.execPath, ['scripts/build-kernel.mjs']);
 }
 
-const binary = path.join(root, 'kernel/target/release', process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel');
+const defaultBinary = path.join(root, 'kernel/target/release', process.platform === 'win32' ? 'piarium-kernel.exe' : 'piarium-kernel');
+const binary = env.PIARIUM_TEST_KERNEL_PATH?.trim() || env.PIARIUM_KERNEL_PATH?.trim() || defaultBinary;
 if (!fs.existsSync(binary)) {
   throw new Error('Native kernel acceptance cannot skip a missing binary. Run bun run kernel:build or pass --build.');
 }
+// Every native acceptance fixture must use the binary that this invocation
+// verified.  Some fixtures run through a shared process/PTY helper while
+// others construct KernelClient directly; keep both explicit so a stale
+// developer binary (or a target-triple build) cannot be selected implicitly.
+env.PIARIUM_TEST_KERNEL_PATH = binary;
+env.PIARIUM_KERNEL_PATH = binary;
 run(process.execPath, ['scripts/generate-kernel-protocol.mjs', '--check']);
 // These suites use different test runners. Do not count node:test registrations
 // as Vitest suites, or call a missing release executable a successful smoke.
 run(process.execPath, ['--import', 'tsx', '--test',
   'packages/web/application-host/lib/kernel/kernel-client.test.ts',
 ]);
-run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run',
+// These files each start real kernels, durable stores and OS process trees.
+// Windows CI hit shutdown and transport deadlines while running these together.
+// Isolate file workloads there; concurrency within each test remains exercised.
+run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.config.ts',
+  ...(process.platform === 'win32' ? ['--no-file-parallelism'] : []),
   'packages/web/application-host/lib/kernel/file-resource-audit.test.ts',
   'packages/web/application-host/lib/kernel/kernel-compute.test.ts',
   'packages/web/application-host/lib/kernel/request-window.test.ts',

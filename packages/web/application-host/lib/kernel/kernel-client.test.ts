@@ -11,7 +11,7 @@ import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDi
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
 
 const extension = process.platform === "win32" ? ".exe" : "";
-const kernelPath = path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
+const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.resolve(process.cwd(), "kernel", "target", "release", `piarium-kernel${extension}`);
 const buildVersion = JSON.parse(await fs.readFile(path.resolve(process.cwd(), "package.json"), "utf8")).version as string;
 const clients: KernelClient[] = [];
 const roots: string[] = [];

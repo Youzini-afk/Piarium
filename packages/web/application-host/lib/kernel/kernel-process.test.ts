@@ -14,7 +14,7 @@ import { createKernelClient, type KernelClient, type KernelScopedClient } from "
 import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 const available = await fs.stat(kernelPath).then(() => true).catch(() => false);
 if (!available && process.env.PIARIUM_REQUIRE_RELEASE_KERNEL === "1") throw new Error("Native process acceptance requires the release kernel");

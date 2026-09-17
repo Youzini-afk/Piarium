@@ -10,7 +10,7 @@ import { KernelRecoveryContentStore, KernelRecoveryStore } from "../kernel/kerne
 import { createKernelProcessService } from "../kernel/process-service.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
-const kernelPath = path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
+const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH ?? path.join(repositoryRoot, "kernel/target/release", process.platform === "win32" ? "piarium-kernel.exe" : "piarium-kernel");
 export const hasNativeProcessKernel = fs.existsSync(kernelPath);
 
 /** An isolated real-kernel fixture. No Node/Bun PTY production fallback. */
