@@ -351,7 +351,7 @@
       "dependencies": {
         "@clack/prompts": "^1.1.0",
         "@huggingface/transformers": "^4.2.0",
-        "@konbakuyomu/smart-search": "^0.1.14",
+        "@konbakuyomu/smart-search": "^0.1.17",
         "@mozilla/readability": "0.6.0",
         "@octokit/rest": "^22.0.1",
         "@piarium/application-client": "workspace:*",
@@ -1062,7 +1062,7 @@
 
     "@keyv/serialize": ["@keyv/serialize@1.1.1", "", {}, "sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA=="],
 
-    "@konbakuyomu/smart-search": ["@konbakuyomu/smart-search@0.1.14", "", { "bin": { "smart-search": "npm/bin/smart-search.js" } }, "sha512-lWr2ctBnbYioVvnIcvqazmgzgkuD8SZSwaES9/ZEWeizqxtM7w63lxK71YTpOH/oiITD2tLarzJO21a8Rl9viA=="],
+    "@konbakuyomu/smart-search": ["@konbakuyomu/smart-search@0.1.17", "", { "bin": { "smart-search": "npm/bin/smart-search.js" } }, "sha512-V1RiX6LY0TVrDqmptYbkFUf2WOAUqP6xZ6HSHE6GCt9TevUYtw3eC9Dx8Tc95p41tU1nQtQqkOoEIs4//1ufkg=="],
 
     "@kwsites/file-exists": ["@kwsites/file-exists@1.1.1", "", { "dependencies": { "debug": "^4.1.1" } }, "sha512-m9/5YGR18lIwxSFDwfE3oA7bWuq9kdau6ugN4H2rJeyhFQZcG9AgSHkQtSD15a8WvTgfz9aikZMrKPHvbpqFiw=="],
 
