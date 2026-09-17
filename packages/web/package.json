@@ -92,7 +92,7 @@
     "luxon": "^3.5.0",
     "multer": "^2.3.0",
     "openai": "^4.79.0",
-    "picomatch": "4.0.5",
+    "picomatch": "4.0.7",
     "qrcode-terminal": "^0.12.0",
     "reflect-metadata": "^0.2.2",
     "ripgrep": "^0.3.1",
