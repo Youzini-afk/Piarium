@@ -2,6 +2,10 @@
 
 Electron desktop runtime for Piarium on macOS, Windows, and Linux.
 
+The desktop uses Electron 44 and requires macOS 13 or newer on Mac. Release artifacts target
+x64 and ARM64. Electron and `electron-context-menu` are upgraded together because the menu
+package uses Electron's clipboard API.
+
 This package owns the native shell: windows, menus, deep links, native notifications, auto-updates, host switching, SSH connections, tunnel helpers, and packaged desktop builds. The web UI and Piarium server logic still live in `packages/web` and shared React UI lives in `packages/ui`.
 
 ## How it runs

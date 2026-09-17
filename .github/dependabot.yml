@@ -10,6 +10,9 @@ updates:
           - tree-sitter
           - wasmtime*
           - cranelift*
+      kernel-patches:
+        patterns: ['*']
+        update-types: [patch]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -22,6 +25,9 @@ updates:
         patterns:
           - actions/upload-artifact
           - actions/download-artifact
+      routine-actions:
+        patterns: ['*']
+        update-types: [minor, patch]
 
   # This workspace installs with Bun and CI runs `bun install --frozen-lockfile`. The `npm`
   # ecosystem edits `package.json` without maintaining `bun.lock`, so every pull request it opened
@@ -45,9 +51,23 @@ updates:
         patterns:
           - vitest
           - '@vitest/*'
+      electron-runtime:
+        patterns:
+          - electron
+          - electron-context-menu
       # Pi publishes its packages in lockstep and Piarium pins them to one exact version, so a
       # single-package bump is a half upgrade that cannot pass. Upgrading also means refreshing the
       # cloud runtime lockfile and the isolated VS Code runtime lockfile, so keep it one review.
       pi-runtime:
         patterns:
           - '@earendil-works/*'
+      capacitor:
+        patterns:
+          - '@capacitor/*'
+          - '@capacitor-mlkit/*'
+          - '@aparajita/capacitor-*'
+      # Keep routine upgrades in one review/build instead of one full CI run per package.
+      # Major upgrades remain separate unless they belong to a coupled group above.
+      routine-libraries:
+        patterns: ['*']
+        update-types: [minor, patch]

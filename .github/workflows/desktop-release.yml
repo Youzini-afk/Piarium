@@ -150,7 +150,7 @@ jobs:
       - name: Restore source-built native libraries
         if: (matrix.platform == 'windows' && matrix.architecture == 'arm64') || (matrix.platform == 'macos' && matrix.architecture == 'x64')
         id: native-cache
-        uses: actions/cache/restore@v5
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cache/piarium-native/**/payload
@@ -162,7 +162,7 @@ jobs:
 
       - name: Cache verified native libraries
         if: steps.native-cache.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
+        uses: actions/cache/save@v6
         with:
           path: |
             ~/.cache/piarium-native/**/payload

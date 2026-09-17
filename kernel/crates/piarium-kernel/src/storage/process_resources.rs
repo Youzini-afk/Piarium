@@ -290,7 +290,9 @@ impl Storage {
                 .registered_file_root(string(params_value, "rootId")?, grant)?
                 .clone();
             self.refresh_process_records()?;
-            let cursor = unsigned(params_value, "cursor", 0)?;
+            let cursor = i64::try_from(unsigned(params_value, "cursor", 0)?).map_err(|_| {
+                KernelError::Operation("process list cursor exceeds SQLite rowid range".into())
+            })?;
             let page_size = unsigned(params_value, "pageSize", 128)?;
             if !(1..=256).contains(&page_size) {
                 return Err(KernelError::Operation(
@@ -298,7 +300,7 @@ impl Storage {
                 ));
             }
             let records = self.conn.prepare("SELECT rowid,status_json FROM process_records WHERE workspace_id=?1 AND rowid>?2 ORDER BY rowid LIMIT ?3")?
-                .query_map(params![workspace,cursor,page_size+1], |row| Ok((row.get::<_, u64>(0)?,row.get::<_, String>(1)?)))?
+                .query_map(params![workspace,cursor,page_size as i64+1], |row| Ok((row.get::<_, i64>(0)?,row.get::<_, String>(1)?)))?
                 .collect::<Result<Vec<_>, _>>()?;
             let mut visible = Vec::new();
             let mut last = cursor;

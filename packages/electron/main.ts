@@ -132,8 +132,7 @@ const readLoginItemSettings = () => {
 const shouldStartInBackground = (loginItemSettings = readLoginItemSettings()) => {
   return (
     process.argv.includes(BACKGROUND_START_ARG) ||
-    loginItemSettings?.wasOpenedAtLogin === true ||
-    loginItemSettings?.wasOpenedAsHidden === true
+    loginItemSettings?.wasOpenedAtLogin === true
   );
 };
 
@@ -4179,7 +4178,6 @@ const handleInvoke = async (
       const enabled = args.enabled === true;
       const settingsArgs = {
         openAtLogin: enabled,
-        ...(process.platform === 'darwin' ? { openAsHidden: enabled } : {}),
         ...(process.platform === 'win32' ? getLoginItemOptions() : { args: enabled ? [BACKGROUND_START_ARG] : [] }),
         ...(process.platform === 'win32' ? { enabled } : {}),
       };
@@ -5689,7 +5687,7 @@ app.whenReady().then(async () => {
     const openAtLogin = loginItemSettings?.openAtLogin === true;
     app.setLoginItemSettings({
       openAtLogin,
-      ...(process.platform === 'darwin' ? { openAsHidden: openAtLogin, args: openAtLogin ? [BACKGROUND_START_ARG] : [] } : {}),
+      ...(process.platform === 'darwin' ? { args: openAtLogin ? [BACKGROUND_START_ARG] : [] } : {}),
       ...(process.platform === 'win32' ? { ...getLoginItemOptions(), enabled: openAtLogin } : {}),
     });
   }
