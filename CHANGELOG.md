@@ -5,6 +5,22 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.11
+
+Piarium 0.9.11 adopts Electron 44 across the desktop shell, applies upstream security fixes to the
+native parsing and compute stack, and repairs the packaged desktop release path end to end.
+
+- Upgrade the desktop shell to Electron 44 with the coupled context-menu update, align Capacitor
+  and isolated Pi runtimes, and adapt SQLite cursor and login-startup APIs
+- Move native parsing to patched tree-sitter 0.27 and Wasmtime 48 releases, adapt cancellation and
+  query captures, enable Cargo dependency updates, and audit the Rust lockfile in CI
+- Integrate Dependabot upgrades across Pi, Vite, ESLint, CodeMirror, jose, and Workbox and adapt
+  the affected runtime consumers
+- Build the Rust kernel before native tests, trim packaged native payloads, supply the missing
+  platform binaries, and admit the isolated desktop smoke workspace so packaged releases verify
+- Isolate Windows kernel acceptance suites and await process exit when validating truncated
+  transport; verify the splash lifecycle without compiler text snapshots
+
 ## 0.9.10
 
 Piarium 0.9.10 brings the native Agent Harness and Rust system kernel into the product, with

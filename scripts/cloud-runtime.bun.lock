@@ -72,7 +72,7 @@
     },
     "packages/web": {
       "name": "@piarium/web",
-      "version": "0.9.10",
+      "version": "0.9.11",
       "bin": {
         "piarium": "./bin/cli.js",
       },
