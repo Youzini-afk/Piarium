@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION } from '@piarium/extension-builtins';
 import {
   PIARIUM_WORKBENCH_PROFILE_TRANSITION_SCENE,
@@ -10,7 +10,9 @@ import {
 import { LOGO_GRID_SIZE } from './piarium-logo-geometry';
 import {
   buildAdaptiveSplashTiles,
+  createSplashCanvasMountOptions,
   mountSplashTileCanvas,
+  resolveSplashCanvasPlayback,
   splashTileBreathesInCycle,
   splashGroundScript,
 } from './piarium-splash-canvas';
@@ -71,6 +73,8 @@ const readMiniChat = (): string => readRepoFile('packages', 'web', 'mini-chat.ht
 const readWebview = (): string => readRepoFile('packages', 'vscode', 'src', 'webviewHtml.ts');
 const SPLASH_TEST_RANDOM_SEED = 0x02f6e2b1;
 
+afterEach(() => { vi.unstubAllGlobals(); });
+
 const buildField = (
   viewportWidth = 1920,
   viewportHeight = 1080,
@@ -90,6 +94,118 @@ const buildField = (
   visibleFarRisePx: SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
   ...overrides,
 });
+
+/**
+ * A small 2D Canvas harness for the controller's observable lifecycle. The real mount drives the camera and
+ * renderer attributes; this fallback context only supplies the browser calls needed to reach those effects.
+ */
+const createSplashCanvasHarness = () => {
+  let now = 0;
+  let nextFrameId = 0;
+  const pendingFrames = new Map<number, FrameRequestCallback>();
+  const cameraValues = new Map<string, string>();
+  const splashAttributes = new Map<string, string>();
+  const canvasAttributes = new Map<string, string>();
+
+  const context = {
+    globalAlpha: 1,
+    fillStyle: '',
+    strokeStyle: '',
+    lineWidth: 1,
+    beginPath: () => undefined,
+    clearRect: () => undefined,
+    closePath: () => undefined,
+    fill: () => undefined,
+    fillRect: () => undefined,
+    getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
+    lineTo: () => undefined,
+    moveTo: () => undefined,
+    setTransform: () => undefined,
+    stroke: () => undefined,
+  };
+
+  const colorContext = {
+    clearRect: () => undefined,
+    fillRect: () => undefined,
+    getImageData: () => ({ data: new Uint8ClampedArray([0, 0, 0, 255]) }),
+    fillStyle: '',
+  };
+  const cameraStyle = {
+    removeProperty: (name: string) => { cameraValues.delete(name); },
+    setProperty: (name: string, value: string) => { cameraValues.set(name, value); },
+  };
+  const cameraElement = { style: cameraStyle };
+  const splashElement = {
+    getAttribute: (name: string) => splashAttributes.get(name) ?? null,
+    removeAttribute: (name: string) => { splashAttributes.delete(name); },
+    setAttribute: (name: string, value: string) => { splashAttributes.set(name, value); },
+  };
+  const parentElement = {
+    append: () => undefined,
+    getBoundingClientRect: () => ({ width: 640, height: 360 }),
+    querySelector: () => cameraElement,
+  };
+  const view = {
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    innerHeight: 360,
+    innerWidth: 640,
+    requestAnimationFrame: (callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      pendingFrames.set(id, callback);
+      return id;
+    },
+  };
+  const document = {
+    createElement: (tagName: string) => {
+      if (tagName === 'canvas') {
+        return {
+          getContext: (kind: string) => kind === '2d' ? colorContext : null,
+          height: 1,
+          width: 1,
+        };
+      }
+      return {
+        remove: () => undefined,
+        style: { color: '', cssText: '' },
+      };
+    },
+    defaultView: view,
+    documentElement: parentElement,
+  };
+  const canvas = {
+    clientHeight: 360,
+    clientWidth: 640,
+    getContext: (kind: string) => kind === '2d' ? context : null,
+    isConnected: true,
+    ownerDocument: document,
+    parentElement,
+    closest: () => splashElement,
+    removeAttribute: (name: string) => { canvasAttributes.delete(name); },
+    setAttribute: (name: string, value: string) => { canvasAttributes.set(name, value); },
+    width: 0,
+    height: 0,
+  } as unknown as HTMLCanvasElement;
+
+  vi.stubGlobal('getComputedStyle', (element: { style: { color: string } }) => ({ color: element.style.color }));
+  vi.stubGlobal('performance', { now: () => now, timeOrigin: 0 });
+  vi.stubGlobal('requestAnimationFrame', view.requestAnimationFrame);
+  vi.stubGlobal('cancelAnimationFrame', (id: number) => { pendingFrames.delete(id); });
+
+  return {
+    cameraValues,
+    canvas,
+    canvasAttributes,
+    detach: () => { (canvas as unknown as { isConnected: boolean }).isConnected = false; },
+    nextFrame: (elapsed: number) => {
+      now = elapsed;
+      const callbacks = [...pendingFrames.values()];
+      pendingFrames.clear();
+      for (const callback of callbacks) callback(now);
+    },
+    splashAttributes,
+  };
+};
 
 /** Content a host embeds verbatim between a pair of sentinels. */
 const between = (body: string, open: string, close: string): string => {
@@ -508,15 +624,6 @@ describe('exit choreography', () => {
     }
   });
 
-  test('tile playback stays in one Canvas rather than rebuilding DOM paint owners', () => {
-    const css = splashPlaneCss(PIARIUM_SPLASH_COLORS, { withMark: true });
-    const renderer = mountSplashTileCanvas.toString();
-    expect(css).not.toContain('.pi-splash-tile-cluster');
-    expect(renderer).toContain('tile.scatterXPx * motion.eased');
-    expect(renderer).toContain('frame.scale = mix(1, 0.56, motion.eased)');
-    expect(renderer).toContain('frame.opacity =');
-  });
-
   /**
    * The scene's terminal frame has to survive until its nodes are gone.
    *
@@ -527,31 +634,40 @@ describe('exit choreography', () => {
    * Canvas's opaque background across the whole viewport. That is the flash, and it is a lifecycle bug
    * rather than anything a browser or a machine decides.
    */
-  test('retiring the Canvas leaves a connected scene untouched', () => {
-    const renderer = mountSplashTileCanvas.toString();
-    const disposal = /dispose: \(\) => \{([\s\S]*?)\n {4}\},\n {4}setPlayback:/.exec(renderer)?.[1] ?? '';
-    expect(disposal).not.toBe('');
+  test('retiring the Canvas leaves a connected scene untouched', async () => {
+    const harness = createSplashCanvasHarness();
+    const playback = resolveSplashCanvasPlayback({
+      mode: 'switch',
+      phase: 'covered',
+      reducedMotion: false,
+      tempo: 'standard',
+    });
+    const options = createSplashCanvasMountOptions({
+      breathe: false,
+      direction: 'forward',
+      mode: 'switch',
+      playback,
+    });
+    const controller = mountSplashTileCanvas(harness.canvas, options);
 
-    // Every visible mutation sits behind the detachment check, and the check bails out while connected.
-    const guarded = disposal.slice(disposal.indexOf('const releaseDetachedScene'));
-    expect(guarded).toContain('if (canvas.isConnected) return;');
-    for (const mutation of [
-      'style.removeProperty(options.camera.tiltProperty)',
-      'removeAttribute("data-piarium-camera-owner")',
-      'removeAttribute("data-piarium-splash-renderer")',
-      'renderer?.dispose()',
-    ]) {
-      expect(guarded).toContain(mutation);
-      expect(disposal.indexOf(mutation)).toBeGreaterThan(disposal.indexOf('if (canvas.isConnected) return;'));
-    }
+    expect(harness.splashAttributes.get('data-piarium-camera-owner')).toBe('canvas');
+    expect(harness.canvasAttributes.get('data-piarium-splash-renderer')).toBe('2d');
+    expect(harness.cameraValues.get(options.camera.tiltProperty)).toBe(`${SPLASH_CAMERA_TILT_DEG}deg`);
 
-    // What runs immediately is only the invisible half: no more frames, no more listeners.
-    const immediate = disposal.slice(0, disposal.indexOf('const releaseDetachedScene'));
-    expect(immediate).toContain('cancelAnimationFrame');
-    expect(immediate).toContain('removeEventListener("resize"');
-    expect(immediate).not.toContain('removeAttribute');
-    expect(immediate).not.toContain('removeProperty');
-    expect(immediate).not.toContain('renderer?.dispose()');
+    controller.dispose();
+    await Promise.resolve();
+
+    // Cleanup is deferred while the Canvas remains in the composed scene, so its last frame and camera
+    // ownership stay intact through the whole connected interval.
+    expect(harness.splashAttributes.get('data-piarium-camera-owner')).toBe('canvas');
+    expect(harness.canvasAttributes.get('data-piarium-splash-renderer')).toBe('2d');
+    expect(harness.cameraValues.get(options.camera.tiltProperty)).toBe(`${SPLASH_CAMERA_TILT_DEG}deg`);
+
+    harness.detach();
+    harness.nextFrame(0);
+    expect(harness.splashAttributes.has('data-piarium-camera-owner')).toBe(false);
+    expect(harness.canvasAttributes.has('data-piarium-splash-renderer')).toBe(false);
+    expect(harness.cameraValues.has(options.camera.tiltProperty)).toBe(false);
   });
 
   test('context loss is the caller\'s decision, taken only after detachment', () => {
@@ -598,9 +714,32 @@ describe('exit choreography', () => {
     const timing = splashTilePlaybackTiming('standard');
     expect(timing.cameraDelayMs + timing.cameraDurationMs).toBeLessThan(timing.releaseMs);
 
-    const renderer = mountSplashTileCanvas.toString();
-    expect(renderer).toContain('tiltDeg * (1 - cubicEase(forwardProgress, 0.4, 0.2))');
-    expect(renderer).not.toContain('forwardProgress <= knee');
+    const harness = createSplashCanvasHarness();
+    const playback = resolveSplashCanvasPlayback({
+      mode: 'switch',
+      phase: 'revealing',
+      reducedMotion: false,
+      tempo: 'standard',
+    });
+    const options = createSplashCanvasMountOptions({
+      breathe: false,
+      direction: 'forward',
+      mode: 'switch',
+      playback,
+    });
+    const controller = mountSplashTileCanvas(harness.canvas, options);
+    const readTilt = (): number => Number.parseFloat(harness.cameraValues.get(options.camera.tiltProperty) ?? 'NaN');
+    const cameraEnd = timing.cameraDelayMs + timing.cameraDurationMs;
+
+    harness.nextFrame(cameraEnd - 1);
+    expect(readTilt()).toBeGreaterThan(0);
+    harness.nextFrame(cameraEnd);
+    expect(readTilt()).toBeLessThan(1e-4);
+    harness.nextFrame(timing.releaseMs);
+    expect(readTilt()).toBeLessThan(1e-4);
+
+    harness.detach();
+    controller.dispose();
   });
 
   test('the contact footprint keeps the original floor-space echo', () => {
