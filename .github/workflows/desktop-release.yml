@@ -41,6 +41,8 @@ jobs:
       - run: bun run --cwd packages/ui test src/lib/i18n/messages.test.ts src/lib/i18n/messages/i18nParity.test.ts
       - run: bun run type-check
       - run: bun run lint
+      - name: Build and verify native kernel authority
+        run: node scripts/test-kernel-authority.mjs --build
       - run: bun run test:pi
       - run: bun run test:cloud
 
