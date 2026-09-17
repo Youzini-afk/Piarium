@@ -97,7 +97,8 @@ That runs, in order:
    read/write through Electron's Node runtime. Storage and PTY no longer use Electron native addons.
 5. `package.mjs` to build the target Rust kernel, stage it in `resources/kernel`, and run
    `electron-builder`. Its `afterPack` hook verifies the kernel identity/hash, keeps only the target
-   TriviumDB binary, rejects retired `better-sqlite3` / `node-pty` / `bun-pty` authority packages, and
+   TriviumDB binary and ONNX platform/architecture directory (including its companion libraries),
+   rejects retired `better-sqlite3` / `node-pty` / `bun-pty` authority packages, and
    removes the duplicate dependency copy of the already staged Web UI. It also verifies that every
    distribution-owned Host runtime needed after lazy activation, including the TypeScript language
    package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.

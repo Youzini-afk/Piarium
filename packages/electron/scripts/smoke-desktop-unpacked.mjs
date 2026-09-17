@@ -200,6 +200,8 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-desktop-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
+const workspaceRoot = path.join(smokeRoot, 'workspace');
+await fsp.mkdir(workspaceRoot);
 const logPaths = [
   path.join(userDataDir, 'logs', 'main.log'),
   ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Piarium', 'main.log')] : []),
@@ -272,10 +274,20 @@ try {
     throw new Error(`Packaged recovery service returned HTTP ${recoveryResponse.status}: ${JSON.stringify(recoveryPayload)}`);
   }
 
+  const workspaceResponse = await fetch(`${baseUrl}/api/documents/workspace/resolve`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ path: workspaceRoot }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const workspace = await workspaceResponse.json();
+  if (!workspaceResponse.ok || typeof workspace?.workspaceId !== 'string' || !workspace.workspaceId) {
+    throw new Error(`Packaged workspace resolution failed with HTTP ${workspaceResponse.status}: ${JSON.stringify(workspace)}`);
+  }
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ cols: 80, cwd: path.dirname(appPath), rows: 24 }),
+    body: JSON.stringify({ cols: 80, cwd: workspaceRoot, rows: 24 }),
     signal: AbortSignal.timeout(15_000),
   });
   if (!terminalResponse.ok) {

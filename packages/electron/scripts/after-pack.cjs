@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
+const pruneOnnxRuntime = require('./prune-onnx-runtime.cjs');
 const {
   defaultKernelTargetTriple,
   detectKernelBinaryIdentity,
@@ -52,6 +53,7 @@ module.exports = (context) => {
   const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';
   if (!fs.existsSync(path.join(trivium, triviumBinary))) throw new Error('Missing target TriviumDB binary: ' + triviumBinary);
   for (const name of fs.readdirSync(trivium)) if (name.endsWith('.node') && name !== triviumBinary) fs.rmSync(path.join(trivium, name));
+  pruneOnnxRuntime(unpackedNodeModulesPath, context.electronPlatformName, targetArchitecture);
   for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
     if (fs.existsSync(path.join(unpackedNodeModulesPath, legacy))) throw new Error('Obsolete native authority entered release: ' + legacy);
   }
