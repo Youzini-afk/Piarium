@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -93,8 +94,9 @@ it("R0/R6 truncated input drains the old epoch, rejects pending work and permits
   await f.actor.createBranch({ operationId: "base", branchId: "base", workspaceId: "ws", draftBasePaths: [], captureScopes: [], entries: [] });
   const before = await f.actor.readBranch({ branchId: "base", includeEntries: false });
   // A partial control frame cannot bypass orderly Storage/reader/process drain.
+  const exited = once(f.child, "exit");
   f.child.stdin.end(Buffer.from([0, 0, 0, 100, 123]));
-  await expect.poll(() => f.child.exitCode !== null || f.child.signalCode !== null).toBe(true);
+  await exited;
   await f.host.close();
   const restarted = createKernelClient(f.options);
   try {
