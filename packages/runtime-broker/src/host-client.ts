@@ -16,6 +16,7 @@ import {
   type RuntimeWorkerRole,
   type WireEnvelope,
 } from "@piarium/protocol";
+import { assertExternalPiHostEntry } from "./errors.js";
 
 interface PendingRequest {
   reject(error: unknown): void;
@@ -171,6 +172,7 @@ export class PiHostClient {
     if (this.#child) throw new Error("Pi host is already started");
     if (this.#disposed) throw new Error("Pi host is disposed");
     if (this.#terminalError) throw this.#terminalError;
+    assertExternalPiHostEntry(this.#options.hostEntry);
 
     const ready = new Promise<void>((resolveReady, rejectReady) => {
       this.#readyResolve = resolveReady;

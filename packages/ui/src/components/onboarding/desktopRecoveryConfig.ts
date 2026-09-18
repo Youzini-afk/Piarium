@@ -42,17 +42,17 @@ export function getDesktopRecoveryConfig(
   switch (variant) {
     case 'local-unavailable':
       return {
-        title: 'Local Pi Runtime Unavailable',
-        description: 'The local Pi runtime could not be started. Retry the runtime or connect to a remote server instead.',
+        title: 'Local Workspace Runtime Unavailable',
+        description: 'The local workspace runtime could not be started. Retry the runtime or connect to a remote server instead.',
         titleKey: 'onboarding.desktopRecovery.localUnavailable.title',
         descriptionKey: 'onboarding.desktopRecovery.localUnavailable.description',
         iconKey: 'local',
         showRetry: true,
-        retryLabel: 'Retry Local',
+        retryLabel: 'Retry Local Runtime',
         retryLabelKey: 'onboarding.desktopRecovery.localUnavailable.retry',
         showUseLocal: true,
         showUseRemote: true,
-        useLocalLabel: 'Check Local Pi',
+        useLocalLabel: 'Use Local Runtime',
         useLocalLabelKey: 'onboarding.desktopRecovery.localUnavailable.useLocal',
         useRemoteLabel: 'Use Remote',
         useRemoteLabelKey: 'onboarding.desktopRecovery.common.useRemote',

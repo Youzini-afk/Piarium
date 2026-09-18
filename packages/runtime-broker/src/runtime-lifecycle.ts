@@ -2,14 +2,13 @@ import type {
   ExtensionUiResponse,
   HostHandshakeResult,
   PiRuntimeInstallation,
-  PiRuntimeIssueCode,
   PiRuntimeSnapshot,
   ProviderAuthResponse,
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
 } from "@piarium/protocol";
-import { PiRuntimeNotReadyError, piRuntimeIssueCodeFromError } from "./errors.js";
+import { PiRuntimeNotReadyError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
 import {
   PiRuntimeBroker,
@@ -31,7 +30,8 @@ export interface PiRuntimeBrokerFactoryOptions {
   runtimeSource?: PiRuntimeInstallation["source"];
 }
 
-export interface PiRuntimeLifecycleOptions extends PiRuntimeManagerOptions {
+export interface PiRuntimeLifecycleOptions extends Omit<PiRuntimeManagerOptions, "startRuntime"> {
+  hostEntry?: string;
   createBroker: (options: PiRuntimeBrokerFactoryOptions) => PiRuntimeBroker;
 }
 
@@ -53,8 +53,6 @@ export class PiRuntimeLifecycle {
   readonly #sessionGenerations = new Map<string, number>();
   readonly #snapshotListeners = new Set<(snapshot: PiRuntimeSnapshot) => void>();
   readonly #workerGenerations = new Map<string, number>();
-  #activationIssue: string | undefined;
-  #activationIssueCode: PiRuntimeIssueCode | undefined;
   #currentId = 0;
   #handshake: HostHandshakeResult | undefined;
   #nextId = 1;
@@ -68,17 +66,12 @@ export class PiRuntimeLifecycle {
       dataDir: options.dataDir,
       ...(options.discover === undefined ? {} : { discover: options.discover }),
       ...(options.discovery === undefined ? {} : { discovery: options.discovery }),
-      hostEntry: this.#hostEntry,
       ...(options.installer === undefined ? {} : { installer: options.installer }),
       ...(options.planInstall === undefined ? {} : { planInstall: options.planInstall }),
-      ...(options.probe === undefined ? {} : { probe: options.probe }),
+      startRuntime: (installation) => this.#ensureBroker(installation),
       ...(options.targetVersion === undefined ? {} : { targetVersion: options.targetVersion }),
     });
-    this.#managerUnsubscribe = this.#manager.subscribe((snapshot) => {
-      if (snapshot.status !== "ready") {
-        this.#activationIssue = undefined;
-        this.#activationIssueCode = undefined;
-      }
+    this.#managerUnsubscribe = this.#manager.subscribe(() => {
       this.#publishSnapshot();
     });
   }
@@ -89,15 +82,7 @@ export class PiRuntimeLifecycle {
       revision: this.#revision,
     };
     if (snapshot.status === "ready" && snapshot.active && !this.#currentMatches(snapshot.active)) {
-      snapshot.status = this.#activationIssue ? "failed" : "probing";
-      if (this.#activationIssue) {
-        snapshot.issue = this.#activationIssue;
-        if (this.#activationIssueCode) snapshot.issueCode = this.#activationIssueCode;
-        else delete snapshot.issueCode;
-      } else {
-        delete snapshot.issue;
-        delete snapshot.issueCode;
-      }
+      snapshot.status = "probing";
     }
     return snapshot;
   }
@@ -132,18 +117,12 @@ export class PiRuntimeLifecycle {
   }
 
   async start(): Promise<HostHandshakeResult | undefined> {
-    const snapshot = await this.#manager.refresh();
-    if (snapshot.status === "ready" && snapshot.active) {
-      return this.#activateInstallation(snapshot.active);
-    }
-    return undefined;
+    const snapshot = await this.#manager.start();
+    return snapshot.status === "ready" ? this.#handshake : undefined;
   }
 
   async refresh(): Promise<PiRuntimeSnapshot> {
-    const snapshot = await this.#manager.refresh();
-    if (snapshot.status === "ready" && snapshot.active) {
-      await this.#activateInstallation(snapshot.active);
-    }
+    await this.#manager.refresh();
     return this.snapshot;
   }
 
@@ -152,36 +131,24 @@ export class PiRuntimeLifecycle {
   }
 
   async activate(id: string): Promise<PiRuntimeSnapshot> {
-    const snapshot = await this.#manager.activate(id);
-    if (snapshot.status === "ready" && snapshot.active) {
-      await this.#activateInstallation(snapshot.active);
-    }
+    await this.#manager.activate(id);
     return this.snapshot;
   }
 
   async activateCustom(packageRoot: string, nodePath?: string): Promise<PiRuntimeSnapshot> {
-    const snapshot = await this.#manager.activateCustom(packageRoot, nodePath);
-    if (snapshot.status === "ready" && snapshot.active) {
-      await this.#activateInstallation(snapshot.active);
-    }
+    await this.#manager.activateCustom(packageRoot, nodePath);
     return this.snapshot;
   }
 
   async install(): Promise<PiRuntimeSnapshot> {
     await this.#stopGenerationsForUpdate();
-    const snapshot = await this.#manager.install();
-    if (snapshot.status === "ready" && snapshot.active) {
-      await this.#activateInstallation(snapshot.active);
-    }
+    await this.#manager.install();
     return this.snapshot;
   }
 
   async upgrade(): Promise<PiRuntimeSnapshot> {
     await this.#stopGenerationsForUpdate();
-    const snapshot = await this.#manager.upgrade();
-    if (snapshot.status === "ready" && snapshot.active) {
-      await this.#activateInstallation(snapshot.active);
-    }
+    await this.#manager.upgrade();
     return this.snapshot;
   }
 
@@ -282,11 +249,11 @@ export class PiRuntimeLifecycle {
     if (this.#handshake) return this.#handshake;
     const snapshot = this.#manager.snapshot.status === "ready"
       ? this.#manager.snapshot
-      : await this.#manager.refresh();
+      : await this.#manager.start();
     if (snapshot.status !== "ready" || !snapshot.active) {
       throw new PiRuntimeNotReadyError(snapshot.issue ?? "Pi runtime is not ready");
     }
-    return this.#activateInstallation(snapshot.active);
+    return this.#ensureBroker(snapshot.active);
   }
 
   asBroker(): PiRuntimeBroker {
@@ -353,23 +320,10 @@ export class PiRuntimeLifecycle {
     this.#snapshotListeners.clear();
   }
 
-  async #activateInstallation(installation: PiRuntimeInstallation): Promise<HostHandshakeResult> {
-    try {
-      return await this.#ensureBroker(installation);
-    } catch (error) {
-      this.#activationIssue = error instanceof Error ? error.message : String(error);
-      this.#activationIssueCode = piRuntimeIssueCodeFromError(error);
-      this.#publishSnapshot();
-      throw error;
-    }
-  }
-
   async #ensureBroker(installation: PiRuntimeInstallation): Promise<HostHandshakeResult> {
     const current = this.#generations.get(this.#currentId);
     if (current && this.#generationMatches(current, installation)) {
       this.#handshake = current.handshake;
-      this.#activationIssue = undefined;
-      this.#activationIssueCode = undefined;
       return current.handshake;
     }
     const id = this.#nextId;
@@ -412,13 +366,11 @@ export class PiRuntimeLifecycle {
       broker,
       handshake,
       id,
-      ...(installation.packageRoot === undefined ? {} : { packageRoot: installation.packageRoot }),
+      ...(handshake.runtime.packageRoot === undefined ? {} : { packageRoot: handshake.runtime.packageRoot }),
       unsubscribe,
     });
     this.#currentId = id;
     this.#handshake = handshake;
-    this.#activationIssue = undefined;
-    this.#activationIssueCode = undefined;
     this.#publishSnapshot();
     return handshake;
   }

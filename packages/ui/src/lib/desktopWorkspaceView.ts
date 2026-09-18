@@ -9,7 +9,7 @@ export const resolveDesktopWorkspaceView = (input: {
   runtimeStatus: PiRuntimeManagerStatus | null;
 }): DesktopWorkspaceView => {
   if (input.catalogLoaded) return 'main';
-  if (input.runtimeStatus === null || input.runtimeStatus === 'discovering') return 'loading';
+  if (input.runtimeStatus === null || input.runtimeStatus === 'discovering' || input.runtimeStatus === 'probing') return 'loading';
   if (input.runtimeStatus === 'ready') {
     if (input.catalogLoading) return 'loading';
     return input.catalogError ? 'catalog-recovery' : 'loading';

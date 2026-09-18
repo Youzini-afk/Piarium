@@ -3,19 +3,19 @@ import { getDesktopRecoveryConfig } from './desktopRecoveryConfig';
 
 describe('getDesktopRecoveryConfig', () => {
   // ---------------------------------------------------------------------------
-  // 1. local-unavailable: both actions visible + retry labeled "Retry Local"
+  // 1. local-unavailable: local retry and both recovery actions
   // ---------------------------------------------------------------------------
-  test('local-unavailable exposes both actions and Retry Local', () => {
+  test('local-unavailable exposes both actions and local runtime retry', () => {
     const config = getDesktopRecoveryConfig('local-unavailable');
 
-    expect(config.title).toBe('Local Pi Runtime Unavailable');
+    expect(config.titleKey).toBe('onboarding.desktopRecovery.localUnavailable.title');
     expect(config.iconKey).toBe('local');
     expect(config.showRetry).toBe(true);
-    expect(config.retryLabel).toBe('Retry Local');
+    expect(config.retryLabelKey).toBe('onboarding.desktopRecovery.localUnavailable.retry');
     expect(config.showUseLocal).toBe(true);
     expect(config.showUseRemote).toBe(true);
     // local-unavailable opens the Pi runtime diagnostics flow.
-    expect(config.useLocalLabel).toBe('Check Local Pi');
+    expect(config.useLocalLabelKey).toBe('onboarding.desktopRecovery.localUnavailable.useLocal');
     expect(config.useRemoteLabel).toBe('Use Remote');
   });
 

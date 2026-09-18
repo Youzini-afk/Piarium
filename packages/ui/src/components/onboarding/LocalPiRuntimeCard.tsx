@@ -117,6 +117,7 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
   const installation = discoveredInstall(snapshot);
   const status = snapshot.status;
   const hostEntryUnavailable = snapshot.issueCode === PI_RUNTIME_ISSUE_HOST_ENTRY_UNAVAILABLE;
+  const repairBundledRuntime = hostEntryUnavailable || (status === 'failed' && installation?.source === 'bundled');
   const busyStatus = status === 'discovering' || status === 'installing' || status === 'upgrading' || status === 'probing' || busy;
   const sourceLabel = installation
     ? t(piRuntimeSourceLabelKey(installation.source))
@@ -317,7 +318,7 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
 
       {status === 'failed' ? (
         <div className="space-y-2">
-          {hostEntryUnavailable ? (
+          {repairBundledRuntime ? (
             <Button
               type="button"
               size="lg"
@@ -330,15 +331,15 @@ export function LocalPiRuntimeCard({ onContinue }: LocalPiRuntimeCardProps) {
           ) : null}
           <Button
             type="button"
-            size={hostEntryUnavailable ? 'default' : 'lg'}
-            variant={hostEntryUnavailable ? 'outline' : 'default'}
+            size={repairBundledRuntime ? 'default' : 'lg'}
+            variant={repairBundledRuntime ? 'outline' : 'default'}
             className="w-full"
             disabled={busyStatus || !piRuntime}
             onClick={() => void runAction(() => piRuntime!.refresh())}
           >
             {t('onboarding.localSetup.actions.retryDetect')}
           </Button>
-          {!hostEntryUnavailable && piRuntime?.capabilities.install ? (
+          {!repairBundledRuntime && piRuntime?.capabilities.install ? (
             <Button
               type="button"
               variant="outline"

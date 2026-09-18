@@ -2,12 +2,12 @@ import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import type {
+  HostHandshakeResult,
   PiRuntimeInstallPlan,
   PiRuntimeInstallation,
   PiRuntimeIssueCode,
   PiRuntimeManagerStatus,
   PiRuntimeSnapshot,
-  RuntimeSourceKind,
 } from "@piarium/protocol";
 import {
   discoverPiRuntimes,
@@ -16,14 +16,12 @@ import {
   type CustomRuntimeConfig,
   type RuntimeDiscoveryOptions,
 } from "@piarium/pi-host/discovery";
-import { resolveBundledPiHostEntry } from "./host-entry.js";
 import { detectInstallManagers, planPiInstall } from "./runtime-install-plan.js";
 import {
   describeInstallFailure,
   executePiInstallPlan,
   type RuntimeInstallerOptions,
 } from "./runtime-installer.js";
-import { probePiRuntime } from "./runtime-probe.js";
 import { piRuntimeIssueCodeFromError } from "./errors.js";
 import {
   loadRuntimeSelection,
@@ -35,19 +33,14 @@ import { standalonePayloadLooksPresent } from "./standalone-runtime.js";
 export interface PiRuntimeManagerOptions {
   dataDir: string;
   discover?: typeof discoverPiRuntimes;
-  discovery?: Omit<RuntimeDiscoveryOptions, "customRuntimes">;
-  hostEntry?: string;
+  discovery?: Omit<RuntimeDiscoveryOptions, "customRuntimes" | "selectedId">;
   installer?: RuntimeInstallerOptions;
   planInstall?: typeof planPiInstall;
-  probe?: typeof probePiRuntime;
+  startRuntime: (installation: PiRuntimeInstallation) => Promise<HostHandshakeResult>;
   targetVersion?: string;
 }
 
 const execFileAsync = promisify(execFile);
-
-function installationSourceToRuntimeSource(source: PiRuntimeInstallation["source"]): RuntimeSourceKind {
-  return source;
-}
 
 async function defaultInstallRunner(
   command: string,
@@ -73,12 +66,11 @@ async function defaultInstallRunner(
 export class PiRuntimeManager {
   readonly #dataDir: string;
   readonly #discover: typeof discoverPiRuntimes;
-  readonly #discovery: Omit<RuntimeDiscoveryOptions, "customRuntimes">;
-  readonly #hostEntry: string;
+  readonly #discovery: Omit<RuntimeDiscoveryOptions, "customRuntimes" | "selectedId">;
   readonly #installer: RuntimeInstallerOptions;
   readonly #listeners = new Set<(snapshot: PiRuntimeSnapshot) => void>();
   readonly #planInstall: typeof planPiInstall;
-  readonly #probe: typeof probePiRuntime;
+  readonly #startRuntime: PiRuntimeManagerOptions["startRuntime"];
   readonly #targetVersion: string;
   #active: PiRuntimeInstallation | undefined;
   #installations: PiRuntimeInstallation[] = [];
@@ -94,10 +86,9 @@ export class PiRuntimeManager {
     this.#dataDir = options.dataDir;
     this.#discover = options.discover ?? discoverPiRuntimes;
     this.#discovery = options.discovery ?? {};
-    this.#hostEntry = options.hostEntry ?? resolveBundledPiHostEntry();
     this.#installer = options.installer ?? {};
     this.#planInstall = options.planInstall ?? planPiInstall;
-    this.#probe = options.probe ?? probePiRuntime;
+    this.#startRuntime = options.startRuntime;
     this.#targetVersion = options.targetVersion ?? readPinnedPiVersion();
   }
 
@@ -122,8 +113,17 @@ export class PiRuntimeManager {
     };
   }
 
+  async start(): Promise<PiRuntimeSnapshot> {
+    return this.#resolve(false);
+  }
+
   async refresh(): Promise<PiRuntimeSnapshot> {
+    return this.#resolve(true);
+  }
+
+  async #resolve(discoverAll: boolean): Promise<PiRuntimeSnapshot> {
     return this.#run("discovering", async () => {
+      this.#installPlan = undefined;
       const loaded = await loadRuntimeSelection(this.#dataDir);
       if (loaded.status === "malformed") {
         this.#installations = [];
@@ -137,15 +137,17 @@ export class PiRuntimeManager {
       this.#selectedId = selection.selectedId;
       const candidates = await this.#discover({
         ...this.#discovery,
+        ...(!discoverAll ? { selectedId: selection.selectedId ?? "bundled" } : {}),
         ...(this.#customRuntimes(selection).length === 0
           ? {}
           : { customRuntimes: this.#customRuntimes(selection) }),
       });
       this.#installations = candidates.map(toRuntimeInstallation);
-      this.#installPlan = await this.#createInstallPlan();
+      if (discoverAll) this.#installPlan = await this.#createInstallPlan();
       const preferred = this.#preferredInstallation();
       if (!preferred) {
         this.#active = undefined;
+        if (this.#selectedId) this.#issue = `Selected Pi runtime ${this.#selectedId} was not found`;
         this.#status = this.#installations.some((entry) => entry.state === "upgrade-required")
           ? "upgrade-required"
           : "missing";
@@ -157,7 +159,7 @@ export class PiRuntimeManager {
         this.#issue = preferred.issue;
         return;
       }
-      await this.#probeInstallation(preferred);
+      await this.#startInstallation(preferred);
     });
   }
 
@@ -179,7 +181,7 @@ export class PiRuntimeManager {
           ? { customNodePath: installation.nodePath }
           : {}),
       });
-      await this.#probeInstallation(installation);
+      await this.#startInstallation(installation);
     });
   }
 
@@ -203,10 +205,13 @@ export class PiRuntimeManager {
     };
     await saveRuntimeSelection(this.#dataDir, selection);
     this.#selectedId = selection.selectedId;
-    return this.refresh();
+    return this.start();
   }
 
   async #applyInstall(requested: "install" | "upgrade"): Promise<PiRuntimeSnapshot> {
+    // Normal startup intentionally has no system inventory. An explicit install
+    // must resolve it before choosing a plan, including the no-downgrade check.
+    if (!this.#installPlan) await this.#rediscoverInstallations();
     const plan = this.#installPlan ?? await this.#createInstallPlan();
     this.#installPlan = plan;
     if (plan.action === "none" || plan.action === "keep-newer") {
@@ -244,7 +249,7 @@ export class PiRuntimeManager {
         this.#issue = preferred.issue;
         return;
       }
-      await this.#probeInstallation(preferred);
+      await this.#startInstallation(preferred);
     });
   }
 
@@ -287,7 +292,7 @@ export class PiRuntimeManager {
     if (!selection.customPackageRoot) return [];
     return [
       {
-        id: "selected",
+        id: selection.selectedId?.startsWith("custom:") ? selection.selectedId.slice("custom:".length) : "selected",
         packageRoot: selection.customPackageRoot,
         ...(selection.customNodePath === undefined ? {} : { nodePath: selection.customNodePath }),
       },
@@ -297,18 +302,24 @@ export class PiRuntimeManager {
   #preferredInstallation(): PiRuntimeInstallation | undefined {
     const byId = new Map(this.#installations.map((entry) => [entry.id, entry]));
     const selected = this.#selectedId ? byId.get(this.#selectedId) : undefined;
-    if (selected && selected.state !== "missing") return selected;
+    if (this.#selectedId) return selected;
     const usable = (entry: PiRuntimeInstallation) =>
       entry.state === "ready" || entry.state === "upgrade-required";
     const bundled = byId.get("bundled");
-    if (bundled?.state === "ready") return bundled;
+    if (bundled) return bundled;
     return (
       this.#installations.find((entry) => (entry.id === "system" || entry.id === "standalone") && usable(entry))
       ?? this.#installations.find((entry) => usable(entry))
     );
   }
 
-  async #probeInstallation(installation: PiRuntimeInstallation): Promise<void> {
+  async #startInstallation(installation: PiRuntimeInstallation): Promise<void> {
+    if (installation.state === "missing" || installation.state === "failed") {
+      this.#active = installation;
+      this.#status = "failed";
+      this.#issue = installation.issue ?? `Pi runtime ${installation.id} is unavailable`;
+      return;
+    }
     if (installation.state === "upgrade-required") {
       this.#active = undefined;
       this.#status = "upgrade-required";
@@ -328,13 +339,7 @@ export class PiRuntimeManager {
     this.#status = "probing";
     this.#emit();
     try {
-      const probed = await this.#probe({
-        hostEntry: this.#hostEntry,
-        ...(installation.nodePath === undefined ? {} : { nodePath: installation.nodePath }),
-        ...(installation.packageRoot === undefined ? {} : { packageRoot: installation.packageRoot }),
-        runtimeSource: installationSourceToRuntimeSource(installation.source),
-      });
-      const runtime = probed.handshake.runtime;
+      const { runtime } = await this.#startRuntime(installation);
       this.#active = {
         ...installation,
         state: "ready",

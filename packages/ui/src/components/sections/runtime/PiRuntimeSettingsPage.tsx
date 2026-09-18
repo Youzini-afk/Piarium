@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_FIELDS_STACK_CLASS,
@@ -41,7 +42,8 @@ export function PiRuntimeSettingsPage() {
   const [customPath, setCustomPath] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const current = snapshot.active
-    ?? snapshot.installations.find((entry) => entry.id === 'system' || entry.id === 'standalone');
+    ?? snapshot.installations.find((entry) => entry.id === (snapshot.selectedId ?? 'bundled'));
+  const available = snapshot.installations.filter((entry) => entry.state === 'ready');
   const busyStatus = snapshot.status === 'installing'
     || snapshot.status === 'upgrading'
     || snapshot.status === 'discovering'
@@ -76,9 +78,26 @@ export function PiRuntimeSettingsPage() {
             <span className="font-mono typography-meta text-foreground">{current?.version ?? '—'}</span>
           </SettingsFieldRow>
           <SettingsFieldRow label={t('settings.runtime.field.source')} settingsItem="runtime.source">
-            <span className="font-mono typography-meta text-foreground">
+            {available.length > 0 && (available.length > 1 || available[0]?.id !== current?.id) ? (
+              <Select
+                value={current?.id ?? ''}
+                disabled={busyStatus || !piRuntime}
+                onValueChange={(id) => void run(() => piRuntime!.activate(id))}
+              >
+                <SelectTrigger aria-label={t('settings.runtime.field.source')} className="w-auto min-w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {available.map((entry) => (
+                    <SelectItem key={entry.id} value={entry.id}>
+                      {t(piRuntimeSourceLabelKey(entry.source))} · {entry.version}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : <span className="font-mono typography-meta text-foreground">
               {current ? t(piRuntimeSourceLabelKey(current.source)) : '—'}
-            </span>
+            </span>}
           </SettingsFieldRow>
           <SettingsFieldRow label={t('settings.runtime.field.commandPath')} settingsItem="runtime.commandPath">
             <span className="break-all font-mono typography-meta text-foreground">{current?.commandPath ?? '—'}</span>

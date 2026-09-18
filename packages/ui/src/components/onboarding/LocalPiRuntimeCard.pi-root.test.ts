@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 
 describe('Local Pi runtime onboarding', () => {
-  test('manages the user-global runtime through RuntimeAPIs without warming a bundled host', () => {
+  test('routes runtime management through RuntimeAPIs instead of starting a worker from the UI', () => {
     const source = readFileSync(new URL('./LocalPiRuntimeCard.tsx', import.meta.url), 'utf8');
     expect(source).toContain('useRuntimeAPIs');
     expect(source).toContain('piRuntime');
@@ -20,6 +20,5 @@ describe('Local Pi runtime onboarding', () => {
     expect(source).toContain('onboarding.localSetup.status.hostEntryUnavailable');
     expect(source).toContain('onboarding.localSetup.actions.downloadPiariumAgain');
     expect(source).toContain('https://github.com/Youzini-afk/Piarium/releases/latest');
-    expect(source).toContain('!hostEntryUnavailable && piRuntime?.capabilities.install');
   });
 });

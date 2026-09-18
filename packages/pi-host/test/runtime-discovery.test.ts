@@ -11,6 +11,16 @@ import {
 } from "../src/runtime-discovery.js";
 
 describe("discoverPiRuntimes", () => {
+  it("resolves bundled startup without searching PATH or inspecting unrelated custom runtimes", async () => {
+    const candidates = await discoverPiRuntimes({
+      selectedId: "bundled",
+      env: { PIARIUM_PI_CUSTOM_ROOT: "unrelated-missing-install", PIARIUM_PI_SOURCE: "unrelated-source" },
+      commandRunner: async () => { throw new Error("bundled startup must not run external commands"); },
+    });
+    assert.deepEqual(candidates.map(candidate => candidate.id), ["bundled"]);
+    assert.equal(candidates[0]?.available, true);
+  });
+
   it("reads the pinned Pi version from development or production dependencies", () => {
     assert.equal(
       readPinnedPiVersion({

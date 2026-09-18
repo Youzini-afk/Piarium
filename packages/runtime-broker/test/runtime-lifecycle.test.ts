@@ -167,9 +167,6 @@ test("starts without a broker when Pi is missing", async () => {
         reason: "missing",
         targetVersion: "0.84.1",
       }),
-      probe: async () => {
-        throw new Error("should not probe");
-      },
     });
     const result = await lifecycle.start();
     assert.equal(result, undefined);
@@ -180,7 +177,7 @@ test("starts without a broker when Pi is missing", async () => {
   }
 });
 
-test("creates a broker after a successful probe without restarting the process", async () => {
+test("starts the real broker once and publishes ready only after its handshake", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-lifecycle-"));
   try {
     const created: string[] = [];
@@ -196,10 +193,6 @@ test("creates a broker after a successful probe without restarting the process",
         action: "none",
         reason: "already installed",
         targetVersion: "0.84.1",
-      }),
-      probe: async () => ({
-        handshake: handshakeFor(SYSTEM_ROOT, "system"),
-        sessionCreated: false,
       }),
     });
     const observed: Array<{ revision: number; status: string }> = [];
@@ -243,12 +236,8 @@ test("reports broker activation failure instead of publishing a false ready stat
         reason: "already installed",
         targetVersion: "0.84.1",
       }),
-      probe: async () => ({
-        handshake: handshakeFor(SYSTEM_ROOT, "system"),
-        sessionCreated: false,
-      }),
     });
-    await assert.rejects(lifecycle.start(), /broker warmup failed/);
+    assert.equal(await lifecycle.start(), undefined);
     assert.equal(disposed, true);
     assert.equal(lifecycle.snapshot.status, "failed");
     assert.match(lifecycle.snapshot.issue ?? "", /broker warmup failed/);
@@ -279,10 +268,6 @@ test("keeps the previous broker generation after activating another install", as
         reason: "already installed",
         targetVersion: "0.84.1",
       }),
-      probe: async (options) => ({
-        handshake: handshakeFor(options.packageRoot ?? SYSTEM_ROOT, options.packageRoot === CUSTOM_ROOT ? "custom" : "system"),
-        sessionCreated: false,
-      }),
     });
     await lifecycle.start();
     await lifecycle.activate("custom:other");
@@ -309,13 +294,6 @@ test("routes old-session and worker operations to their owning generation", asyn
         action: "none",
         reason: "already installed",
         targetVersion: "0.84.1",
-      }),
-      probe: async (options) => ({
-        handshake: handshakeFor(
-          options.packageRoot ?? SYSTEM_ROOT,
-          options.packageRoot === CUSTOM_ROOT ? "custom" : "system",
-        ),
-        sessionCreated: false,
       }),
     });
     await lifecycle.start();
@@ -395,10 +373,6 @@ test("stops workers that use the global install before upgrading", async () => {
         manager: "npm",
         reason: "upgrade",
         targetVersion: "0.84.1",
-      }),
-      probe: async () => ({
-        handshake: handshakeFor(SYSTEM_ROOT, "system"),
-        sessionCreated: false,
       }),
     });
     await lifecycle.start();

@@ -14,6 +14,12 @@ Desktop starts the Piarium web server in the same Electron main process. There i
 
 The `main.ts` source imports `@piarium/web/server/index.js` and calls `startWebUiServer()`; builds execute the generated `dist-bundle/main.mjs`. The Electron window then loads the UI from the local server in development, or from packaged `resources/web-dist` assets in packaged builds.
 
+Normal startup resolves the bundled Pi runtime, or the installation explicitly selected by the user.
+It does not scan PATH or package managers. The production catalog worker's handshake establishes readiness;
+there is no temporary probe worker before it. Startup remains on the loading screen while that handshake
+is pending. Settings → Runtime → Rediscover explicitly inventories other installations and prepares external
+install/upgrade actions; a missing selected runtime is reported rather than silently replaced.
+
 That embedded Application Host starts the private Rust system kernel from `resources/kernel`; storage,
 file/materialization, PTY/process, and fixed-view compute remain Host services and do not become a second
 Electron backend or renderer IPC surface.

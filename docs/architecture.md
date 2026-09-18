@@ -2,7 +2,7 @@
 
 Status: Pi-native workbench/harness in production; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
 
 ## 1. Context
 
@@ -1116,22 +1116,25 @@ See [security.md](security.md) for the threat model and release gates.
 
 ## 10. Runtime selection
 
-Desktop and the local Web UI start without forcing a Pi warmup. The Runtime Manager probes the
-user's explicit selection first. When nothing is selected, a ready bundled Pi is preferred over a
-system, standalone, or PATH install. The chosen install is then probed: Node starts, the three Pi
-SDK packages resolve, and the Host handshake must succeed. A newer Pi is used as-is. An older Pi is upgrade-required only. There
+Desktop and the local Web UI can load while their runtime starts. Normal startup resolves only
+the user's explicit selection, or bundled Pi when nothing is selected; it does not search PATH or
+detect package managers for unrelated installations. The lifecycle starts the production broker
+directly: Node starts, the three Pi SDK packages resolve, and that worker's Host handshake must
+succeed. No disposable probe worker precedes it. A newer Pi is used as-is. An older Pi is upgrade-required only. There
 is no version ceiling, downgrade action, or silent upgrade. Cloud and headless Web still require a
 ready runtime before the server finishes starting.
 
-Onboarding and Settings activate or install through `RuntimeAPIs.piRuntime`. After a successful
-probe the lifecycle creates a broker without restarting the app and publishes `ready` only after
-that broker completes its Host handshake. Runtime snapshots carry a monotonic revision so a delayed
+Onboarding and Settings activate or install through `RuntimeAPIs.piRuntime`. The lifecycle publishes
+`ready` only after the production broker completes its Host handshake, and the desktop keeps its
+loading view while that handshake is pending. Missing explicitly selected installations are reported
+instead of silently switching to another runtime. Runtime snapshots carry a monotonic revision so a delayed
 HTTP snapshot cannot overwrite a newer live event. HTTP and WebSocket surfaces use the lifecycle
 facade: existing sessions and interactive worker replies stay on their owning generation while new
 catalog and session work uses the current generation. Workers that use the user-global install are
 stopped before that install is overwritten.
 
-When PATH has no usable Pi, the same manager plans a one-click user-global install. It prefers the
+Explicit rediscovery in Settings enumerates the other installations and prepares user-global install
+or upgrade actions. An explicit install also refreshes this inventory before planning. It prefers the
 owning package manager of an existing install, otherwise the first detected npm, bun, or pnpm, and
 otherwise a verified standalone payload that lands in the user-level Pi program directory
 (`%LOCALAPPDATA%\Pi` on Windows, `~/.local/share/pi/runtime` plus a user `bin` entry on

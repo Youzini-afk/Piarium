@@ -21,10 +21,15 @@ describe('resolveDesktopWorkspaceView', () => {
       catalogLoaded: false,
       runtimeStatus: 'discovering',
     })).toBe('loading');
+    expect(resolveDesktopWorkspaceView({
+      catalogError: null,
+      catalogLoaded: false,
+      runtimeStatus: 'probing',
+    })).toBe('loading');
   });
 
   test('treats a missing or unusable Pi as runtime setup, not app failure', () => {
-    for (const runtimeStatus of ['missing', 'upgrade-required', 'failed', 'installing', 'upgrading', 'probing'] as const) {
+    for (const runtimeStatus of ['missing', 'upgrade-required', 'failed', 'installing', 'upgrading'] as const) {
       expect(resolveDesktopWorkspaceView({
         catalogError: new Error('session.list failed'),
         catalogLoaded: false,

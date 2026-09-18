@@ -75,6 +75,8 @@ export interface RuntimeDiscoveryOptions {
   customRuntimes?: CustomRuntimeConfig[];
   env?: NodeJS.ProcessEnv;
   includeBundled?: boolean;
+  /** Resolve only this installation; omit for an explicit inventory refresh. */
+  selectedId?: string;
   platform?: NodeJS.Platform;
   sourcePaths?: string[];
 }
@@ -386,12 +388,16 @@ export async function discoverPiRuntimes(
       : []),
   ];
   const includeBundled = options.includeBundled ?? true;
+  const selected = options.selectedId;
   return [
-    ...(includeBundled ? [inspectBundledPi()] : []),
-    await inspectSystemPi(platform, runner, env),
-    ...(await Promise.all(uniqueSourcePaths.map(inspectSourcePi))),
+    ...(includeBundled && (!selected || selected === "bundled") ? [inspectBundledPi()] : []),
+    ...(!selected || selected === "system" || selected === "standalone"
+      ? [await inspectSystemPi(platform, runner, env)] : []),
+    ...(await Promise.all(uniqueSourcePaths.flatMap((source, index) =>
+      !selected || selected === `source:${index}` ? [inspectSourcePi(source, index)] : []))),
     ...(await Promise.all(
-      customRuntimes.map((config, index) => inspectCustomPi(config, index, runner)),
+      customRuntimes.flatMap((config, index) =>
+        !selected || selected === `custom:${config.id ?? index}` ? [inspectCustomPi(config, index, runner)] : []),
     )),
   ];
 }
