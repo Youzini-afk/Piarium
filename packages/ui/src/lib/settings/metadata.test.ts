@@ -55,7 +55,8 @@ describe('settings metadata', () => {
     const metadata = getSettingsPageMetadata();
     const slugs = metadata.map((page) => page.slug);
 
-    expect(slugs).toContain('knowledge');
+    expect(slugs).not.toContain('knowledge');
+    expect(slugs).toContain('harness-context');
     expect(slugs).toContain('language-support');
     expect(slugs).toContain('runtime');
     expect(slugs).toContain('providers');
@@ -68,7 +69,7 @@ describe('settings metadata', () => {
     expect(slugs).toContain('plugins');
     expect(slugs).toContain('plugin-settings');
     expect(slugs).toContain('extensions');
-    expect(metadata.find((page) => page.slug === 'knowledge')?.group).toBe('harness');
+    expect(metadata.find((page) => page.slug === 'harness-context')?.group).toBe('harness');
     expect(metadata.find((page) => page.slug === 'language-support')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'runtime')?.group).toBe('pi');
     expect(metadata.find((page) => page.slug === 'providers')?.group).toBe('pi');

@@ -24,6 +24,7 @@ import {
 } from '@/lib/settings/metadata';
 import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { buildSettingsSearchResults, type SettingsSearchResult } from '@/lib/settings/search';
+import { SettingsSearchTargetContext } from '@/lib/settings/search-target';
 import { useResourceRuntimeTarget } from '@/components/sections/resources/useResourceRuntimeTarget';
 import {
   refreshMcpSettingsAvailability,
@@ -315,7 +316,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     }
 
     let cancelled = false;
-    const frame = window.requestAnimationFrame(() => {
+    let frame = 0;
+    const reveal = () => {
       if (cancelled) {
         return;
       }
@@ -323,19 +325,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         ? CSS.escape(targetId)
         : targetId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
       const target = containerRef.current?.querySelector<HTMLElement>(`[data-settings-item="${escapedId}"]`);
-      if (!target) {
+      if (!target || target.closest('[hidden]')) {
         return;
       }
+      observer.disconnect();
       setPendingSearchItemId(null);
       target.scrollIntoView({ block: 'center', behavior: 'smooth' });
       target.setAttribute('data-settings-search-highlight', 'true');
       window.setTimeout(() => {
         target.removeAttribute('data-settings-search-highlight');
       }, 1600);
+    };
+    const scheduleReveal = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(reveal);
+    };
+    const observer = new MutationObserver(scheduleReveal);
+    if (containerRef.current) observer.observe(containerRef.current, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['hidden'],
     });
+    scheduleReveal();
 
     return () => {
       cancelled = true;
+      observer.disconnect();
       window.cancelAnimationFrame(frame);
     };
   }, [pendingSearchItemId, settingsSlug]);
@@ -362,8 +375,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (!isPageAvailable(registration.meta, runtimeCtx)) {
       return renderUnavailable();
     }
-    return registration.implementation.renderContent();
-  }, [renderUnavailable, runtimeCtx, settingsPageRegistrations]);
+    return <SettingsSearchTargetContext.Provider value={pendingSearchItemId}>
+      {registration.implementation.renderContent()}
+    </SettingsSearchTargetContext.Provider>;
+  }, [pendingSearchItemId, renderUnavailable, runtimeCtx, settingsPageRegistrations]);
 
   // Mobile: if opened via deep-link / palette to a non-home page, jump into it once.
   React.useEffect(() => {

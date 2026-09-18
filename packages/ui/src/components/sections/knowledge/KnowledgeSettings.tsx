@@ -1,6 +1,5 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_HELPER_CLASS,
   SettingsFieldRow,
@@ -11,6 +10,7 @@ import { toast } from '@/components/ui';
 import { useWorkbenchWorkspace } from '@/lib/extensions/workbench-workspace';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import {
   loadKnowledgeCatalog,
   loadKnowledgeChain,
@@ -28,10 +28,11 @@ const statusKey = (item: KnowledgeCatalogItem): I18nKey => (
     : `settings.knowledge.status.${item.status}`
 );
 
-export const KnowledgeSettingsPage: React.FC = () => {
+export const KnowledgeSettings: React.FC = () => {
   const { t } = useI18n();
   const workspace = useWorkbenchWorkspace();
-  const [scope, setScope] = React.useState<KnowledgeCatalogScope>('workspace');
+  const searchTarget = useSettingsSearchTarget();
+  const [scope, setScope] = React.useState<KnowledgeCatalogScope>(searchTarget === 'knowledge.user' ? 'user' : 'workspace');
   const [showRetired, setShowRetired] = React.useState(false);
   const [items, setItems] = React.useState<KnowledgeCatalogItem[]>([]);
   const [selectedId, setSelectedId] = React.useState<number | null>(null);
@@ -186,11 +187,13 @@ export const KnowledgeSettingsPage: React.FC = () => {
     setScope(next);
   }, [resetContext, scope, workspaceId]);
 
+  React.useEffect(() => {
+    if (searchTarget === 'knowledge.user') changeScope('user');
+    if (searchTarget === 'knowledge.workspace') changeScope('workspace');
+  }, [searchTarget, changeScope]);
+
   return (
-    <SettingsPageLayout
-      title={t('settings.page.knowledge.title')}
-      description={t('settings.page.knowledge.description')}
-    >
+    <>
       <SettingsSection
         title={t(scope === 'workspace' ? 'settings.knowledge.section.workspace' : 'settings.knowledge.section.user')}
         divider={false}
@@ -330,6 +333,6 @@ export const KnowledgeSettingsPage: React.FC = () => {
           ) : null}
         </div>
       </SettingsSection>
-    </SettingsPageLayout>
+    </>
   );
 };

@@ -105,7 +105,6 @@ const MOBILE_SETTINGS_PAGES = [
   'harness-context',
   'harness-retrieval',
   'harness-web',
-  'knowledge',
   'extensions',
   'runtime',
   'providers',

@@ -786,14 +786,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'knowledge.workspace',
-    page: 'knowledge',
+    page: 'harness-context',
     titleKey: 'settings.knowledge.section.workspace',
     descriptionKey: 'settings.page.knowledge.description',
     keywords: ['knowledge', 'memory', 'recall', 'workspace', 'supersede'],
   },
   {
     id: 'knowledge.user',
-    page: 'knowledge',
+    page: 'harness-context',
     titleKey: 'settings.knowledge.section.user',
     descriptionKey: 'settings.page.knowledge.description',
     keywords: ['knowledge', 'memory', 'user', 'recall'],

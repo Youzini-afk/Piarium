@@ -3,7 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runtimeFetch } from '@piarium/application-client';
-import { KnowledgeSettingsPage } from './KnowledgeSettingsPage';
+import { KnowledgeSettings } from './KnowledgeSettings';
+import { SettingsSearchTargetContext } from '@/lib/settings/search-target';
 
 const mocks = vi.hoisted(() => ({
   workspace: {
@@ -19,9 +20,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
-vi.mock('@/components/sections/shared/SettingsPageLayout', () => ({
-  SettingsPageLayout: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-}));
 vi.mock('@/components/sections/shared/SettingsSection', () => ({
   SETTINGS_HELPER_CLASS: '',
   SettingsFieldRow: ({ label, children }: { label: string; children: React.ReactNode }) => <label>{label}{children}</label>,
@@ -97,9 +95,14 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
-describe('KnowledgeSettingsPage request generations', () => {
+describe('KnowledgeSettings request generations', () => {
+  it('opens user knowledge directly when reached from settings search', async () => {
+    await act(async () => root.render(<SettingsSearchTargetContext.Provider value="knowledge.user"><KnowledgeSettings /></SettingsSearchTargetContext.Provider>));
+    expect(findPending('scope=user')).toBeDefined();
+    expect(pending.some((request) => request.url.includes('scope=workspace'))).toBe(false);
+  });
   it('clears the old scope before a slow response and never writes the old item', async () => {
-    await act(async () => root.render(<KnowledgeSettingsPage />));
+    await act(async () => root.render(<KnowledgeSettings />));
     expect(findPending('scope=workspace')).toBeDefined();
 
     const userScopeButton = [...container.querySelectorAll('button')]
@@ -120,13 +123,13 @@ describe('KnowledgeSettingsPage request generations', () => {
   });
 
   it('keeps the newest workspace response when an older workspace response arrives late', async () => {
-    await act(async () => root.render(<KnowledgeSettingsPage />));
+    await act(async () => root.render(<KnowledgeSettings />));
     const first = findPending('workspaceId=workspace-a');
 
     mocks.workspace.workspaceId = 'workspace-b';
     mocks.workspace.directory = '/workspace-b';
     mocks.workspace.key = 'workspace-b';
-    await act(async () => root.render(<KnowledgeSettingsPage />));
+    await act(async () => root.render(<KnowledgeSettings />));
     const second = findPending('workspaceId=workspace-b');
 
     await act(async () => second.resolve(listResponse([item(2, 'workspace', 'new workspace item')])));

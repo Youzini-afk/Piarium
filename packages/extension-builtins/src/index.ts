@@ -248,11 +248,11 @@ export const PIARIUM_BUILTIN_HARNESS_EXTENSION = definition({
       group: "harness",
       icon: "chat-history",
       id: "piarium.builtin.pi-harness.page.context",
-      keywords: ["harness", "context", "compaction", "preparation", "long session"],
+      keywords: ["harness", "context", "compaction", "preparation", "long session", "knowledge", "memory", "recall"],
       kind: "single",
       order: 3,
       slug: "harness-context",
-      title: "Context Management",
+      title: "Context & Knowledge",
       titleKey: "settings.page.harness.page.context.title",
     }),
     pageContribution({
