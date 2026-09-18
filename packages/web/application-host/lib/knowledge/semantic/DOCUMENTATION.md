@@ -6,7 +6,8 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
 
 - Identities: `identity.ts` — vector space, index recipe, `{ scopeKind, scopeId }`. Remote spaces use
   `remoteEmbeddingSpaceId` from protocol parts (no credentials).
-- Embedder: `backend.ts` — unconfigured → local MiniLM; `harness.embedding` set → `remote-embedder.ts`
+- Embedder: `backend.ts` — unconfigured → local MiniLM only when the optional component is installed;
+  otherwise the semantic source is unavailable. `harness.embedding` set → `remote-embedder.ts`
   via workspace `harness.embed`. Configured remote never falls back to MiniLM in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
 - Cache / schedule: `vector-cache.ts` (space + purpose + embedText, byte soft budget);
@@ -23,5 +24,12 @@ derived store (`../vectors/`); they reuse `harness.embed` but never this MiniLM 
   native-tool journal completions notify this runtime. Open indexes mask an observed path before the tool
   is acknowledged; embedding runs in the background. Metadata resolution obeys query cancellation, and a
   retired workspace worker or closed Host cannot publish a late binding/watch as current.
-- Model pack: `model-store.ts`; `minilm.ts` loads `@huggingface/transformers` when weights exist and
-  sets Node ORT session threads.
+- Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file
+  verification, a short native inference check process, and atomic activation under
+  `dataDir/optional-components/local-semantic`. `local-component-routes.ts` exposes authenticated
+  status/install/import/cancel routes. Startup neither downloads components nor loads native inference.
+  `model-store.ts` resolves the active package; `minilm.ts` imports its absolute runtime entry and sets
+  Node ORT session threads. Installation replaces the local embedder for new workspace operations,
+  retaining the model identity held by an in-flight query. Remote bindings are not replaced.
+- `scripts/build-local-semantic-component.mjs` builds and verifies the separate target-specific archive.
+  Its Node inference dependencies and model weights never enter the normal Host or desktop build.

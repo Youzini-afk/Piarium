@@ -85,15 +85,6 @@ try {
   // cmd.exe and bun path resolution issues on Windows.
   const tscJs = path.join(repoRoot, 'node_modules', 'typescript', 'lib', 'tsc.js');
   const configPath = path.join(webRoot, 'tsconfig.application-host.json');
-  log('Ensuring the default semantic model pack is available...');
-  const copySemanticModel = spawnSync(process.execPath, [path.join(webRoot, 'scripts', 'copy-semantic-model.mjs')], {
-    cwd: webRoot,
-    stdio: 'inherit',
-    shell: false,
-  });
-  if (copySemanticModel.status !== 0) {
-    throw new Error(`copy-semantic-model exited with status ${copySemanticModel.status}`);
-  }
   log('Refreshing structure runtime wasm...');
   const copyRuntime = spawnSync(process.execPath, [path.join(webRoot, 'scripts', 'copy-structure-runtime.mjs')], {
     cwd: webRoot,
@@ -124,6 +115,9 @@ try {
   // (e.g., HTML templates, static fixtures). Copy them to staging.
   const copyAssets = (srcDir, destDir) => {
     if (!fs.existsSync(srcDir)) return;
+    // Local inference is an explicitly installed component. Cached development
+    // model weights must not enter a normal Host build or desktop installer.
+    if (srcDir === path.join(sourceDir, 'lib', 'knowledge', 'semantic', 'runtime')) return;
     for (const entry of fs.readdirSync(srcDir, { withFileTypes: true })) {
       // Skip test files
       if (entry.name.endsWith('.test.js') || entry.name.endsWith('.test.ts')) continue;

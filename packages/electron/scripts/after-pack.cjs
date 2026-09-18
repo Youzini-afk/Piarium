@@ -2,20 +2,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
-const pruneOnnxRuntime = require('./prune-onnx-runtime.cjs');
 const {
   defaultKernelTargetTriple,
   detectKernelBinaryIdentity,
   normalizeKernelArchitecture,
 } = require('../../../scripts/kernel-binary-identity.cjs');
-
-const SEMANTIC_MODEL_FILES = [
-  'tokenizer.json',
-  'tokenizer_config.json',
-  'config.json',
-  'special_tokens_map.json',
-  'onnx/model_quantized.onnx',
-];
 
 module.exports = (context) => {
   const resourcesPath = context.electronPlatformName === 'darwin'
@@ -53,7 +44,11 @@ module.exports = (context) => {
   const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';
   if (!fs.existsSync(path.join(trivium, triviumBinary))) throw new Error('Missing target TriviumDB binary: ' + triviumBinary);
   for (const name of fs.readdirSync(trivium)) if (name.endsWith('.node') && name !== triviumBinary) fs.rmSync(path.join(trivium, name));
-  pruneOnnxRuntime(unpackedNodeModulesPath, context.electronPlatformName, targetArchitecture);
+  for (const optional of ['@huggingface/transformers', 'onnxruntime-node', 'onnxruntime-web']) {
+    if (fs.existsSync(path.join(unpackedNodeModulesPath, optional))) {
+      throw new Error(`Optional local inference dependency entered the base installer: ${optional}`);
+    }
+  }
   for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
     if (fs.existsSync(path.join(unpackedNodeModulesPath, legacy))) throw new Error('Obsolete native authority entered release: ' + legacy);
   }
@@ -80,18 +75,6 @@ module.exports = (context) => {
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript-language-server.mjs'),
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'package.json'),
     path.join('node_modules', '@piarium', 'extension-builtins', 'dist', 'builtin-packages', 'typescript-language', 'runtime', 'typescript', 'lib', 'tsserver.js'),
-    // Semantic retrieval is a production Host dependency. Keep the runtime
-    // and the complete default MiniLM pack in the unpacked app so the external
-    // Host can resolve both dynamic transformers imports and ONNX weights.
-    path.join('node_modules', '@huggingface', 'transformers', 'package.json'),
-    path.join('node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'recipe.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', '.source-revision.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer_config.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'config.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'special_tokens_map.json'),
-    path.join('node_modules', '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'onnx', 'model_quantized.onnx'),
   ];
   for (const relativePath of requiredApplicationHostFiles) {
     const packagedPath = path.join(resourcesPath, 'app.asar.unpacked', relativePath);
@@ -106,59 +89,8 @@ module.exports = (context) => {
       throw new Error(`Missing unpacked application-host runtime file at ${packagedPath}`);
     }
   }
-  const semanticRecipePath = path.join(
-    resourcesPath,
-    'app.asar.unpacked',
-    'node_modules',
-    '@piarium',
-    'web',
-    'server',
-    'lib',
-    'knowledge',
-    'semantic',
-    'runtime',
-    'all-minilm-l6-v2',
-    'recipe.json',
-  );
-  let semanticRecipe;
-  try {
-    semanticRecipe = JSON.parse(fs.readFileSync(semanticRecipePath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Unable to read packaged semantic model recipe at ${semanticRecipePath}: ${error.message}`);
-  }
-  if (!/^[0-9a-f]{40}$/i.test(semanticRecipe.modelRevision || '')) {
-    throw new Error(
-      `Packaged semantic model recipe is not pinned to a full commit revision: ${semanticRecipe.modelRevision}`,
-    );
-  }
-  const semanticMarkerPath = path.join(
-    resourcesPath,
-    'app.asar.unpacked',
-    'node_modules',
-    '@piarium',
-    'web',
-    'server',
-    'lib',
-    'knowledge',
-    'semantic',
-    'runtime',
-    'all-minilm-l6-v2',
-    '.source-revision.json',
-  );
-  let semanticMarker;
-  try {
-    semanticMarker = JSON.parse(fs.readFileSync(semanticMarkerPath, 'utf8'));
-  } catch (error) {
-    throw new Error(`Unable to read packaged semantic model source marker at ${semanticMarkerPath}: ${error.message}`);
-  }
-  const markerFiles = Array.isArray(semanticMarker.files) ? [...semanticMarker.files].sort() : [];
-  if (
-    semanticMarker.schemaVersion !== 1
-    || semanticMarker.revision !== semanticRecipe.modelRevision
-    || JSON.stringify(markerFiles) !== JSON.stringify([...SEMANTIC_MODEL_FILES].sort())
-  ) {
-    throw new Error(`Packaged semantic model source marker does not match recipe at ${semanticMarkerPath}`);
-  }
+  const bundledModelDirectory = path.join(unpackedNodeModulesPath, '@piarium', 'web', 'server', 'lib', 'knowledge', 'semantic', 'runtime');
+  if (fs.existsSync(bundledModelDirectory)) throw new Error('Local model weights entered the base installer');
 
   const packagedHostEntry = path.join(
     unpackedNodeModulesPath,
@@ -179,7 +111,6 @@ module.exports = (context) => {
     : path.join(context.appOutDir, context.electronPlatformName === 'win32'
       ? `${context.packager.appInfo.productFilename}.exe`
       : context.packager.appInfo.productFilename.toLowerCase());
-  const packagingNode = process.env.PIARIUM_PACKAGING_NODE || process.execPath;
   execFileSync(packagedExecutable, [
     path.join(__dirname, 'verify-packaged-pi-host.mjs'),
     packagedBrokerEntry,
@@ -187,13 +118,6 @@ module.exports = (context) => {
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
     env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-    stdio: 'inherit',
-    windowsHide: true,
-  });
-  execFileSync(packagingNode, [
-    path.join(__dirname, 'smoke-semantic-runtime.mjs'),
-    path.join(unpackedNodeModulesPath, '@piarium', 'web'),
-  ], {
     stdio: 'inherit',
     windowsHide: true,
   });

@@ -1,21 +1,16 @@
 /**
- * Content-addressed MiniLM pack, same install shape as structure grammars.
+ * Resolution for the optional local semantic component.
  *
- * Blobs are immutable and named by digest. `index.json` is the only binding
- * from a recipe id to those blobs. A missing index is empty; a torn or
- * unreadable index is an error (plan 0.4 invariant 10).
+ * The component manager owns archive validation and the active pointer. This
+ * module only turns an already enabled component into the pack shape consumed
+ * by MiniLM, so normal Host startup never scans or imports the runtime.
  */
 
-import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { remapAsarUnpackedPath } from "../../structure/runtime-path.js";
-import { LOCAL_MINILM_MAX_TOKENS, LOCAL_MINILM_SPACE, type VectorSpaceIdentity } from "./identity.js";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { type VectorSpaceIdentity } from "./identity.js";
 
 export const SEMANTIC_MODEL_ID = "all-minilm-l6-v2";
-
-export type SemanticModelPackSource = "manifest" | "user";
 
 export interface SemanticModelRecipe {
   schemaVersion: 1;
@@ -30,25 +25,6 @@ export interface SemanticModelRecipe {
   tokenizerFile: string;
 }
 
-export interface SemanticModelRecord {
-  integrity: string;
-  source: SemanticModelPackSource;
-  installedAt: string;
-  recipe: SemanticModelRecipe;
-}
-
-export class SemanticModelStoreUnreadableError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "SemanticModelStoreUnreadableError";
-  }
-}
-
-export interface SemanticModelStoreIndex {
-  schemaVersion: 1;
-  models: Record<string, SemanticModelRecord>;
-}
-
 export interface ResolvedModelPack {
   id: string;
   root: string;
@@ -56,57 +32,23 @@ export interface ResolvedModelPack {
   space: VectorSpaceIdentity;
   onnxPath: string | null;
   tokenizerPath: string | null;
-  source: "bundled" | "store";
+  source: "bundled" | "component";
+  /** Absolute path to the component's transformers.node.mjs entry. */
+  transformersEntry?: string;
 }
 
-const INDEX_NAME = "index.json";
 const RECIPE_NAME = "recipe.json";
-
-const integrityOf = (bytes: Uint8Array): string => (
-  `sha256-${createHash("sha256").update(bytes).digest("hex")}`
-);
-
-const emptyIndex = (): SemanticModelStoreIndex => ({ schemaVersion: 1, models: {} });
-
-const readIndex = (file: string): SemanticModelStoreIndex => {
-  let source: string;
-  try {
-    source = readFileSync(file, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return emptyIndex();
-    throw new SemanticModelStoreUnreadableError(`Semantic model index is not readable: ${file}`, { cause: error });
-  }
-  let raw: Partial<SemanticModelStoreIndex>;
-  try {
-    raw = JSON.parse(source) as Partial<SemanticModelStoreIndex>;
-  } catch (error) {
-    throw new SemanticModelStoreUnreadableError(`Semantic model index is not valid JSON: ${file}`, { cause: error });
-  }
-  if (raw.schemaVersion !== 1 || !raw.models || typeof raw.models !== "object" || Array.isArray(raw.models)) {
-    throw new SemanticModelStoreUnreadableError(`Semantic model index has an unknown shape: ${file}`);
-  }
-  const models: Record<string, SemanticModelRecord> = {};
-  for (const [id, record] of Object.entries(raw.models)) {
-    if (
-      record
-      && typeof record.integrity === "string"
-      && record.integrity.startsWith("sha256-")
-      && (record.source === "manifest" || record.source === "user")
-      && typeof record.installedAt === "string"
-      && record.recipe
-      && record.recipe.schemaVersion === 1
-    ) {
-      models[id] = record;
-    }
-  }
-  return { schemaVersion: 1, models };
-};
+const COMPONENT_ROOT = "optional-components/local-semantic";
 
 const readRecipe = (file: string): SemanticModelRecipe | null => {
   try {
-    const raw = JSON.parse(readFileSync(file, "utf8")) as SemanticModelRecipe;
-    if (raw.schemaVersion !== 1 || raw.provider !== "local") return null;
-    return raw;
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Partial<SemanticModelRecipe>;
+    if (raw.schemaVersion !== 1 || raw.provider !== "local"
+      || typeof raw.model !== "string" || typeof raw.modelRevision !== "string"
+      || typeof raw.dim !== "number" || typeof raw.pooling !== "string"
+      || typeof raw.normalize !== "boolean" || typeof raw.maxTokens !== "number"
+      || typeof raw.onnxFile !== "string" || typeof raw.tokenizerFile !== "string") return null;
+    return raw as SemanticModelRecipe;
   } catch {
     return null;
   }
@@ -122,135 +64,65 @@ const spaceFromRecipe = (recipe: SemanticModelRecipe): VectorSpaceIdentity => ({
   maxTokens: recipe.maxTokens,
 });
 
-const defaultRecipe = (): SemanticModelRecipe => ({
-  schemaVersion: 1,
-  provider: "local",
-  model: LOCAL_MINILM_SPACE.model,
-  modelRevision: LOCAL_MINILM_SPACE.modelRevision,
-  dim: LOCAL_MINILM_SPACE.dim,
-  pooling: LOCAL_MINILM_SPACE.pooling,
-  normalize: LOCAL_MINILM_SPACE.normalize,
-  maxTokens: LOCAL_MINILM_MAX_TOKENS,
-  onnxFile: "model_quantized.onnx",
-  tokenizerFile: "tokenizer.json",
-});
+const safeComponentPath = (root: string, relativePath: string): string | null => {
+  if (!relativePath || relativePath.includes("\\") || relativePath.startsWith("/")) return null;
+  const candidate = resolve(root, relativePath);
+  const base = `${resolve(root)}${process.platform === "win32" ? "\\" : "/"}`;
+  return candidate === resolve(root) || candidate.startsWith(base) ? candidate : null;
+};
 
-export const bundledModelPackDir = (
-  fromUrl: string = import.meta.url,
+/** Resolve one extracted component without loading its optional runtime. */
+export const resolveModelPackAtComponentRoot = (
+  componentRoot: string,
+  manifest: { modelPath: string; transformersEntry: string },
   pathExists: (candidate: string) => boolean = existsSync,
-): string => remapAsarUnpackedPath(
-  fileURLToPath(new URL("./runtime/all-minilm-l6-v2/", fromUrl)),
-  pathExists,
-);
-
-export function createSemanticModelStore(dataDir: string, now: () => string = () => new Date().toISOString()) {
-  const root = join(dataDir, "semantic-models");
-  const indexPath = join(root, INDEX_NAME);
-  mkdirSync(join(root, "sha256"), { recursive: true });
-
-  const persist = (index: SemanticModelStoreIndex): void => {
-    const tmp = `${indexPath}.${process.pid}.tmp`;
-    writeFileSync(tmp, `${JSON.stringify(index, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    renameSync(tmp, indexPath);
-  };
-
-  const packDir = (integrity: string): string => join(root, "sha256", integrity.slice("sha256-".length));
-
+): ResolvedModelPack | null => {
+  const modelRoot = safeComponentPath(componentRoot, manifest.modelPath);
+  const transformersEntry = safeComponentPath(componentRoot, manifest.transformersEntry);
+  if (!modelRoot || !transformersEntry || !pathExists(transformersEntry)) return null;
+  const recipe = readRecipe(join(modelRoot, RECIPE_NAME));
+  if (!recipe) return null;
+  const onnxPath = safeComponentPath(modelRoot, recipe.onnxFile);
+  const tokenizerPath = safeComponentPath(modelRoot, recipe.tokenizerFile);
+  if (!onnxPath || !tokenizerPath) return null;
   return {
-    root,
-    has: (id: string) => Boolean(readIndex(indexPath).models[id]),
-    get: (id: string) => readIndex(indexPath).models[id],
-    pathForIntegrity: (integrity: string) => packDir(integrity),
-    put: (id: string, files: Record<string, Uint8Array>, record: Omit<SemanticModelRecord, "installedAt">): SemanticModelRecord => {
-      const listing = Object.keys(files).sort().map((name) => `${name}:${integrityOf(files[name]!)}`).join("\n");
-      const integrity = integrityOf(new TextEncoder().encode(listing));
-      if (integrity !== record.integrity) {
-        throw new Error("Semantic model pack bytes do not match the supplied integrity.");
-      }
-      const index = readIndex(indexPath);
-      const dest = packDir(integrity);
-      mkdirSync(dest, { recursive: true });
-      for (const [name, bytes] of Object.entries(files)) {
-        const file = join(dest, name);
-        const tmp = `${file}.${process.pid}.tmp`;
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(tmp, bytes);
-        renameSync(tmp, file);
-      }
-      const stored: SemanticModelRecord = { ...record, installedAt: now() };
-      index.models[id] = stored;
-      persist(index);
-      return stored;
-    },
-    remove: (id: string) => {
-      const index = readIndex(indexPath);
-      const record = index.models[id];
-      if (!record) return;
-      delete index.models[id];
-      persist(index);
-      if (!Object.values(index.models).some((entry) => entry.integrity === record.integrity)) {
-        rmSync(packDir(record.integrity), { recursive: true, force: true });
-      }
-    },
+    id: SEMANTIC_MODEL_ID,
+    root: modelRoot,
+    recipe,
+    space: spaceFromRecipe(recipe),
+    onnxPath: pathExists(onnxPath) ? onnxPath : null,
+    tokenizerPath: pathExists(tokenizerPath) ? tokenizerPath : null,
+    source: "component",
+    transformersEntry,
   };
-}
+};
 
-export type SemanticModelStore = ReturnType<typeof createSemanticModelStore>;
-
-const memo = new Map<string, ResolvedModelPack | null>();
-
-export function resolveInstalledModelPack(
-  dataDir: string,
-  fromUrl: string = import.meta.url,
-  pathExists: (candidate: string) => boolean = existsSync,
-): ResolvedModelPack | null {
-  const key = `${dataDir}\0${fromUrl}`;
-  if (memo.has(key)) return memo.get(key) ?? null;
-  const bundledRoot = bundledModelPackDir(fromUrl, pathExists);
-  const bundledRecipe = readRecipe(join(bundledRoot, RECIPE_NAME)) ?? defaultRecipe();
-  const bundledOnnx = join(bundledRoot, bundledRecipe.onnxFile);
-  const bundledTokenizer = join(bundledRoot, bundledRecipe.tokenizerFile);
-  if (pathExists(bundledTokenizer) || pathExists(bundledOnnx)) {
-    const pack: ResolvedModelPack = {
-      id: SEMANTIC_MODEL_ID,
-      root: bundledRoot,
-      recipe: bundledRecipe,
-      space: spaceFromRecipe(bundledRecipe),
-      onnxPath: pathExists(bundledOnnx) ? bundledOnnx : null,
-      tokenizerPath: pathExists(bundledTokenizer) ? bundledTokenizer : null,
-      source: "bundled",
-    };
-    memo.set(key, pack);
-    return pack;
-  }
+const activeComponentRoot = (dataDir: string): { root: string; manifest: { modelPath: string; transformersEntry: string } } | null => {
+  const parent = join(dataDir, COMPONENT_ROOT);
+  let raw: { root?: unknown };
   try {
-    const store = createSemanticModelStore(dataDir);
-    const record = store.get(SEMANTIC_MODEL_ID);
-    if (!record) {
-      memo.set(key, null);
-      return null;
-    }
-    const root = store.pathForIntegrity(record.integrity);
-    const onnxPath = join(root, record.recipe.onnxFile);
-    const tokenizerPath = join(root, record.recipe.tokenizerFile);
-    const pack: ResolvedModelPack = {
-      id: SEMANTIC_MODEL_ID,
-      root,
-      recipe: record.recipe,
-      space: spaceFromRecipe(record.recipe),
-      onnxPath: pathExists(onnxPath) ? onnxPath : null,
-      tokenizerPath: pathExists(tokenizerPath) ? tokenizerPath : null,
-      source: "store",
-    };
-    memo.set(key, pack);
-    return pack;
-  } catch (error) {
-    if (error instanceof SemanticModelStoreUnreadableError) throw error;
-    memo.set(key, null);
+    raw = JSON.parse(readFileSync(join(parent, "active.json"), "utf8")) as { root?: unknown };
+  } catch {
     return null;
   }
-}
-
-export const resetInstalledModelPackMemo = (): void => {
-  memo.clear();
+  if (typeof raw.root !== "string" || !raw.root.trim() || raw.root.includes("\\")) return null;
+  const relative = raw.root.replace(/\\/g, "/");
+  if (relative.split("/").some((part) => part === ".." || !part)) return null;
+  const root = safeComponentPath(parent, relative);
+  if (!root) return null;
+  try {
+    const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8")) as {
+      modelPath?: unknown;
+      transformersEntry?: unknown;
+    };
+    if (typeof manifest.modelPath !== "string" || typeof manifest.transformersEntry !== "string") return null;
+    return { root, manifest: { modelPath: manifest.modelPath, transformersEntry: manifest.transformersEntry } };
+  } catch {
+    return null;
+  }
 };
+
+export function resolveInstalledModelPack(dataDir: string): ResolvedModelPack | null {
+  const component = activeComponentRoot(dataDir);
+  return component ? resolveModelPackAtComponentRoot(component.root, component.manifest) : null;
+}

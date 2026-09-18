@@ -392,8 +392,12 @@ model's semantic judgment. This adds no durable conversation or generic workflow
 state is in agent-harness-status.md. Remote embedding and HTTP rerank are user-owned harness bindings,
 not chat model slots. When `harness.embedding` is set, the workspace-worker Pi runtime resolves the
 provider endpoint and credential, and the application host submits authorized text through
-`harness.embed` without receiving secrets. Unconfigured workspaces keep the local MiniLM path for
-code semantic indexes. Knowledge recall uses the same remote bind when configured, stores vectors in
+`harness.embed` without receiving secrets. Unconfigured workspaces use local MiniLM only after the user
+installs the optional local semantic component. The base distribution contains neither model weights
+nor its dedicated transformers/ONNX runtime, and startup never downloads them. Settings can install a
+target-specific component or import its archive; verified installation activates it in the current Host.
+Without it, lexical and structural/graph retrieval continue with semantic retrieval unavailable (D-288).
+Knowledge recall uses the same remote bind when configured, stores vectors in
 a derived generation directory, and stays text-only when remote is unset — it does not fall back to
 MiniLM. A configured remote failure reports semantic `failed`/`unavailable` and does not silently
 mix the local vector space. Dedicated rerank uses `harness.rerank` on already-built explore views and

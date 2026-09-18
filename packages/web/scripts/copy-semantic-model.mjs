@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Fetch the default MiniLM pack into the Host semantic runtime directory.
- * Weights are not checked in; the recipe is. Application Host builds invoke
- * this helper, and an existing marker lets subsequent builds reuse the pack.
+ * Weights are not checked in; the recipe is. Only explicit component builds
+ * invoke this helper. Ordinary Application Host builds do not download models.
  *
  *   bun run --cwd packages/web semantic:copy-model
  */

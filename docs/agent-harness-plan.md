@@ -725,7 +725,7 @@ A–D 已由 D-176–D-189 接入同一引擎与公开工具。不把 3.16 的�
 **A. 收口现有性能与发行修复。** 已提交：`37b12e8e`、`8752e039`（真实批推理、切块尺寸查找、存储增量计数/批事务与中断恢复、
 模型配方固定修订、构建准备和 Electron 实际加载 smoke）。完整冷扫时间仍未量得，不能把部分语料或中断扫描外推成全仓性能。
 
-**B. 已接线（D-190 / D-194–D-195）。** 调用边界：Settings `harness.embedding` → Host `settings.get` 与 Pi binding describe（无密钥）→ 确认未配置才走本地 MiniLM；
+**B. 已接线（D-190 / D-194–D-195，默认发行方式由 D-288 更新）。** 调用边界：Settings `harness.embedding` → Host `settings.get` 与 Pi binding describe（无密钥）→ 确认未配置且用户已安装本地组件才走 MiniLM；
 配置后 `createRemoteEmbedder` → workspace `harness.embed` → Pi `BackgroundInferenceRuntime`（workspace worker 的
 隔离的 user/operator 配置 ModelRuntime / 用户 `auth.json`）→ OpenAI 兼容 `POST {baseUrl}/embeddings`。Host 提交已授权正文、用途、批次和绑定。空间身份
 由 protocol/provider/model/maxTokens、去凭据 endpoint/API 配置身份和最终实际维度命名；自动维度由首个真实输入解析，不持久化 `auto` 空间。知识库召回在 2.8 / D-196
@@ -751,6 +751,8 @@ Documents workspace。rerank 超预算 view 不截断冒充原 ID，finish 冻�
 **生产装配与原生写入（D-235）。** Application Host 与公开工具纵切共用 `WorkspaceSemanticRuntime`，统一 Settings/describe、
 workspace 推理传输、固定查询视图、配置订阅和关闭。成功的 Pi 原生 journal after 在工具答复前通知执行工作区语义索引；后台
 重建不等待本回合 settle。验证覆盖真实 SessionHost 的 embedding/rerank HTTP 适配与 Documents，具体证据范围记入 status。
+
+**本地组件发行（D-288）。** 主包和普通构建不准备模型或专用推理运行库。设置中由用户主动下载或导入独立平台组件，验证完整性与真实推理后启用；安装失败/取消不替换已有完整组件。未安装不发起本地扫描、下载或原生模块加载。基础安装的启动/词法/结构检索与可选组件的安装/推理分别验证，发行流水线发布独立组件资产，不把可选能力变成基础安装等待。
 
 工作区仍是包含陌生文件的范围，注意力只改变建设顺序。真实 provider 延迟、质量、成本和完整冷扫时间未观察。扩散模型/
 后训练、全仓生成式摘要与零样本路由仍留后续。知识库语义召回已按 2.8 / D-196 单独接线，不与代码语义 MiniLM 回退混写。

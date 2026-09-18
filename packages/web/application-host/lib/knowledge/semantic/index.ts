@@ -37,15 +37,21 @@ export { createVectorCache } from "./vector-cache.js";
 export { pinSemanticQueryView } from "./query-view.js";
 export type { SemanticQueryView } from "./query-view.js";
 export {
-  SEMANTIC_MODEL_ID,
-  bundledModelPackDir,
-  createSemanticModelStore,
-  resetInstalledModelPackMemo,
+  resolveModelPackAtComponentRoot,
   resolveInstalledModelPack,
-  SemanticModelStoreUnreadableError,
 } from "./model-store.js";
-export type { ResolvedModelPack, SemanticModelRecipe, SemanticModelRecord } from "./model-store.js";
+export type { ResolvedModelPack, SemanticModelRecipe } from "./model-store.js";
 export { createLocalMinilmEmbedder } from "./minilm.js";
+export {
+  LOCAL_SEMANTIC_COMPONENT_ID,
+  LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
+  createLocalSemanticComponentManager,
+  localSemanticComponentUrl,
+} from "./local-component.js";
+export type {
+  LocalSemanticComponentManager,
+  LocalSemanticComponentManifest,
+} from "./local-component.js";
 export { createSemanticGenerationStore } from "./store.js";
 export type {
   SemanticCheckpoint,

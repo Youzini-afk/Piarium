@@ -78,7 +78,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | worker→host 通道 | 类型化协议请求（`@piarium/protocol`），沿 `workspace.mutation.request` 先例；worker 不持有 host 凭据、不直接打 HTTP |
 | 检索分层 | 精确匹配用 grep；快速发现和原文获取用 explore；开放事实追踪用 retrieval。文件/结构/索引操作归 Host，较长语义判断归 agent，持久记忆检索归知识库；三种工具不要求逐级失败后才可使用（D-173） |
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
-| embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程时代码语义走本地 MiniLM；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
+| embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程且用户已安装本地组件时代码语义走 MiniLM，否则语义来源不可用，词法与结构/图检索继续（D-288）；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
@@ -734,7 +734,7 @@ limit 是上限，不是填满目标；相同原文与重复事实不反复占�
 编码器的区域为准，行号已出现不等于整行已编码。路径、父单元名、必要签名与正文共同设计输入：容纳不下时继续切正文或压缩
 装饰，不能让大量路径/签名占满输入，也不把 512 这类有效上限当成每块必须填满的目标。
 
-嵌入接口区分 query/document 用途、有效长度、取消、批次对应与实际维度。现有本地 MiniLM 保持为未配置远程时的后端；远程嵌入
+嵌入接口区分 query/document 用途、有效长度、取消、批次对应与实际维度。本地 MiniLM 是用户主动安装的可选组件，主包不携带模型和专用推理库，启动不自动下载；未配置远程且组件已安装时才使用它（D-288）。远程嵌入
 走 `harness.embedding` → `harness.embed` → OpenAI 兼容 `/embeddings`，复用 Pi provider 与凭据权威。知识库召回在配置有效时
 走同一绑定，向量写在独立代际目录，不改权威 `.tdb` 维度。模型选择不取当前聊天主模型；换绑定按兼容空间切换查询与后台建设，不能用旧空间向量响应
 新模型。第 8.5 节定义配置责任。本地模型是否适合中文、代码与当前吞吐分别说明，不以“小模型跑得动”推出检索效果或速度。
@@ -1316,7 +1316,7 @@ GPTpro 上下文报告与随后讨论共同形成以下目标，实施不能只�
 | `models.reader` | `webfetch` 的阅读子 agent | 未配置 | 忽略 `prompt`，返回提取内容 |
 | `models.suggestions` | 知识建议的草拟与触发描述生成 | 未配置 | 用用户原文，触发描述留空 |
 | `models.permissionJudge` | 原生权限 fallback 的 Smart 判断 | 未配置 | Smart 不可选；插件活跃时由插件 authorizer 链负责 |
-| `harness.embedding` | explore 文档与查询嵌入（3.16B） | 未配置远程时本地 `all-MiniLM-L6-v2` | 远程失败/未绑定 Pi 时语义来源 `failed`/`unavailable`，词法与图继续；同一查询不静默切回另一 vector space |
+| `harness.embedding` | explore 文档与查询嵌入（3.16B） | 未配置远程且已安装本地组件时使用 `all-MiniLM-L6-v2`；否则不启用向量来源 | 远程失败/未绑定 Pi 时语义来源 `failed`/`unavailable`，词法与图继续；同一查询不静默切回另一 vector space |
 | `harness.rerank` | 对当前可展示视图提供统一顺序（3.16E） | 未配置 | 保留来源排名与可读材料，details 标明未参与/失败；不使 explore 整体失败 |
 
 **配置种类与聊天槽位分开**（D-190）。前十个普通 Harness 槽位仍走 `HarnessModelRole`；embedding/rerank 不在该表里，也不能

@@ -47,7 +47,6 @@
       "name": "@piarium/electron",
       "version": "0.9.11",
       "dependencies": {
-        "@huggingface/transformers": "^4.2.0",
         "@piarium/application-client": "workspace:*",
         "@piarium/pi-host": "workspace:*",
         "@piarium/protocol": "workspace:*",
@@ -350,7 +349,6 @@
       },
       "dependencies": {
         "@clack/prompts": "^1.1.0",
-        "@huggingface/transformers": "^4.2.0",
         "@konbakuyomu/smart-search": "^0.1.17",
         "@mozilla/readability": "0.6.0",
         "@octokit/rest": "^22.0.1",
@@ -390,6 +388,7 @@
         "yazl": "^3.3.1",
       },
       "devDependencies": {
+        "@huggingface/transformers": "4.2.0",
         "@piarium/extension-builtins": "workspace:*",
         "@piarium/ui": "workspace:*",
         "@types/better-sqlite3": "^9.6.0",

@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,21 @@ Last updated: 2026-09-16
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**D-288 本地语义检索已改为用户按需安装的独立组件（2026-09-18）。** 基础 Desktop/Web 构建不再下载或复制
+MiniLM 模型，生产依赖不再包含 Transformers / Node ONNX / Web ONNX。Settings → Agent Harness → 检索提供
+显式下载、离线导入、进度、取消与重试；Host 校验归档路径、目标平台、完整文件清单和 SHA-256，并在独立子进程中
+完成真实推理后原子切换组件。安装完成即刷新本地语义后端；在途查询仍持有启动时的模型身份，远程 embedding 配置不受影响。
+未安装时词法/结构检索正常工作，不自动安装模型；远程语义仍通过用户配置启用。
+
+Windows x64 实际产物：安装包 **262,211,818 → 172,679,437 字节**（约 250 → 165 MiB），展开后约 **875 → 580 MiB**，
+文件 **20,840 → 17,734**；独立组件归档 **52,369,311 字节**（约 50 MiB）。删除重复 Host 源码/模型与重复 kernel 副本，
+保留内置 Pi、Rust kernel、知识库和语音功能必需依赖。以上是产物大小证据，未测量安装器全程墙钟。
+`smoke-windows-unpacked.mjs` 已在新安装包的 unpacked 产物上验证干净 profile 启动、内置 Pi 0.85.1、语言/恢复/终端服务，
+以及组件未安装 → HTTP 离线导入 → 真实 384 维推理校验 → ready；`local-component.test.ts`、`minilm.test.ts`、
+`harness-316.test.ts` 覆盖失败保留、损坏组件、固定查询模型身份与远程绑定。构建、定向 lint/类型检查、i18n 与文档校验通过。
+Release workflow 已接入各平台独立组件构建和发布资产；本轮未发布新 GitHub release，当前本地安装包可使用离线组件，
+在线安装需对应版本组件资产发布后才可用。macOS/Linux 原生组件与安装器墙钟未在本机验证。
 
 **D-284 上下文无感续接已实施（2026-09-16）。** 真实请求前预算（`context` hook 覆盖回合内继续）→ 水位触发固定范围后台摘要 →
 前台继续追加 → `session_before_compact` 提交候选或等待/同步 fallback → Pi 持久压缩 → `compaction.after` 重置观察基线 →
@@ -175,7 +190,7 @@ Owner：`host` = `packages/web/application-host/lib/harness`（或 `lib/knowledg
 | **3.18A–E（D-285 / D-287）** 可续做任务线程与定向协作 | protocol / pi-host / host / ui | ✓ | ✓ | 既有 protocol/service/runtime/registry/dequeue/route 证据；新增 `thread-admission.acceptance.test.ts`、`thread-wait-admission.acceptance.test.ts`、`thread-message-identity.acceptance.test.ts`、`thread-delivery.acceptance.test.ts`、`thread-runtime-session.e2e.test.ts`（同根原子准入、非唤醒 inform、native request receipt、消息幂等/回复身份、旧结果跨 Run 可读与公开连续交付）；物化更新见 `materialized-baseline-update.acceptance.test.ts` | ✓ | — | Run 配置由每次 Run 冻结并被 spawn/dequeue/resume/restore/continue/fresh 消费；旧 role/send/per-parent 路径已删除 |
 | **3.1** 符号图采集器与查询 | host knowledge | ✓ | ✓（defines + imports/connects/associates + 解析出的 references/calls；explore 路径候选 + 摘录注解 + `related`） | `knowledge/store.test.ts`（节点/边、代际、match、反向 import、紧凑候选 close/reopen 后补关系；resolved relation 行的固定/未固定、重解析替换、目标删除级联、staleTarget、generation 消亡；D-246 anchor 批次重解析两缩一缩空、不同 anchor 隔离）；`knowledge/relations.test.ts`（真 supervisor+fixture 的 collect→持久化、piggyback record、无库降级）；`import-resolve.test.ts`；`symbol-runtime.test.ts`；`catalog-scan.test.ts`（并发扫描合并、无事件正文修改后重扫、连接移除/恢复、不重采集消费文件）；`typescript-service.test.ts`（D-246：显式根、嵌套首文件 cross-file caller、无根回退 cwd 不猜、setWorkspaceRoot 生命周期）；`related-scope.test.ts`（D-246：scope 过滤定义/引用/importers/connections、anchor 外拒绝、partial 组合状态、pathInRoots 一致性） | ✓（随 Documents mutation + 打开后火忘冷扫描；resolved 行由查询期 collector 与 lsp 导航回写） | 未知语言只 touch file；结构 unavailable 保留最后图；范围绑定磁盘 revision，脏缓冲不入图——resolved 行同样只持久化磁盘绑定答案，跨文件站点一律 unpinned、目标 revision 移动报 staleTarget（D-240）。未确认关联仅存在 file metadata，不建 link 节点 | D-236 已移除同名闸门再访的重读/重解析；extractor 3 使旧目录下次重采集。当前 2520 文件冷建 185767.1 ms、显式未变重扫 10314.095 ms，详见下方观察；没有同语料改前对照。D-140/D-141 的 18.4/4.8 分钟保留为历史。仍不冷启 LSP——resolved 行只在真实查询驱动下由已运行的语言视图产生；目录限 TS/TSX/JS/JSX。D-237 已补完整重扫的外部删除对账：missing 确认、代际条件删除与排队取消；失败/截断/未知 inventory 保留旧图。D-240 已接 references/calls 边与 relation collector；D-246 返工修正 LSP 根推断（来自 initialize 而非首个文件父目录）、related/explore actor scope 贯穿、权威 anchor 批次重解析（清掉消失 site）、partial 组合状态、explore 公开链暴露 findReferences/findCallers/findCalls；PageRank/多跳仍未做。完整桌面冷建未实测 |
 | **3.15** 快速 explore：查询上下文、分组计划、成组选段与局部补查（D-175–D-189） | protocol / host / pi-host | ✓ | ✓ | `explore-query-run.test.ts`（start 到达即读、原问题词法与慢语义并行、同文件晚到语义重建、稳定 viewId、required 组、单元来源排名、来源终态与冻结）；`explore-query-services.test.ts`（固定来源、完整 actor、受限 scope、取消与响应未送达、fixed roots 传递）；`router.test.ts` / `service-host.test.ts`（授权 cancel、request actor key、session 换代清理）；`semantic/runtime.test.ts`（查询取消停止等待）；`explore-model.test.ts` / `explore-tool.test.ts` / `host-services-bridge.test.ts`（模型输入、Host accepted、补查失败保留首选、timeout/dispose 实传 cancel）；`session-e2e.test.ts`「runs plan expressions through ModelRuntime…」（公开 `explore` → `completeSimple` → 新表达搜索 → 最终原文）；`knowledge/store.test.ts` / `knowledge/semantic/store.test.ts`（scope 内 Top-K、`.` 快路径、文档更新删除） | ✓（公开 `explore` 默认；配置 `models.explore` 后同一路径启用模型，未配置保留算法/向量） | 未配置或调用失败保留已取得材料，不回退主模型；取消/失败/不可用/无命中/截止未完成分列 | 真实 `models.explore` 质量与墙钟未观察，不作为启用门。120s/8s 是尚未按真实 provider 定标的工作预算，不是 SLO。D-189 已让受限 scope 的图/向量后端在有效 roots 内计算 Top-K，reverse importer 在截断前过滤；`.` / 空 roots 保留未受限语义快路径。native ONNX 当前批不能被 JS signal 硬抢占，取消会停止等待并丢弃迟到结果。远程嵌入、向量复用、语义草稿覆盖与专用 reranker 见 3.16B–E；router 取消与超时目前同为 `timeout` 码；`harness-e2e` #3 是既有 D-103 |
-| **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（user/operator-only resolver、项目 provider 重定向隔离、binding 竞态、cancel→fetch、endpoint/credential space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`（旧手工 consumer 链）；`semantic-workspace.e2e.test.ts`（D-235：共用生产装配、真实 SessionHost/HTTP adapter、双执行目录路由、无效配置/失败状态）；`workspace-runtime.test.ts`（配置与取消生命周期） | ✓（未配置远程时本地 MiniLM；配置有效即走远程同一 space） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库语义召回已按 2.8 / D-196 单独接线，不回退 MiniLM。Host 从不接收或持久化 provider secret |
+| **3.16B** 远程 embedding 配置、后台绑定与 OpenAI 兼容调用（D-190） | protocol / pi-host / host / ui | ✓ | ✓ | `protocol/test/harness-settings.test.ts`（workspace 不能留下 embedding/rerank）；`pi-host/test/harness/openai-embeddings.test.ts`（乱序/缺项/维度/NaN/取消）；`pi-host/test/harness/background-inference.test.ts`（user/operator-only resolver、项目 provider 重定向隔离、binding 竞态、cancel→fetch、endpoint/credential space）；`semantic/harness-316.test.ts`；`session-e2e.test.ts`（旧手工 consumer 链）；`semantic-workspace.e2e.test.ts`（D-235：共用生产装配、真实 SessionHost/HTTP adapter、双执行目录路由、无效配置/失败状态）；`workspace-runtime.test.ts`（配置与取消生命周期） | ✓（配置有效即走远程同一 space；未配置时仅在用户已安装本地组件后使用 MiniLM，D-288） | 远程失败/未绑定 Pi：语义 `failed`/`unavailable`，词法与图继续；同一查询不静默切回本地 MiniLM | 真实远程 provider 延迟、质量、成本未观察，不作为启用门。知识库语义召回已按 2.8 / D-196 单独接线，不回退 MiniLM。Host 从不接收或持久化 provider secret |
 | **3.16C** 向量复用、完整编码与前台优先（D-191） | host | ✓ | ✓ | `semantic/harness-316.test.ts`（embedText 复用、单块重嵌、并发扫描合并、前台插队、partial 首发、迟到 revision、scoped 缓存仍做授权 Top-K）；`semantic/chunker.test.ts`（超长单行续切、多块覆盖无缺口）；`semantic/minilm.test.ts`（Node ORT session 线程） | ✓（随语义索引） | 缓存满按字节软预算淘汰，不拒绝查询；后台当前批完成后前台优先 | 完整冷扫墙钟仍未量得（沿用 3.16A）。远程 Host 侧按字符长度续切，不是远程 tokenizer 精确计数 |
 | **3.16D** 固定草稿与线程分支语义覆盖（D-192） | host | ✓ | ✓ | `semantic/harness-316.test.ts`（立即遮蔽、dirty-only、删除、supersede、捕获后继续编辑、兄弟线程隔离、缺向量≠缺正文） | ✓（公开 explore 的 `semanticRecall`） | 草稿/线程向量未完成：语义 gap/partial，词法与读取继续用已固定原文 | 物化 child 使用自身 Documents workspace，virtual 使用固定 WorkingBranch；copyIgnored 不自动扩大范围。D-235 公开 SessionHost 纵切已覆盖原生写入通知、后台发布后同回合 explore；完整 nested dispatch/桌面启动未测 |
 | **3.16E** 专用 HTTP reranker（D-193） | protocol / pi-host / host / ui | ✓ | ✓ | `pi-host/test/harness/http-rerank.test.ts`（非法/缺失 ID、部分响应）；`explore-rerank.test.ts`；`explore-query-services.test.ts`（select=used 不调用、select=unconfigured 调用）；`session-e2e.test.ts`（旧手工 consumer 链）；`semantic-workspace.e2e.test.ts`（D-235 共用生产装配 → 真实 Pi `/rerank` adapter，结构化状态为 used） | ✓（`harness.rerank` 有效且本轮未用 LLM 选择时） | 失败保留来源排名与可读材料，details 标明未参与/失败；explore 整体不失败 | 真实 rerank provider 质量与费用未观察。当前 registry 无标准 rerank 方法，使用可配置 HTTP `/rerank` 契约，不把 chat/embeddings 改名为 rerank |
@@ -360,9 +375,9 @@ TS/TSX/JS/JSX 文件调用生产 `scanWorkspace`、tree-sitter 和 TriviumDB；�
 
 - 真实数组批推理；切块尺寸查找避免逐行/逐字符重复缩短；语义存储使用增量计数、批量发布与合并检查点，恢复中断留下的 WAL。
   这些改动在 `semantic/{minilm,chunker,runtime,store}.ts`。按实际编码文本复用与前台优先已由 3.16C 接线。
-- 模型 recipe 固定上游修订，构建自动准备发行包，after-pack 校验模型/运行时文件；Windows unpacked smoke 从实际
+- 当时模型 recipe 固定上游修订，构建自动准备发行包，after-pack 校验模型/运行时文件；Windows unpacked smoke 从实际
   `app.asar.unpacked` 模块加载 Host、MiniLM、ONNX，零词汇重合夹具命中排名 1，status/coverage/lifecycle 为 ready/complete/ready。
-  入口：[Windows smoke](../packages/electron/scripts/smoke-windows-unpacked.mjs)。这是该夹具与打包链的证据，不是全仓召回结果。
+  这是历史夹具与打包链的证据，不是全仓召回结果。D-288 已改为独立可选组件，当前基础包 smoke 验证未安装时正常启动，显式导入组件后再验证可用状态。
 - [存储探针](../packages/web/scripts/semantic-store-perf.ts)：3000 文档、真实 TriviumDB、假 embedder，旧实现总计 11.26 s，
   改后逐文档 6.56 s、8 文档一批 1.15 s。仅说明存储路径，不包含真实推理速度。
   [局部扫描探针](../packages/web/scripts/semantic-scan-perf.ts)：40 个 knowledge 文件、真实 MiniLM、621 块，首批发布 6.06 s，

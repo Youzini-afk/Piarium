@@ -4,7 +4,7 @@ import os from 'node:os';
 import fsp from 'node:fs/promises';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,9 +16,11 @@ for (const variable of [
   'PIARIUM_PI_CUSTOM_ROOT',
   'PIARIUM_PI_CUSTOM_NODE',
   'PIARIUM_PI_PACKAGE_ROOT',
+  'PIARIUM_AGENT_DIR',
   'PIARIUM_RUNTIME_SOURCE',
   'PIARIUM_SKIP_LOCAL_SERVER',
   'PIARIUM_SMOKE_PROFILE_SOURCE',
+  'PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK',
   'ELECTRON_RUN_AS_NODE',
   'NODE_PATH',
 ]) {
@@ -36,20 +38,6 @@ const packagedWebServerRoot = path.join(
 );
 const packagedWebRoot = path.dirname(packagedWebServerRoot);
 const packagedKernelRoot = path.join(packagedResourcesRoot, 'kernel');
-const packagedTransformersRoot = path.join(
-  packagedResourcesRoot,
-  'app.asar.unpacked',
-  'node_modules',
-  '@huggingface',
-  'transformers',
-);
-const SEMANTIC_MODEL_FILES = [
-  'tokenizer.json',
-  'tokenizer_config.json',
-  'config.json',
-  'special_tokens_map.json',
-  'onnx/model_quantized.onnx',
-];
 
 if (process.platform !== 'win32') {
   throw new Error('The unpacked Windows smoke test must run on Windows.');
@@ -77,6 +65,9 @@ const DEVTOOLS_REQUEST_TIMEOUT_MS = 20_000;
 const LAYOUT_TOLERANCE_PX = 1;
 const MAX_COMPOSER_FRAME_WIDTH_PX = 48 * 16;
 const MONACO_SMOKE_ENABLED = process.env.PIARIUM_MONACO_SMOKE === '1';
+const localSemanticPack = process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK?.trim()
+  ? path.resolve(process.env.PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK.trim())
+  : null;
 
 const assertNear = (actual, expected, label) => {
   if (!Number.isFinite(actual) || Math.abs(actual - expected) > LAYOUT_TOLERANCE_PX) {
@@ -137,181 +128,81 @@ const postJson = async (baseUrl, route, body, label) => {
   return payload;
 };
 
-const importPackagedServerModule = (relativePath) => import(
-  pathToFileURL(path.join(packagedWebServerRoot, relativePath)).href
-);
+const LOCAL_SEMANTIC_STATUSES = new Set(['not-installed', 'installing', 'ready', 'failed']);
 
-const runPackagedSemanticSmoke = async (workspaceRoot, semanticDataDir) => {
-  const requiredFiles = [
-    path.join(packagedTransformersRoot, 'package.json'),
-    path.join(packagedTransformersRoot, 'dist', 'transformers.node.mjs'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'recipe.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', '.source-revision.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'tokenizer_config.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'config.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'special_tokens_map.json'),
-    path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'onnx', 'model_quantized.onnx'),
-  ];
-  const missing = requiredFiles.filter((file) => {
-    try {
-      const details = statSync(file);
-      return !details.isFile() || details.size === 0;
-    } catch {
-      return true;
-    }
-  });
-  if (missing.length > 0) {
-    throw new Error(`Packaged semantic runtime is incomplete: ${missing.join(', ')}`);
-  }
-  const recipePath = path.join(
-    packagedWebServerRoot,
-    'lib',
-    'knowledge',
-    'semantic',
-    'runtime',
-    'all-minilm-l6-v2',
-    'recipe.json',
-  );
-  let recipe;
+const readLocalSemanticStatus = async (baseUrl, label) => {
+  let response;
   try {
-    recipe = JSON.parse(readFileSync(recipePath, 'utf8'));
+    response = await fetch(`${baseUrl}/api/harness/local-semantic`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15_000),
+    });
   } catch (error) {
-    throw new Error(`Packaged semantic recipe is unreadable at ${recipePath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`${label} request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
-  if (!/^[0-9a-f]{40}$/i.test(recipe.modelRevision || '')) {
-    throw new Error(`Packaged semantic recipe is not pinned to a full commit revision: ${recipe.modelRevision}`);
-  }
-  const markerPath = path.join(
-    packagedWebServerRoot,
-    'lib',
-    'knowledge',
-    'semantic',
-    'runtime',
-    'all-minilm-l6-v2',
-    '.source-revision.json',
-  );
-  let marker;
+  const text = await response.text();
+  let payload;
   try {
-    marker = JSON.parse(readFileSync(markerPath, 'utf8'));
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+  if (!response.ok || !payload || !LOCAL_SEMANTIC_STATUSES.has(payload.status)) {
+    throw new Error(`${label} failed with HTTP ${response.status}: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}`);
+  }
+  return payload;
+};
+
+const runPackagedLocalSemanticSmoke = async (baseUrl) => {
+  const initial = await readLocalSemanticStatus(baseUrl, 'Packaged local semantic status');
+  if (initial.status !== 'not-installed') {
+    throw new Error(`Clean packaged local semantic component was not absent: ${JSON.stringify(initial)}`);
+  }
+  if (!localSemanticPack) return { imported: false, status: initial.status };
+
+  let packStat;
+  try {
+    packStat = await fsp.stat(localSemanticPack);
   } catch (error) {
-    throw new Error(`Packaged semantic source marker is unreadable at ${markerPath}: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Missing local semantic component pack at ${localSemanticPack}`, { cause: error });
   }
-  const markerFiles = Array.isArray(marker.files) ? [...marker.files].sort() : [];
-  if (
-    marker.schemaVersion !== 1
-    || marker.revision !== recipe.modelRevision
-    || JSON.stringify(markerFiles) !== JSON.stringify([...SEMANTIC_MODEL_FILES].sort())
-  ) {
-    throw new Error(`Packaged semantic source marker does not match recipe at ${markerPath}`);
+  if (!packStat.isFile() || packStat.size === 0) {
+    throw new Error(`Local semantic component pack is empty or not a file: ${localSemanticPack}`);
+  }
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([await fsp.readFile(localSemanticPack)], { type: 'application/gzip' }),
+    path.basename(localSemanticPack),
+  );
+  const importResponse = await fetch(`${baseUrl}/api/harness/local-semantic/import`, {
+    method: 'POST',
+    body: form,
+    signal: AbortSignal.timeout(30_000),
+  });
+  const importText = await importResponse.text();
+  if (importResponse.status !== 202) {
+    throw new Error(`Packaged local semantic import returned HTTP ${importResponse.status}: ${importText}`);
   }
 
-  const [documentsModule, fsSearchModule, structureSourceModule, treeSitterModule, semanticModule, minilmModule, identityModule, kernelClientModule, computeServiceModule] = await Promise.all([
-    importPackagedServerModule('lib/documents/authority.js'),
-    importPackagedServerModule('lib/fs/search.js'),
-    importPackagedServerModule('lib/structure/source.js'),
-    importPackagedServerModule('lib/structure/tree-sitter-provider.js'),
-    importPackagedServerModule('lib/knowledge/semantic/runtime.js'),
-    importPackagedServerModule('lib/knowledge/semantic/minilm.js'),
-    importPackagedServerModule('lib/knowledge/semantic/identity.js'),
-    importPackagedServerModule('lib/kernel/kernel-client.js'),
-    importPackagedServerModule('lib/kernel/compute-service.js'),
-  ]);
-  const webVersion = JSON.parse(readFileSync(path.join(packagedWebRoot, 'package.json'), 'utf8')).version;
-  const kernel = kernelClientModule.createKernelClient({
-    hostId: 'packaged-semantic-smoke',
-    storageRoot: path.join(semanticDataDir, 'kernel'),
-    kernelPath: path.join(packagedKernelRoot, 'piarium-kernel.exe'),
-    buildVersion: webVersion,
-    requireKernelManifest: true,
-    allowCargoDevRunner: false,
-  });
-  const documents = documentsModule.createDocumentAuthority({
-    hostId: 'packaged-semantic-smoke',
-    dataDir: semanticDataDir,
-    fsPromises: fsp,
-    pathModule: path,
-    isAllowedRoot: async () => true,
-    isTrusted: async () => true,
-  });
-  let runtime;
-  let compute;
-  try {
-    await kernel.start();
-    const identity = await documents.resolveWorkspace({ path: workspaceRoot });
-    compute = computeServiceModule.createKernelComputeService({
-      client: kernel,
-      resolveIdentity: async (cwd) => {
-        const resolved = await documents.resolveWorkspace({ path: cwd });
-        const inspected = await documents.inspectWorkspace(resolved.workspaceId);
-        return {
-          workspaceId: resolved.workspaceId,
-          executionWorkspaceId: resolved.workspaceId,
-          canonicalRoot: inspected.root,
-        };
-      },
-    });
-    const fileSearch = fsSearchModule.createFsSearchRuntime({
-      compute,
-    });
-    const structureSource = structureSourceModule.createStructureSource([
-      treeSitterModule.createTreeSitterStructureProvider({ compute, parseBudgetMs: 10_000 }),
-    ]);
-    runtime = semanticModule.createSemanticIndexRuntime({
-      dataDir: semanticDataDir,
-      hostId: 'packaged-semantic-smoke',
-      documents,
-      structureSource,
-      searchFilesystemFiles: fileSearch.searchFilesystemFiles,
-      embedder: minilmModule.createLocalMinilmEmbedder({ dataDir: semanticDataDir }),
-    });
-    const scope = identityModule.workspaceScope(identity.workspaceId);
-    await runtime.scanScope(scope);
-    const scanStatus = runtime.statusFor(scope);
-    if (
-      scanStatus.status !== 'ready'
-      || scanStatus.coverage !== 'complete'
-      || scanStatus.lifecycle !== 'ready'
-      || typeof scanStatus.generation !== 'string'
-      || typeof scanStatus.spaceId !== 'string'
-    ) {
-      throw new Error(`Packaged semantic scan did not complete: ${JSON.stringify(scanStatus)}`);
+  let status = await readLocalSemanticStatus(baseUrl, 'Packaged local semantic import progress');
+  const deadline = Date.now() + 120_000;
+  while (status.status !== 'ready' && Date.now() < deadline) {
+    if (status.status === 'failed') {
+      throw new Error(`Packaged local semantic import failed: ${JSON.stringify(status)}`);
     }
-
-    // No word from this query occurs in the fixture body. A hit therefore
-    // proves the published MiniLM + ONNX path, rather than lexical matching.
-    const result = await runtime.search(scope, 'how does the runtime discard idle tokens', 8);
-    const hit = result.hits.find((candidate) => candidate.documentId === 'semantic-gap-smoke.ts');
-    const primaryEvidence = hit?.rank === 1 && hit.body.includes('parkedHandles.delete');
-    if (
-      result.status.status !== 'ready'
-      || result.status.coverage !== 'complete'
-      || !primaryEvidence
-    ) {
-      throw new Error(`Packaged semantic query did not return primary fixture evidence: ${JSON.stringify({ status: result.status, hits: result.hits })}`);
-    }
-    return {
-      coverage: result.status.coverage,
-      generation: result.status.generation,
-      hit: {
-        blockId: hit.blockId,
-        documentId: hit.documentId,
-        rank: hit.rank,
-        similarity: hit.similarity,
-      },
-      lifecycle: result.status.lifecycle,
-      model: path.relative(packagedWebServerRoot, path.join(packagedWebServerRoot, 'lib', 'knowledge', 'semantic', 'runtime', 'all-minilm-l6-v2', 'onnx', 'model_quantized.onnx')),
-      primaryEvidence,
-      spaceId: result.status.spaceId,
-      status: result.status.status,
-      transformers: path.relative(packagedResourcesRoot, path.join(packagedTransformersRoot, 'dist', 'transformers.node.mjs')),
-    };
-  } finally {
-    await runtime?.dispose().catch(() => {});
-    await compute?.dispose().catch(() => {});
-    await kernel.close().catch(() => {});
-    await documents.dispose?.().catch(() => {});
+    await delay(500);
+    status = await readLocalSemanticStatus(baseUrl, 'Packaged local semantic import progress');
   }
+  if (status.status !== 'ready') {
+    throw new Error(`Packaged local semantic import did not become ready: ${JSON.stringify(status)}`);
+  }
+  return {
+    imported: true,
+    installedBytes: status.installedBytes,
+    status: status.status,
+    version: status.version,
+  };
 };
 
 const runPackagedBuiltinLanguageSmoke = async (baseUrl, workspaceRoot) => {
@@ -743,24 +634,15 @@ const waitForRenderer = async (userDataDir) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
+const agentDir = path.join(smokeRoot, 'pi-agent');
 const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
 try {
   await fsp.mkdir(userDataDir, { recursive: true });
+  await fsp.mkdir(agentDir, { recursive: true });
   await fsp.mkdir(smokeWorkspaceRoot, { recursive: true });
   await fsp.writeFile(
     path.join(smokeWorkspaceRoot, 'packaged-language-smoke.ts'),
     'export const packagedLanguageSmoke: number = 1;\n',
-    'utf8',
-  );
-  await fsp.writeFile(
-    path.join(smokeWorkspaceRoot, 'semantic-gap-smoke.ts'),
-    [
-      'export function reclaimLease(handle: string) {',
-      '  parkedHandles.delete(handle);',
-      '  return handle;',
-      '}',
-      '',
-    ].join('\n'),
     'utf8',
   );
 } catch (error) {
@@ -777,6 +659,7 @@ const child = spawn(appPath, [
   cwd: path.dirname(appPath),
   env: {
     ...smokeEnvironment,
+    PI_CODING_AGENT_DIR: agentDir,
     PIARIUM_DATA_DIR: userDataDir,
     PIARIUM_WORKSPACE_ROOT: smokeWorkspaceRoot,
   },
@@ -810,12 +693,9 @@ try {
   const health = await healthResponse.json();
   if (health?.status !== 'ok') throw new Error(`Packaged health check returned ${JSON.stringify(health)}`);
 
+  const localSemantic = await runPackagedLocalSemanticSmoke(baseUrl);
   const builtinLanguage = await runPackagedBuiltinLanguageSmoke(baseUrl, smokeWorkspaceRoot);
   const builtinRecovery = await runPackagedRecoverySmoke(baseUrl);
-  const semantic = await runPackagedSemanticSmoke(
-    smokeWorkspaceRoot,
-    path.join(smokeRoot, 'semantic-data'),
-  );
 
   const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
     method: 'POST',
@@ -887,8 +767,8 @@ try {
     appPath,
     builtinLanguage,
     builtinRecovery,
-    semantic,
     health: 'ok',
+    localSemantic,
     layout,
     piVersion,
     profile: 'clean',

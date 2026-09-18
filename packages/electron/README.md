@@ -104,34 +104,50 @@ That runs, in order:
 2. `prepare:pi-runtime` to compile the Pi host bootstrap and runtime broker.
 3. `bundle:main` to create `packages/electron/dist-bundle/main.mjs`.
 4. `verify:native` to prepare target native libraries, start the manifest-verified release kernel,
-   perform a durable TriviumDB read/write, and run real MiniLM inference through Electron's Node
-   runtime. Storage and PTY no longer use Electron native addons.
+   and perform a durable TriviumDB read/write through Electron's Node runtime. Storage and PTY no
+   longer use Electron native addons.
 5. `package.mjs` to build the target Rust kernel, stage it in `resources/kernel`, and run
    `electron-builder`. Its `afterPack` hook verifies the kernel identity/hash, keeps only the target
-   TriviumDB binary and ONNX platform/architecture directory (including its companion libraries),
+   TriviumDB binary, rejects optional transformers/ONNX dependencies and model weights in the base app,
    rejects retired `better-sqlite3` / `node-pty` / `bun-pty` authority packages, and
    removes the duplicate dependency copy of the already staged Web UI. It also verifies that every
    distribution-owned Host runtime needed after lazy activation, including the TypeScript language
    package and its `tsserver`, exists in the physical `app.asar.unpacked` tree.
 
-Build output goes to `packages/electron/dist`.
+Build output goes to `packages/electron/dist`. Development sources and the duplicate Web-owned kernel
+are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
+
+### Optional local semantic component
+
+The base installer does not include MiniLM, transformers.js, or ONNX Runtime. Lexical and structural
+retrieval remain available; configured remote embedding keeps its existing path. Settings → Agent
+Harness → Retrieval installs local inference only when requested, or imports a downloaded `.tar.gz`.
+Installation checks the platform, file digests and a real vector before activating the component in
+the current Host. It does not require npm, Bun or Python on the user's machine.
+
+Build its separate native archive with `bun run --cwd packages/electron package:local-semantic`.
+This is the only build path that downloads the pinned model and prepares Node ONNX. It emits
+`Piarium-local-semantic-<version>-<platform>-<arch>.tar.gz` and a checksum into `dist`; the release
+workflow publishes these alongside, rather than inside, the application. The archive excludes the
+unused browser ONNX distribution. Set `PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK` to that archive when running
+the desktop smoke to additionally exercise the explicit import flow.
 
 ### Native libraries built from source
 
-`prepare-native-runtime.mjs` supplies two binaries absent from the pinned npm packages:
+Two native recipes supply binaries absent from the pinned npm packages:
 
 - Windows ARM64 builds TriviumDB 0.8.6 from commit
   `2b840d0a05142f91e57d46bf30ebbde143440fa4`. The checked-in Bun patch makes its loader
   select the actual Windows architecture. The native runner needs Rust and the ARM64 MSVC toolchain.
-- macOS Intel builds the ONNX Runtime 1.24.3 CPU library and Node-API binding from commit
+- The optional semantic component's `prepare-onnx-runtime.mjs` builds macOS Intel ONNX Runtime 1.24.3 CPU and Node-API libraries from commit
   `3a728b75062256951b6e19ce718907cf1a1d4cf0`, matching the installed JavaScript API. The
   build uses Xcode command-line tools, Python 3, CMake 3.28 or newer, and Ninja.
 
-These recipes are part of normal native verification and packaging. They validate the installed
+These recipes run for their respective base or optional component builds. They validate the installed
 dependency version, build from the fixed source revision, and check the resulting architecture.
 Verified payloads and hash receipts are cached under `~/.cache/piarium-native`; release jobs cache
-only those outputs, not source checkouts or build directories. The final packaged Host runs a real
-MiniLM inference as well, so successful compilation alone does not establish runtime support.
+only those outputs, not source checkouts or build directories. The optional component build runs real
+MiniLM inference through Electron, so successful compilation alone does not establish runtime support.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 

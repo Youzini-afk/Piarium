@@ -348,6 +348,19 @@ describe("3.16 vector reuse, scheduler, overlays, and remote spaces", () => {
     expect(embedder.status).toBe("unavailable");
     expect(embedder.space.model).toBe(local.space.model);
     expect(backend.local).toBe(local);
+    backend.replaceLocal(createHashEmbedder({ ...local.space, modelRevision: "new-local-component" }));
+    expect(backend.embedder).toBe(embedder);
+    expect(backend.kind).toBe("remote");
+  });
+
+  it("keeps the model identity held by a query when a local component is replaced", () => {
+    const previous = createHashEmbedder();
+    const backend = createSemanticBackend({ local: previous });
+    const queryEmbedder = backend.embedder;
+    const next = createHashEmbedder({ ...previous.space, modelRevision: "new-local-component" });
+    backend.replaceLocal(next);
+    expect(backend.embedder).toBe(next);
+    expect(queryEmbedder.space.modelRevision).toBe("test-hash");
   });
 
   it("treats a dirty path without a body as an immediate disk mask, not a missing body", async () => {

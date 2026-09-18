@@ -34,7 +34,8 @@ export function createSemanticBackend(options: {
   embedClient?: RemoteEmbedClient;
 }) {
   let kind: SemanticBackendKind = "local";
-  let current = options.local;
+  let local = options.local;
+  let current = local;
   let currentKey = "local";
   let lastError: unknown;
 
@@ -42,7 +43,7 @@ export function createSemanticBackend(options: {
     lastError = undefined;
     if (!settings) {
       kind = "local";
-      current = options.local;
+      current = local;
       currentKey = "local";
       return current;
     }
@@ -50,7 +51,7 @@ export function createSemanticBackend(options: {
       lastError = new Error("Remote embedding is configured but the Pi workspace binding is unavailable.");
       kind = "remote";
       current = {
-        ...options.local,
+        ...local,
         status: "unavailable",
       };
       currentKey = bindingKey(settings);
@@ -68,7 +69,7 @@ export function createSemanticBackend(options: {
     lastError = error;
     kind = "remote";
     currentKey = "invalid";
-    current = { ...options.local, status: "unavailable" };
+    current = { ...local, status: "unavailable" };
     return current;
   };
 
@@ -78,7 +79,11 @@ export function createSemanticBackend(options: {
     get lastError() { return lastError; },
     bind,
     unavailable,
-    local: options.local,
+    get local() { return local; },
+    replaceLocal: (next: SemanticEmbedder): void => {
+      local = next;
+      if (kind === "local") current = next;
+    },
   };
 }
 

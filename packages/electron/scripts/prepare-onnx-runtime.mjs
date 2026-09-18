@@ -18,8 +18,8 @@ const run = (command, args, cwd) => execFileSync(command, args, { cwd, stdio: 'i
 // their macOS binaries in npm. Compile both from the same revision as our JS API.
 export function prepareOnnxRuntime() {
   if (process.platform !== 'darwin' || process.arch !== 'x64') return;
-  const electronRequire = createRequire(new URL('../package.json', import.meta.url));
-  const transformersRequire = createRequire(electronRequire.resolve('@huggingface/transformers'));
+  const webRequire = createRequire(new URL('../../web/package.json', import.meta.url));
+  const transformersRequire = createRequire(webRequire.resolve('@huggingface/transformers'));
   const packageRoot = path.dirname(path.dirname(transformersRequire.resolve('onnxruntime-node')));
   const installedVersion = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8')).version;
   if (installedVersion !== VERSION) {

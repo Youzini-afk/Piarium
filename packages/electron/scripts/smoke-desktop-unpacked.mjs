@@ -13,9 +13,11 @@ for (const variable of [
   'PIARIUM_PI_CUSTOM_ROOT',
   'PIARIUM_PI_CUSTOM_NODE',
   'PIARIUM_PI_PACKAGE_ROOT',
+  'PIARIUM_AGENT_DIR',
   'PIARIUM_RUNTIME_SOURCE',
   'PIARIUM_SKIP_LOCAL_SERVER',
   'PIARIUM_SMOKE_PROFILE_SOURCE',
+  'PIARIUM_SMOKE_LOCAL_SEMANTIC_PACK',
   'ELECTRON_RUN_AS_NODE',
   'NODE_PATH',
 ]) {
@@ -231,8 +233,10 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
 
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-desktop-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
+const agentDir = path.join(smokeRoot, 'pi-agent');
 const workspaceRoot = path.join(smokeRoot, 'workspace');
 await fsp.mkdir(workspaceRoot);
+await fsp.mkdir(agentDir);
 const logPaths = [
   path.join(userDataDir, 'logs', 'main.log'),
   ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Piarium', 'main.log')] : []),
@@ -250,6 +254,7 @@ const child = spawn(appPath, [
   cwd: path.dirname(appPath),
   env: {
     ...smokeEnvironment,
+    PI_CODING_AGENT_DIR: agentDir,
     PIARIUM_STARTUP_PERF: '1',
     PIARIUM_DATA_DIR: userDataDir,
     PIARIUM_WORKSPACE_ROOT: workspaceRoot,

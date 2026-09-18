@@ -1,11 +1,12 @@
 /**
- * Host-local MiniLM via `@huggingface/transformers`. The pack is resolved
- * through the content-addressed store; missing weights are `unavailable`,
- * not an empty ready index.
+ * Host-local MiniLM via the optional local semantic component. The runtime is
+ * loaded from the component's absolute entry only after a package is enabled;
+ * missing weights are `unavailable`, not an empty ready index.
  */
 
 import os from "node:os";
 import { basename, dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { intraOpThreads, LOCAL_MINILM_SPACE, type VectorSpaceIdentity } from "./identity.js";
 import type { SemanticEmbedder, SemanticEmbedderStatus } from "./embedder.js";
 import { resolveInstalledModelPack, type ResolvedModelPack } from "./model-store.js";
@@ -62,8 +63,8 @@ const TRANSFORMERS_MODULE_ID = "@huggingface/transformers";
 // inference grain: embed() always walks every input and preserves its order.
 const INFERENCE_BATCH_SIZE = 32;
 
-const loadTransformers = async (): Promise<TransformersModule> => (
-  await import(/* @vite-ignore */ TRANSFORMERS_MODULE_ID) as TransformersModule
+const loadTransformers = async (entry?: string): Promise<TransformersModule> => (
+  await import(/* @vite-ignore */ (entry ? pathToFileURL(entry).href : TRANSFORMERS_MODULE_ID)) as TransformersModule
 );
 
 export function createLocalMinilmEmbedder(options: {
@@ -71,13 +72,13 @@ export function createLocalMinilmEmbedder(options: {
   pack?: ResolvedModelPack | null;
   parallelism?: number;
 }): SemanticEmbedder {
-  const pack = options.pack !== undefined
-    ? options.pack
-    : resolveInstalledModelPack(options.dataDir);
-  const space: VectorSpaceIdentity = pack?.space ?? LOCAL_MINILM_SPACE;
-  const status: SemanticEmbedderStatus = pack?.onnxPath ? "ready" : "unavailable";
+  // A query keeps one model identity for its entire lifetime. The workspace
+  // owner replaces this instance when a new component is enabled.
+  const packSnapshot = options.pack !== undefined ? options.pack : resolveInstalledModelPack(options.dataDir);
+  const currentPack = (): ResolvedModelPack | null => packSnapshot;
   let encode: ((text: string) => number) | null = null;
   let prepared = false;
+  let preparedRoot: string | null = null;
   let preparePromise: Promise<void> | null = null;
   let extractor: ((texts: readonly string[]) => Promise<number[][]>) | null = null;
 
@@ -90,17 +91,30 @@ export function createLocalMinilmEmbedder(options: {
   };
 
   const embedder: SemanticEmbedder = {
-    status,
-    space,
+    get status(): SemanticEmbedderStatus {
+      return currentPack()?.onnxPath ? "ready" : "unavailable";
+    },
+    get space(): VectorSpaceIdentity {
+      return currentPack()?.space ?? LOCAL_MINILM_SPACE;
+    },
     prepare: async () => {
-      if (prepared) return;
+      const current = currentPack();
+      if (prepared && preparedRoot === (current?.root ?? null)) return;
       if (preparePromise) return preparePromise;
+      prepared = false;
+      preparedRoot = null;
+      encode = null;
+      extractor = null;
       preparePromise = (async () => {
+        const pack = currentPack();
         if (!pack?.root) {
           prepared = true;
+          preparedRoot = null;
+          encode = null;
+          extractor = null;
           return;
         }
-        const mod = await loadTransformers();
+        const mod = await loadTransformers(pack.transformersEntry);
         const threads = configureThreads(mod);
         // transformers.js resolves a local pack as `${env.localModelPath}/${id}`
         // and looks for `onnx/<file>` inside it. A file:// URL as the id makes it
@@ -132,13 +146,13 @@ export function createLocalMinilmEmbedder(options: {
             const vectors: number[][] = [];
             for (let offset = 0; offset < texts.length; offset += INFERENCE_BATCH_SIZE) {
               const batch = texts.slice(offset, offset + INFERENCE_BATCH_SIZE);
-              const output = await pipe(batch, { pooling: space.pooling, normalize: space.normalize });
+              const output = await pipe(batch, { pooling: pack.space.pooling, normalize: pack.space.normalize });
               const listed = typeof (output as { tolist?: () => number[] | number[][] }).tolist === "function"
                 ? (output as { tolist: () => number[] | number[][] }).tolist()
                 : output as number[][];
               const rows = Array.isArray(listed[0]) ? listed as number[][] : [listed as number[]];
-              if (rows.length !== batch.length || rows.some((row) => row.length !== space.dim)) {
-                throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${space.dim} dimensions.`);
+              if (rows.length !== batch.length || rows.some((row) => row.length !== pack.space.dim)) {
+                throw new Error(`MiniLM returned ${rows.length} vectors for ${batch.length} inputs in ${pack.space.dim} dimensions.`);
               }
               vectors.push(...rows);
             }
@@ -146,11 +160,12 @@ export function createLocalMinilmEmbedder(options: {
           };
         }
         prepared = true;
+        preparedRoot = pack.root;
       })();
-      try { await preparePromise; }
-      catch (error) {
-        preparePromise = null;
-        throw error;
+      const pending = preparePromise;
+      try { await pending; }
+      finally {
+        if (preparePromise === pending) preparePromise = null;
       }
     },
     countTokens: (text) => {
@@ -158,13 +173,17 @@ export function createLocalMinilmEmbedder(options: {
       throw new Error("MiniLM tokenizer is not prepared.");
     },
     embed: async (texts) => {
-      if (status !== "ready" || !extractor) throw new Error("MiniLM model pack is unavailable.");
+      const pack = currentPack();
+      if (!pack?.onnxPath || !extractor || preparedRoot !== pack.root) {
+        throw new Error("MiniLM model pack is unavailable.");
+      }
       return extractor(texts);
     },
     embedBatch: async (request) => {
       request.signal?.throwIfAborted();
       const vectors = await embedder.embed(request.items.map((item) => item.text));
       request.signal?.throwIfAborted();
+      const space = embedder.space;
       if (vectors.length !== request.items.length || vectors.some((vector) => vector.length !== space.dim)) {
         throw new Error(`MiniLM returned ${vectors.length} vectors for ${request.items.length} inputs in ${space.dim} dimensions.`);
       }

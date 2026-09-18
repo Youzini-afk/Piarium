@@ -158,7 +158,9 @@ jobs:
           key: native-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/electron/scripts/prepare-*-runtime.mjs', 'bun-patches/triviumdb+0.8.6.patch') }}
 
       - name: Prepare target native libraries
-        run: node packages/electron/scripts/prepare-native-runtime.mjs
+        run: |
+          node packages/electron/scripts/prepare-native-runtime.mjs
+          node packages/electron/scripts/prepare-onnx-runtime.mjs
 
       - name: Cache verified native libraries
         if: steps.native-cache.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true'
@@ -186,6 +188,9 @@ jobs:
             args+=("--piarium-unsigned-mac")
           fi
           node packages/electron/scripts/package.mjs "${args[@]}"
+
+      - name: Build and verify optional local semantic component
+        run: node scripts/build-local-semantic-component.mjs --output packages/electron/release-assets
 
       - name: Smoke unpacked Windows application
         if: matrix.platform == 'windows'

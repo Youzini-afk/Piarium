@@ -56,6 +56,8 @@ import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.j
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createLocalMinilmEmbedder } from './lib/knowledge/semantic/minilm.js';
+import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
+import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createWorkspaceSemanticRuntime } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
@@ -1990,6 +1992,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ),
     onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
   });
+  const semanticRuntimeHolder: { current?: ReturnType<typeof createWorkspaceSemanticRuntime> } = {};
+  const localSemanticComponent = createLocalSemanticComponentManager({
+    dataDir: PIARIUM_DATA_DIR,
+    version: PIARIUM_VERSION,
+    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR })),
+  });
   const localEmbedder = createLocalMinilmEmbedder({ dataDir: PIARIUM_DATA_DIR });
   const semanticScheduler = createEmbedScheduler();
   const semanticVectorCache = createVectorCache();
@@ -2010,6 +2018,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     workingBranches: workingBranchLookups,
     onBindingChanged: (workspaceId) => queueMicrotask(() => knowledgeVectors?.refreshWorkspace(workspaceId)),
     onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
+  });
+  semanticRuntimeHolder.current = semanticRuntime;
+  registerLocalSemanticComponentRoutes(app, {
+    manager: localSemanticComponent,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   knowledgeVectors = createKnowledgeVectorRuntime({
     dataDir: PIARIUM_DATA_DIR,
@@ -2818,6 +2831,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await documentsAuthority.dispose();
       await Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose()));
       workspaceRecoveryEngines.clear();
+      await localSemanticComponent.dispose();
       await semanticRuntime.dispose();
       await symbolGraphRuntime.dispose();
       await nativeCompute.dispose();

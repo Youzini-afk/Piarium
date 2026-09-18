@@ -7,6 +7,7 @@ import type { HarnessServiceHost } from '../../harness/service-host.js';
 import type { createWorkingBranchLookups } from '../../harness/working-state/working-branch-lookups.js';
 import type { ThreadExecutionViewRegistry } from '../../harness/working-state/execution-view.js';
 import { createSemanticBackend } from './backend.js';
+import type { SemanticEmbedder } from './embedder.js';
 import { waitWithSignal } from './cancellation.js';
 import { workspaceScope } from './identity.js';
 import { pinSemanticQueryView } from './query-view.js';
@@ -40,6 +41,7 @@ type WorkspaceState = {
 
 /** The production owner of workspace settings, inference transport and query views. */
 export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntimeOptions) {
+  let localEmbedder = options.embedder;
   const states = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
   const watchWorkspaces = new Map<string, string>();
@@ -148,7 +150,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       const cwd = (await options.documents.inspectWorkspace(workspaceId)).root;
       assertActive();
       const backend = createSemanticBackend({
-        local: options.embedder,
+        local: localEmbedder,
         embedClient: {
           embed: (params) => {
             const broker = options.getBroker();
@@ -293,6 +295,15 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   return {
     semanticRecall, harnessSettings, rerankExploreViews, observeDocumentMutation, observeToolWrite, processEvent,
     scanWorkspace: async (workspaceId: string) => (await getWorkspace(workspaceId, false)).runtime.scanWorkspace(workspaceId),
+    refreshLocalSemantic: (next: SemanticEmbedder): void => {
+      localEmbedder = next;
+      for (const state of states.values()) {
+        state.backend.replaceLocal(next);
+        if (state.backend.kind !== 'local') continue;
+        state.runtime.cancelScans();
+        track(state.runtime.scanWorkspace(state.workspaceId));
+      }
+    },
     resolveKnowledgeEmbedder: async (workspaceId: string) => {
       const state = await getWorkspace(workspaceId);
       if (state.binding.embedding.status === 'ready') return { status: 'ready' as const, embedder: state.backend.embedder };

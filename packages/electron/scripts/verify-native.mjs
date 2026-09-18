@@ -37,7 +37,4 @@ const source = `
 execFileSync(executable, ['--input-type=module', '-e', source], {
   cwd: electronRoot, env: environment, stdio: 'inherit', windowsHide: true, timeout: 30_000,
 });
-execFileSync(executable, [path.join(electronRoot, 'scripts/smoke-semantic-runtime.mjs'), webRoot], {
-  cwd: electronRoot, env: environment, stdio: 'inherit', windowsHide: true,
-});
-console.log('[electron] verified Rust release authority, TriviumDB, and MiniLM inference under Electron');
+console.log('[electron] verified Rust release authority and TriviumDB under Electron');

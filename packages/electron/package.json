@@ -8,7 +8,6 @@
   "type": "module",
   "main": "./dist-bundle/main.mjs",
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0",
     "@piarium/application-client": "workspace:*",
     "@piarium/web": "workspace:*",
     "@piarium/pi-host": "workspace:*",
@@ -48,13 +47,14 @@
     "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
     "test:runtime": "vitest run --config vitest.config.ts",
-    "test:architecture": "bun run prepare:pi-runtime && bun run test:runtime && node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/prune-onnx-runtime.test.mjs ./scripts/verify-update-manifest.test.mjs",
+    "test:architecture": "bun run prepare:pi-runtime && bun run test:runtime && node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/dev-server-runtime.test.mjs ./scripts/target-architecture.test.mjs ./scripts/windows-installer-config.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "test:updater": "vitest run updater-capability.test.ts updater-channel.test.ts updater-check.test.ts updater-feed.test.ts --config vitest.config.ts && node --test ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
     "test:linux-desktop": "vitest run linux-autostart.test.ts --config vitest.config.ts && tsx ./scripts/smoke-linux-app-discovery.mjs && tsx ./scripts/smoke-path-open-utils.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run verify:native && node ./scripts/package.mjs",
     "package:win:x64": "bun run build:web-assets && bun run prepare:pi-runtime && bun run bundle:main && bun run verify:native && node ./scripts/package.mjs --win --x64 --publish=never",
+    "package:local-semantic": "node ../../scripts/build-local-semantic-component.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint \"./*.ts\" --config ../../eslint.config.js",
@@ -65,7 +65,9 @@
     "productName": "Piarium",
     "files": [
       "dist-bundle/main.mjs",
-      "dist-bundle/preload.mjs"
+      "dist-bundle/preload.mjs",
+      "!node_modules/@piarium/*/{src,test,tests}/**/*",
+      "!node_modules/@piarium/web/{application-host,cli,scripts,kernel}/**/*"
     ],
     "asarUnpack": [
       "node_modules/**/*"
