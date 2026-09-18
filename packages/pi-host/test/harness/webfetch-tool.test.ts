@@ -28,6 +28,41 @@ function createTestBridge(sessionId: string) {
 }
 
 describe("webfetch tool", () => {
+  it("finds page passages then reads their extracted line range without a reader model", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const markdown = Array.from({ length: 20 }, (_, index) => index === 9 ? "The Response_Model filters fields." : `paragraph ${index + 1}`).join("\n");
+    const page: FetchResult = { status: "ok", url: "https://example.com/", finalUrl: "https://example.com/", contentType: "text/plain", markdown, bytes: markdown.length, fromCache: true, rendered: false, receipt: exampleReceipt };
+    const tool = createWebFetchTool(bridge, "test");
+    const find = tool.execute("find", { url: page.url, find: "response_model" } as never, undefined as never, undefined as never, undefined as never);
+    bridge.respond("test", emitted[0]!.requestId, { ok: true, result: page });
+    const found = await find;
+    const text = found.content.map((entry) => entry.type === "text" ? entry.text : "").join("");
+    assert.match(text, /10: The Response_Model filters fields\./);
+    assert.match(text, /7: paragraph 7/);
+    assert.doesNotMatch(text, /1: paragraph 1\n/);
+    const read = tool.execute("range", { url: page.url, start_line: 9, end_line: 11 } as never, undefined as never, undefined as never, undefined as never);
+    bridge.respond("test", emitted[1]!.requestId, { ok: true, result: page });
+    const result = await read;
+    const range = result.content.map((entry) => entry.type === "text" ? entry.text : "").join("");
+    assert.match(range, /9: paragraph 9\n10: The Response_Model filters fields\.\n11: paragraph 11/);
+    assert.doesNotMatch(range, /12: paragraph/);
+    assert.match(range, /receipt web-short/);
+    bridge.dispose();
+  });
+
+  it("keeps no-match as an observation and rejects reversed ranges before fetching", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const tool = createWebFetchTool(bridge, "test");
+    const pending = tool.execute("find", { url: "https://example.com", find: "absent" } as never, undefined as never, undefined as never, undefined as never);
+    bridge.respond("test", emitted[0]!.requestId, { ok: true, result: { status: "ok", url: "https://example.com", finalUrl: "https://example.com", contentType: "text/plain", markdown: "present", bytes: 7, rendered: false, fromCache: false } });
+    const result = await pending;
+    assert.notEqual((result as { isError?: boolean }).isError, true);
+    assert.match((result.content[0] as { text: string }).text, /No matches/);
+    const reversed = await tool.execute("range", { url: "https://example.com", start_line: 5, end_line: 2 } as never, undefined as never, undefined as never, undefined as never);
+    assert.equal((reversed as { isError?: boolean }).isError, true);
+    assert.equal(emitted.length, 1);
+    bridge.dispose();
+  });
   it("formats ok result without prompt", async () => {
     const { bridge, emitted } = createTestBridge("test");
     const okResult: FetchResult = {

@@ -40,7 +40,7 @@ import {
 import { createLanguageSupervisor } from "../../../web/application-host/lib/lsp/supervisor.js";
 import { PIARIUM_LSP_FIXTURE_SERVER_ARGS } from "../../../web/application-host/lib/lsp/servers.js";
 import { createLanguageSupervisorDiagnosticsProvider } from "../../../web/application-host/lib/harness/diagnostics-adapter.js";
-import { createWebSearchService } from "../../../web/application-host/lib/harness/web-search.js";
+import { createWebSearchService, resolveConfiguredSearchProvider } from "../../../web/application-host/lib/harness/web-search.js";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 import { createExploreFileReader } from "../../../web/application-host/lib/harness/explore-file-reader.js";
 import type { StructureSource } from "../../../web/application-host/lib/structure/types.js";
@@ -1266,16 +1266,18 @@ describe("session e2e — session-local web reader", () => {
   });
 });
 
-describe("session e2e — configured web search", () => {
-  it("carries a configured Host provider result through websearch into a real Pi turn", async () => {
+describe("session e2e — default web search", () => {
+  it("searches without search credentials and follows the result URL to a page passage in a real Pi turn", async () => {
     await withTempRoot("piarium-s-web-search-", async (root) => {
       const agentDir = join(root, "agent");
       await mkdir(agentDir, { recursive: true });
       await writeFile(join(agentDir, "settings.json"), JSON.stringify({
-        harness: { web: { search: { provider: "searxng", endpoint: "https://search.example.test" } } },
+        harness: {},
       }), "utf8");
       const faux = registerFauxProvider();
       let finalToolResult = "";
+      let pageToolResult = "";
+      let searchRequests = 0;
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("websearch", {
           query: "Piarium architecture",
@@ -1283,31 +1285,45 @@ describe("session e2e — configured web search", () => {
         })]),
         (context) => {
           finalToolResult = JSON.stringify(context.messages.at(-1));
+          return fauxAssistantMessage([fauxToolCall("webfetch", { url: "https://docs.example/piarium", find: "authority" })]);
+        },
+        (context) => {
+          pageToolResult = JSON.stringify(context.messages.at(-1));
           return fauxAssistantMessage("done");
         },
       ]);
-      const webSearchService = createWebSearchService(async () => ({
-        id: "configured-test",
-        search: async () => [{
-          title: "Piarium architecture",
-          url: "https://docs.example/piarium",
-          snippet: "Host and pi-host have separate authority boundaries.",
-        }],
+      const webSearchService = createWebSearchService(async () => resolveConfiguredSearchProvider({
+        settings: undefined,
+        auth: {},
+        fetch: async (url, init) => {
+          searchRequests += 1;
+          assert.equal(new URL(String(url)).hostname, "mcp.exa.ai");
+          assert.equal(new Headers(init?.headers).has("Authorization"), false);
+          const request = JSON.parse(String(init?.body));
+          assert.equal(request.params.name, "web_search_advanced_exa");
+          assert.deepEqual(request.params.arguments.includeDomains, ["docs.example"]);
+          return Response.json({ jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text: "Title: Piarium architecture\nURL: https://docs.example/piarium\nText: Host and pi-host have separate authority boundaries." }] } });
+        },
       }));
       const session = await setupSession({
         root,
         faux,
         harnessWebSearch: true,
-        serviceHostOptions: { webSearchService },
+        serviceHostOptions: {
+          webSearchService,
+          webFetchService: { fetch: async (url) => ({ status: "ok", url, finalUrl: url, contentType: "text/plain", markdown: "Architecture\nThe Host owns file authority.\nPi supplies the agent loop.", bytes: 72, fromCache: false, rendered: false }) },
+        },
       });
       try {
         const snapshot = await session.host.create(root);
         assert.ok(snapshot.activeTools.includes("websearch"));
         await session.host.prompt(snapshot.sessionId, "search for the architecture");
         await session.host.session.waitForIdle();
-        assert.match(finalToolResult, /configured-test/);
+        assert.equal(searchRequests, 1);
+        assert.match(finalToolResult, /default-exa/);
         assert.match(finalToolResult, /https:\/\/docs\.example\/piarium/);
         assert.match(finalToolResult, /authority boundaries/);
+        assert.match(pageToolResult, /2: The Host owns file authority/);
       } finally {
         await session.dispose();
         faux.unregister();

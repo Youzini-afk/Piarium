@@ -1125,7 +1125,7 @@ export interface HarnessServiceMap {
   "lsp.hover": { params: { path: string; line: number; character?: number }; result: LspNavigationResult };
   "fs.lock": { params: FsLockParams; result: FsLockResult };
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
-  "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[] } };
+  "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "context.retained": { params: ContextRetentionParams; result: ContextRetentionResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };

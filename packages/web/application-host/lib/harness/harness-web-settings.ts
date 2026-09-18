@@ -2,13 +2,14 @@ import {
   mergeHarnessWebDomainPolicy,
   type HarnessSettings,
   type HarnessWebDomainPolicy,
-  type HarnessWebSearchSettings,
   type PiSettingsSnapshot,
 } from "@piarium/protocol";
+import { parseSearchProviderSettings } from "./web-search.js";
 
 export interface HarnessWebBinding {
   generation: string;
   settings: HarnessSettings["web"];
+  searchError?: string;
 }
 
 const record = (value: unknown): Record<string, unknown> => (
@@ -44,30 +45,12 @@ const domainsFrom = (value: unknown): Partial<HarnessWebDomainPolicy> | undefine
       };
 };
 
-const searchFrom = (value: unknown): HarnessWebSearchSettings | undefined => {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const input = value as Record<string, unknown>;
-  const provider = input.provider;
-  if (provider !== "brave" && provider !== "exa" && provider !== "tavily" && provider !== "jina" && provider !== "searxng") {
-    return undefined;
-  }
-  const endpoint = typeof input.endpoint === "string" && input.endpoint.trim() ? input.endpoint.trim() : undefined;
-  const credentialRef = typeof input.credentialRef === "string" && input.credentialRef.trim()
-    ? input.credentialRef.trim()
-    : undefined;
-  return {
-    provider,
-    ...(endpoint ? { endpoint } : {}),
-    ...(credentialRef ? { credentialRef } : {}),
-  };
-};
-
 /** Freeze credential-free web policy/provider identity for one worker generation. */
 export const resolveHarnessWebBinding = (snapshot: PiSettingsSnapshot): HarnessWebBinding => {
   const user = webFrom(snapshot.global);
   const workspace = snapshot.projectTrusted ? webFrom(snapshot.project) : {};
   const render = typeof user.render === "boolean" ? user.render : undefined;
-  const search = searchFrom(user.search);
+  const search = parseSearchProviderSettings(user.search);
   const domains = mergeHarnessWebDomainPolicy(domainsFrom(user.domains), domainsFrom(workspace.domains));
   const settings: HarnessSettings["web"] = {
     ...(render === undefined ? {} : { render }),
@@ -77,5 +60,6 @@ export const resolveHarnessWebBinding = (snapshot: PiSettingsSnapshot): HarnessW
   return {
     generation: `${snapshot.globalRevision}:${snapshot.projectTrusted ? snapshot.projectRevision : "untrusted"}`,
     settings,
+    ...(user.search !== undefined && !search ? { searchError: "Invalid web search provider configuration" } : {}),
   };
 };

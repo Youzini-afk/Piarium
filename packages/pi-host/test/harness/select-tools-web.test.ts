@@ -71,9 +71,9 @@ describe("selectHarnessTools web tool gating", () => {
     assert.equal(tools.some((tool) => tool.name === "websearch"), false);
   });
 
-  it("omits websearch when no provider is configured for the session", () => {
+  it("includes default websearch without a search provider or model account", () => {
     const tools = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, baseDeps);
-    assert.equal(tools.some((tool) => tool.name === "websearch"), false);
+    assert.equal(tools.some((tool) => tool.name === "websearch"), true);
     assert.equal(tools.some((tool) => tool.name === "webfetch"), true);
   });
 });

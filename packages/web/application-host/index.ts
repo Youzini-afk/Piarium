@@ -1281,12 +1281,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const webSearchService = createWebSearchService(
     async ({ sessionId }) => {
-      const search = harnessServiceHost.getWebBinding(sessionId)?.settings?.search;
+      const binding = harnessServiceHost.getWebBinding(sessionId);
+      if (!binding) return { unavailable: true as const, hint: 'Web search session settings are unavailable' };
+      if (binding.searchError) return { unavailable: true as const, hint: binding.searchError };
+      const search = binding.settings?.search;
       return resolveConfiguredSearchProvider({
         settings: search,
         // Credential material is intentionally resolved live for every call.
         // Revocation makes an old frozen binding unavailable immediately.
-        auth: readPiAuthFile(),
+        auth: search ? readPiAuthFile() : {},
       });
     },
     async ({ sessionId }) => {

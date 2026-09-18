@@ -25,6 +25,7 @@ describe("websearch tool", () => {
       ok: true,
       result: {
         providerId: "test-provider",
+        notices: ["Exa is unavailable; used Parallel."],
         results: [
           { title: "Hello World", url: "https://example.com/1", snippet: "A greeting" },
           { title: "World Hello", url: "https://example.com/2", snippet: "Reversed" },
@@ -35,13 +36,15 @@ describe("websearch tool", () => {
     const result = await resultPromise as { content: Array<{ type: string; text: string }> };
     const text = result.content[0]?.text ?? "";
     assert.ok(text.includes('2 results for "hello world" (test-provider)'));
-    assert.ok(text.includes("- Hello World"));
+    assert.ok(text.includes("1. Hello World"));
+    assert.ok(text.includes("Exa is unavailable; used Parallel."));
+    assert.ok(text.includes("webfetch"));
     assert.ok(text.includes("https://example.com/1"));
     assert.ok(text.includes("A greeting"));
     bridge.dispose();
   });
 
-  it("returns error when no provider configured", async () => {
+  it("reports a successful empty search without a configuration error", async () => {
     const { bridge, emitted } = createTestBridge("test");
     const tool = createWebSearchTool(bridge, "test");
     const resultPromise = tool.execute("tc2", { query: "test" } as never, undefined as never, undefined as never, undefined as never);
@@ -49,13 +52,14 @@ describe("websearch tool", () => {
     await new Promise((r) => setImmediate(r));
     bridge.respond("test", emitted[0]!.requestId, {
       ok: true,
-      result: { providerId: "none", results: [] },
+      result: { providerId: "default-exa", results: [] },
     });
 
     const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
-    assert.equal(result.isError, true);
+    assert.notEqual(result.isError, true);
     const text = result.content[0]?.text ?? "";
-    assert.ok(text.includes("no search provider configured"));
+    assert.ok(text.includes("No results"));
+    assert.ok(!text.includes("configured"));
     bridge.dispose();
   });
 
@@ -85,7 +89,7 @@ describe("websearch tool", () => {
     });
 
     const result = await resultPromise as { isError?: boolean };
-    assert.equal(result.isError, true); // 0 results → error
+    assert.notEqual(result.isError, true);
     bridge.dispose();
   });
 
@@ -101,8 +105,20 @@ describe("websearch tool", () => {
     });
 
     const result = await resultPromise as { content: Array<{ type: string; text: string }>; isError?: boolean };
-    assert.equal(result.isError, true);
+    assert.equal((result as { isError?: boolean }).isError, true);
     assert.match(result.content[0]?.text ?? "", /^websearch unavailable: search credential is unavailable/);
+    bridge.dispose();
+  });
+
+  it("cancels the Host search when the tool is aborted", async () => {
+    const { bridge, emitted } = createTestBridge("test");
+    const controller = new AbortController();
+    const pending = createWebSearchTool(bridge, "test").execute("cancel", { query: "test" } as never, controller.signal, undefined as never, undefined as never);
+    controller.abort();
+    const result = await pending;
+    assert.equal((result as { isError?: boolean }).isError, true);
+    assert.equal(emitted.length, 2);
+    assert.equal(emitted[1]?.requestId, emitted[0]?.requestId);
     bridge.dispose();
   });
 });

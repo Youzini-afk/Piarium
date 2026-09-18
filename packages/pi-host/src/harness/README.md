@@ -24,12 +24,20 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `symbols`, `definition`, `references`, `hover` | Navigate a real language server with one-based positions, bound to this turn's fixed text | `lsp.*` |
 | `explore` | Locate and read related context in one call; `question` plus optional literal `anchors` | `explore.query.*` (algorithm-only `explore.search` is the same engine) |
 | `related` | File-level import topology and connection endpoints from the symbol graph | `related.query` |
+| `websearch` | Default keyless Exa search with disclosed Parallel failover, or the user's explicit search provider | `web.search` |
+| `webfetch` | Read a source URL, find literal text, or expand extracted Markdown line ranges | `web.fetch` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
 
 ## Registration
 
 Tools are selected by `selectHarnessTools()` during `SessionHost.#createRuntimeFactory()`.
+Web search is available whenever the Host advertises its search service, unless the user disables
+`harness.tools.websearch`. It does not require a search key or reuse model-account search. Empty results
+are normal observations; provider errors remain errors. Tool cancellation reaches the Host, and returned
+details preserve the actual provider, any failover notice, and source URLs for the existing source panel.
+`webfetch` accepts `find` and inclusive one-based `start_line`/`end_line` over extracted Markdown;
+it uses the same Host fetch/cache and does not invoke a reader model unless a prompt and reader are configured.
 The read override is included only after the Host handshake advertises
 `harnessDocumentRead`; otherwise Pi's built-in read remains registered. The
 same-name `find` and `ls` overrides require `harnessDocumentPathOverlay` and

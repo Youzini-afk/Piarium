@@ -29,7 +29,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 15 |
-| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 32 |
+| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 33 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 61 |
@@ -326,3 +326,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-286 | 2026-09-16 | 完整上下文取舍与过期背景fresh：工作身份/成果独立于活跃输入 | implemented / wired；retained-source acceptance corrected by D-287 | D-287 | 设计8.0/8.4.7/8.4.8；plan2.4/2.6/3.18B；status；architecture4.4 | [context-knowledge](decisions/context-knowledge.md) |
 | D-287 | 2026-09-16 | D-284–D-286 验收收口：原文收据、消息提交边界、Run 准入与物化 baseline handoff | implementation correction / accepted | — | status 2.4A/B、2.6A/B、3.18A–E；Harness/Kernel/Recovery documentation | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-288 | 2026-09-18 | 本地语义推理独立组件，用户主动安装，主包不携带模型与专用运行库 | accepted | — | 设计 6.1/8.5；plan/status 3.16；architecture；Electron/semantic documentation | [retrieval](decisions/retrieval.md) |
+| D-289 | 2026-09-18 | 默认免密钥网页搜索与原文查找/续读；不复用模型账户 | accepted | D-050/D-067/D-283 的搜索默认行为 | 设计 5.8；plan 1b.8；status 1b.3；Web 工具与设置 | [tool-environment](decisions/tool-environment.md) |

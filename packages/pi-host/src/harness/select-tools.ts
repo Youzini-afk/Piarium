@@ -78,7 +78,7 @@ export interface SelectHarnessToolsDeps {
  * apply_patch is only included when isOpenAIFamily is true AND not disabled.
  * webfetch / websearch remain Piarium-native unless explicitly disabled in
  * harness.tools. Installing pi-web-access does not silently replace them.
- * websearch is registered only when a provider is frozen into this session.
+ * websearch uses the Host's default search unless the user selected a provider.
  */
 export function selectHarnessTools(
   settings: HarnessSettings,
@@ -151,7 +151,7 @@ export function selectHarnessTools(
   if (tools.webfetch !== false) {
     result.push(createWebFetchTool(bridge, sessionId, readPage ? { readPage } : undefined));
   }
-  if (webSearchAvailable && settings.web?.search && tools.websearch !== false) {
+  if (webSearchAvailable && tools.websearch !== false) {
     result.push(createWebSearchTool(bridge, sessionId));
   }
   // Phase 2 tools

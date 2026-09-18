@@ -43,6 +43,15 @@ Global singleton that owns:
 
 ### HarnessRouter (`router.ts`)
 
+`web.search` has a Host-owned keyless default (D-289): Exa MCP, then Parallel only on failure.
+`web-search.ts` owns direct HTTP/SSE tool calls and normalized source results; no MCP subprocess or
+model credentials are involved. Explicit providers retain their own credential contract and never
+silently switch to the free route. Settings bind the choice per worker generation; malformed explicit
+settings stay unavailable. Final domain filtering applies to all providers, and an empty allow set
+makes no network request. A valid empty response is distinct from transport/protocol failure. Default
+failover reports its actual provider and cause; cancellation stops the chain. Search snippets are
+discovery material, while the existing `web.fetch` service remains the original-page authority.
+
 Consumes `harness.request` events from the broker stream and dispatches
 to registered services. Responds via `harness.respond` on the broker. The
 broker-pinned Actor must match the Host session registry and carry the method's

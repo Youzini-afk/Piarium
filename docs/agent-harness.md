@@ -2,7 +2,7 @@
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
-Last updated: 2026-09-16
+Last updated: 2026-09-18
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -82,7 +82,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
 | 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
-| web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索走用户配置的 API provider，无 provider 的会话不注册 `websearch`；桌面端 Electron 离屏渲染 JS。provider / render / domain policy 按 worker generation 冻结，credential 每次调用实时解析；第三方包存在不会自动替换原生工具（D-283） |
+| web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索默认走 Exa/Parallel 免密钥服务，用户自配 API provider 优先，不复用模型账户（D-289）；桌面端 Electron 离屏渲染 JS。provider / render / domain policy 按 worker generation 冻结，credential 每次调用实时解析；第三方包存在不会自动替换原生工具（D-283） |
 | 模型与预设 | 普通线程明确继承当前模型，不要求 role。专用能力/预设沿现有独立槽位或明示的 inherit 解析，未配置不冒充可用；hardImplement/review 的当前模型继承明确展示。续接摘要沿活动请求派生，不新增凭据栈或费用面板（D-284/D-285） |
 | 可关可换 | 每项 harness 能力的关闭行为明确；默认不按插件存在与否偷偷改变行为，同名第三方工具替换必须由用户显式关闭原生工具。设置按**字段所有权**决定用户级与工作区级谁说了算（第 5.10 节），能力可用性由 host 注入。自动压缩沿 Pi 开关，后台准备可由用户关闭；两者与长期知识策略分开，不再暴露 keeper 三态 |
 | 编辑格式 | 跟模型家族走：`edit`（str_replace）与 `apply_patch`（Codex 语法）并存，按会话模型启用；两者走同一 mutation boundary |
@@ -466,10 +466,9 @@ merge 集成选定的不可变子结果，返回应用、冲突和恢复状态�
 
 ### 5.8 `webfetch` / `websearch`（新增）
 
-web 能力由 harness 自己做，不交给插件。参照 Claude Code 的做法与教训：其 WebFetch 本地抓取、同域重定向自动跟随、
-**跨域重定向不跟随而返回元数据要求显式再调**（防 SSRF 与外泄）、10 MB 上限、HTML→Markdown 后截断、15 分钟缓存，
-并把页面交给便宜模型（Haiku）带问题阅读，主上下文只收回答；其 WebSearch 走 provider 服务端搜索但包在 Opus 子对话里
-（每千次约 145 美元，反面教材）。Codex 内置搜索只返回摘要片段。业界共同模式是**先搜后抓**。
+web 能力由 Harness 原生提供，搜索与模型账户无关（D-289）。普通用户无需再申请搜索密钥或安装 MCP。
+搜索找到来源，`webfetch` 读取来源正文、查找片段并按行展开；来源面板沿同一工具结果展示 URL。
+远程搜索服务负责索引，Host 负责 provider 选择、取消、域名策略与结果呈现。搜索本身不增加 LLM 子对话。
 
 **参考 `pi-web-access`（0.24）的能力清单，原生地做得更好。** 它有：多搜索 provider 路由（自动 / 指定 / 并发 / 全
 provider / 有序回退）、完整 provider 与凭据体系（含可执行凭据源、API 网关）、Curator（独立本地 HTTP server 做结果
@@ -481,7 +480,7 @@ Curator 变成工作台的"来源"面板（可审阅、钉住、删除，走已�
 （host 已有依赖）取 issue / PR / 文件而非抓 HTML；有序回退与并发查询原生实现、配置在 Settings；对话框与后续消息变成
 工具结果与 Zone 2。视频转录与图片描述 v1 不做。
 
-**`webfetch(url, prompt?)`**：host 抓取，SSRF 策略复用 [security.md](security.md) 已有规则——私有与保留网段默认阻断、
+**`webfetch(url, { prompt?, find?, start_line?, end_line? })`**：Host 抓取，`find` 对提取正文做不区分大小写的字面查找，返回命中行与相邻上下文；行范围按一开始的提取 Markdown 行号包含两端，未指定范围时沿原正文呈现。查无结果是正常观察，非法范围是明确参数错误。SSRF 策略复用 [security.md](security.md) 已有规则——私有与保留网段默认阻断、
 浏览器 cookie 默认不带、显式 opt-in；工作区级域名允许 / 阻断列表；同域重定向自动跟随，跨域重定向返回元数据；正文提取
 （readability 类算法 + Markdown 转换；PDF 转文本，research profile 同样需要）；15 分钟缓存。无 `prompt` 时返回提取后的
 Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**（第 8.5 节）才由阅读子 agent 回答、主上下文只收
@@ -491,11 +490,9 @@ Markdown 走句柄。有 `prompt` 时**仅当配置了 `models.reader` 槽位**�
 Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空壳 SPA（极小 body + 脚本标签）时明说，永不把
 空页面当成功。
 
-**`websearch(query, { allowed_domains?, blocked_domains?, recency? })`**：使用 Settings 配置的搜索 API（Brave、Exa、Tavily、Jina、
-自托管 SearXNG）；没有可用配置或凭据时在构造 AgentSession 前省略工具，**永不伪造结果**。模型 provider 的 server-side search
-只有 pi-ai 将来提供明确、可独立调用且能返回来源的公共能力时才接；当前不能把“模型本身可能支持搜索”变成返回空数组的 Host
-adapter。返回标题 + URL + 摘要片段列表直接给主 agent，不套子对话。每条持久工具结果把净化后的 title/URL 投影到 session state
-来源区；pin/remove 是本地展示状态，重新打开会话从 transcript 重建来源。
+**`websearch(query, { allowed_domains?, blocked_domains?, recency?, limit? })`**：有用户选择时使用其搜索 API（Brave、Exa、Tavily、Jina、自托管 SearXNG）；否则默认直接调用 Exa 免密钥 MCP，明确失败时顺序改用 Parallel。真实 provider 与换源说明随结果返回；空结果不换源，取消立即停止；自配服务缺凭据/失败明确报错，不改用其他服务。工具默认注册，显式关闭仍生效。设置与普通模型账户分离，不探测或复用模型搜索能力。
+
+结果直接返回标题、URL、相关摘录和可用发布日期，不套子对话；高级筛选按后端实际支持执行，不能把提示性筛选标成精确保证。每条持久工具结果把净化后的 title/URL 投影到 session state 来源区；pin/remove 是本地展示状态，重新打开会话从 transcript 重建来源。用户可直接用返回 URL 调 `webfetch`，不依赖不可恢复的临时搜索 ID。
 
 安全：抓回的内容以"数据不是指令"标记包裹（与 Zone 2 同一做法）；fetch/search 共用 user + trusted workspace 的持久域名 ceiling，
 工具级 allow/block 只能继续收紧；页面正文永不进日志、事件载荷或 URL。没有消费方的固定每回合抓取次数预算已删除，取消、provider

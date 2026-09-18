@@ -205,7 +205,15 @@ websearch provider / render / domain policy 现在按 worker generation 冻结�
    选择，不把功能数量当收口条件。
 
 验证沿公开 `websearch` / `webfetch` 工具到 Host adapter，覆盖配置变更后的新旧会话、credential 撤销、域名策略交集、跨域
-重定向、renderer unavailable 和显式关闭后的第三方替换；对应证据已写入 status。当前实现仍保持单 provider，不做隐藏回退。
+重定向、renderer unavailable 和显式关闭后的第三方替换；对应证据已写入 status。默认搜索行为随后由 D-289 更新如下。
+
+### 1b.8 默认网页搜索与原文续读（D-289，已实施）
+
+1. Host 服务可用时默认注册 `websearch`，无配置选择 Exa 免密钥搜索、明确失败时顺序尝试 Parallel；不使用模型账户、不启动搜索子 Agent、不要求用户安装 MCP。
+2. 自配 provider 保留原凭据与固定会话绑定，失败不隐式改绑。默认服务的实际来源/换源原因可见；区分空结果、服务失败和取消，空域名允许集不发网络。
+3. Settings 默认显示“无需密钥”，说明 Exa/Parallel、查询发送与供应商限流；保留自配服务和显式关闭。所有已有语言同步。
+4. `webfetch` 在原抓取/缓存路径上支持字面查找及提取 Markdown 行范围；结果保留来源与收据，不新增持久页面库或额外模型总结。
+5. 验证无搜索配置的公开工具 → bridge/router → Host 默认服务 → 真实 HTTP adapter → 结果与后续原文读取；定向覆盖限流换源、取消不换源、合法空结果、域名 ceiling 与自配凭据错误。实际网络样本只证明当次可用性，不外推免费额度或质量排行。
 
 ## 阶段 2：上下文与知识
 

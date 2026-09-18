@@ -89,7 +89,7 @@ function SearchCredential({ provider }: { provider: HarnessWebSearchProvider }) 
 
 export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
   const { t } = useI18n();
-  const [provider, setProvider] = React.useState<HarnessWebSearchProvider | 'none'>(harness.web?.search?.provider ?? 'none');
+  const [provider, setProvider] = React.useState<HarnessWebSearchProvider | 'default'>(harness.web?.search?.provider ?? 'default');
   const providerRef = React.useRef(provider);
   const [endpoint, setEndpoint] = React.useState(harness.web?.search?.endpoint ?? '');
   const allow = harness.web?.domains?.allow;
@@ -97,26 +97,29 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
   allowEnabled.current = allow !== undefined;
   const commitSearch = (nextProvider: typeof provider, nextEndpoint: string) => {
     if (providerRef.current !== nextProvider) return;
-    if (nextProvider === 'none') { update({ web: { search: undefined } }); return; }
+    if (nextProvider === 'default') { update({ web: { search: undefined } }); return; }
     if (nextProvider === 'searxng' && !nextEndpoint.trim()) return;
     update({ web: { search: { provider: nextProvider, endpoint: nextEndpoint.trim() || undefined, credentialRef: `piarium-web-search-${nextProvider}` } } });
   };
   return <>
     <SettingsSection title={t('settings.page.harness.section.web')} settingsItem="harness.web.search" contentClassName="space-y-5">
-      <SettingsFieldRow label={t('settings.page.harness.web.search.provider')}>
+      <SettingsCheckboxRow checked={harness.tools.websearch !== false} onChange={(enabled) => update({ tools: { websearch: enabled } })}
+        ariaLabel={t('settings.page.harness.web.search.enabled')} label={t('settings.page.harness.web.search.enabled')} />
+      <SettingsFieldRow label={t('settings.page.harness.web.search.provider')} description={t('settings.page.harness.web.search.provider.description')}>
         <Select value={provider} onValueChange={(value) => {
           const next = value as typeof provider; providerRef.current = next; setProvider(next); setEndpoint(''); commitSearch(next, '');
         }}>
-          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.web.search.provider')}><SelectValue>{provider === 'none' ? t('settings.page.harness.web.search.none') : providerName(provider)}</SelectValue></SelectTrigger>
-          <SelectContent><SelectItem value="none">{t('settings.page.harness.web.search.none')}</SelectItem>{providers.map((item) => <SelectItem key={item} value={item}>{providerName(item)}</SelectItem>)}</SelectContent>
+          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.web.search.provider')}><SelectValue>{provider === 'default' ? t('settings.page.harness.web.search.default') : providerName(provider)}</SelectValue></SelectTrigger>
+          <SelectContent><SelectItem value="default">{t('settings.page.harness.web.search.default')}</SelectItem>{providers.map((item) => <SelectItem key={item} value={item}>{providerName(item)}</SelectItem>)}</SelectContent>
         </Select>
       </SettingsFieldRow>
+      {provider === 'default' ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.web.search.default.description')}</p> : null}
       {provider === 'searxng' ? <SettingsFieldRow label={t('settings.page.harness.web.search.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
         <AutoSaveInput value={endpoint} placeholder="http://127.0.0.1:8080" aria-label={t('settings.page.harness.web.search.endpoint')}
           validate={(value) => { try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) ? null : t('settings.harness.validUrl'); } catch { return t('settings.harness.validUrl'); } }}
           onCommit={(value) => { setEndpoint(value); commitSearch(provider, value); }} />
       </SettingsFieldRow> : null}
-      {provider !== 'none' ? <SearchCredential key={provider} provider={provider} /> : null}
+      {provider !== 'default' ? <SearchCredential key={provider} provider={provider} /> : null}
       {provider === 'searxng' && !endpoint ? <p className="typography-meta text-muted-foreground">{t('settings.harness.completeFields')}</p> : null}
     </SettingsSection>
     <SettingsSection title={t('settings.page.harness.web.render')} settingsItem="harness.web.render">

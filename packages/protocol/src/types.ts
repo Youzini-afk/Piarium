@@ -538,7 +538,7 @@ export interface HostHandshakeParams {
     harnessDocumentPathOverlay?: boolean;
     /** The application Host permits session-local reader models over its guarded web.fetch service. */
     harnessWebRead?: boolean;
-    /** The application Host has a real web-search provider. */
+    /** The application Host provides web search, including its keyless default. */
     harnessWebSearch?: boolean;
     workspaceMutationJournal?: boolean;
   };

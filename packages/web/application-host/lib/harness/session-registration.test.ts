@@ -158,6 +158,15 @@ describe("asynchronous Harness registration", () => {
     });
   });
 
+  it("preserves a malformed explicit search selection instead of silently choosing the default", async () => {
+    const { host, registrations } = fixture(async () => ({
+      ...snapshot,
+      global: { harness: { web: { search: { provider: "misspelled-provider" } } } },
+    } as PiSettingsSnapshot));
+    await registrations.register(context());
+    expect(host.getWebBinding(actor.sessionId)?.searchError).toMatch(/Invalid web search/);
+  });
+
   it("web binding ignores malformed unrelated harness sections", async () => {
     const { host, registrations } = fixture(async () => ({
       global: {
