@@ -75,7 +75,7 @@ export const settingsDict = {
   'settings.languageSupport.server.installed': 'インストール済み · 必要時に起動',
   'settings.languageSupport.server.needsRuntime': 'プロジェクトの実行環境が必要',
   'settings.languageSupport.server.unsupported': '未提供',
-  'settings.languageSupport.actions.prepare': '今すぐ準備',
+  'settings.languageSupport.actions.prepare': '今すぐウォームアップ',
   'settings.languageSupport.actions.retry': '再試行',
   'settings.languageSupport.section.workspace': 'ワークスペースの言語',
   'settings.languageSupport.empty.noWorkspace': 'プロジェクトを開くと、言語サーバーと構造パックを確認できます。',

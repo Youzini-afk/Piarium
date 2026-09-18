@@ -93,7 +93,7 @@
   'settings.languageSupport.server.installed': '已安装 · 按需启动',
   'settings.languageSupport.server.needsRuntime': '需要项目运行环境',
   'settings.languageSupport.server.unsupported': '尚未提供',
-  'settings.languageSupport.actions.prepare': '立即准备',
+  'settings.languageSupport.actions.prepare': '立即预热',
   'settings.languageSupport.actions.retry': '重试',
   'settings.languageSupport.section.workspace': '工作区语言',
   'settings.languageSupport.empty.noWorkspace': '打开一个项目以查看语言服务器和结构包。',

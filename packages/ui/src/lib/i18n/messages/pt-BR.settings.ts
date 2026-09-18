@@ -93,7 +93,7 @@
   'settings.languageSupport.server.installed': 'Instalado · inicia sob demanda',
   'settings.languageSupport.server.needsRuntime': 'Requer o ambiente do projeto',
   'settings.languageSupport.server.unsupported': 'Ainda não disponível',
-  'settings.languageSupport.actions.prepare': 'Preparar agora',
+  'settings.languageSupport.actions.prepare': 'Pré-aquecer agora',
   'settings.languageSupport.actions.retry': 'Tentar novamente',
   "settings.languageSupport.section.workspace": "Linguagens do espaço de trabalho",
   "settings.languageSupport.empty.noWorkspace": "Abra um projeto para ver os servidores de linguagem e os pacotes estruturais.",

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
+import { PiariumLogo } from '@/components/ui/PiariumLogo';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -81,7 +82,11 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
       )}
       aria-label={t('chat.autocomplete.tabs.agents')}
     >
-      <Icon name="ai-agent" className="size-4 shrink-0" />
+      {selectedAgent ? (
+        <Icon name="ai-agent" className="size-4 shrink-0" />
+      ) : (
+        <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
+      )}
       <span className="truncate">{selectedAgent?.name ?? 'Piarium'}</span>
     </button>
   );
@@ -96,7 +101,10 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         )}
         onClick={() => select(undefined)}
       >
-        <span>Piarium</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
+          <span>Piarium</span>
+        </span>
         {!selectedAgent ? <Icon name="check" className="size-4 text-primary" /> : null}
       </button>
       {agents.map((agent) => (
@@ -142,7 +150,10 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         <DropdownMenuLabel>{t('chat.autocomplete.tabs.agents')}</DropdownMenuLabel>
         <DropdownMenuItem onSelect={() => select(undefined)}>
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="font-medium">Piarium</span>
+            <span className="flex min-w-0 items-center gap-2 font-medium">
+              <PiariumLogo width={16} height={16} decorative className="size-4 shrink-0" />
+              <span>Piarium</span>
+            </span>
             {!selectedAgent ? <Icon name="check" className="size-4 shrink-0 text-primary" /> : null}
           </div>
         </DropdownMenuItem>

@@ -91,7 +91,7 @@
   'settings.languageSupport.server.installed': '已安裝 · 按需啟動',
   'settings.languageSupport.server.needsRuntime': '需要專案執行環境',
   'settings.languageSupport.server.unsupported': '尚未提供',
-  'settings.languageSupport.actions.prepare': '立即準備',
+  'settings.languageSupport.actions.prepare': '立即預熱',
   'settings.languageSupport.actions.retry': '重試',
   'settings.languageSupport.section.workspace': '工作區語言',
   'settings.languageSupport.empty.noWorkspace': '開啟專案以查看語言伺服器與結構套件。',

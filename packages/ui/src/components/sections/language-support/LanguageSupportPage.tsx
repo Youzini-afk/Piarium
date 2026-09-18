@@ -190,7 +190,7 @@ export const LanguageSupportPage: React.FC = () => {
     return () => subscription.close();
   }, [language, workspaceId]);
 
-  const runPrepare = React.useCallback(async (languageId: string) => {
+  const runPrepare = React.useCallback(async (languageId: string, silent = false) => {
     if (!workspaceId) return;
     setPreparingIds((previous) => new Set([...previous, languageId]));
     try {
@@ -198,7 +198,9 @@ export const LanguageSupportPage: React.FC = () => {
       if (running === 'failed' || running === 'degraded') await language.restart(workspaceId, languageId);
       else await languageSupport.prepareServer({ workspaceId, languageId });
     } catch (error) {
-      if (currentWorkspace.current === workspaceId) toast.error(error instanceof Error ? error.message : String(error));
+      if (!silent && currentWorkspace.current === workspaceId) {
+        toast.error(error instanceof Error ? error.message : String(error));
+      }
     } finally {
       if (currentWorkspace.current === workspaceId) {
         setPreparingIds((previous) => { const next = new Set(previous); next.delete(languageId); return next; });
@@ -206,6 +208,24 @@ export const LanguageSupportPage: React.FC = () => {
       }
     }
   }, [language, languageSupport, lspByLanguage, refresh, workspaceId]);
+
+  // Native servers are prepared in the background for languages that are
+  // actually present in the workspace. Opening this page must not be a
+  // prerequisite for using them; the runtime also prepares on first request.
+  // Keep one preflight per workspace/server so aliases such as C and C++ do
+  // not start duplicate downloads or duplicate error toasts.
+  const autoPreparedServers = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    if (!workspaceId || !status) return;
+    for (const row of status.languages) {
+      if (row.fileCount === 0 || row.server?.status !== 'available') continue;
+      const serverKey = row.server.name ?? row.languageId;
+      const key = `${workspaceId}:${serverKey}`;
+      if (autoPreparedServers.current.has(key)) continue;
+      autoPreparedServers.current.add(key);
+      void runPrepare(row.languageId, true);
+    }
+  }, [runPrepare, status, workspaceId]);
 
   const cancelPreparation = React.useCallback(async (languageId: string) => {
     if (!workspaceId) return;

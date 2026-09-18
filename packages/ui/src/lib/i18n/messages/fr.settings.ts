@@ -66,7 +66,7 @@ export const settingsDict = {
   'settings.languageSupport.server.installed': 'Installé · démarrage à la demande',
   'settings.languageSupport.server.needsRuntime': 'Environnement du projet requis',
   'settings.languageSupport.server.unsupported': 'Pas encore disponible',
-  'settings.languageSupport.actions.prepare': 'Préparer maintenant',
+  'settings.languageSupport.actions.prepare': 'Précharger maintenant',
   'settings.languageSupport.actions.retry': 'Réessayer',
   'settings.languageSupport.section.workspace': 'Langages de l’espace de travail',
   'settings.languageSupport.empty.noWorkspace': 'Ouvrez un projet pour voir les serveurs de langage et les paquets structurels.',

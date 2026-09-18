@@ -1113,7 +1113,7 @@
   'settings.languageSupport.server.installed': 'Zainstalowany · uruchamiany na żądanie',
   'settings.languageSupport.server.needsRuntime': 'Wymagane środowisko projektu',
   'settings.languageSupport.server.unsupported': 'Jeszcze niedostępny',
-  'settings.languageSupport.actions.prepare': 'Przygotuj teraz',
+  'settings.languageSupport.actions.prepare': 'Rozgrzej teraz',
   'settings.languageSupport.actions.retry': 'Ponów',
   'settings.languageSupport.section.workspace': 'Języki obszaru roboczego',
   'settings.languageSupport.empty.noWorkspace': 'Otwórz projekt, aby zobaczyć serwery językowe i pakiety strukturalne.',

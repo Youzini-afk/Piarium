@@ -93,7 +93,7 @@ export const settingsDict = {
   'settings.languageSupport.server.installed': 'Installed · starts when needed',
   'settings.languageSupport.server.needsRuntime': 'Project runtime required',
   'settings.languageSupport.server.unsupported': 'Not yet provided',
-  'settings.languageSupport.actions.prepare': 'Prepare now',
+  'settings.languageSupport.actions.prepare': 'Prewarm now',
   'settings.languageSupport.actions.retry': 'Retry',
   'settings.languageSupport.section.workspace': 'Workspace languages',
   'settings.languageSupport.empty.noWorkspace': 'Open a project to see language servers and structure packs.',

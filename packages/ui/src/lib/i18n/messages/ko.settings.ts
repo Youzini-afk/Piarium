@@ -93,7 +93,7 @@
   'settings.languageSupport.server.installed': '설치됨 · 필요할 때 시작',
   'settings.languageSupport.server.needsRuntime': '프로젝트 실행 환경 필요',
   'settings.languageSupport.server.unsupported': '아직 제공되지 않음',
-  'settings.languageSupport.actions.prepare': '지금 준비',
+  'settings.languageSupport.actions.prepare': '지금 예열',
   'settings.languageSupport.actions.retry': '다시 시도',
   'settings.languageSupport.section.workspace': '작업 공간 언어',
   'settings.languageSupport.empty.noWorkspace': '프로젝트를 열면 언어 서버와 구조 팩을 볼 수 있습니다.',

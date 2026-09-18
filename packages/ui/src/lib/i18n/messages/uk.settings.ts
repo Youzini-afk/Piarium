@@ -93,7 +93,7 @@
   'settings.languageSupport.server.installed': 'Встановлено · запуск за потреби',
   'settings.languageSupport.server.needsRuntime': 'Потрібне середовище проєкту',
   'settings.languageSupport.server.unsupported': 'Ще не надається',
-  'settings.languageSupport.actions.prepare': 'Підготувати зараз',
+  'settings.languageSupport.actions.prepare': 'Попередньо запустити',
   'settings.languageSupport.actions.retry': 'Повторити',
   "settings.languageSupport.section.workspace": "Мови робочої області",
   "settings.languageSupport.empty.noWorkspace": "Відкрийте проєкт, щоб побачити мовні сервери та структурні пакети.",
