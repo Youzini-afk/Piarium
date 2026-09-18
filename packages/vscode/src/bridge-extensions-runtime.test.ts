@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import test from 'node:test';
+import { test } from 'bun:test';
 // @ts-expect-error The Bun test runner provides module mocking at test time.
 import { mock } from 'bun:test';
 import type * as vscode from 'vscode';

@@ -223,6 +223,7 @@
     "dev:webview": "vite --host localhost --port 5173 --strictPort",
     "watch:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:esbuild --format=cjs --platform=node --watch --sourcemap --main-fields=module,main",
     "watch:webview": "vite build --watch",
+    "test": "bun test",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.webview.json",
     "lint": "bun x eslint --ext .ts,.tsx src webview",
     "package": "vsce package --no-dependencies",

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it, mock } from 'bun:test';
 import { DocumentsError } from '@piarium/application-client';
 
 describe('VS Code documents API errors', () => {
@@ -22,6 +22,11 @@ describe('VS Code documents API errors', () => {
         }),
       });
 
+      // documents.ts imports './bridge' with the bare specifier, which would reuse a
+      // bridge instance bound to an earlier fixture's window. Point that specifier at a
+      // query-busted bridge that captured this test's window and acquireVsCodeApi.
+      const bridge = await import(`./bridge?documents-${Date.now()}`);
+      mock.module('./bridge', () => ({ sendBridgeMessage: bridge.sendBridgeMessage }));
       const { createVSCodeDocumentsAPI } = await import(`./documents?maintenance-${Date.now()}`);
       const api = createVSCodeDocumentsAPI();
       const pending = api.read({
@@ -47,6 +52,7 @@ describe('VS Code documents API errors', () => {
         return true;
       });
     } finally {
+      mock.restore();
       Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
       Object.defineProperty(globalThis, 'acquireVsCodeApi', { configurable: true, value: originalAcquire });
     }

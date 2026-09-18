@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test } from 'bun:test';
 
 test('VS Code runtime transport carries frames and close state over postMessage', async () => {
   const originalWindow = globalThis.window;

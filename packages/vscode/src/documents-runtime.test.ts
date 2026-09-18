@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createDocumentAuthorityHarness, defineDocumentAuthorityContract } from '../../web/application-host/lib/documents/contract-fixtures.js';

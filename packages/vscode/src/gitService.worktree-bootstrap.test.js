@@ -24,6 +24,37 @@ const waitFor = async (predicate, timeout = 5_000) => {
   }
 };
 
+const RETRYABLE_RM_CODES = new Set(['EBUSY', 'ENOTEMPTY', 'EPERM', 'EMFILE', 'EACCES']);
+const removeTree = async (directory, timeout = 20_000) => {
+  const deadline = Date.now() + timeout;
+  let lastError;
+  for (;;) {
+    try {
+      await fs.promises.rm(directory, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = String(error?.code || '');
+      if (!RETRYABLE_RM_CODES.has(code) || Date.now() >= deadline) throw lastError;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+};
+
+const initRepository = (repository) => {
+  execFileSync('git', ['init', '-b', 'main'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+  execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+  execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+  execFileSync('git', ['config', 'gc.auto', '0'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+  execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+};
+
+const commitReadme = (repository) => {
+  fs.writeFileSync(path.join(repository, 'README.md'), '# Test\n');
+  execFileSync('git', ['add', 'README.md'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+  execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+};
+
 describe('VS Code worktree bootstrap phases', () => {
   it('treats missing bootstrap state as fully ready', async () => {
     await expect(getWorktreeBootstrapStatus('/untracked-worktree')).resolves.toMatchObject({
@@ -51,9 +82,9 @@ describe('VS Code worktree bootstrap phases', () => {
     } finally {
       if (previousDataDirectory === undefined) delete process.env.PIARIUM_DATA_DIR;
       else process.env.PIARIUM_DATA_DIR = previousDataDirectory;
-      await fs.promises.rm(root, { recursive: true, force: true });
+      await removeTree(root);
     }
-  });
+  }, 30_000);
 
   it('hands the create writer to background bootstrap before returning and releases it exactly once', async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-vscode-writer-'));
@@ -86,12 +117,8 @@ describe('VS Code worktree bootstrap phases', () => {
 
     try {
       await fs.promises.mkdir(repository);
-      execFileSync('git', ['init', '-b', 'main'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      await fs.promises.writeFile(path.join(repository, 'README.md'), '# Test\n');
-      execFileSync('git', ['add', 'README.md'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+      initRepository(repository);
+      commitReadme(repository);
       await fs.promises.writeFile(
         setupScript,
         `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
@@ -120,9 +147,9 @@ describe('VS Code worktree bootstrap phases', () => {
     } finally {
       if (previousDataDirectory === undefined) delete process.env.PIARIUM_DATA_DIR;
       else process.env.PIARIUM_DATA_DIR = previousDataDirectory;
-      await fs.promises.rm(root, { recursive: true, force: true });
+      await removeTree(root);
     }
-  }, 15_000);
+  }, 30_000);
 
   it('keeps the create writer through bootstrap on the normal create path', async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-vscode-sync-writer-'));
@@ -142,12 +169,8 @@ describe('VS Code worktree bootstrap phases', () => {
 
     try {
       await fs.promises.mkdir(repository);
-      execFileSync('git', ['init', '-b', 'main'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      await fs.promises.writeFile(path.join(repository, 'README.md'), '# Test\n');
-      execFileSync('git', ['add', 'README.md'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+      initRepository(repository);
+      commitReadme(repository);
       await fs.promises.writeFile(
         setupScript,
         `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(setupStarted)}, 'started'); setTimeout(() => fs.writeFileSync(${JSON.stringify(setupFinished)}, 'finished'), 300);\n`,
@@ -173,9 +196,9 @@ describe('VS Code worktree bootstrap phases', () => {
     } finally {
       if (previousDataDirectory === undefined) delete process.env.PIARIUM_DATA_DIR;
       else process.env.PIARIUM_DATA_DIR = previousDataDirectory;
-      await fs.promises.rm(root, { recursive: true, force: true });
+      await removeTree(root);
     }
-  }, 15_000);
+  }, 30_000);
 
   it('keeps the create writer active until failed background attach cleanup finishes', async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'piarium-vscode-writer-failure-'));
@@ -191,12 +214,8 @@ describe('VS Code worktree bootstrap phases', () => {
 
     try {
       await fs.promises.mkdir(repository);
-      execFileSync('git', ['init', '-b', 'main'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['config', 'user.name', 'Test User'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      await fs.promises.writeFile(path.join(repository, 'README.md'), '# Test\n');
-      execFileSync('git', ['add', 'README.md'], { cwd: repository, stdio: 'ignore', windowsHide: true });
-      execFileSync('git', ['commit', '-m', 'Initial commit'], { cwd: repository, stdio: 'ignore', windowsHide: true });
+      initRepository(repository);
+      commitReadme(repository);
       process.env.PIARIUM_DATA_DIR = dataDirectory;
 
       const preview = await previewWorktreeCreate(repository, {
@@ -237,7 +256,7 @@ describe('VS Code worktree bootstrap phases', () => {
     } finally {
       if (previousDataDirectory === undefined) delete process.env.PIARIUM_DATA_DIR;
       else process.env.PIARIUM_DATA_DIR = previousDataDirectory;
-      await fs.promises.rm(root, { recursive: true, force: true });
+      await removeTree(root);
     }
-  }, 15_000);
+  }, 30_000);
 });
