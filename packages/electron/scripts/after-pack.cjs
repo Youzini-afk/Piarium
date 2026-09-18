@@ -174,23 +174,19 @@ module.exports = (context) => {
     'dist',
     'index.js',
   );
-  const piPackageRoot = path.resolve(
-    __dirname,
-    '..',
-    '..',
-    'pi-host',
-    'node_modules',
-    '@earendil-works',
-    'pi-coding-agent',
-  );
+  const packagedExecutable = context.electronPlatformName === 'darwin'
+    ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'MacOS', context.packager.appInfo.productFilename)
+    : path.join(context.appOutDir, context.electronPlatformName === 'win32'
+      ? `${context.packager.appInfo.productFilename}.exe`
+      : context.packager.appInfo.productFilename.toLowerCase());
   const packagingNode = process.env.PIARIUM_PACKAGING_NODE || process.execPath;
-  execFileSync(packagingNode, [
+  execFileSync(packagedExecutable, [
     path.join(__dirname, 'verify-packaged-pi-host.mjs'),
     packagedBrokerEntry,
     packagedHostEntry,
-    piPackageRoot,
   ], {
     cwd: path.resolve(__dirname, '..', '..', '..'),
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
     stdio: 'inherit',
     windowsHide: true,
   });

@@ -21,19 +21,14 @@ describe("discoverPiRuntimes", () => {
     assert.equal(candidates[0]?.available, true);
   });
 
-  it("reads the pinned Pi version from development or production dependencies", () => {
-    assert.equal(
-      readPinnedPiVersion({
-        devDependencies: { "@earendil-works/pi-coding-agent": "0.84.1" },
-      }),
-      "0.84.1",
-    );
+  it("reads the bundled Pi version from production dependencies", () => {
     assert.equal(
       readPinnedPiVersion({
         dependencies: { "@earendil-works/pi-coding-agent": "0.84.1" },
       }),
       "0.84.1",
     );
+    assert.throws(() => readPinnedPiVersion({}), /does not pin/);
   });
 
   it("reports bundled, system, and source runtimes with compatibility", async () => {

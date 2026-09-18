@@ -7,6 +7,20 @@ import path from 'node:path';
 
 const appPath = path.resolve(process.argv[2] ?? '');
 const appArguments = process.argv.slice(3);
+const smokeEnvironment = { ...process.env };
+for (const variable of [
+  'PIARIUM_PI_SOURCE',
+  'PIARIUM_PI_CUSTOM_ROOT',
+  'PIARIUM_PI_CUSTOM_NODE',
+  'PIARIUM_PI_PACKAGE_ROOT',
+  'PIARIUM_RUNTIME_SOURCE',
+  'PIARIUM_SKIP_LOCAL_SERVER',
+  'PIARIUM_SMOKE_PROFILE_SOURCE',
+  'ELECTRON_RUN_AS_NODE',
+  'NODE_PATH',
+]) {
+  delete smokeEnvironment[variable];
+}
 
 if (!process.argv[2] || !existsSync(appPath)) {
   throw new Error(`Missing packaged Piarium executable at ${appPath}`);
@@ -146,6 +160,7 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
+    let continuedFromBundledWelcome = false;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => ({
         apiBaseUrl: typeof window.__PIARIUM_API_BASE_URL__ === 'string' ? window.__PIARIUM_API_BASE_URL__ : '',
@@ -153,9 +168,9 @@ const waitForRenderer = async (userDataDir) => {
         diagnostics: window.__piariumStartupDiagnostics ?? null,
         href: window.location.href,
         localOrigin: typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string' ? window.__PIARIUM_LOCAL_ORIGIN__ : '',
+        localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
         mainWorkspace: document.querySelector('[data-pi-composer-shell="true"]') !== null,
         ready: window.__piariumAppReady === true,
-        runtimeSetup: document.querySelector('[data-pi-runtime-setup="true"]') !== null,
       }))()`);
       if (evaluation?.exceptionDetails) {
         throw new Error(`Packaged renderer evaluation failed: ${evaluation.exceptionDetails.text}`);
@@ -164,13 +179,29 @@ const waitForRenderer = async (userDataDir) => {
       if (/Minified React error|Maximum update depth|发生错误|Something went wrong/i.test(lastState?.bodyText ?? '')) {
         throw new Error('Packaged renderer entered its error boundary.');
       }
-      if (lastState?.ready === true && (lastState.mainWorkspace === true || lastState.runtimeSetup === true)) {
+      if (lastState?.ready === true && lastState.mainWorkspace === true) {
         return {
           consoleMessages: devTools.consoleMessages,
           exceptions: devTools.exceptions,
-          mode: lastState.runtimeSetup === true ? 'runtime-setup' : 'main',
+          mode: 'main',
           state: lastState,
         };
+      }
+      const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
+      const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
+        && runtimeSnapshot.active?.id === 'bundled'
+        && runtimeSnapshot.active?.source === 'bundled';
+      if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState?.localRuntimeContinueReady === true) {
+        const continuation = await devTools.evaluate(`(() => {
+          const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
+          if (!(action instanceof HTMLButtonElement)) return false;
+          action.click();
+          return true;
+        })()`);
+        if (continuation?.exceptionDetails) {
+          throw new Error(`Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`);
+        }
+        continuedFromBundledWelcome = continuation?.result?.value === true;
       }
       await delay(250);
     }
@@ -218,7 +249,7 @@ const child = spawn(appPath, [
 ], {
   cwd: path.dirname(appPath),
   env: {
-    ...process.env,
+    ...smokeEnvironment,
     PIARIUM_STARTUP_PERF: '1',
     PIARIUM_DATA_DIR: userDataDir,
     PIARIUM_WORKSPACE_ROOT: workspaceRoot,
@@ -260,6 +291,14 @@ try {
   const health = await healthResponse.json();
   if (!healthResponse.ok || health?.status !== 'ok') {
     throw new Error(`Packaged health check returned HTTP ${healthResponse.status}: ${JSON.stringify(health)}`);
+  }
+  const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
+  if (
+    runtimeSnapshot?.status !== 'ready'
+    || runtimeSnapshot.active?.id !== 'bundled'
+    || runtimeSnapshot.active?.source !== 'bundled'
+  ) {
+    throw new Error(`Packaged renderer did not start the bundled Pi runtime: ${JSON.stringify(runtimeSnapshot)}`);
   }
 
   const recoveryResponse = await fetch(`${baseUrl}/api/piarium/extensions/v1/services/invoke`, {
@@ -318,7 +357,7 @@ try {
     platform: process.platform,
     renderer: renderer.mode,
     recovery: 'inventory-ok',
-    runtimeDiscovery: renderer.state?.diagnostics?.runtimeSnapshot ?? null,
+    runtimeDiscovery: runtimeSnapshot,
     terminal: 'create-close-ok',
   }, null, 2));
 } catch (error) {

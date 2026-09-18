@@ -173,10 +173,12 @@ owns catalog/per-session workers, and performs graceful then process-tree shutdo
 and handshakes the catalog worker whenever the local runtime is available, verifies that packaged
 worker files are unpacked, and awaits broker disposal during ordinary quit, update, relaunch, hard
 signals, and startup failure. Electron resolves that external Host entry once and gives the same
-absolute path to Runtime Manager probes and live Broker generations. A path inside `app.asar` is never
-an executable fallback for an external Node process. Packaging launches the unpacked Host and completes
-a real handshake; the Windows unpacked-app smoke also activates a seeded Pi package root instead of
-accepting the runtime-setup screen as proof that the Host works.
+absolute path to live Broker generations. A path inside `app.asar` is never
+an executable fallback for an external Node process. The three Pi SDK packages are pinned production
+dependencies of `@piarium/pi-host` in every distribution. Packaging runs default bundled discovery
+and a real Host handshake using the packaged Electron executable in Node mode, and rejects SDK entry
+paths outside the packaged dependencies. Desktop smoke starts with no runtime selection and requires
+bundled Pi to reach `ready`; a source-checkout Pi or the runtime-setup screen cannot satisfy that check.
 
 `@piarium/runtime-client` is the browser-safe surface client. The Web server exposes the same
 Pi-native method names through `/api/piarium/runtime/ws`; it validates every untrusted parameter,

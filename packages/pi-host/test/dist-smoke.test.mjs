@@ -19,7 +19,7 @@ const PINNED_PI_VERSION = (() => {
     fileURLToPath(new URL("../package.json", import.meta.url)),
     "utf8",
   ));
-  const version = manifest.devDependencies?.["@earendil-works/pi-coding-agent"];
+  const version = manifest.dependencies?.["@earendil-works/pi-coding-agent"];
   if (!/^\d+\.\d+\.\d+$/.test(version ?? "")) {
     throw new Error("pi-host must pin an exact Pi version");
   }

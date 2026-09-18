@@ -24,7 +24,7 @@ const pinnedPiVersion = () => {
     fileURLToPath(new URL('../pi-host/package.json', import.meta.url)),
     'utf8',
   ));
-  const version = manifest.devDependencies?.['@earendil-works/pi-coding-agent'];
+  const version = manifest.dependencies?.['@earendil-works/pi-coding-agent'];
   assert.match(version ?? '', /^\d+\.\d+\.\d+$/, 'pi-host must pin an exact Pi version');
   return version;
 };
@@ -165,31 +165,4 @@ test('Electron startup and shutdown own the Pi runtime lifecycle', async () => {
     /await killSidecar\(\);[\s\S]*await shutdownPiRuntime\(\);/,
   );
   assert.match(main, /await shutdownBackgroundServices\(\);[\s\S]*app\.exit\(1\)/);
-});
-
-test('desktop packaging and Windows smoke execute the external Host boundary', async () => {
-  const [afterPack, desktopSmoke, packageScript, services, verifier, windowsSmoke] = await Promise.all([
-    source('./scripts/after-pack.cjs'),
-    source('./scripts/smoke-desktop-unpacked.mjs'),
-    source('./scripts/package.mjs'),
-    source('../extension-contract/src/services.ts'),
-    source('./scripts/verify-packaged-pi-host.mjs'),
-    source('./scripts/smoke-windows-unpacked.mjs'),
-  ]);
-  const recoveryVersion = services.match(/PIARIUM_WORKSPACE_RECOVERY_SERVICE_VERSION = (\d+) as const/)?.[1];
-  assert.ok(recoveryVersion, 'workspace recovery service version must be declared');
-  const recoveryProbe = new RegExp(
-    `serviceId: 'piarium\\.workspace-recovery',[\\s\\S]*?version: ${recoveryVersion}`,
-  );
-
-  assert.match(afterPack, /verify-packaged-pi-host\.mjs/);
-  assert.match(packageScript, /PIARIUM_PACKAGING_NODE = process\.execPath/);
-  assert.match(afterPack, /PIARIUM_PACKAGING_NODE \|\| process\.execPath/);
-  assert.match(verifier, /await lifecycle\.start\(\)/);
-  assert.match(desktopSmoke, recoveryProbe);
-  assert.match(windowsSmoke, recoveryProbe);
-  assert.match(windowsSmoke, /runtime-selection\.json/);
-  assert.match(windowsSmoke, /selectedId: 'custom:selected'/);
-  assert.match(windowsSmoke, /runtimeStillWorking/);
-  assert.match(windowsSmoke, /did not activate the seeded Pi runtime through its external Host/);
 });

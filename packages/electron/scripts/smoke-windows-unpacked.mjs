@@ -10,14 +10,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const electronDir = path.resolve(__dirname, '..');
 const appPath = path.resolve(process.argv[2] ?? path.join(electronDir, 'dist', 'win-unpacked', 'Piarium.exe'));
-const smokePiPackageRoot = path.resolve(
-  electronDir,
-  '..',
-  'pi-host',
-  'node_modules',
-  '@earendil-works',
-  'pi-coding-agent',
-);
+const smokeEnvironment = { ...process.env };
+for (const variable of [
+  'PIARIUM_PI_SOURCE',
+  'PIARIUM_PI_CUSTOM_ROOT',
+  'PIARIUM_PI_CUSTOM_NODE',
+  'PIARIUM_PI_PACKAGE_ROOT',
+  'PIARIUM_RUNTIME_SOURCE',
+  'PIARIUM_SKIP_LOCAL_SERVER',
+  'PIARIUM_SMOKE_PROFILE_SOURCE',
+  'ELECTRON_RUN_AS_NODE',
+  'NODE_PATH',
+]) {
+  delete smokeEnvironment[variable];
+}
 const packagedResourcesRoot = path.join(path.dirname(appPath), 'resources');
 const packagedNodeModulesRoot = path.join(packagedResourcesRoot, 'app.asar.unpacked', 'node_modules');
 const packagedWebServerRoot = path.join(
@@ -51,10 +57,6 @@ if (process.platform !== 'win32') {
 if (!existsSync(appPath)) {
   throw new Error(`Missing unpacked Piarium executable at ${appPath}`);
 }
-if (!existsSync(path.join(smokePiPackageRoot, 'package.json'))) {
-  throw new Error(`Missing Pi package used by the packaged Host smoke at ${smokePiPackageRoot}`);
-}
-
 const packagedWebManifest = JSON.parse(readFileSync(path.join(packagedWebRoot, 'package.json'), 'utf8'));
 for (const legacy of ['node-pty', 'bun-pty', 'better-sqlite3']) {
   if (packagedWebManifest.dependencies?.[legacy] || existsSync(path.join(packagedNodeModulesRoot, legacy))) {
@@ -646,7 +648,7 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
-    let continuedFromOnboarding = false;
+    let continuedFromBundledWelcome = false;
     for (let attempt = 0; attempt < 80; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => {
         const readElement = (selector) => {
@@ -682,7 +684,6 @@ const waitForRenderer = async (userDataDir) => {
             innerWidth: window.innerWidth,
             localRuntimeContinueReady: document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)') !== null,
             pendingDraft: document.querySelector('[data-pi-pending-draft="true"]') !== null,
-            runtimeSetup: document.querySelector('[data-pi-runtime-setup="true"]') !== null,
           },
           ready: window.__piariumAppReady === true,
         };
@@ -707,18 +708,11 @@ const waitForRenderer = async (userDataDir) => {
           const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
           return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'main', monaco, state: lastState };
         }
-        if (lastState.layout?.runtimeSetup === true && lastState.layout?.localRuntimeContinueReady !== true) {
-          const runtimeStatus = lastState.diagnostics?.runtimeSnapshot?.status;
-          const runtimeStillWorking = runtimeStatus === 'discovering'
-            || runtimeStatus === 'installing'
-            || runtimeStatus === 'probing'
-            || runtimeStatus === 'upgrading';
-          if (!runtimeStillWorking) {
-            const monaco = MONACO_SMOKE_ENABLED ? await runMonacoSmoke(devTools) : null;
-            return { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, mode: 'runtime-setup', monaco, state: lastState };
-          }
-        }
-        if (!continuedFromOnboarding && lastState.layout?.localRuntimeContinueReady === true) {
+        const runtimeSnapshot = lastState?.diagnostics?.runtimeSnapshot;
+        const bundledRuntimeReady = runtimeSnapshot?.status === 'ready'
+          && runtimeSnapshot.active?.id === 'bundled'
+          && runtimeSnapshot.active?.source === 'bundled';
+        if (!continuedFromBundledWelcome && bundledRuntimeReady && lastState.layout?.localRuntimeContinueReady === true) {
           const continuation = await devTools.evaluate(`(() => {
             const action = document.querySelector('[data-pi-local-runtime-continue="true"]:not(:disabled)');
             if (!(action instanceof HTMLButtonElement)) return false;
@@ -727,18 +721,18 @@ const waitForRenderer = async (userDataDir) => {
           })()`);
           if (continuation?.exceptionDetails) {
             throw describeSmokeFailure(
-              `Packaged onboarding continuation failed: ${continuation.exceptionDetails.text}`,
+              `Packaged bundled-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`,
               { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
             );
           }
-          continuedFromOnboarding = continuation?.result?.value === true;
+          continuedFromBundledWelcome = continuation?.result?.value === true;
         }
       }
       await delay(250);
     }
     throw describeSmokeFailure(
       lastState?.ready === true
-        ? 'Packaged renderer became ready without the main workspace or runtime setup surface.'
+        ? 'Packaged renderer became ready without the main workspace.'
         : 'Packaged renderer did not become app-ready.',
       { consoleMessages: devTools.consoleMessages, exceptions: devTools.exceptions, lastState },
     );
@@ -747,26 +741,12 @@ const waitForRenderer = async (userDataDir) => {
   }
 };
 
-const profileSource = process.env.PIARIUM_SMOKE_PROFILE_SOURCE?.trim();
-const profileSourcePath = profileSource ? path.resolve(profileSource) : null;
-if (profileSourcePath && !existsSync(profileSourcePath)) {
-  throw new Error(`Missing smoke profile source at ${profileSourcePath}`);
-}
 const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'piarium-win-smoke-'));
 const userDataDir = path.join(smokeRoot, 'user-data');
 const smokeWorkspaceRoot = path.join(smokeRoot, 'workspace');
 try {
   await fsp.mkdir(userDataDir, { recursive: true });
   await fsp.mkdir(smokeWorkspaceRoot, { recursive: true });
-  await fsp.writeFile(
-    path.join(userDataDir, 'runtime-selection.json'),
-    `${JSON.stringify({
-      selectedId: 'custom:selected',
-      customNodePath: process.execPath,
-      customPackageRoot: smokePiPackageRoot,
-    }, null, 2)}\n`,
-    'utf8',
-  );
   await fsp.writeFile(
     path.join(smokeWorkspaceRoot, 'packaged-language-smoke.ts'),
     'export const packagedLanguageSmoke: number = 1;\n',
@@ -783,16 +763,6 @@ try {
     ].join('\n'),
     'utf8',
   );
-  if (profileSourcePath) {
-    for (const entry of ['Local State', 'Local Storage', 'Preferences', 'Session Storage', 'settings.json']) {
-      const source = path.join(profileSourcePath, entry);
-      if (!existsSync(source)) continue;
-      const destination = path.join(userDataDir, entry);
-      const stat = await fsp.stat(source);
-      if (stat.isDirectory()) await fsp.cp(source, destination, { recursive: true });
-      else await fsp.copyFile(source, destination);
-    }
-  }
 } catch (error) {
   await fsp.rm(smokeRoot, { recursive: true, force: true });
   throw error;
@@ -804,9 +774,9 @@ const child = spawn(appPath, [
   '--remote-debugging-address=127.0.0.1',
   '--remote-allow-origins=*',
 ], {
-  cwd: electronDir,
+  cwd: path.dirname(appPath),
   env: {
-    ...process.env,
+    ...smokeEnvironment,
     PIARIUM_DATA_DIR: userDataDir,
     PIARIUM_WORKSPACE_ROOT: smokeWorkspaceRoot,
   },
@@ -877,23 +847,11 @@ try {
       renderer,
     );
   }
-  if (renderer.mode === 'runtime-setup') {
-    const runtimeManager = await fetch(`${baseUrl}/api/piarium/runtime-manager`, {
-      signal: AbortSignal.timeout(10_000),
-    }).then((response) => response.json()).catch((error) => ({
-      status: 'diagnostic-request-failed',
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    throw describeSmokeFailure(
-      'Packaged Windows application did not activate the seeded Pi runtime through its external Host.',
-      { ...renderer, runtimeManager },
-    );
-  }
   if (!layout.closeControl) {
     throw describeSmokeFailure('Packaged renderer did not expose the Windows close control.', renderer);
   }
   const closeControlIsRight = layout.closeControl.left >= layout.innerWidth / 2;
-  if (!profileSourcePath && !closeControlIsRight) {
+  if (!closeControlIsRight) {
     throw describeSmokeFailure(
       `Clean profile placed the Windows close control on the unexpected side: ${JSON.stringify(layout.closeControl)}`,
       renderer,
@@ -908,7 +866,7 @@ try {
       renderer,
     );
   }
-  if (!profileSourcePath && layout.pendingDraft !== true) {
+  if (layout.pendingDraft !== true) {
     throw describeSmokeFailure('Clean packaged renderer did not open the pending Pi draft welcome state.', renderer);
   }
   assertNear(layout.composerShell.bottom, layout.innerHeight, 'Composer shell bottom edge');
@@ -919,10 +877,10 @@ try {
   const runtimeSnapshot = renderer.state?.diagnostics?.runtimeSnapshot;
   if (
     runtimeSnapshot?.status !== 'ready'
-    || runtimeSnapshot.active?.id !== 'custom:selected'
-    || runtimeSnapshot.active?.source !== 'custom'
+    || runtimeSnapshot.active?.id !== 'bundled'
+    || runtimeSnapshot.active?.source !== 'bundled'
   ) {
-    throw describeSmokeFailure('Packaged renderer did not retain the selected custom Pi runtime.', renderer);
+    throw describeSmokeFailure('Packaged renderer did not start the bundled Pi runtime.', renderer);
   }
   const piVersion = runtimeSnapshot.active.version ?? 'unknown';
   console.log(JSON.stringify({
@@ -933,7 +891,7 @@ try {
     health: 'ok',
     layout,
     piVersion,
-    profile: profileSource ? 'seeded' : 'clean',
+    profile: 'clean',
     renderer: renderer.state?.ready === true ? 'app-ready' : 'not-ready',
     monaco: renderer.monaco,
     terminal: 'create-close-ok',

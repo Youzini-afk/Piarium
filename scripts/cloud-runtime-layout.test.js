@@ -146,32 +146,22 @@ describe('Piarium cloud runtime layout', () => {
     expect(webBuild).toBeGreaterThan(applicationClientBuild);
   });
 
-  it('reinstalls Pi SDK packages into the staged cloud pi-host production graph', () => {
+  it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {
     const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
-    expect(hostManifest.dependencies?.['@earendil-works/pi-coding-agent']).toBeUndefined();
-    // The Pi SDK stays a devDependency so the cloud builder reinstalls it into the staged
-    // production graph. Assert the pin is exact rather than a literal version, so upgrading the
-    // runtime does not require editing this test.
     for (const name of [
       '@earendil-works/pi-agent-core',
       '@earendil-works/pi-ai',
       '@earendil-works/pi-coding-agent',
     ]) {
-      expect(hostManifest.devDependencies?.[name]).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(hostManifest.dependencies?.[name]).toMatch(/^\d+\.\d+\.\d+$/);
     }
     // Pi publishes these in lockstep, so a partial bump is a mistake worth failing on.
     const piVersions = new Set([
-      hostManifest.devDependencies?.['@earendil-works/pi-agent-core'],
-      hostManifest.devDependencies?.['@earendil-works/pi-ai'],
-      hostManifest.devDependencies?.['@earendil-works/pi-coding-agent'],
+      hostManifest.dependencies?.['@earendil-works/pi-agent-core'],
+      hostManifest.dependencies?.['@earendil-works/pi-ai'],
+      hostManifest.dependencies?.['@earendil-works/pi-coding-agent'],
     ]);
     expect(piVersions.size).toBe(1);
-    const builderSource = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
-      'utf8',
-    );
-    expect(builderSource).toContain('readPiSdkRuntimeDependencies');
-    expect(builderSource).toContain("directory === 'pi-host'");
   });
 
   it('contains the complete private Pi runtime dependency closure', () => {

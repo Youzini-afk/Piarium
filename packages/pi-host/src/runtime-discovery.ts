@@ -29,14 +29,12 @@ export { isStandalonePiLayout, resolvePiCommandLayout } from "./pi-command-layou
 const execFileAsync = promisify(execFile);
 const PACKAGE_MANIFEST = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+) as { dependencies?: Record<string, string> };
 
 export function readPinnedPiVersion(
-  manifest: { dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = PACKAGE_MANIFEST,
+  manifest: { dependencies?: Record<string, string> } = PACKAGE_MANIFEST,
 ): string {
-  const version =
-    manifest.devDependencies?.["@earendil-works/pi-coding-agent"]
-    ?? manifest.dependencies?.["@earendil-works/pi-coding-agent"];
+  const version = manifest.dependencies?.["@earendil-works/pi-coding-agent"];
   if (!version) {
     throw new Error("Pi host package manifest does not pin @earendil-works/pi-coding-agent");
   }

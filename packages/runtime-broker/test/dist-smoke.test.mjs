@@ -16,7 +16,7 @@ const pinnedPiVersion = () => {
     resolve(import.meta.dirname, "../../pi-host/package.json"),
     "utf8",
   ));
-  const version = manifest.devDependencies?.["@earendil-works/pi-coding-agent"];
+  const version = manifest.dependencies?.["@earendil-works/pi-coding-agent"];
   assert.match(version ?? "", /^\d+\.\d+\.\d+$/, "pi-host must pin an exact Pi version");
   return version;
 };

@@ -155,19 +155,18 @@ Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The wor
 `PIARIUM_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
 and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
 
-After packaging, verify the unpacked application, external-runtime discovery state, health endpoint,
-renderer app-ready signal/error boundary, lazy materialization and a real hover request through the
-built-in TypeScript language service, and a real `node-pty` terminal create/close cycle without installing
-it. The smoke must cover both the no-runtime onboarding state and a selected Pi runtime; merely finding
-compiled Host files is not proof that their unpacked assets or the selected Pi installation can execute:
+After packaging, verify that the unpacked application starts the default bundled Pi runtime using only
+packaged dependencies, then check the renderer app-ready signal/error boundary, lazy materialization and a
+real hover request through the built-in TypeScript language service, plus a real terminal create/close
+cycle. Merely finding compiled Host files is not proof that their unpacked assets or the bundled runtime
+can execute:
 
 ```bash
 bun run electron:smoke:win
 ```
 
-Set `PIARIUM_SMOKE_PROFILE_SOURCE` to a packaged Piarium user-data directory to seed the isolated
-smoke profile with Piarium settings plus Chromium Local/Session Storage. The source profile is never
-launched or modified.
+The smoke always uses a clean temporary user-data directory and workspace, then removes both after the
+run.
 
 ## Platform notes
 
