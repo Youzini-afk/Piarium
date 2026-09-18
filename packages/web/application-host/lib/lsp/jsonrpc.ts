@@ -10,14 +10,30 @@ const asRecord = (value: unknown): JsonRpcRecord | null => (
 export const createJsonRpcClient = ({
   input,
   output,
-}: { input: ContentLengthInput; output: ContentLengthOutput }) => {
+  onRequest,
+}: { input: ContentLengthInput; output: ContentLengthOutput; onRequest?: (method: string, params: unknown) => unknown | Promise<unknown> }) => {
   let nextId = 1;
   const pending = new Map<number | string, Waiter>();
   const notificationListeners = new Set<(method: string, params: unknown) => void>();
 
-  const detach = attachContentLengthReader(input, (rawMessage) => {
+  const detach = attachContentLengthReader(input, async (rawMessage) => {
     const message = asRecord(rawMessage);
     if (!message) return;
+    // Each peer owns its request IDs. A server request can have the same ID as
+    // an outstanding client request and must never resolve that client's waiter.
+    if (typeof message.method === 'string' && (typeof message.id === 'number' || typeof message.id === 'string')) {
+      try {
+        if (!onRequest) {
+          writeContentLengthMessage(output, { jsonrpc: '2.0', id: message.id, error: { code: -32601, message: `Unsupported client method: ${message.method}` } });
+        } else {
+          const result = await onRequest(message.method, message.params);
+          writeContentLengthMessage(output, { jsonrpc: '2.0', id: message.id, result: result ?? null });
+        }
+      } catch (error) {
+        writeContentLengthMessage(output, { jsonrpc: '2.0', id: message.id, error: { code: -32603, message: error instanceof Error ? error.message : 'Client request failed' } });
+      }
+      return;
+    }
     if ((typeof message.id === 'number' || typeof message.id === 'string') && pending.has(message.id)) {
       const waiter = pending.get(message.id);
       pending.delete(message.id);

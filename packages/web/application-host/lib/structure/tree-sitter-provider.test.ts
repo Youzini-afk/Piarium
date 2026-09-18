@@ -64,7 +64,7 @@ describe("tree-sitter language specs", () => {
       imports: false,
     });
     expect(capabilitiesFromSpec(undefined)).toEqual(NO_STRUCTURE_CAPABILITIES);
-    expect(createTreeSitterStructureProvider().capabilities("python")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    expect(createTreeSitterStructureProvider().capabilities("swift")).toEqual(NO_STRUCTURE_CAPABILITIES);
     expect(createTreeSitterStructureProvider().capabilities(null)).toEqual(NO_STRUCTURE_CAPABILITIES);
   });
 
@@ -76,6 +76,7 @@ describe("tree-sitter language specs", () => {
       literalCalls: false,
       imports: false,
     });
+    expect(capabilitiesFromSpec(treeSitterTagsSpec("x.wasm", ""))).toEqual(NO_STRUCTURE_CAPABILITIES);
   });
 
   it("maps upstream tags captures onto slice kinds and leaves the rest as catalog names", () => {
@@ -98,7 +99,7 @@ describe("tree-sitter language specs", () => {
   it("outlines an installed grammar through its upstream tags query", async () => {
     const provider = createTreeSitterStructureProvider({
       parseBudgetMs: 30_000,
-      resolveInstalledLanguage: (languageId) => (languageId === "ruby" ? {
+      resolveInstalledLanguage: (languageId) => (languageId === "markdown" ? {
         grammarFile: "tree-sitter-javascript.wasm",
         tagsQuery: [
           "(function_declaration name: (identifier) @name) @definition.function",
@@ -120,7 +121,7 @@ describe("tree-sitter language specs", () => {
       "  return inner;",
       "}",
     ].join("\n");
-    const outline = await provider.outline({ path: "sample.rb", languageId: "ruby", text, revision: "rev-1" });
+    const outline = await provider.outline({ path: "sample.md", languageId: "markdown", text, revision: "rev-1" });
     expect(outline.status).toBe("ready");
     expect(outline.provider).toBe("tree-sitter");
     const needle = outline.symbols.find((symbol) => symbol.name === "needle");
@@ -131,8 +132,8 @@ describe("tree-sitter language specs", () => {
     expect(outline.symbols.find((symbol) => symbol.name === "inner")?.kind).toBe("variable");
 
     const classified = await provider.classifyHits({
-      path: "sample.rb",
-      languageId: "ruby",
+      path: "sample.md",
+      languageId: "markdown",
       text,
       revision: "rev-1",
       lines: [2, 3],
@@ -146,10 +147,20 @@ describe("tree-sitter language specs", () => {
       parseBudgetMs: 30_000,
       resolveInstalledLanguage: () => null,
     });
-    expect(provider.capabilities("ruby")).toEqual(NO_STRUCTURE_CAPABILITIES);
-    const outline = await provider.outline({ path: "a.rb", languageId: "ruby", text: "x = 1", revision: "rev-1" });
+    expect(provider.capabilities("swift")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    const outline = await provider.outline({ path: "a.swift", languageId: "swift", text: "x = 1", revision: "rev-1" });
     expect(outline.status).toBe("unsupported");
     expect(outline.symbols).toEqual([]);
+  });
+
+  it("does not treat a bundled or installed empty query as usable structure", async () => {
+    const provider = createTreeSitterStructureProvider({
+      resolveInstalledLanguage: () => ({ grammarFile: "tree-sitter-javascript.wasm", tagsQuery: "" }),
+    });
+    expect(provider.capabilities("markdown")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    const outline = await provider.outline({ path: "a.md", languageId: "markdown", text: "# title", revision: "rev-1" });
+    expect(outline.status).toBe("unavailable");
+    expect(outline.message).toMatch(/query is not readable/i);
   });
 
   it("notifies the host when a structure request names a language", async () => {
@@ -438,5 +449,31 @@ describe("createTreeSitterStructureProvider", () => {
     expect(classified.hits).toEqual(expect.arrayContaining([
       { line: 2, class: "name" },
     ]));
+  });
+
+  it("extracts representative symbols from every bundled common grammar", async () => {
+    const provider = parsingProvider();
+    const samples: Array<{ languageId: string; path: string; text: string; name: string }> = [
+      { languageId: "python", path: "sample.py", text: "class Box:\n  def run(self):\n    return 1\n", name: "Box" },
+      { languageId: "go", path: "sample.go", text: "package main\nfunc Run() {}\ntype Box struct {}\n", name: "Run" },
+      { languageId: "rust", path: "sample.rs", text: "struct Box {}\nfn run() {}\n", name: "Box" },
+      { languageId: "java", path: "Sample.java", text: "class Box { void run() {} }\n", name: "Box" },
+      { languageId: "c", path: "sample.c", text: "struct Box { int x; };\nint run() { return 1; }\n", name: "run" },
+      { languageId: "cpp", path: "sample.cpp", text: "class Box {};\nint run() { return 1; }\n", name: "run" },
+      { languageId: "csharp", path: "Sample.cs", text: "class Box { void Run() {} }\n", name: "Box" },
+      { languageId: "kotlin", path: "Sample.kt", text: "class Box { fun run() {} }\nfun top() {}\n", name: "Box" },
+      { languageId: "ruby", path: "sample.rb", text: "class Box\n  def run\n  end\nend\n", name: "Box" },
+      { languageId: "php", path: "sample.php", text: "<?php class Box { function run() {} }\n", name: "Box" },
+      { languageId: "shellscript", path: "build.sh", text: "function build() { echo hi; }\n", name: "build" },
+      { languageId: "css", path: "style.css", text: ".box { color: red; }\n", name: "box" },
+      { languageId: "html", path: "index.html", text: "<div><span>Hi</span></div>\n", name: "div" },
+      { languageId: "yaml", path: "config.yaml", text: "name: app\nservices:\n  web: nginx\n", name: "services" },
+      { languageId: "toml", path: "Cargo.toml", text: "[package]\nname = \"app\"\n", name: "package" },
+    ];
+    for (const sample of samples) {
+      const outline = await provider.outline({ ...sample, revision: `bundled-${sample.languageId}` });
+      expect(outline.status, `${sample.languageId}: ${outline.message ?? ""}`).toBe("ready");
+      expect(outline.symbols.map((symbol) => symbol.name), sample.languageId).toContain(sample.name);
+    }
   });
 });

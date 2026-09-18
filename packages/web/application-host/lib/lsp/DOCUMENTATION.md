@@ -13,9 +13,25 @@ Rust kernel. Renderers never spawn language servers.
 - `routes.js`: authenticated `/api/language/*` routes and SSE events, pinned to the `surface` view
 - `capability.js`: `workspace.language` Host capability
 - `fixture-server.js` / `typescript-server.js`: test servers, not production providers
-- the distribution TypeScript/JavaScript provider is a brokered Piarium extension in
-  `@piarium/extension-builtins`; its immutable `typescript-language-server` and TypeScript fallback are
-  materialized on the first `workspace-match` activation, not registered directly in this module
+- `managed-servers.js`: on-demand native Go (`gopls`), Rust (`rust-analyzer`), C/C++ (`clangd`), and independent Markdown (`marksman`) preparation
+- the distribution TypeScript/JavaScript provider and the Python/HTML/CSS/JSON/YAML/Bash providers are
+  brokered Piarium extensions in `@piarium/extension-builtins`. Their self-contained program assets are
+  materialized on `workspace-match` activation; actual language processes still start on demand.
+- `managed-servers.ts` prepares larger native tools in the Host's private data directory. Preparation
+  processes use an explicitly scoped Rust process service for that tooling directory; LSP processes
+  use the ordinary admitted workspace process service. No renderer launches or installs programs.
+
+`LanguageSupportAPI` reports program availability separately from live `LanguageServicesAPI` sessions.
+Opening Settings only inspects inventory. Its prepare/cancel actions download/install without starting
+an empty language session; actual editor/agent requests use the same preparation manager before spawn.
+The UI keeps technical package/ABI information in details and uses failure/retry for actual failures,
+not for a bundled server that simply has not been needed yet.
+
+The JSON-RPC client handles both request directions without confusing peer-owned IDs. It answers
+workspace configuration with the server's native defaults, provides the admitted workspace folders,
+and acknowledges progress setup. Unsolicited `workspace/applyEdit` is rejected: edits still go through
+Documents. A pending preparation belongs to the session's launch cancellation and cannot spawn after
+the workspace is disposed.
 
 ## Views
 
@@ -54,6 +70,30 @@ Production Web sets `isTrusted` to false. There is no HTTP route that registers 
 
 Application-host endpoint/workspace switch disposes sessions. Electron reuses this Web host.
 VS Code webviews report language services as `absent` and do not spawn.
+
+## Managed native servers
+
+`createManagedLanguageServers({ directory, spawn, ... })` owns the private user-data
+cache for the native providers. `inspect(languageId)` is side-effect free: it checks
+the private cache and PATH and never downloads or runs a process. The application host
+calls `ensure(languageId, workspaceRoot, signal?)` only when a real LSP session starts
+or the user retries a failed preparation; it returns `{ command, args,
+initializationOptions? }` for the supervisor to pass to the injected Rust Kernel
+`ManagedSpawn`.
+
+The observable preparation states are `available`, `preparing`, `installed`, `failed`,
+`needs-runtime`, and `unsupported`. Go uses an existing `go` toolchain and a private
+`GOBIN`, module cache, build cache, and preparation cwd under `language-servers/.cache`.
+Rust Analyzer and clangd use fixed official
+release assets with committed SHA-256 digests. All archives are staged, verified,
+path-checked, and atomically installed; cancellation, failed preparation, and dispose
+remove staging directories and never publish a half-written executable. A concurrent
+ensure for one server shares one preparation, while a caller cancellation only aborts
+the shared job after the last waiter leaves.
+
+Marksman is the standalone `artempyanykh/marksman` binary, started with its official
+`server` subcommand. Markdown, `md`, and `mdx` requests share this provider; the
+download manifest uses the fixed `2026-02-08` release and GitHub asset digests.
 
 ## Native owner lifetime
 

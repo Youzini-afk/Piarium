@@ -33,7 +33,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 61 |
-| [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 51 |
+| [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
 
@@ -327,3 +327,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-287 | 2026-09-16 | D-284–D-286 验收收口：原文收据、消息提交边界、Run 准入与物化 baseline handoff | implementation correction / accepted | — | status 2.4A/B、2.6A/B、3.18A–E；Harness/Kernel/Recovery documentation | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-288 | 2026-09-18 | 本地语义推理独立组件，用户主动安装，主包不携带模型与专用运行库 | accepted | — | 设计 6.1/8.5；plan/status 3.16；architecture；Electron/semantic documentation | [retrieval](decisions/retrieval.md) |
 | D-289 | 2026-09-18 | 默认免密钥网页搜索与原文查找/续读；不复用模型账户 | accepted | D-050/D-067/D-283 的搜索默认行为 | 设计 5.8；plan 1b.8；status 1b.3；Web 工具与设置 | [tool-environment](decisions/tool-environment.md) |
+| D-290 | 2026-09-18 | 常用结构包内置、语言服务器按需自动准备与能力设置页 | accepted | D-124/D-128 的默认交付方式 | plan 3.11；status；language-support | [structure-symbol-graph](decisions/structure-symbol-graph.md) |

@@ -16,13 +16,13 @@ const manifest = parseGrammarPackManifest({
   minCompatibleAbi: 13,
   maxCompatibleAbi: 15,
   packs: {
-    python: {
-      languageId: "python",
-      packageName: "tree-sitter-python",
+    swift: {
+      languageId: "swift",
+      packageName: "tree-sitter-swift",
       version: "0.25.0",
-      tarballUrl: "https://example.test/tree-sitter-python.tgz",
-      wasmPath: "package/tree-sitter-python.wasm",
-      grammarFile: "tree-sitter-python.wasm",
+      tarballUrl: "https://example.test/tree-sitter-swift.tgz",
+      wasmPath: "package/tree-sitter-swift.wasm",
+      grammarFile: "tree-sitter-swift.wasm",
       integrity,
       bytes: wasm.byteLength,
       abi: 15,
@@ -49,7 +49,7 @@ const files = (entries: Record<string, Uint8Array>) => async (
 };
 
 const published = files({
-  "package/tree-sitter-python.wasm": wasm,
+  "package/tree-sitter-swift.wasm": wasm,
   "package/queries/tags.scm": tags,
 });
 
@@ -62,14 +62,14 @@ describe("createGrammarInstaller", () => {
       minAbi: 13,
       maxAbi: 15,
       download: async () => new Uint8Array([9, 9, 9]),
-      extractFiles: files({ "package/tree-sitter-python.wasm": new Uint8Array([9, 9, 9]) }),
+      extractFiles: files({ "package/tree-sitter-swift.wasm": new Uint8Array([9, 9, 9]) }),
       inspectAbi: async () => 15,
     });
-    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(installer.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "failed",
       reason: "integrity",
     });
-    expect(store.has("python")).toBe(false);
+    expect(store.has("swift")).toBe(false);
   });
 
   it("rejects a query digest mismatch, because the query is part of the anchor", async () => {
@@ -81,16 +81,16 @@ describe("createGrammarInstaller", () => {
       maxAbi: 15,
       download: async () => wasm,
       extractFiles: files({
-        "package/tree-sitter-python.wasm": wasm,
+        "package/tree-sitter-swift.wasm": wasm,
         "package/queries/tags.scm": new TextEncoder().encode("(other) @definition.class"),
       }),
       inspectAbi: async () => 15,
     });
-    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(installer.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "failed",
       reason: "integrity",
     });
-    expect(store.has("python")).toBe(false);
+    expect(store.has("swift")).toBe(false);
   });
 
   it("stores the verified query next to the grammar", async () => {
@@ -104,11 +104,11 @@ describe("createGrammarInstaller", () => {
       extractFiles: published,
       inspectAbi: async () => 15,
     });
-    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(installer.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "ready",
       grammarStatus: "installed",
     });
-    expect(store.readTagsQuery("python")).toContain("@definition.function");
+    expect(store.readTagsQuery("swift")).toContain("@definition.function");
   });
 
   it("cancels an in-flight download", async () => {
@@ -129,13 +129,13 @@ describe("createGrammarInstaller", () => {
       extractFiles: published,
       inspectAbi: async () => 15,
     });
-    const pending = installer.install({ languageId: "python" });
+    const pending = installer.install({ languageId: "swift" });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await expect(installer.cancelInstall({ languageId: "python" })).resolves.toMatchObject({
+    await expect(installer.cancelInstall({ languageId: "swift" })).resolves.toMatchObject({
       status: "cancelled",
     });
     await expect(pending).resolves.toMatchObject({ status: "cancelled" });
-    expect(store.has("python")).toBe(false);
+    expect(store.has("swift")).toBe(false);
     release?.();
   });
 
@@ -156,8 +156,8 @@ describe("createGrammarInstaller", () => {
       inspectAbi: async () => 15,
     });
     const [first, second] = await Promise.all([
-      installer.install({ languageId: "python" }),
-      installer.install({ languageId: "python" }),
+      installer.install({ languageId: "swift" }),
+      installer.install({ languageId: "swift" }),
     ]);
     expect(first).toMatchObject({ status: "ready" });
     expect(second).toMatchObject({ status: "ready" });
@@ -175,11 +175,11 @@ describe("createGrammarInstaller", () => {
       extractFiles: published,
       inspectAbi: async () => 16,
     });
-    await expect(installer.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(installer.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "failed",
       reason: "abi",
     });
-    expect(store.has("python")).toBe(false);
+    expect(store.has("swift")).toBe(false);
   });
 
   it("imports a user wasm without a manifest match", async () => {
@@ -192,11 +192,11 @@ describe("createGrammarInstaller", () => {
       readLocal: async () => wasm,
       inspectAbi: async () => 14,
     });
-    await expect(installer.importUserGrammar({ languageId: "kotlin", path: "C:\\tmp\\custom.wasm" })).resolves.toMatchObject({
+    await expect(installer.importUserGrammar({ languageId: "markdown", path: "C:\\tmp\\custom.wasm" })).resolves.toMatchObject({
       status: "ready",
       grammarStatus: "user-unverified",
     });
-    expect(store.get("kotlin")?.source).toBe("user");
+    expect(store.get("markdown")?.source).toBe("user");
   });
 
   it("does not echo filesystem errors back to the caller", async () => {
@@ -211,10 +211,10 @@ describe("createGrammarInstaller", () => {
       },
       inspectAbi: async () => 14,
     });
-    const result = await installer.importUserGrammar({ languageId: "kotlin", path: "/etc/shadow.wasm" });
+    const result = await installer.importUserGrammar({ languageId: "markdown", path: "/etc/shadow.wasm" });
     expect(result).toMatchObject({ status: "failed", reason: "failed" });
     expect(result).not.toMatchObject({ message: expect.stringContaining("EACCES") });
-    expect(store.has("kotlin")).toBe(false);
+    expect(store.has("markdown")).toBe(false);
   });
 
   it("refuses a path that is not a wasm file and a file over the ceiling", async () => {
@@ -228,14 +228,14 @@ describe("createGrammarInstaller", () => {
       inspectAbi: async () => 14,
       maxUserBytes: 32,
     });
-    await expect(installer.importUserGrammar({ languageId: "kotlin", path: "/tmp/grammar.txt" })).resolves.toMatchObject({
+    await expect(installer.importUserGrammar({ languageId: "markdown", path: "/tmp/grammar.txt" })).resolves.toMatchObject({
       status: "failed",
       reason: "unsupported",
     });
-    await expect(installer.importUserGrammar({ languageId: "kotlin", path: "/tmp/grammar.wasm" })).resolves.toMatchObject({
+    await expect(installer.importUserGrammar({ languageId: "markdown", path: "/tmp/grammar.wasm" })).resolves.toMatchObject({
       status: "failed",
       reason: "failed",
     });
-    expect(store.has("kotlin")).toBe(false);
+    expect(store.has("markdown")).toBe(false);
   });
 });

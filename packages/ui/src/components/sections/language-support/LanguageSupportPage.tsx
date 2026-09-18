@@ -9,7 +9,6 @@ import { Icon } from '@/components/icon/Icon';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import {
   SETTINGS_HELPER_CLASS,
-  SettingsFieldRow,
   SettingsSection,
 } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
@@ -26,6 +25,8 @@ import {
   grammarStatusTone,
   languageServerStatusKey,
   languageServerStatusTone,
+  languageDisplayName,
+  serverAvailabilityKey,
   statusToneClass,
   structureNoteKey,
 } from './presentation';
@@ -39,14 +40,25 @@ const StatusValue: React.FC<{ tone: ReturnType<typeof grammarStatusTone>; label:
 
 const LanguageRow: React.FC<{
   busy: boolean;
-  languageServerStatus?: PiariumLanguageProviderStatus['status'];
+  languageServerStatus?: PiariumLanguageProviderStatus;
+  preparing: boolean;
+  onPrepare(): void;
+  onCancelPreparation(): void;
   onCancel(): void;
   onImport(): void;
   onInstall(): void;
   row: LanguageSupportLanguageRow;
-}> = ({ busy, languageServerStatus, onCancel, onImport, onInstall, row }) => {
+}> = ({ busy, preparing, languageServerStatus, onPrepare, onCancelPreparation, onCancel, onImport, onInstall, row }) => {
   const { t } = useI18n();
-  const lspStatus = languageServerStatus ?? 'absent';
+  const lspStatus = languageServerStatus?.status ?? 'absent';
+  const server = row.server;
+  const serverFailure = lspStatus === 'failed' || lspStatus === 'degraded' || server?.status === 'failed' || server?.status === 'needs-runtime';
+  const serverMessage = languageServerStatus && 'message' in languageServerStatus ? languageServerStatus.message : server?.message;
+  const availability = server?.status ?? 'unsupported';
+  const serverLabel = preparing ? t('settings.languageSupport.server.preparing')
+    : lspStatus === 'absent' ? t(serverAvailabilityKey(availability)) : t(languageServerStatusKey(lspStatus));
+  const serverTone = preparing ? 'warning' : lspStatus !== 'absent' ? languageServerStatusTone(lspStatus)
+    : serverFailure ? 'warning' : availability === 'bundled' || availability === 'installed' ? 'success' : 'muted';
   const noteKey = structureNoteKey(row);
   const capabilityKeys: I18nKey[] = [];
   if (row.capabilities.outline) capabilityKeys.push('settings.languageSupport.capability.outline');
@@ -55,54 +67,51 @@ const LanguageRow: React.FC<{
   if (row.capabilities.imports) capabilityKeys.push('settings.languageSupport.capability.imports');
 
   return (
-    <div className="rounded-lg border border-border/60 px-3 py-3">
+    <div className="py-4" data-settings-item={`language-support.language.${row.languageId}`}>
       <div className="flex flex-col gap-3 @xl:flex-row @xl:items-start @xl:justify-between">
-        <div className="min-w-0 space-y-2">
+        <div className="min-w-0 flex-1 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <Icon name="code-box" className="size-4 text-muted-foreground" />
-            <span className="typography-ui-label text-foreground">{row.languageId}</span>
-            {row.wanted ? (
-              <span className="rounded-md bg-primary/10 px-1.5 py-0.5 typography-micro text-primary">
-                {t('settings.languageSupport.detected')}
-              </span>
-            ) : null}
+            <span className="typography-ui-label text-foreground">{languageDisplayName(row.languageId)}</span>
             <span className={SETTINGS_HELPER_CLASS}>
               {t('settings.languageSupport.files.count', { count: row.fileCount })}
             </span>
-            {row.pack ? (
-              <span className={SETTINGS_HELPER_CLASS}>
-                {t('settings.languageSupport.field.abi', { abi: row.pack.abi })}
-                {' · '}
-                {formatPackBytes(row.pack.bytes)}
-              </span>
-            ) : null}
           </div>
-          <SettingsFieldRow
-            label={t('settings.languageSupport.row.languageServer')}
-            settingsItem={`language-support.lsp.${row.languageId}`}
-          >
-            <StatusValue tone={languageServerStatusTone(lspStatus)} label={t(languageServerStatusKey(lspStatus))} />
-          </SettingsFieldRow>
-          <SettingsFieldRow
-            label={t('settings.languageSupport.row.structurePack')}
-            settingsItem={`language-support.grammar.${row.languageId}`}
-          >
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1" data-settings-item={`language-support.grammar.${row.languageId}`}>
+            <span className={SETTINGS_HELPER_CLASS}>{t('settings.languageSupport.row.structurePack')}</span>
             <StatusValue
               tone={grammarStatusTone(row.grammarStatus, row.capabilities)}
               label={t(grammarStatusKey(row.grammarStatus))}
             />
-          </SettingsFieldRow>
-          {capabilityKeys.length > 0 ? (
-            <p className={SETTINGS_HELPER_CLASS}>
-              {capabilityKeys.map((key) => t(key)).join(' · ')}
-            </p>
-          ) : null}
+          </div>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1" data-settings-item={`language-support.lsp.${row.languageId}`}>
+            <span className={SETTINGS_HELPER_CLASS}>{t('settings.languageSupport.row.languageServer')}</span>
+            <StatusValue tone={serverTone} label={serverLabel} />
+          </div>
+          {serverFailure && serverMessage ? <p className="typography-micro break-words text-[var(--status-warning)]">{serverMessage}</p> : null}
           {noteKey ? (
             <p className="typography-micro text-[var(--status-warning)]">{t(noteKey)}</p>
           ) : null}
+          <details className="group typography-micro text-muted-foreground">
+            <summary className="w-fit cursor-pointer rounded-sm hover:text-foreground focus-visible:outline focus-visible:outline-ring">{t('settings.languageSupport.details')}</summary>
+            <div className="space-y-2 pt-2">
+              {capabilityKeys.length > 0 ? <p>{capabilityKeys.map((key) => t(key)).join(' · ')}</p> : null}
+              {server?.name ? <p>{server.name}</p> : null}
+              {row.pack ? <p>{row.pack.packageName} · {row.pack.version} · {formatPackBytes(row.pack.bytes)} · {t('settings.languageSupport.field.abi', { abi: row.pack.abi })}</p> : null}
+              {canImportGrammar(row.grammarStatus) && !busy ? (
+                <Button type="button" variant="outline" size="xs" onClick={onImport} className="!font-normal">{t('settings.languageSupport.actions.import')}</Button>
+              ) : null}
+            </div>
+          </details>
         </div>
-        {canInstallGrammar(row.grammarStatus) || canImportGrammar(row.grammarStatus) ? (
+        {canInstallGrammar(row.grammarStatus) || serverFailure || availability === 'available' || preparing ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {serverFailure || availability === 'available' || preparing ? (
+              <Button type="button" variant="outline" size="xs" disabled={preparing} onClick={onPrepare} className="!font-normal">
+                {preparing ? t('settings.languageSupport.server.preparing') : serverFailure ? t('settings.languageSupport.actions.retry') : t('settings.languageSupport.actions.prepare')}
+              </Button>
+            ) : null}
+            {preparing && lspStatus === 'absent' ? <Button type="button" variant="ghost" size="xs" onClick={onCancelPreparation}>{t('settings.languageSupport.actions.cancel')}</Button> : null}
             {busy ? (
               <Button type="button" variant="outline" size="xs" onClick={onCancel} className="!font-normal">
                 {t('settings.languageSupport.actions.cancel')}
@@ -110,11 +119,6 @@ const LanguageRow: React.FC<{
             ) : canInstallGrammar(row.grammarStatus) ? (
               <Button type="button" variant="outline" size="xs" onClick={onInstall} className="!font-normal">
                 {t('settings.languageSupport.actions.install')}
-              </Button>
-            ) : null}
-            {canImportGrammar(row.grammarStatus) && !busy ? (
-              <Button type="button" variant="outline" size="xs" onClick={onImport} className="!font-normal">
-                {t('settings.languageSupport.actions.import')}
               </Button>
             ) : null}
           </div>
@@ -128,40 +132,86 @@ export const LanguageSupportPage: React.FC = () => {
   const { t } = useI18n();
   const { language, languageSupport } = useRuntimeAPIs();
   const workspace = useWorkbenchWorkspace();
+  const workspaceId = workspace.status === 'ready' ? workspace.workspaceId : null;
   const [status, setStatus] = React.useState<LanguageSupportStatus | null>(null);
   const [lspByLanguage, setLspByLanguage] = React.useState<
-    Partial<Record<string, PiariumLanguageProviderStatus['status']>>
+    Partial<Record<string, PiariumLanguageProviderStatus>>
   >({});
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [preparingIds, setPreparingIds] = React.useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = React.useState(false);
+  const refreshId = React.useRef(0);
+  const invalidateRefresh = React.useCallback(() => { refreshId.current++; }, []);
+  const currentWorkspace = React.useRef(workspaceId);
+  currentWorkspace.current = workspaceId;
 
   const refresh = React.useCallback(async () => {
-    if (workspace.status !== 'ready') {
+    const requestId = ++refreshId.current;
+    if (!workspaceId) {
       setStatus(null);
       setLspByLanguage({});
+      setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      const next = await languageSupport.getStatus({ workspaceId: workspace.workspaceId });
+      const next = await languageSupport.getStatus({ workspaceId });
+      if (requestId !== refreshId.current || currentWorkspace.current !== workspaceId) return;
       setStatus(next);
       const snapshots = await Promise.all(next.languages.map(async (row) => {
-        const snapshot = await language.getStatus(workspace.workspaceId, row.languageId);
-        return [row.languageId, snapshot.status] as const;
+        const snapshot = await language.getStatus(workspaceId, row.languageId);
+        return [row.languageId, snapshot] as const;
       }));
+      if (requestId !== refreshId.current || currentWorkspace.current !== workspaceId) return;
       setLspByLanguage(Object.fromEntries(snapshots));
     } catch (error) {
+      if (requestId !== refreshId.current || currentWorkspace.current !== workspaceId) return;
       toast.error(error instanceof LanguageSupportError
         ? error.message
         : error instanceof Error ? error.message : t('settings.languageSupport.empty.none'));
     } finally {
-      setLoading(false);
+      if (requestId === refreshId.current) setLoading(false);
     }
-  }, [language, languageSupport, t, workspace]);
+  }, [language, languageSupport, t, workspaceId]);
 
   React.useEffect(() => {
+    setStatus(null);
+    setLspByLanguage({});
+    setPreparingIds(new Set());
     void refresh();
-  }, [refresh]);
+    return invalidateRefresh;
+  }, [refresh, invalidateRefresh]);
+
+  React.useEffect(() => {
+    if (!workspaceId) return;
+    const subscription = language.subscribe(workspaceId, (event) => {
+      if (event.kind === 'status') setLspByLanguage((previous) => ({ ...previous, [event.snapshot.languageId]: event.snapshot }));
+    });
+    return () => subscription.close();
+  }, [language, workspaceId]);
+
+  const runPrepare = React.useCallback(async (languageId: string) => {
+    if (!workspaceId) return;
+    setPreparingIds((previous) => new Set([...previous, languageId]));
+    try {
+      const running = lspByLanguage[languageId]?.status;
+      if (running === 'failed' || running === 'degraded') await language.restart(workspaceId, languageId);
+      else await languageSupport.prepareServer({ workspaceId, languageId });
+    } catch (error) {
+      if (currentWorkspace.current === workspaceId) toast.error(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (currentWorkspace.current === workspaceId) {
+        setPreparingIds((previous) => { const next = new Set(previous); next.delete(languageId); return next; });
+        await refresh();
+      }
+    }
+  }, [language, languageSupport, lspByLanguage, refresh, workspaceId]);
+
+  const cancelPreparation = React.useCallback(async (languageId: string) => {
+    if (!workspaceId) return;
+    try { await languageSupport.cancelServerPreparation({ workspaceId, languageId }); }
+    catch (error) { toast.error(error instanceof Error ? error.message : String(error)); }
+  }, [languageSupport, workspaceId]);
 
   const runInstall = React.useCallback(async (languageId: string) => {
     setBusyId(languageId);
@@ -271,13 +321,16 @@ export const LanguageSupportPage: React.FC = () => {
             {t('settings.languageSupport.empty.none')}
           </div>
         ) : null}
-        <div className="space-y-3">
+        <div className="divide-y divide-border/50">
           {status?.languages.map((row) => (
             <LanguageRow
               key={row.languageId}
               row={row}
               busy={busyId === row.languageId}
               languageServerStatus={lspByLanguage[row.languageId]}
+              preparing={preparingIds.has(row.languageId)}
+              onPrepare={() => void runPrepare(row.languageId)}
+              onCancelPreparation={() => void cancelPreparation(row.languageId)}
               onInstall={() => void runInstall(row.languageId)}
               onImport={() => void runImport(row.languageId)}
               onCancel={() => void runCancel(row.languageId)}

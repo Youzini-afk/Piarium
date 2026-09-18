@@ -1,12 +1,35 @@
 import type {
   LanguageSupportCapabilities,
   LanguageSupportLanguageRow,
+  LanguageSupportServerInfo,
   PiariumLanguageProviderStatus,
   StructureGrammarStatus,
 } from '@piarium/application-client';
 import type { I18nKey } from '@/lib/i18n/store';
 
 export type StatusTone = 'success' | 'warning' | 'danger' | 'muted';
+
+const LANGUAGE_NAMES: Readonly<Record<string, string>> = {
+  typescript: 'TypeScript', typescriptreact: 'TSX', javascript: 'JavaScript', javascriptreact: 'JSX',
+  python: 'Python', rust: 'Rust', go: 'Go', c: 'C', cpp: 'C++', csharp: 'C#', java: 'Java',
+  ruby: 'Ruby', php: 'PHP', bash: 'Bash', shell: 'Shell', shellscript: 'Shell',
+  html: 'HTML', css: 'CSS', scss: 'SCSS', less: 'Less', json: 'JSON', jsonc: 'JSONC',
+  yaml: 'YAML', toml: 'TOML', markdown: 'Markdown', vue: 'Vue', svelte: 'Svelte',
+  swift: 'Swift', kotlin: 'Kotlin', lua: 'Lua', sql: 'SQL', dockerfile: 'Dockerfile',
+};
+export const languageDisplayName = (languageId: string): string => LANGUAGE_NAMES[languageId] ?? languageId;
+
+export const serverAvailabilityKey = (status: LanguageSupportServerInfo['status']): I18nKey => {
+  switch (status) {
+    case 'bundled': return 'settings.languageSupport.server.bundled';
+    case 'available': return 'settings.languageSupport.server.available';
+    case 'preparing': return 'settings.languageSupport.server.preparing';
+    case 'installed': return 'settings.languageSupport.server.installed';
+    case 'failed': return 'settings.languageSupport.lsp.failed';
+    case 'needs-runtime': return 'settings.languageSupport.server.needsRuntime';
+    case 'unsupported': return 'settings.languageSupport.server.unsupported';
+  }
+};
 
 export const languageServerStatusKey = (
   status: PiariumLanguageProviderStatus['status'],
@@ -69,7 +92,6 @@ export const grammarStatusTone = (
 ): StatusTone => {
   switch (status) {
     case 'bundled':
-      return 'success';
     case 'installed':
     case 'user-unverified':
       return capabilities?.outline ? 'success' : 'warning';
@@ -88,7 +110,7 @@ export const grammarStatusTone = (
 export const structureNoteKey = (row: LanguageSupportLanguageRow): I18nKey | null => {
   if (row.grammarStatus === 'unknown') return 'settings.languageSupport.note.storeUnreadable';
   if (row.capabilities.outline) return null;
-  if (row.grammarStatus === 'installed' || row.grammarStatus === 'user-unverified') {
+  if (row.grammarStatus === 'bundled' || row.grammarStatus === 'installed' || row.grammarStatus === 'user-unverified') {
     return 'settings.languageSupport.note.installedWithoutQuery';
   }
   if (row.grammarStatus === 'available' && row.pack && !row.pack.providesOutline) {

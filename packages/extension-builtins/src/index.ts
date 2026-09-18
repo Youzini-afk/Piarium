@@ -42,8 +42,62 @@ export const PIARIUM_INTEGRATION_ENTRYPOINT_ID = "main";
 export const PIARIUM_INTEGRATION_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile", "vscode"];
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "piarium.builtin.typescript-language";
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.piarium.1";
+export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "piarium.builtin.language-servers";
+export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION = "0.1.0";
 export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID = "piarium.builtin.recovery";
 export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_VERSION = "0.4.0";
+
+export interface PiariumBundledLanguageServer {
+  id: string;
+  name: string;
+  languageIds: readonly string[];
+}
+
+/**
+ * Browser-safe catalog of language providers shipped in the desktop artifact.
+ * The ids are provider ids used by workspace.language status and registration.
+ */
+export const PIARIUM_BUNDLED_LANGUAGE_SERVERS: readonly PiariumBundledLanguageServer[] = [
+  {
+    id: "piarium.typescript-language",
+    name: "TypeScript and JavaScript",
+    languageIds: ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  },
+  {
+    id: "piarium.python-language",
+    name: "Python (Pyright)",
+    languageIds: ["python"],
+  },
+  {
+    id: "piarium.html-language",
+    name: "HTML",
+    languageIds: ["html"],
+  },
+  {
+    id: "piarium.css-language",
+    name: "CSS, SCSS, and LESS",
+    languageIds: ["css", "scss", "less"],
+  },
+  {
+    id: "piarium.json-language",
+    name: "JSON and JSONC",
+    languageIds: ["json", "jsonc"],
+  },
+  {
+    id: "piarium.yaml-language",
+    name: "YAML",
+    languageIds: ["yaml"],
+  },
+  {
+    id: "piarium.bash-language",
+    name: "Bash",
+    languageIds: ["shellscript"],
+  },
+] as const;
+
+export const PIARIUM_BUNDLED_LANGUAGE_SERVER_PROVIDER_IDS = PIARIUM_BUNDLED_LANGUAGE_SERVERS.map(
+  ({ id }) => id,
+);
 
 const pageContribution = (input: {
   group: "pi" | "harness";
@@ -428,6 +482,25 @@ export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION: PiariumBuiltinExtens
   },
 };
 
+export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION: PiariumBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: {
+    capabilities: { host: ["workspace.language"] },
+    displayName: "Built-in Language Servers",
+    engines: { piarium: "*" },
+    entrypoints: {
+      host: {
+        activation: ["workspace-match"],
+        file: "host.cjs",
+        mode: "brokered",
+      },
+    },
+    id: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    schemaVersion: 1,
+    version: PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_VERSION,
+  },
+};
+
 export const PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION: PiariumBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: {
@@ -488,6 +561,7 @@ export const PIARIUM_BUILTIN_PLUGIN_ADAPTER_EXTENSIONS = [
 export const PIARIUM_BUILTIN_EXTENSION_DEFINITIONS: readonly PiariumBuiltinExtensionDefinition[] = [
   PIARIUM_BUILTIN_TRANSITION_SCENE_EXTENSION,
   PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION,
+  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION,
   PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION,
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION,
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION,

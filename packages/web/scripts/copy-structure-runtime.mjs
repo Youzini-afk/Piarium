@@ -6,6 +6,7 @@
  * those artifacts lack dylink.0.
  */
 import fs from "node:fs";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -49,4 +50,46 @@ copyIfNeeded(path.join(javascriptRoot, "tree-sitter-javascript.wasm"), "tree-sit
 const jsonRoot = packageRoot("tree-sitter-json");
 copyIfNeeded(path.join(jsonRoot, "tree-sitter-json.wasm"), "tree-sitter-json.wasm");
 
-log(`runtime assets ready in ${destDir}`);
+// The common-language grammars are checked into runtime/ so production, Web,
+// and Electron builds stay offline and reproducible. The committed manifest is
+// the sole list and digest authority: a missing, changed, or query-less pack
+// must fail the build instead of silently turning a language into parser-only
+// support.
+const manifestPath = path.join(webRoot, "application-host", "lib", "structure", "grammar-packs.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const customQueryAliases = { shellscript: "tree-sitter-bash.tags.scm", csharp: "tree-sitter-csharp.tags.scm" };
+const queryFileFor = (languageId, grammarFile) => {
+  return customQueryAliases[languageId] ?? grammarFile.replace(/\.wasm$/i, ".tags.scm");
+};
+const sha256 = (file) => `sha256-${createHash("sha256").update(fs.readFileSync(file)).digest("hex")}`;
+
+const validateBundledGrammars = async () => {
+  const { Parser, Language, Query } = await import("web-tree-sitter");
+  const runtimeWasm = fileURLToPath(import.meta.resolve("web-tree-sitter/web-tree-sitter.wasm"));
+  await Parser.init({ locateFile: () => runtimeWasm });
+  let checked = 0;
+  for (const [languageId, pack] of Object.entries(manifest.packs ?? {})) {
+    const grammarPath = path.join(destDir, pack.grammarFile);
+    if (!fs.existsSync(grammarPath)) throw new Error(`Missing bundled grammar for ${languageId}: ${grammarPath}`);
+    const bytes = fs.statSync(grammarPath).size;
+    if (bytes !== pack.bytes || sha256(grammarPath) !== pack.integrity) {
+      throw new Error(`Bundled grammar digest/size does not match grammar-packs.json for ${languageId}`);
+    }
+    const queryPath = path.join(destDir, queryFileFor(languageId, pack.grammarFile));
+    if (!fs.existsSync(queryPath) || fs.statSync(queryPath).size === 0) {
+      throw new Error(`Missing bundled structure query for ${languageId}: ${queryPath}`);
+    }
+    if (pack.tagsIntegrity && !customQueryAliases[languageId] && sha256(queryPath) !== pack.tagsIntegrity) {
+      throw new Error(`Bundled upstream structure query digest does not match grammar-packs.json for ${languageId}`);
+    }
+    const language = await Language.load(grammarPath);
+    const query = new Query(language, fs.readFileSync(queryPath, "utf8"));
+    query.delete();
+    language.delete?.();
+    checked += 1;
+  }
+  return checked;
+};
+
+const bundledGrammarCount = await validateBundledGrammars();
+log(`runtime assets ready in ${destDir} (${bundledGrammarCount} manifest grammars, wasm digests and queries compiled)`);

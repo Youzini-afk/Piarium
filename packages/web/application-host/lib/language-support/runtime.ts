@@ -3,6 +3,7 @@ import type {
   LanguageSupportAPI,
   LanguageSupportInstallResult,
   LanguageSupportLanguageRow,
+  LanguageSupportServerInfo,
   LanguageSupportStatus,
   LanguageSupportStoreStatus,
   StructureGrammarStatus,
@@ -38,6 +39,8 @@ export interface LanguageSupportRuntimeOptions {
   manifest?: GrammarPackManifest;
   store?: GrammarStore;
   installer?: GrammarInstaller;
+  serverInfo?: (languageId: string) => LanguageSupportServerInfo | Promise<LanguageSupportServerInfo>;
+  prepareServer?: (languageId: string, root: string, signal: AbortSignal) => Promise<unknown>;
 }
 
 export interface LanguageSupportRuntime extends LanguageSupportAPI {
@@ -83,6 +86,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
   const now = options.now ?? Date.now;
   const wantedByWorkspace = new Map<string, Set<string>>();
   const cache = new Map<string, { expiresAt: number; status: LanguageSupportStatus }>();
+  const serverPreparations = new Map<string, { controller: AbortController; result: Promise<LanguageSupportServerInfo> }>();
 
   const installableLanguageIds = options.installableLanguageIds ?? (() => {
     const packs = Object.keys(options.manifest?.packs ?? {});
@@ -154,13 +158,20 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     cache.delete(workspaceId);
   };
 
+  const withServers = async (status: LanguageSupportStatus): Promise<LanguageSupportStatus> => {
+    if (!options.serverInfo) return status;
+    return { ...status, languages: await Promise.all(status.languages.map(async (row) => ({
+      ...row, server: await options.serverInfo!(row.languageId),
+    }))) };
+  };
+
   const getStatus = async (request: { workspaceId: string }): Promise<LanguageSupportStatus> => {
     const workspaceId = request.workspaceId.trim();
     if (!workspaceId) {
       return { workspaceId, languages: [], partial: false, scannedFiles: 0, fileLimit, grammarStore: "ready" };
     }
     const cached = cache.get(workspaceId);
-    if (cached && cached.expiresAt > now()) return cached.status;
+    if (cached && cached.expiresAt > now()) return withServers(cached.status);
 
     let grammarStore: LanguageSupportStoreStatus = "ready";
     let catalog: ReturnType<typeof sets>;
@@ -224,7 +235,7 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
       grammarStore,
     };
     cache.set(workspaceId, { expiresAt: now() + cacheTtlMs, status });
-    return status;
+    return withServers(status);
   };
 
   return {
@@ -232,6 +243,31 @@ export function createLanguageSupportRuntime(options: LanguageSupportRuntimeOpti
     peekWanted: (workspaceId) => [...(wantedByWorkspace.get(workspaceId) ?? [])],
     installedStructureSpec,
     getStatus,
+    prepareServer(request) {
+      const { workspaceId, languageId } = request;
+      const key = JSON.stringify([workspaceId, languageId]);
+      const existing = serverPreparations.get(key);
+      if (existing) return existing.result;
+      const controller = new AbortController();
+      const result = (async (): Promise<LanguageSupportServerInfo> => {
+        if (!options.prepareServer || !options.serverInfo) return { status: 'unsupported' };
+        try {
+          const workspace = await options.inspectWorkspace(workspaceId);
+          controller.signal.throwIfAborted();
+          await options.prepareServer(languageId, workspace.root, controller.signal);
+        } catch (error) {
+          if (!controller.signal.aborted) throw error;
+        }
+        return options.serverInfo(languageId);
+      })();
+      const pending = { controller, result };
+      serverPreparations.set(key, pending);
+      void result.finally(() => { if (serverPreparations.get(key) === pending) serverPreparations.delete(key); }).catch(() => {});
+      return result;
+    },
+    async cancelServerPreparation(request) {
+      serverPreparations.get(JSON.stringify([request.workspaceId, request.languageId]))?.controller.abort();
+    },
     install: async (request) => {
       if (!options.installer) return unsupportedInstall(request.languageId);
       const result = await options.installer.install(request);

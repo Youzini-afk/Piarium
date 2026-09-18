@@ -110,8 +110,15 @@ Do not hard-code the four flags.
 
 ## Tree-sitter coverage
 
-Wired language ids are `typescript`, `typescriptreact`, `javascript`,
-`javascriptreact`, and `json`. JS and JSX share `tree-sitter-javascript.wasm`.
+The Host bundles the runtime plus wasm and an outline query for the common
+language ids in the committed grammar manifest: `typescript`,
+`typescriptreact`, `javascript`, `javascriptreact`, `json`, `python`, `go`,
+`rust`, `java`, `c`, `cpp`, `csharp`, `kotlin`, `ruby`, `php`, `shellscript`,
+`css`, `html`, `yaml`, and `toml`. JS and JSX share
+`tree-sitter-javascript.wasm`; each other id has its matching grammar file in
+`runtime/`. The query files are checked in beside the wasm so a production
+Host, cloud server, and Electron app have the same structure behavior without
+an install click or network access.
 
 ### TypeScript / TSX
 
@@ -151,7 +158,9 @@ enter the cold catalog — key names are not what `searchSymbols` answers.
 
 Native grammar runtimes are cached by the kernel from the registered recipe and
 actual wasm digest. Parsing and query cancellation happen in the compute worker;
-the Host never holds a live tree across an `await`.
+the Host never holds a live tree across an `await`. The Host submits the same
+recipe path for bundled and user-installed grammars; Rust is the only parser
+and query authority.
 
 ## Wiring
 
@@ -164,11 +173,13 @@ virtual Threads call the provider with a pin-bound compute function. Semantic
 chunking uses native structural units and keeps only tokenizer-aware packing and
 embedding decoration in TypeScript.
 
-Runtime wasm lives in `lib/structure/runtime/` (`web-tree-sitter.wasm` plus the
-TS/TSX grammars from `tree-sitter-typescript@0.23.2`, JavaScript from
-`tree-sitter-javascript@0.25.0`, and JSON from `tree-sitter-json@0.24.8`). Paths go through the same
-asar / asar.unpacked remap as `extension-builtins` (D-096). A missing or
-unloadable wasm is `unavailable`; explore then tries LSP or the ±3 window.
+Runtime wasm and the corresponding tags queries live in
+`lib/structure/runtime/`. Paths go through the same asar / asar.unpacked remap
+as `extension-builtins` (D-096). The Application Host build copies the runtime
+directory into `server/lib/structure/runtime/`; Electron unpacks its
+`node_modules` tree, so the existing path remap reaches the physical wasm.
+A missing or unloadable wasm/query is `unavailable`; explore then tries LSP or
+the ±3 window.
 
 On-demand grammars are listed in committed `grammar-packs.json` (publish-time
 sha256, D-125). Install writes `{PIARIUM_DATA_DIR}/structure-grammars/sha256/<hex>.wasm`
@@ -188,12 +199,14 @@ symbol kinds, unrecognized suffixes become `unknown` (catalog name, never a
 slice unit), and `reference.*` produces nothing. Hit classification falls back
 to matching node type names, which is a tree-sitter naming convention rather
 than a per-language table. `literalCalls` and `imports` need hand-written
-queries and stay off. `refresh-grammar-manifest.mjs` compiles the query against
-that pack's own wasm at publish time and only records `tagsPath` /
-`tagsIntegrity` when it compiles; install verifies both digests. A pack that
-ships no query installs a parser with every capability off, and
-`LanguageSupportStatus` reports that distinctly so the settings page does not
-show it as working (D-128).
+queries and stay off. Common bundled grammars whose npm packages do not ship
+tags queries use the checked-in `runtime/*.tags.scm` query; the refresh script
+compiles those queries against the published wasm as a build-time check. The
+manifest's `tagsPath` / `tagsIntegrity` fields continue to describe only files
+inside an on-demand tarball, and install verifies both digests. A pack that is
+neither bundled nor shipped with a verified query installs a parser with every
+structure capability off, and `LanguageSupportStatus` reports that distinctly
+so the settings page does not show it as working (D-128).
 
 `GrammarStore` treats only ENOENT as an empty store; a parse error or an IO
 failure raises `GrammarStoreUnreadableError` rather than reporting nothing

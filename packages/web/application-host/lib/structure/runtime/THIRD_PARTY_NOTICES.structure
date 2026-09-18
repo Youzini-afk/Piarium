@@ -1,10 +1,10 @@
 Piarium structure runtime third-party notices
 ===========================================
 
-This directory vendors WebAssembly used by the Application Host structure
-provider. Bundled grammars are TypeScript, TSX, JavaScript/JSX, and JSON
-(D-091 / D-096). Authorization and source paths are checked on every load,
-including cache hits.
+This directory vendors WebAssembly and checked-in tags queries used by the
+Application Host structure provider. The common grammar set is bundled so
+search outlines work offline in Web, cloud, and Electron builds. Authorization
+and source paths are checked on every load, including cache hits.
 
 1. web-tree-sitter
    Source: https://www.npmjs.com/package/web-tree-sitter
@@ -34,6 +34,22 @@ including cache hits.
    Grammar license: MIT. See LICENSE.tree-sitter-json.
    ABI 14, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
 
-5. Piarium tree-sitter queries
+5. Common-language grammar wasm
+   Published wasm from the pinned npm packages recorded in
+   `application-host/lib/structure/grammar-packs.json`:
+   `tree-sitter-python`, `tree-sitter-go`, `tree-sitter-rust`,
+   `tree-sitter-java`, `tree-sitter-c`, `tree-sitter-cpp`,
+   `tree-sitter-c-sharp`, `@tree-sitter-grammars/tree-sitter-kotlin`,
+   `tree-sitter-ruby`, `tree-sitter-php`, `tree-sitter-bash`,
+   `tree-sitter-css`, `tree-sitter-html`,
+   `@tree-sitter-grammars/tree-sitter-yaml`, and
+   `@tree-sitter-grammars/tree-sitter-toml`.
+   Files: `tree-sitter-*.wasm` for those language ids.
+   Grammar licenses are MIT; see each package's published LICENSE.
+   ABI 14 or 15, compatible with web-tree-sitter 0.27 (MIN 13–LANGUAGE 15).
+
+6. Piarium tree-sitter queries
    Adapted from Apache-2.0 query sets in Aider (paul-gauthier/aider) and
-   nvim-treesitter (nvim-treesitter/nvim-treesitter). See queries.ts.
+   nvim-treesitter (nvim-treesitter/nvim-treesitter), or authored from the
+   corresponding grammar node shapes for packages without upstream tags.
+   Files: `tree-sitter-*.tags.scm`. See `languages.ts` and the refresh script.

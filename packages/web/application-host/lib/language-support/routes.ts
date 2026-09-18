@@ -43,6 +43,16 @@ export const registerLanguageSupportRoutes = (app: Express, {
     }
   });
 
+  app.post('/api/language-support/server/:action', requireAuth, async (req, res) => {
+    try {
+      const body = readBody(req);
+      const request = { workspaceId: stringField(body.workspaceId), languageId: stringField(body.languageId) };
+      if (req.params.action === 'prepare') return res.json(await languageSupport.prepareServer(request));
+      if (req.params.action === 'cancel') { await languageSupport.cancelServerPreparation(request); return res.json({ status: 'cancelled' }); }
+      return res.status(404).json({ error: 'Unknown language server action' });
+    } catch (error) { return sendError(res, error); }
+  });
+
   app.post("/api/language-support/cancel", requireAuth, async (req, res) => {
     try {
       return res.json(await languageSupport.cancelInstall({ languageId: stringField(readBody(req).languageId) }));

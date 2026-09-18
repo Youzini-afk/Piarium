@@ -43,7 +43,7 @@ describe('language support presentation', () => {
     const working = { outline: true, classifyHits: true, literalCalls: false, imports: false };
     expect(grammarStatusTone('installed', inert)).toBe('warning');
     expect(grammarStatusTone('installed', working)).toBe('success');
-    expect(grammarStatusTone('bundled', inert)).toBe('success');
+    expect(grammarStatusTone('bundled', inert)).toBe('warning');
     expect(structureNoteKey(row({ grammarStatus: 'installed' })))
       .toBe('settings.languageSupport.note.installedWithoutQuery');
     expect(structureNoteKey(row({ grammarStatus: 'installed', capabilities: working }))).toBeNull();

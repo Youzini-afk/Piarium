@@ -93,6 +93,21 @@ const licenseFile = (files) => (
 
 const TAGS_ENTRY = /(?:^|\/)queries\/tags\.scm$/;
 
+// Several common grammars publish a wasm parser without an upstream tags.scm.
+// Their checked-in runtime query is compiled here as a release check; it is
+// intentionally not written into `tagsPath`, because that field names a file
+// inside the npm tarball used by the on-demand installer. The bundled Host
+// wires these queries directly from runtime/.
+const BUNDLED_QUERY_FILES = {
+  shellscript: "tree-sitter-bash.tags.scm",
+  csharp: "tree-sitter-csharp.tags.scm",
+  css: "tree-sitter-css.tags.scm",
+  html: "tree-sitter-html.tags.scm",
+  kotlin: "tree-sitter-kotlin.tags.scm",
+  yaml: "tree-sitter-yaml.tags.scm",
+  toml: "tree-sitter-toml.tags.scm",
+};
+
 const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedVersion) => {
   let metadata;
   try {
@@ -136,6 +151,7 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
   let tagsPath = null;
   let tagsIntegrity = null;
   let tagsNote = null;
+  let bundledQueryValidated = false;
   const tagsRelative = files.find((file) => TAGS_ENTRY.test(file.replace(/\\/g, "/")));
   if (!tagsRelative) {
     tagsNote = "no queries/tags.scm";
@@ -147,6 +163,25 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
       tagsIntegrity = integrityOf(tagsBytes);
     } catch (error) {
       tagsNote = `tags.scm did not compile (${error instanceof Error ? error.message.split("\n")[0] : error})`;
+    }
+  }
+  const bundledQueryFile = BUNDLED_QUERY_FILES[languageId];
+  if (bundledQueryFile) {
+    const bundledQueryPath = path.join(
+      webRoot,
+      "application-host",
+      "lib",
+      "structure",
+      "runtime",
+      bundledQueryFile,
+    );
+    try {
+      const bundledQuery = await fs.readFile(bundledQueryPath, "utf8");
+      runtime.compileQuery(language, bundledQuery);
+      bundledQueryValidated = true;
+      tagsNote = `${tagsNote ? `${tagsNote}; ` : ""}bundled ${bundledQueryFile} compiled`;
+    } catch (error) {
+      tagsNote = `${tagsNote ? `${tagsNote}; ` : ""}bundled query did not compile (${error instanceof Error ? error.message.split("\n")[0] : error})`;
     }
   }
 
@@ -166,6 +201,7 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
       tagsIntegrity,
     },
     tagsNote,
+    bundledQueryValidated,
   };
 };
 
@@ -229,7 +265,9 @@ const main = async () => {
           }
           packs[candidate.languageId] = result.pack;
           recorded = true;
-          const outline = result.pack.tagsPath ? "outline" : `no outline (${result.tagsNote})`;
+          const outline = result.pack.tagsPath || result.bundledQueryValidated
+            ? "outline"
+            : `no outline (${result.tagsNote})`;
           log(`${candidate.languageId}: ${packageName}@${result.pack.version} abi=${result.pack.abi} ${result.pack.bytes}B ${outline}`);
           break;
         } catch (error) {

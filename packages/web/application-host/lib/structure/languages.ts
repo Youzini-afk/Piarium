@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { JSON_OUTLINE_MAX_DEPTH, JSON_OUTLINE_MAX_SYMBOLS } from "./constants.js";
 import {
   JAVASCRIPT_DEFINITION_QUERY,
@@ -8,6 +9,7 @@ import {
   TYPESCRIPT_IMPORT_QUERY,
   TYPESCRIPT_LITERAL_CALL_QUERY,
 } from "./queries.js";
+import { resolveStructureRuntimeFile } from "./runtime-path.js";
 import { NO_STRUCTURE_CAPABILITIES, type StructureCapabilities } from "./types.js";
 
 /**
@@ -62,6 +64,37 @@ const JAVASCRIPT_BINDING_TYPES: ReadonlySet<string> = new Set([
   "field_definition",
 ]);
 
+/**
+ * Grammars we can install carry no hand-written node-type table, so comments
+ * and strings are recognised by name shape. Every grammar we list names them
+ * with these substrings (`comment`, `line_comment`, `block_comment`, `string`,
+ * `raw_string_literal`, `interpreted_string_literal`, `char_literal`).
+ */
+const GENERIC_COMMENT_TYPES: StructureTypeMatcher = (type) => type.includes("comment");
+const GENERIC_STRING_TYPES: StructureTypeMatcher = (type) => (
+  type.includes("string") || type.includes("char_literal")
+);
+
+const readBundledTags = (queryFile: string): string => {
+  try {
+    return readFileSync(resolveStructureRuntimeFile(queryFile, import.meta.url), "utf8");
+  } catch {
+    // A missing staged asset is reported by the native provider as unavailable;
+    // importing the Host must remain possible so the rest of the service can
+    // report that degradation instead of failing during module evaluation.
+    return "";
+  }
+};
+
+const bundledTags = (grammarFile: string, queryFile: string): TreeSitterLanguageSpec => ({
+  grammarFile,
+  definitionQuery: readBundledTags(queryFile),
+  tagsOutline: true,
+  commentTypes: GENERIC_COMMENT_TYPES,
+  stringTypes: GENERIC_STRING_TYPES,
+  bindingTypes: new Set(),
+});
+
 const TYPESCRIPT_FAMILY: Omit<TreeSitterLanguageSpec, "grammarFile"> = {
   definitionQuery: TYPESCRIPT_DEFINITION_QUERY,
   importQuery: TYPESCRIPT_IMPORT_QUERY,
@@ -105,18 +138,22 @@ export const TREE_SITTER_LANGUAGE_SPECS: Readonly<Record<string, TreeSitterLangu
     bindingTypes: new Set(),
     jsonOutline: { maxDepth: JSON_OUTLINE_MAX_DEPTH, maxSymbols: JSON_OUTLINE_MAX_SYMBOLS },
   },
+  python: bundledTags("tree-sitter-python.wasm", "tree-sitter-python.tags.scm"),
+  go: bundledTags("tree-sitter-go.wasm", "tree-sitter-go.tags.scm"),
+  rust: bundledTags("tree-sitter-rust.wasm", "tree-sitter-rust.tags.scm"),
+  java: bundledTags("tree-sitter-java.wasm", "tree-sitter-java.tags.scm"),
+  c: bundledTags("tree-sitter-c.wasm", "tree-sitter-c.tags.scm"),
+  cpp: bundledTags("tree-sitter-cpp.wasm", "tree-sitter-cpp.tags.scm"),
+  csharp: bundledTags("tree-sitter-c_sharp.wasm", "tree-sitter-csharp.tags.scm"),
+  kotlin: bundledTags("tree-sitter-kotlin.wasm", "tree-sitter-kotlin.tags.scm"),
+  ruby: bundledTags("tree-sitter-ruby.wasm", "tree-sitter-ruby.tags.scm"),
+  php: bundledTags("tree-sitter-php.wasm", "tree-sitter-php.tags.scm"),
+  shellscript: bundledTags("tree-sitter-bash.wasm", "tree-sitter-bash.tags.scm"),
+  css: bundledTags("tree-sitter-css.wasm", "tree-sitter-css.tags.scm"),
+  html: bundledTags("tree-sitter-html.wasm", "tree-sitter-html.tags.scm"),
+  yaml: bundledTags("tree-sitter-yaml.wasm", "tree-sitter-yaml.tags.scm"),
+  toml: bundledTags("tree-sitter-toml.wasm", "tree-sitter-toml.tags.scm"),
 };
-
-/**
- * Grammars we can install carry no hand-written node-type table, so comments
- * and strings are recognised by name shape. Every grammar we list names them
- * with these substrings (`comment`, `line_comment`, `block_comment`, `string`,
- * `raw_string_literal`, `interpreted_string_literal`, `char_literal`).
- */
-const GENERIC_COMMENT_TYPES: StructureTypeMatcher = (type) => type.includes("comment");
-const GENERIC_STRING_TYPES: StructureTypeMatcher = (type) => (
-  type.includes("string") || type.includes("char_literal")
-);
 
 /**
  * An installed grammar plus its upstream tags query. Outline and hit
@@ -183,7 +220,7 @@ export function treeSitterLanguageSpec(languageId: string | null | undefined): T
 }
 
 export function capabilitiesFromSpec(spec: TreeSitterLanguageSpec | undefined): StructureCapabilities {
-  if (!spec) return NO_STRUCTURE_CAPABILITIES;
+  if (!spec || (spec.tagsOutline === true && !spec.definitionQuery.trim())) return NO_STRUCTURE_CAPABILITIES;
   return {
     outline: true,
     classifyHits: true,

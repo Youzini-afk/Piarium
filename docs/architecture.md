@@ -1319,6 +1319,14 @@ and LSP remains a protocol/navigation/diagnostic service. Host `web-tree-sitter`
 grammar-install ABI admission and does not parse workspace source. Generic Files UI reads are not
 reclassified as R5 compute; their mutation/resource authority remains the R2 boundary.
 
+Common language grammars and extraction queries ship with the application (D-290). Node-based
+TypeScript/JavaScript, Python, HTML/CSS, JSON, YAML and Bash language servers are immutable built-in
+extension assets. Rust Analyzer, gopls, clangd and Marksman are prepared in a private Host tooling
+directory when first requested, with fixed distribution identities; their actual workspace processes
+remain under the same Rust process service and LSP Supervisor. Merely viewing language status starts
+neither downloads nor processes. Installation availability, active analysis, missing project toolchains
+and unsupported languages remain distinct in Settings.
+
 The removed production paths include Host ripgrep child management, recursive file-search scanning,
 WorkingBranch corpus/body mirrors and Host AST/chunker discovery. R5 is therefore Complete under
 D-281. D-282 then closes R0/R6 and Stage R as described below.

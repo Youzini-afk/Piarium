@@ -83,13 +83,24 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
     }
   };
   let grammarGrant: Promise<KernelGrantHandle> | undefined;
+  const grammarRecipes = new Map<string, Promise<string>>();
   return {
     async registerGrammar(recipe: KernelComputeGrammarParams): Promise<string> {
       lifecycle.signal.throwIfAborted();
-      grammarGrant ??= options.client.issueGrant({ grantId: "compute-grammar:" + randomUUID(), capabilities: ["compute.grammar"], pathScopes: [] });
-      const registered = await options.client.scoped(await grammarGrant).computeGrammarRegister(recipe);
-      if (typeof registered.recipeId !== "string") throw new Error("Native grammar registration returned no recipe identity");
-      return registered.recipeId;
+      // The digest and queries identify an immutable recipe for this kernel
+      // lifetime. A repository scan must not reread the same wasm per file.
+      const key = JSON.stringify(recipe);
+      const existing = grammarRecipes.get(key);
+      if (existing) return existing;
+      const registering = track((async () => {
+        grammarGrant ??= options.client.issueGrant({ grantId: "compute-grammar:" + randomUUID(), capabilities: ["compute.grammar"], pathScopes: [] });
+        const registered = await options.client.scoped(await grammarGrant).computeGrammarRegister(recipe);
+        if (typeof registered.recipeId !== "string") throw new Error("Native grammar registration returned no recipe identity");
+        return registered.recipeId;
+      })());
+      grammarRecipes.set(key, registering);
+      void registering.catch(() => { if (grammarRecipes.get(key) === registering) grammarRecipes.delete(key); });
+      return registering;
     },
     directory(cwd: string, input: DirectoryComputeInput, runOptions: KernelComputeOptions = {}, overlays: readonly KernelComputeText[] = []): Promise<KernelComputeResult> {
       return track((async () => {
@@ -130,6 +141,7 @@ export function createKernelComputeService(options: KernelComputeServiceOptions)
       disposed = true;
       lifecycle.abort(new DOMException("Native computation service disposed", "AbortError"));
       await Promise.allSettled([...operations]);
+      grammarRecipes.clear();
       unregister();
       if (!options.client.isReady) return;
       await Promise.all([...contexts.values()].map(async (pending) => options.client.revokeGrant((await pending).grant.grantId)));

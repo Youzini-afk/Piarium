@@ -17,6 +17,7 @@ import {
   ApplicationExtensionRuntime,
   ExtensionPackageManager,
 } from '@piarium/extension-host';
+import { PIARIUM_BUNDLED_LANGUAGE_SERVERS } from '@piarium/extension-builtins';
 import { createDocumentAuthority, type DocumentAuthority, type DocumentMutationObservation } from './lib/documents/authority.js';
 import { createManagedRootAdmission } from './lib/kernel/managed-root-admission.js';
 import { createKernelProcessService } from './lib/kernel/process-service.js';
@@ -34,6 +35,8 @@ import { RecoveryPrimitiveError } from './lib/recovery/errors.js';
 import { createPiWorkspaceWriterTracker } from './lib/recovery/pi-writer-tracker.js';
 import { createRecoveryTurnCoordinator } from './lib/recovery/turn-coordinator.js';
 import { createLanguageSupervisor, SURFACE_LANGUAGE_VIEW } from './lib/lsp/supervisor.js';
+import { createManagedLanguageServers } from './lib/lsp/managed-servers.js';
+import { canonicalizePathIdentity, isPathWithinRoot } from './lib/workspace/path-safety.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
 import { createRunRuntime } from './lib/run/runtime.js';
 import {
@@ -1236,8 +1239,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     })(cwd),
     onError: (error) => console.error("[PiariumProcess]", error.message),
   });
+  // Installation programs are Host-owned tooling. They receive only this
+  // private resource root; editor/agent LSP processes still use their workspace.
+  const languageToolProcesses = createKernelProcessService({
+    client: kernelClient,
+    resolveIdentity: async (cwd) => {
+      const canonicalRoot = await canonicalizePathIdentity(path.join(PIARIUM_DATA_DIR, 'language-servers'));
+      const canonicalCwd = await canonicalizePathIdentity(cwd);
+      if (!isPathWithinRoot(canonicalCwd, canonicalRoot)) throw new Error('Language tool preparation escaped its private directory');
+      const workspaceId = `language-tools:${extensionRuntime.services.hostId}`;
+      return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
+    },
+  });
+  const managedLanguageServers = createManagedLanguageServers({ directory: PIARIUM_DATA_DIR, spawn: languageToolProcesses.spawn });
+  const nativeLanguageProviders = new Map(managedLanguageServers.languageIds.map((languageId) => [`piarium.managed.${languageId}`, languageId]));
   const languageSupervisor = createLanguageSupervisor({
     activateProviders: () => extensionRuntime.activateForEvent('workspace-match'),
+    prepareProvider: (providerId, root, signal) => {
+      const languageId = nativeLanguageProviders.get(providerId);
+      return languageId ? managedLanguageServers.ensure(languageId, root, signal) : Promise.resolve(null);
+    },
     documents: documentsAuthority,
     spawn: nativeProcesses.spawn,
     pathModule: path,
@@ -1247,6 +1268,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // authority, so renderer or extension input cannot expand this boundary.
     isTrusted: workspaceRootGuard,
   });
+  for (const [providerId, languageId] of nativeLanguageProviders) {
+    languageSupervisor.registerProvider({ providerId, command: providerId, languageIds: [languageId], source: 'builtin' });
+  }
   const nativeCompute = createKernelComputeService({
     client: kernelClient,
     resolveIdentity: (cwd) => createKernelProcessIdentityResolver({
@@ -1971,6 +1995,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     manifest: grammarManifest,
     store: grammarStore,
     installer: grammarInstaller,
+    prepareServer: (languageId, root, signal) => managedLanguageServers.ensure(languageId, root, signal),
+    serverInfo: (languageId) => {
+      const bundled = PIARIUM_BUNDLED_LANGUAGE_SERVERS.find((server) => server.languageIds.includes(languageId));
+      if (bundled) return { status: 'bundled', name: bundled.name };
+      const { status, name, message } = managedLanguageServers.inspect(languageId);
+      return { status, ...(name ? { name } : {}), ...(message ? { message } : {}) };
+    },
   });
   const structureSource = createStructureSource([
     createTreeSitterStructureProvider({
@@ -2823,9 +2854,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
-        threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), runRuntime.dispose(),
+        threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
+      await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       await nativeProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });
       for (const error of processShutdownErrors) console.error('[PiariumKernel] Native process shutdown incomplete:', errorMessage(error));
       await piRuntimeGateway.stop();

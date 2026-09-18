@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
   PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
   PIARIUM_BUILTIN_WORKSPACE_RECOVERY_EXTENSION_ID,
 } from "./index.js";
@@ -30,6 +31,12 @@ export const resolvePiariumBuiltinPackageRoot = (
 };
 
 export const PIARIUM_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
+  [
+    PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
+    resolvePiariumBuiltinPackageRoot(
+      fileURLToPath(new URL("./builtin-packages/language-servers/", import.meta.url)),
+    ),
+  ],
   [
     PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID,
     resolvePiariumBuiltinPackageRoot(

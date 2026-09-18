@@ -8,6 +8,8 @@ const unsupported = async (languageId: string): Promise<LanguageSupportInstallRe
 });
 
 export const createVSCodeLanguageSupportAPI = (): LanguageSupportAPI => ({
+  prepareServer: async () => ({ status: 'unsupported', message: 'Language servers are managed by VS Code.' }),
+  cancelServerPreparation: async () => {},
   async getStatus(request): Promise<LanguageSupportStatus> {
     return {
       workspaceId: request.workspaceId,

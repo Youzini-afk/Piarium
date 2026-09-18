@@ -174,6 +174,7 @@ interface LanguageProviderDescriptor extends Record<string, unknown> {
 
 interface LanguageSupervisorOptions {
   activateProviders?: (request: { languageId: string; workspaceId: string }) => Promise<void>;
+  prepareProvider?: (providerId: string, root: string, signal: AbortSignal) => Promise<{ command: string; args: readonly string[]; initializationOptions?: Readonly<Record<string, unknown>> } | null>;
   documents: Pick<DocumentAuthority, 'inspectWorkspace'>;
   env?: NodeJS.ProcessEnv;
   isTrusted?: (root: string) => Promise<boolean>;
@@ -319,6 +320,7 @@ const lspSeverity = (value: unknown): 'error' | 'hint' | 'info' | 'warning' => {
 
 export const createLanguageSupervisor = ({
   activateProviders = async () => {},
+  prepareProvider,
   documents,
   spawn,
   pathModule = path,
@@ -346,13 +348,15 @@ export const createLanguageSupervisor = ({
   };
 
   const findProvider = (workspaceId: string, languageId: string): LanguageProvider | null => (
-    providers.find((provider) => (
+    providers.filter((provider) => (
       provider.languageIds.includes(languageId)
       && (!provider.workspaceId || provider.workspaceId === workspaceId)
-    )) ?? null
+    )).sort((left, right) => Number(Boolean(right.workspaceId)) - Number(Boolean(left.workspaceId))
+      || Number(left.source === 'builtin') - Number(right.source === 'builtin'))[0] ?? null
   );
 
   const inflight = new Map<string, Promise<LanguageSessionRecord | null>>();
+  let disposed = false;
 
   const snapshotFor = (record: LanguageSessionRecord | null | undefined): LanguageStatusSnapshot | null => {
     if (!record) return null;
@@ -487,20 +491,30 @@ export const createLanguageSupervisor = ({
     usedAt: now(),
   });
 
-  const ensureSession = async (
+  const ensureSession = (
     workspaceId: string,
     languageId: string,
     view: LanguageViewId,
   ): Promise<LanguageSessionRecord | null> => {
     const key = sessionKey(workspaceId, languageId, view);
-    if (inflight.has(key)) return inflight.get(key) ?? null;
+    const pending = inflight.get(key);
+    if (pending) return pending;
+    const run = resolveSession(workspaceId, languageId, view);
+    inflight.set(key, run);
+    void run.finally(() => { if (inflight.get(key) === run) inflight.delete(key); }).catch(() => {});
+    return run;
+  };
+
+  const resolveSession = async (workspaceId: string, languageId: string, view: LanguageViewId): Promise<LanguageSessionRecord | null> => {
+    if (disposed) return null;
+    const key = sessionKey(workspaceId, languageId, view);
     const existing = sessions.get(key);
     if (existing && (existing.status === 'ready' || existing.status === 'degraded')) {
       existing.usedAt = now();
       return existing;
     }
     let provider = findProvider(workspaceId, languageId);
-    if (!provider) {
+    if (!provider || provider.source === 'builtin') {
       try {
         await activateProviders({ workspaceId, languageId });
       } catch (error) {
@@ -522,15 +536,9 @@ export const createLanguageSupervisor = ({
       }
       provider = findProvider(workspaceId, languageId);
     }
-    if (!provider) return null;
+    if (!provider || disposed) return null;
     if (existing) await disposeRecord(existing);
-    const run = startSession(workspaceId, languageId, view, provider, existing);
-    inflight.set(key, run);
-    try {
-      return await run;
-    } finally {
-      inflight.delete(key);
-    }
+    return startSession(workspaceId, languageId, view, provider, existing);
   };
 
   const startSession = async (
@@ -597,8 +605,13 @@ export const createLanguageSupervisor = ({
     emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
 
     let child: ManagedPipedProcessHandle;
+    let initializationOptions = provider.initializationOptions;
     try {
-      child = await launchOwnedProcess(record, (signal) => spawn(provider.command, provider.args ?? [], {
+      child = await launchOwnedProcess(record, async (signal) => {
+        const prepared = await prepareProvider?.(provider.providerId, workspace.root, signal);
+        if (prepared?.initializationOptions) initializationOptions = { ...prepared.initializationOptions, ...initializationOptions };
+        signal.throwIfAborted();
+        return spawn(prepared?.command ?? provider.command, prepared?.args ?? provider.args, {
         cwd: workspace.root,
         env: {
           ...env,
@@ -611,13 +624,29 @@ export const createLanguageSupervisor = ({
         windowsHide: true,
         stdio: ['pipe', 'pipe', 'pipe'],
         signal,
-      }));
+        });
+      });
     } catch (error) {
       setFailed(record, error instanceof Error ? error.message : 'Failed to start language server');
       return record;
     }
     record.child = child;
-    const rpc = createJsonRpcClient({ input: child.stdout, output: child.stdin });
+    const rpc = createJsonRpcClient({
+      input: child.stdout,
+      output: child.stdin,
+      onRequest: (method, params) => {
+        if (method === 'workspace/configuration') {
+          const items = asRecord(params)?.items;
+          // No synthetic configuration overrides: servers use their own defaults
+          // and read the project's native configuration (pyrightconfig, tsconfig…).
+          return Array.isArray(items) ? items.map(() => null) : [];
+        }
+        if (method === 'workspace/workspaceFolders') return [{ uri: toFileUri(record.root), name: pathModule.basename(record.root) }];
+        if (method === 'window/workDoneProgress/create' || method === 'window/showMessageRequest') return null;
+        if (method === 'workspace/applyEdit') return { applied: false, failureReason: 'Edits must be requested through Documents.' };
+        throw new Error(`Unsupported language client method: ${method}`);
+      },
+    });
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
       if (sessions.get(key) !== record || record.rpc !== rpc) return;
@@ -735,13 +764,15 @@ export const createLanguageSupervisor = ({
             publishDiagnostics: { relatedInformation: true, tagSupport: { valueSet: [1, 2] } },
           },
           workspace: {
+            configuration: true,
+            workspaceFolders: true,
             symbol: { resolveSupport: { properties: ['location.range'] }, tagSupport: { valueSet: [1] } },
             workspaceEdit: { documentChanges: true, changeAnnotationSupport: { groupsOnLabel: true } },
             executeCommand: { dynamicRegistration: false },
           },
         },
         workspaceFolders: [{ uri: toFileUri(workspace.root), name: pathModule.basename(workspace.root) }],
-        ...(provider.initializationOptions ? { initializationOptions: provider.initializationOptions } : {}),
+        ...(initializationOptions ? { initializationOptions } : {}),
       }));
       record.serverCapabilities = asCapabilities(initialized?.capabilities);
       rpc.notify('initialized', {});
@@ -1535,6 +1566,7 @@ export const createLanguageSupervisor = ({
       await Promise.all([...pendingExits]);
     },
     async dispose() {
+      disposed = true;
       await Promise.all([...sessions.values()].map((record) => disposeRecord(record, 'Language supervisor disposed')));
       sessions.clear();
       desiredDocuments.clear();

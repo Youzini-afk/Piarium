@@ -2,6 +2,7 @@ import type {
   LanguageSupportAPI,
   LanguageSupportInstallResult,
   LanguageSupportStatus,
+  LanguageSupportServerInfo,
 } from '@piarium/application-client';
 import { LanguageSupportError, parseLanguageSupportFailureReason } from '@piarium/application-client';
 import { runtimeFetch } from '@piarium/application-client';
@@ -36,6 +37,8 @@ const postJson = async (path: string, body: unknown): Promise<unknown> => {
 
 export const createWebLanguageSupportAPI = (): LanguageSupportAPI => ({
   getStatus: (request) => postJson('/api/language-support/status', request) as Promise<LanguageSupportStatus>,
+  prepareServer: (request) => postJson('/api/language-support/server/prepare', request) as Promise<LanguageSupportServerInfo>,
+  cancelServerPreparation: async (request) => { await postJson('/api/language-support/server/cancel', request); },
   install: (request) => postJson('/api/language-support/install', request) as Promise<LanguageSupportInstallResult>,
   cancelInstall: (request) => postJson('/api/language-support/cancel', request) as Promise<LanguageSupportInstallResult>,
   importUserGrammar: (request) => postJson('/api/language-support/import', request) as Promise<LanguageSupportInstallResult>,

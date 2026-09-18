@@ -1154,3 +1154,24 @@ live 父图当 child 当前事实。
 权威重解析两缩一缩空、不同 anchor 隔离、partial 组合状态、pathInRoots 一致性）；既有 related-tool /
 explore / explore-query-services / explore-service / knowledge/store / knowledge/relations 套件
 回归通过。局限：scope 在 Windows 上大小写不敏感（`pathInRoots` 归一），非 Windows 区分。
+
+### D-290 · 2026-09-18 · 3.11（编程语言支持开箱即用）
+
+类型：默认值调整
+
+决定：常用语言结构包随发行提供完整 wasm + 查询；Node 型语言服务器随应用内置；较大的原生服务器在首次实际请求时自动准备。用户不再需要逐项安装基础语言支持。此决定更新 D-124 的手动准备默认与 D-128 的无查询包交付方式，原有外部配置、项目正文和语言进程权威不变。
+
+原因：用户明确要求 agent 面向常见项目开箱即用。轻量语法包的空间节省不足以抵消首次检索缺能力的损失；语言服务器需要按项目启动，但不要求用户了解包名、命令行和可执行路径。
+
+实施边界：
+
+- 结构包以已提交的版本和摘要构建，缺查询的常用语言补提取规则。原生 kernel 仍是运行期结构计算权威，不添加 Host 解析后端。
+- 保留 TS/JS 内置扩展，新增 Python、HTML/CSS、JSON、YAML、Shell 的发行语言扩展。资产自包含、随版本固定，不在用户电脑运行 npm 安装这些服务。Markdown 使用独立 Marksman，不使用依赖 VS Code 专属解析/文件 RPC 的 extracted Markdown server。
+- Rust、Go、C/C++、Markdown 由 Host 管理私有准备目录，优先复用可用本机程序。Rust/clangd/Marksman 校验固定官方资产摘要；gopls 使用已有 Go 工具链和私有安装位置。服务器的安装不替代项目 SDK、依赖和构建配置。
+- 状态查询无下载、无进程启动；真实 LSP 请求或用户“立即准备/重试”才准备。并发请求共享准备，取消不遗留可执行半包；关闭 Host 中止准备并回收所属进程。
+- LSP 继续经同一 Supervisor 和 Rust 进程监督运行。补齐 server→client 的配置/工作区请求，双向请求 ID 分开匹配；服务器不能绕过 Documents 自发应用编辑。
+- 设置展示结构检索和代码分析能力，将“已内置、按需启动”与“不支持、失败、缺项目运行环境”分开。ABI、包名、导入 wasm 放在技术详情。
+
+影响：extension-builtins 的发行资产与注册、Host structure/LSP/language-support、Application Client 状态 DTO、设置页和十种语言文案、plan 3.11、status。
+
+状态：已实施。15 种新增语法经原生提取验证；六个 Node provider 从复制产物的真实扩展 activate → descriptor → initialize → symbols/hover 验证，Python 另经 Host/Rust 进程链返回类型诊断；Windows 官方 Rust Analyzer/Marksman 下载与原生进程 smoke 通过。具体边界见 status；Java/C# 等尚未接入的服务器不标可用。

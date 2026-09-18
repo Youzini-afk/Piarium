@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { languageIdForPath } from "@piarium/protocol";
 import type { KernelComputeService } from "../kernel/compute-service.js";
 import type { KernelComputeResult } from "../kernel/compute-runner.js";
@@ -60,6 +61,10 @@ const string = (value: unknown): string => {
   return value;
 };
 
+const grammarIntegrityOf = (file: string): string => (
+  `sha256-${createHash("sha256").update(readFileSync(file)).digest("hex")}`
+);
+
 const range = (value: unknown) => {
   const record = recordOf(value);
   const startLine = positiveInteger(record.startLine);
@@ -108,6 +113,16 @@ const observedRevision = (
  * cancellable query run in the shared kernel, never a Host parser fallback. */
 export function createTreeSitterStructureProvider(options: TreeSitterStructureProviderOptions = {}): StructureProvider {
   const exists = options.pathExists ?? existsSync;
+  const grammarHashes = new Map<string, { identity: string; hash: string }>();
+  const grammarHashFor = (file: string): string => {
+    const info = statSync(file);
+    const identity = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    const known = grammarHashes.get(file);
+    if (known?.identity === identity) return known.hash;
+    const hash = grammarIntegrityOf(file);
+    grammarHashes.set(file, { identity, hash });
+    return hash;
+  };
   const specFor = (id: string): TreeSitterLanguageSpec | undefined => {
     const bundled = treeSitterLanguageSpec(id);
     if (bundled) return bundled;
@@ -120,6 +135,9 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
     if (id) options.onLanguageRequest?.(id, request.workspaceId);
     const spec = id ? specFor(id) : undefined;
     if (!spec) return undefined;
+    if (spec.tagsOutline === true && !spec.definitionQuery.trim()) {
+      throw new Error(`Structure query is not readable for bundled language: ${id}`);
+    }
     const grammarPath = resolveStructureRuntimeFile(
       spec.grammarFile,
       options.runtimeFromUrl ?? import.meta.url,
@@ -128,11 +146,13 @@ export function createTreeSitterStructureProvider(options: TreeSitterStructurePr
     );
     if (!exists(grammarPath)) throw new Error(`Grammar wasm is not readable: ${grammarPath}`);
     if (!options.compute) throw new Error("Native structure computation is unavailable");
+    const grammarHash = grammarHashFor(grammarPath);
     // Registration hashes the actual installed bytes. Neither grammar updates
     // nor query recipe changes may reuse a stale compiled language identity.
     return options.compute.registerGrammar({
       recipeId: "",
       grammarPath,
+      grammarHash,
       grammarName: "",
       style: spec.jsonOutline ? "json" : spec.tagsOutline ? "tags" : "code",
       definitionQuery: spec.definitionQuery,

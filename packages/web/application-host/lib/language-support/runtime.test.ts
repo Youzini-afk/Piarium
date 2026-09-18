@@ -13,6 +13,39 @@ const file = (relativePath: string): FileSearchItem => ({
 });
 
 describe("createLanguageSupportRuntime", () => {
+  it('prepares only on an explicit request and keeps cached inventory separate from server status', async () => {
+    let scans = 0;
+    let preparations = 0;
+    let status: 'available' | 'preparing' | 'installed' = 'available';
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const runtime = createLanguageSupportRuntime({
+      inspectWorkspace: async () => ({ root: '/ws' }),
+      searchFilesystemFiles: async () => { scans++; return [file('main.go')]; },
+      serverInfo: () => ({ status, name: 'gopls' }),
+      prepareServer: async (_language, _root, signal) => {
+        preparations++;
+        status = 'preparing';
+        started();
+        await new Promise<void>((_resolve, reject) => signal.addEventListener('abort', () => { status = 'available'; reject(signal.reason); }, { once: true }));
+      },
+    });
+    const request = { workspaceId: 'ws', languageId: 'go' };
+    expect((await runtime.getStatus(request)).languages[0]?.server?.status).toBe('available');
+    expect(preparations).toBe(0);
+    const first = runtime.prepareServer(request);
+    const second = runtime.prepareServer(request);
+    await entered;
+    expect((await runtime.getStatus(request)).languages[0]?.server?.status).toBe('preparing');
+    expect(scans).toBe(1);
+    expect(preparations).toBe(1);
+    await runtime.cancelServerPreparation(request);
+    expect(await first).toMatchObject({ status: 'available' });
+    expect(await second).toMatchObject({ status: 'available' });
+    status = 'installed';
+    expect((await runtime.getStatus(request)).languages[0]?.server?.status).toBe('installed');
+  });
+
   it("buckets workspace files on demand and marks the scan partial at the file cap", async () => {
     let searches = 0;
     const runtime = createLanguageSupportRuntime({
@@ -57,17 +90,17 @@ describe("createLanguageSupportRuntime", () => {
 
   it("records wanted only for installable languages that are not present, and still leaves structure unsupported", async () => {
     const runtime = createLanguageSupportRuntime({
-      installableLanguageIds: () => ["python"],
+      installableLanguageIds: () => ["swift"],
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.py"), file("main.ts")],
+      searchFilesystemFiles: async () => [file("app.swift"), file("main.ts")],
     });
-    runtime.noteRequest("python", "ws-1");
+    runtime.noteRequest("swift", "ws-1");
     runtime.noteRequest("typescript", "ws-1");
-    runtime.noteRequest("python");
-    expect(runtime.peekWanted("ws-1")).toEqual(["python"]);
+    runtime.noteRequest("swift");
+    expect(runtime.peekWanted("ws-1")).toEqual(["swift"]);
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.languages[0]).toMatchObject({
-      languageId: "python",
+      languageId: "swift",
       grammarStatus: "available",
       wanted: true,
       fileCount: 1,
@@ -99,7 +132,7 @@ describe("createLanguageSupportRuntime", () => {
       inspectWorkspace: async () => ({ root: "/ws" }),
       searchFilesystemFiles: async () => [],
     });
-    await expect(runtime.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(runtime.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "failed",
       reason: "unsupported",
     });
@@ -108,25 +141,25 @@ describe("createLanguageSupportRuntime", () => {
   it("delegates install to the injected installer and attaches pack metadata", async () => {
     const runtime = createLanguageSupportRuntime({
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.py")],
+      searchFilesystemFiles: async () => [file("app.swift")],
       manifest: {
         generatedAt: "2026-09-07",
         minCompatibleAbi: 13,
         maxCompatibleAbi: 15,
         packs: {
-          python: {
-            languageId: "python",
-            packageName: "tree-sitter-python",
-            version: "0.25.0",
-            tarballUrl: "https://example.test/python.tgz",
-            wasmPath: "package/tree-sitter-python.wasm",
-            grammarFile: "tree-sitter-python.wasm",
+          swift: {
+            languageId: "swift",
+            packageName: "tree-sitter-swift",
+            version: "0.7.1",
+            tarballUrl: "https://example.test/swift.tgz",
+            wasmPath: "package/tree-sitter-swift.wasm",
+            grammarFile: "tree-sitter-swift.wasm",
             integrity: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             bytes: 12,
             abi: 15,
             licensePath: null,
-            tagsPath: "package/queries/tags.scm",
-            tagsIntegrity: "sha256-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            tagsPath: null,
+            tagsIntegrity: null,
           },
         },
         skipped: {},
@@ -140,11 +173,11 @@ describe("createLanguageSupportRuntime", () => {
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.grammarStore).toBe("ready");
     expect(status.languages[0]).toMatchObject({
-      languageId: "python",
+      languageId: "swift",
       grammarStatus: "available",
-      pack: { abi: 15, packageName: "tree-sitter-python", version: "0.25.0", providesOutline: true },
+      pack: { abi: 15, packageName: "tree-sitter-swift", version: "0.7.1", providesOutline: false },
     });
-    await expect(runtime.install({ languageId: "python" })).resolves.toMatchObject({
+    await expect(runtime.install({ languageId: "swift" })).resolves.toMatchObject({
       status: "ready",
       grammarStatus: "installed",
     });
@@ -155,30 +188,30 @@ describe("createLanguageSupportRuntime", () => {
     const wasm = new Uint8Array([1, 2, 3]);
     const tags = new TextEncoder().encode("(class_declaration) @definition.class");
     store.put(
-      "python",
+      "swift",
       wasm,
-      { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-python.wasm" },
+      { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-swift.wasm" },
       { bytes: tags, integrity: grammarIntegrityOf(tags) },
     );
-    store.put("go", wasm, { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-go.wasm" });
+    store.put("markdown", wasm, { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-markdown.wasm" });
     const runtime = createLanguageSupportRuntime({
       store,
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.py"), file("main.go")],
+      searchFilesystemFiles: async () => [file("app.swift"), file("README.md")],
     });
 
-    expect(runtime.installedStructureSpec("python")).toMatchObject({ grammarFile: "tree-sitter-python.wasm" });
+    expect(runtime.installedStructureSpec("swift")).toMatchObject({ grammarFile: "tree-sitter-swift.wasm" });
     // A grammar with no query cannot outline, so it is not wired at all.
-    expect(runtime.installedStructureSpec("go")).toBeNull();
+    expect(runtime.installedStructureSpec("markdown")).toBeNull();
     expect(runtime.installedStructureSpec("typescript")).toBeNull();
 
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
-    expect(byLanguage.get("python")).toMatchObject({
+    expect(byLanguage.get("swift")).toMatchObject({
       grammarStatus: "installed",
       capabilities: { outline: true, classifyHits: true, literalCalls: false, imports: false },
     });
-    expect(byLanguage.get("go")).toMatchObject({
+    expect(byLanguage.get("markdown")).toMatchObject({
       grammarStatus: "installed",
       capabilities: { outline: false, classifyHits: false, literalCalls: false, imports: false },
     });
@@ -187,25 +220,25 @@ describe("createLanguageSupportRuntime", () => {
   it("reports an unreadable index as unknown instead of nothing installed", async () => {
     const store = createGrammarStore(mkdtempSync(join(tmpdir(), "piarium-language-support-")));
     const wasm = new Uint8Array([4, 5, 6]);
-    store.put("python", wasm, {
+    store.put("swift", wasm, {
       integrity: grammarIntegrityOf(wasm),
       source: "manifest",
-      grammarFile: "tree-sitter-python.wasm",
+      grammarFile: "tree-sitter-swift.wasm",
     });
     writeFileSync(join(store.root, "index.json"), "{ broken", "utf8");
     const runtime = createLanguageSupportRuntime({
       store,
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.py"), file("main.ts")],
+      searchFilesystemFiles: async () => [file("app.swift"), file("main.ts")],
     });
 
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.grammarStore).toBe("unreadable");
     const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
-    expect(byLanguage.get("python")?.grammarStatus).toBe("unknown");
+    expect(byLanguage.get("swift")?.grammarStatus).toBe("unknown");
     // The bundled table is still authoritative on its own.
     expect(byLanguage.get("typescript")?.grammarStatus).toBe("bundled");
     // Demand tracking must not turn a broken index into a structure failure.
-    expect(() => runtime.noteRequest("python", "ws-1")).not.toThrow();
+    expect(() => runtime.noteRequest("swift", "ws-1")).not.toThrow();
   });
 });
