@@ -5,9 +5,9 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/journal-engine.js";
-import { createLocalSqliteWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions as LocalRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
-import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
+import { asTestWorkingStateRootAccess, createTestWorkingStateRootAccess, createWorkingStateObjectCollector, createWorkingStateStoreContextAccess } from "./working-state-root-adapter.test-helper.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import type { RecoveryState } from "./types.js";
 import { createThreadWorktreeRuntime } from "../thread-worktree.js";
@@ -96,24 +96,19 @@ const createHarness = async (
   }));
   // WorkingStateStore itself is a legacy unit fixture and still needs its own
   // test SQLite context. Integration durable metadata does not use or inspect it.
-  const workingStateDocuments: LocalRecoveryEngineOptions["documents"] = {
-    inspectWorkspace: (workspaceId) => documents.inspectWorkspace(workspaceId),
-    listWorkspaceRegistrations: () => documents.listWorkspaceRegistrations(),
-    beginDirtyStateBarrier: (workspaceId, paths, options) => documents.beginDirtyStateBarrier!(workspaceId, paths, options),
-    inspectDirtyBuffers: async () => [],
-    runResourceOperation: (workspaceId, resources, operation) => documents.runResourceOperation!(workspaceId, resources, operation),
-  };
-  const workingStateEngine = trackEngine(createLocalSqliteWorkspaceRecoveryEngine({
-    authorityId: "working-state-test",
-    dataDir: path.join(root, "working-state-data"),
-    documents: workingStateDocuments,
+  const workingStateRoot = path.join(root, "working-state-data");
+  const workingStateDatabase = await openRecoveryJournalCatalog(workingStateRoot, { create: true });
+  if (!workingStateDatabase) throw new Error("Working-state test catalog is missing");
+  trackEngine({ dispose: async () => { workingStateDatabase.close(); } });
+  durableObjectRoot = workingStateRoot;
+  const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+    database: workingStateDatabase,
     fileStore,
-    sessionNavigation: navigation,
-  }));
-  durableObjectRoot = await workingStateEngine.withWorkspaceStorage(
-    "ws", { mode: "shared", purpose: "resolve-shared-test-object-root", create: true }, (context) => context.root,
-  );
-  const workingStates = createTestWorkingStateRootAccess(workingStateEngine, durableRecoveryStore);
+    identity: { authorityId: "working-state-test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws" },
+    resourceOperationGate: { run: (resources, operation) => documents.runResourceOperation!("ws", resources, operation) },
+    root: workingStateRoot,
+    collectUnreachableObjects: createWorkingStateObjectCollector(workingStateRoot, workingStateDatabase),
+  }), durableRecoveryStore);
   return {
     coordinator: new IntegrationCoordinator({ workingStates, resolveDirectoryApplyContext }),
     dataDir,
@@ -127,7 +122,6 @@ const createHarness = async (
     root,
     workingStates,
     workspace,
-    workingStateEngine,
   };
 };
 
@@ -801,17 +795,18 @@ describe("IntegrationCoordinator", () => {
       const child = path.join(root, "child-documents-gate");
       await fs.promises.mkdir(child);
       await fs.promises.writeFile(path.join(child, "a.txt"), "child");
-      const workingStateDocuments: LocalRecoveryEngineOptions["documents"] = {
-        inspectWorkspace: (workspaceId) => documents.inspectWorkspace(workspaceId),
-        listWorkspaceRegistrations: () => documents.listWorkspaceRegistrations(),
-        beginDirtyStateBarrier: (workspaceId, paths, options) => documents.beginDirtyStateBarrier!(workspaceId, paths, options),
-        inspectDirtyBuffers: async () => [],
-        runResourceOperation: (workspaceId, resources, operation) => documents.runResourceOperation!(workspaceId, resources, operation),
-      };
-      const workingStateEngine = trackEngine(createLocalSqliteWorkspaceRecoveryEngine({
-        authorityId: "working-state-gate-test", dataDir: path.join(root, "working-state-data"), documents: workingStateDocuments, fileStore, sessionNavigation: navigation,
-      }));
-      const workingStates = createTestWorkingStateRootAccess(workingStateEngine, durableRecoveryStore);
+      const workingStateRoot = path.join(root, "working-state-data");
+      const workingStateDatabase = await openRecoveryJournalCatalog(workingStateRoot, { create: true });
+      if (!workingStateDatabase) throw new Error("Working-state test catalog is missing");
+      trackEngine({ dispose: async () => { workingStateDatabase.close(); } });
+      const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+        database: workingStateDatabase,
+        fileStore,
+        identity: { authorityId: "working-state-gate-test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: identity.workspaceId },
+        resourceOperationGate: { run: (resources, operation) => documents.runResourceOperation!(identity.workspaceId, resources, operation) },
+        root: workingStateRoot,
+        collectUnreachableObjects: createWorkingStateObjectCollector(workingStateRoot, workingStateDatabase),
+      }), durableRecoveryStore);
       const result = await workingStates.withBranchStore(identity.workspaceId, "test-publish", async (store) => {
         await store.createBranch(identity.workspaceId, "thread-gated", await store.captureDirectory(workspace), "base");
         return store.publishDirectoryResult("thread-gated", child);

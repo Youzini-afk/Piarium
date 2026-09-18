@@ -5,13 +5,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SessionSnapshot, ThreadReport } from "@piarium/protocol";
-import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
+import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createThreadRegistry } from "./thread-registry.js";
 import { createThreadRuntime } from "./thread-runtime.js";
 import { registerHarnessThreadRoutes } from "./thread-routes.js";
 import { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
 import { WorkingStateStore } from "./working-state/working-state-store.js";
-import { createTestWorkingStateRootAccess } from "./working-state/working-state-root-adapter.test-helper.js";
+import { createTestWorkingStateRootAccess, createWorkingStateObjectCollector, createWorkingStateStoreContextAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -24,22 +25,17 @@ async function setup() {
   const workspace = path.join(root, "workspace");
   await fs.promises.mkdir(workspace);
   await fs.promises.writeFile(path.join(workspace, "a.txt"), "base\n");
-  const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
-    inspectWorkspace: async (workspaceId) => ({ root: workspace, workspaceId }),
-    listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId: "ws" }],
-    beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-    inspectDirtyBuffers: async () => [],
-    runResourceOperation: async (_workspaceId, _resources, operation) => operation(),
-  };
-  const engine = createWorkspaceRecoveryEngine({
-    authorityId: "test", dataDir: path.join(root, "data"), documents,
-    sessionNavigation: {
-      prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-      prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-      commit: async () => ({}), commitLeaf: async () => ({}),
-    },
-  });
-  const workingStates = createTestWorkingStateRootAccess(engine);
+  const recoveryRoot = path.join(root, "recovery");
+  const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+  if (!database) throw new Error("catalog missing");
+  const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+    database,
+    fileStore: createRecoveryFileStore(),
+    identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws" },
+    resourceOperationGate: { run: async <Result>(_resources: readonly unknown[], next: () => Promise<Result>) => next() },
+    root: recoveryRoot,
+    collectUnreachableObjects: createWorkingStateObjectCollector(recoveryRoot, database),
+  }));
   const registry = createThreadRegistry({ hostId: "test", dataDir: path.join(root, "threads") });
   const parent = { kind: "session", id: "parent" } as const;
   const thread = await registry.createThread({
@@ -81,10 +77,10 @@ async function setup() {
     .set("Authorization", "test").send({ branchId: selectedBranch, resultRevisions });
   const inspect = () => request(app).get(url).set("Authorization", "test");
   cleanups.push(async () => {
-    await runtime.dispose(); await registry.dispose(); await engine.dispose();
+    await runtime.dispose(); await registry.dispose(); database.close();
     await fs.promises.rm(root, { recursive: true, force: true });
   });
-  return { root, workspace, engine, workingStates, registry, parent, thread, branchId, publish, coordinator, runtime, app, url, inspect, release };
+  return { root, workspace, workingStates, registry, parent, thread, branchId, publish, coordinator, runtime, app, url, inspect, release };
 }
 
 describe("user Thread history release", () => {

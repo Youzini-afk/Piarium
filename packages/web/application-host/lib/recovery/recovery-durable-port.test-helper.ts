@@ -1,4 +1,7 @@
+import type { WorkspaceRecoveryTurnProvenance } from "@piarium/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
+import { sameState } from "./journal-files.js";
+import type { RecoveryState } from "./journal-files.js";
 
 interface MemoryOperation extends Record<string, unknown> {
   operationId: string;
@@ -6,41 +9,140 @@ interface MemoryOperation extends Record<string, unknown> {
   kind: string;
   state: string;
   revision: number;
+  createdAt: string;
+  updatedAt: string;
   data: Record<string, unknown>;
   result?: Record<string, unknown>;
   files: Array<Record<string, unknown> & { path: string; phase: string; revision: number }>;
 }
 
+type MemoryTurn = DurableRecoveryChangeSelection["turns"][number] & {
+  workspaceId: string;
+  assistantEntryId?: string;
+  provenance?: WorkspaceRecoveryTurnProvenance;
+  runtimeGeneration?: number;
+  runtimeKey?: string;
+  sessionId?: string;
+  settledAt?: string;
+  startedAt?: string;
+  userEntryId?: string;
+  workerId?: string;
+};
+
+type MemoryChange = DurableRecoveryChangeSelection["changes"][number] & {
+  workspaceId: string;
+  sessionId?: string;
+};
+
 export interface InMemoryRecoveryDurablePort extends RecoveryDurableMetadataPort {
   snapshot(workspaceId: string, operationId: string): MemoryOperation | null;
+  /** Test-only escape hatch: force an operation file's phase (e.g. needs-attention). */
+  debugSetFilePhase(workspaceId: string, operationId: string, path: string, phase: string): void;
+  /** Test-only escape hatch: force an operation's state (e.g. simulating a host crash before the terminal persist). */
+  debugSetOperationState(workspaceId: string, operationId: string, state: string): void;
 }
 
-/** Strict, process-local recovery port for tests. It models operation/file revisions independently. */
-export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort => {
+export interface InMemoryRecoveryDurablePortOptions {
+  /**
+   * File-state capture used by recordMutationBefore/After, mirroring the
+   * kernel store's `content.captureState`. Tests wire this to a real
+   * RecoveryFileStore over the workspace root.
+   */
+  captureState?: (input: { path: string; workspaceId: string }) => Promise<RecoveryState>;
+  /**
+   * Workspace-relative path resolution, mirroring the kernel store's
+   * `paths.resolve`. Tests wire this to RecoveryFileStore.relativePathFor.
+   */
+  relativePathFor?: (input: { path: string; workspaceId: string }) => Promise<string>;
+}
+
+/**
+ * Process-local recovery port for tests. It mirrors the kernel store's
+ * observable contract — turn checkpoints surface in listCheckpoints, mutation
+ * before/after states are captured per path, and turn settlement computes the
+ * same coverage status — while keeping operation/file revisions independent.
+ */
+export const createInMemoryRecoveryDurablePort = (
+  options: InMemoryRecoveryDurablePortOptions = {},
+): InMemoryRecoveryDurablePort => {
   const operations = new Map<string, MemoryOperation>();
   const checkpoints = new Map<string, Array<Record<string, unknown>>>();
-  const turns = new Map<string, DurableRecoveryChangeSelection["turns"][number] & { workspaceId: string }>();
-  const changes = new Map<string, DurableRecoveryChangeSelection["changes"][number] & { workspaceId: string }>();
+  const turns = new Map<string, MemoryTurn>();
+  const changes = new Map<string, MemoryChange>();
   let turnSequence = 0;
   const key = (workspaceId: string, operationId: string) => `${workspaceId}\0${operationId}`;
-  const clone = (operation: MemoryOperation): MemoryOperation => structuredClone(operation);
+  const clone = <T>(value: T): T => structuredClone(value);
   const get = (workspaceId: string, operationId: string): MemoryOperation | null => {
     const operation = operations.get(key(workspaceId, operationId));
     return operation ? clone(operation) : null;
   };
+  const checkpointSummaries = (workspaceId: string): Array<Record<string, unknown>> => {
+    const values = checkpoints.get(workspaceId) ?? [];
+    checkpoints.set(workspaceId, values);
+    return values;
+  };
+  const capture = async (workspaceId: string, path: string): Promise<RecoveryState> => {
+    if (!options.captureState) {
+      throw new Error("in-memory durable port needs captureState for mutation recording");
+    }
+    return options.captureState({ path, workspaceId });
+  };
+  const relativize = async (workspaceId: string, path: string): Promise<string> => {
+    if (!options.relativePathFor) {
+      throw new Error("in-memory durable port needs relativePathFor for mutation recording");
+    }
+    return options.relativePathFor({ path, workspaceId });
+  };
+  const turnFor = (workspaceId: string, executionId: string): MemoryTurn | undefined => (
+    turns.get(`${workspaceId}\0${executionId}`)
+  );
+  const turnBinding = (turn: MemoryTurn) => ({
+    activeWriterScopes: [...turn.activeWriterScopes],
+    checkpointId: turn.checkpointId,
+    executionId: turn.executionId,
+    provenance: turn.provenance ?? "observed-during",
+    runtimeGeneration: turn.runtimeGeneration ?? 0,
+    runtimeKey: turn.runtimeKey ?? "",
+    sessionId: turn.sessionId ?? "",
+    startedAt: turn.startedAt ?? "",
+    status: turn.status,
+    unrecordedResourceIds: [...turn.unrecordedResourceIds],
+    userEntryId: turn.userEntryId ?? "",
+    workerId: turn.workerId ?? "",
+    workspaceId: turn.workspaceId,
+    ...(turn.assistantEntryId ? { assistantEntryId: turn.assistantEntryId } : {}),
+    ...(turn.failure ? { failure: clone(turn.failure) } : {}),
+    ...(turn.settledAt ? { settledAt: turn.settledAt } : {}),
+  });
   return {
     snapshot: get,
+    debugSetFilePhase(workspaceId, operationId, path, phase) {
+      const operation = operations.get(key(workspaceId, operationId));
+      const file = operation?.files.find((value) => value.path === path);
+      if (!operation || !file) throw new Error("operation file is missing");
+      file.phase = phase;
+      file.revision += 1;
+    },
+    debugSetOperationState(workspaceId, operationId, state) {
+      const operation = operations.get(key(workspaceId, operationId));
+      if (!operation) throw new Error("operation is missing");
+      operation.state = state;
+      operation.revision += 1;
+    },
     async createOperation(input) {
       const id = key(input.workspaceId, input.operationId);
       const existing = operations.get(id);
       if (existing) return clone(existing);
       const surface = new Set(input.surfacePaths ?? []);
+      const createdAt = new Date().toISOString();
       const operation: MemoryOperation = {
         operationId: input.operationId,
         workspaceId: input.workspaceId,
         kind: input.kind,
         state: input.state,
         revision: 1,
+        createdAt,
+        updatedAt: createdAt,
         data: structuredClone(input.data),
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         ...(input.threadId ? { threadId: input.threadId } : {}),
@@ -65,6 +167,7 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
       }
       file.phase = input.phase;
       file.revision += 1;
+      operation.updatedAt = new Date().toISOString();
       if (input.observedFingerprint) file.observedFingerprint = input.observedFingerprint;
       if (input.expected) file.expectedJson = JSON.stringify(input.expected);
       if (input.target) file.targetJson = JSON.stringify(input.target);
@@ -76,6 +179,7 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
       if (!operation || operation.revision !== input.expectedRevision) throw new Error("operation state conflict");
       operation.state = input.state;
       operation.revision += 1;
+      operation.updatedAt = new Date().toISOString();
       if (input.result) operation.result = structuredClone(input.result);
       if (input.failure) operation.failure = structuredClone(input.failure);
       return { operationId: input.operationId, workspaceId: input.workspaceId, state: operation.state, revision: operation.revision };
@@ -95,13 +199,28 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
       return { operationId, released: true };
     },
     async listChanges(input): Promise<DurableRecoveryChangeSelection> {
+      const selectedTurns = [...turns.values()].filter((turn) => {
+        if (turn.workspaceId !== input.workspaceId) return false;
+        if (input.sessionId && turn.sessionId !== input.sessionId) return false;
+        if (input.executionId && turn.executionId !== input.executionId) return false;
+        if (input.entryIds && input.entryIds.length > 0) {
+          const entries = new Set(input.entryIds);
+          if (!entries.has(turn.userEntryId ?? "") && !entries.has(turn.assistantEntryId ?? "")) return false;
+        }
+        return true;
+      });
+      const executionIds = new Set(selectedTurns.map((turn) => turn.executionId));
       return {
         changes: [...changes.values()]
-          .filter((change) => change.workspaceId === input.workspaceId && (!input.executionId || change.executionId === input.executionId))
-          .map(({ workspaceId: _workspaceId, ...change }) => structuredClone(change)),
-        turns: [...turns.values()]
-          .filter((turn) => turn.workspaceId === input.workspaceId && (!input.executionId || turn.executionId === input.executionId))
-          .map(({ workspaceId: _workspaceId, ...turn }) => structuredClone(turn)),
+          .filter((change) => {
+            if (change.workspaceId !== input.workspaceId) return false;
+            if (input.executionId) return change.executionId === input.executionId;
+            if (input.sessionId && change.sessionId !== input.sessionId) return false;
+            if (input.entryIds && input.entryIds.length > 0) return executionIds.has(change.executionId);
+            return true;
+          })
+          .map(({ workspaceId: _workspaceId, sessionId: _sessionId, ...change }) => clone(change)),
+        turns: selectedTurns.map(({ workspaceId: _workspaceId, sessionId: _sessionId, userEntryId: _userEntryId, assistantEntryId: _assistantEntryId, provenance: _provenance, ...turn }) => clone(turn)),
       };
     },
     async recordIntegrationChanges(input) {
@@ -124,15 +243,16 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
           path,
           sequence: turn.sequence,
           toolName: prior?.toolName ?? "thread.merge",
-          before: prior?.before ?? structuredClone(states.before),
-          after: structuredClone(states.after),
+          before: prior?.before ?? clone(states.before),
+          after: clone(states.after),
+          ...(turn.sessionId ? { sessionId: turn.sessionId } : {}),
         });
       }
       return true;
     },
     async createNamedCheckpoint(workspaceId, name) {
       const createdAt = new Date().toISOString();
-      const values = checkpoints.get(workspaceId) ?? [];
+      const values = checkpointSummaries(workspaceId);
       const checkpoint = {
         id: `checkpoint-${values.length + 1}`,
         workspaceId,
@@ -142,53 +262,158 @@ export const createInMemoryRecoveryDurablePort = (): InMemoryRecoveryDurablePort
         createdAt,
         changedPathCount: 0,
         byteLength: 0,
-        name,
+        label: name,
       };
       values.unshift(checkpoint);
-      checkpoints.set(workspaceId, values);
-      return structuredClone(checkpoint) as never;
+      return clone(checkpoint) as never;
     },
     async listCheckpoints(workspaceId) {
-      return structuredClone(checkpoints.get(workspaceId) ?? []) as never;
+      return clone(checkpoints.get(workspaceId) ?? []) as never;
     },
-    async recordMutationAfter() { return true; },
-    async recordMutationBefore() { return true; },
+    async recordMutationBefore(input) {
+      const turn = turnFor(input.workspaceId, input.executionId);
+      if (!turn || !turn.sessionId) return false;
+      const relative = await relativize(input.workspaceId, input.path);
+      const state = await capture(input.workspaceId, input.path);
+      const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
+      if (!changes.has(id)) {
+        changes.set(id, {
+          workspaceId: input.workspaceId,
+          checkpointId: turn.checkpointId,
+          executionId: input.executionId,
+          mutationId: input.mutationId,
+          path: relative,
+          sequence: changes.size + 1,
+          sessionId: turn.sessionId,
+          toolName: input.toolName,
+          before: clone(state),
+          after: clone(state),
+        });
+      }
+      return true;
+    },
+    async recordMutationAfter(input) {
+      const turn = turnFor(input.workspaceId, input.executionId);
+      if (!turn || !turn.sessionId) return false;
+      const relative = await relativize(input.workspaceId, input.path);
+      const id = `${input.workspaceId}\0${turn.checkpointId}\0${relative}`;
+      const prior = changes.get(id);
+      if (!prior) return false;
+      const state = await capture(input.workspaceId, input.path);
+      prior.after = clone(state);
+      prior.mutationId = input.mutationId;
+      return !sameState(prior.before, state);
+    },
     async recordTurnSettled(input) {
-      const turnKey = `${input.workspaceId}\0${input.executionId}`;
-      const previous = turns.get(turnKey);
-      const next = {
+      const previous = turnFor(input.workspaceId, input.executionId);
+      if (!previous) throw new Error("checkpoint-missing");
+      const recorded = new Set(
+        [...changes.values()]
+          .filter((change) => change.workspaceId === input.workspaceId && change.executionId === input.executionId)
+          .map((change) => change.path),
+      );
+      const observed = [...new Set(input.observedResourceIds
+        .filter((value) => Boolean(value) && !/\.piarium-(?:tmp|restore|recovery)-/u.test(value)))].sort();
+      const unrecorded = observed.filter((value) => !recorded.has(value));
+      const retainedFailure = previous.status === "incomplete" && previous.failure && typeof previous.failure === "object"
+        ? previous.failure
+        : undefined;
+      const exact = !input.failure
+        && !retainedFailure
+        && (!input.mutationObserved || input.observationComplete)
+        && unrecorded.length === 0
+        && !(input.mutationObserved && recorded.size === 0 && observed.length === 0);
+      const failure = input.failure ?? retainedFailure ?? (exact ? undefined : {
+        code: "checkpoint-incomplete",
+        message: unrecorded.length > 0
+          ? `Some changed paths were not captured before mutation: ${unrecorded.join(", ")}`
+          : "Workspace activity was observed outside the exact write/edit journal",
+        origin: "coverage",
+        retryable: false,
+        ...(unrecorded.length > 0 ? { details: { paths: unrecorded } } : {}),
+      });
+      const next: MemoryTurn = {
+        ...previous,
         workspaceId: input.workspaceId,
         executionId: input.executionId,
-        checkpointId: previous?.checkpointId ?? `turn-${input.executionId}`,
-        sequence: previous?.sequence ?? ++turnSequence,
         activeWriterScopes: [...input.activeWriterScopes],
-        status: input.observationComplete ? "ready" : "incomplete",
-        unrecordedResourceIds: [],
-        ...(input.failure ? { failure: structuredClone(input.failure) as unknown as Record<string, unknown> } : {}),
+        status: exact ? "ready" : "incomplete",
+        settledAt: new Date().toISOString(),
+        unrecordedResourceIds: unrecorded,
+        ...(input.assistantEntryId ? { assistantEntryId: input.assistantEntryId } : {}),
+        ...(input.provenance ? { provenance: input.provenance } : {}),
+        ...(failure ? { failure: clone(failure) as Record<string, unknown> } : {}),
       };
-      turns.set(turnKey, next);
-      return {
-        executionId: input.executionId, workspaceId: input.workspaceId, checkpointId: next.checkpointId,
-        status: next.status, activeWriterScopes: next.activeWriterScopes, unrecordedResourceIds: [],
-      } as never;
+      if (!failure) delete next.failure;
+      turns.set(`${input.workspaceId}\0${input.executionId}`, next);
+      const summary = checkpointSummaries(input.workspaceId)
+        .find((entry) => (entry as { id?: string }).id === next.checkpointId);
+      if (summary) {
+        const checkpointChanges = [...changes.values()]
+          .filter((change) => change.workspaceId === input.workspaceId && change.checkpointId === next.checkpointId && !sameState(change.before, change.after));
+        summary.state = next.status;
+        summary.changedPathCount = checkpointChanges.length;
+        summary.byteLength = checkpointChanges.reduce((total, change) => {
+          const beforeBytes = Number((change.before as { byteLength?: number }).byteLength ?? 0);
+          const afterBytes = Number((change.after as { byteLength?: number }).byteLength ?? 0);
+          return total + Math.max(beforeBytes, afterBytes);
+        }, 0);
+      }
+      return turnBinding(next) as never;
     },
     async recordTurnStart(input) {
-      const turnKey = `${input.workspaceId}\0${input.executionId}`;
-      const next = {
-        workspaceId: input.workspaceId, executionId: input.executionId, checkpointId: `turn-${input.executionId}`,
-        sequence: ++turnSequence, activeWriterScopes: [...input.activeWriterScopes], status: "pending", unrecordedResourceIds: [],
-        ...(input.failure ? { failure: structuredClone(input.failure) as unknown as Record<string, unknown> } : {}),
+      const next: MemoryTurn = {
+        workspaceId: input.workspaceId,
+        executionId: input.executionId,
+        checkpointId: `turn-${input.executionId}`,
+        sequence: ++turnSequence,
+        sessionId: input.sessionId,
+        userEntryId: input.userEntryId,
+        workerId: input.workerId,
+        runtimeGeneration: input.runtimeGeneration,
+        runtimeKey: `${input.workerId}@${input.runtimeGeneration}`,
+        startedAt: new Date().toISOString(),
+        provenance: input.provenance,
+        activeWriterScopes: [...input.activeWriterScopes],
+        status: "pending",
+        unrecordedResourceIds: [],
+        ...(input.failure ? { failure: clone(input.failure) as unknown as Record<string, unknown> } : {}),
       };
-      turns.set(turnKey, next);
-      return {
-        executionId: input.executionId, workspaceId: input.workspaceId, checkpointId: next.checkpointId,
-        status: "pending", activeWriterScopes: next.activeWriterScopes, unrecordedResourceIds: [],
-      } as never;
+      turns.set(`${input.workspaceId}\0${input.executionId}`, next);
+      // The kernel records a 'turn' checkpoint row at turn start; mirror that
+      // so listCheckpoints surfaces turn checkpoints like the real store.
+      const values = checkpointSummaries(input.workspaceId);
+      if (!values.some((entry) => (entry as { id?: string }).id === next.checkpointId)) {
+        values.unshift({
+          id: next.checkpointId,
+          workspaceId: input.workspaceId,
+          sequence: values.length + 1,
+          source: "turn",
+          state: "pending",
+          createdAt: new Date().toISOString(),
+          changedPathCount: 0,
+          byteLength: 0,
+        });
+      }
+      return turnBinding(next) as never;
     },
-    async resolveEntry() {
+    async resolveEntry(input) {
+      const turn = [...turns.values()]
+        .filter((candidate) => candidate.workspaceId === input.workspaceId && candidate.sessionId === input.sessionId)
+        .find((candidate) => candidate.userEntryId === input.entryId || candidate.assistantEntryId === input.entryId);
+      if (!turn) {
+        return { status: "unbound", reason: "entry-unbound" } as never;
+      }
+      const summary = (checkpoints.get(input.workspaceId) ?? [])
+        .find((entry) => (entry as { id?: string }).id === turn.checkpointId);
+      if (!summary) {
+        return { status: "unbound", reason: "entry-unbound" } as never;
+      }
       return {
-        status: "failed",
-        failure: { code: "checkpoint-missing", message: "The in-memory fixture has no entry binding", origin: "storage", retryable: false },
+        binding: turnBinding(turn),
+        checkpoint: clone(summary),
+        position: "after",
+        status: "ready",
       } as never;
     },
     async health() { return { blobs: 0, catalogBytes: 0, walBytes: 0 }; },

@@ -7,7 +7,7 @@ import type { HarnessActorContext, HarnessServiceMap, SessionSnapshot, SessionSt
 import { createDocumentAuthority } from "../documents/authority.js";
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
-import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
+import type { LocalWorkingStateStorageContext as WorkspaceRecoveryStorageContext } from "./working-state/working-state-store.js";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createHarnessRouter } from "./router.js";
 import { createHarnessServiceHost } from "./service-host.js";

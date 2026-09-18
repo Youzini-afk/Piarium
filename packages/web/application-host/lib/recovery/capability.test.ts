@@ -7,10 +7,9 @@ import {
   type DocumentAuthorityHarness,
 } from '../documents/contract-fixtures.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
-import {
-  createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine,
-  type RecoverySessionNavigation,
-} from './local-sqlite-recovery-engine.test-helper.js';
+import { createWorkspaceRecoveryEngine, type RecoverySessionNavigation } from './journal-engine.js';
+import { createRecoveryFileStore } from './file-store.test-helper.js';
+import { createInMemoryRecoveryDurablePort } from './recovery-durable-port.test-helper.js';
 
 let harness: DocumentAuthorityHarness | undefined;
 
@@ -52,6 +51,8 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       authorityId: harness.authority.hostId,
       dataDir: harness.dataDir,
       documents: harness.authority,
+      durableRecoveryStore: createInMemoryRecoveryDurablePort(),
+      fileStore: createRecoveryFileStore(),
       sessionNavigation: navigation,
     });
     const capability = createWorkspaceRecoveryCapabilityHandler(engine as never);
@@ -68,11 +69,9 @@ describe('workspace.recovery-primitives Web Host capability', () => {
     expect(listed.status).toBe('ready');
     if (listed.status !== 'ready') throw new Error('Expected checkpoint list');
     expect(listed.page.checkpoints).toHaveLength(1);
+    // Storage location is owned by the Rust kernel: overrides are unavailable.
     const global = await capability('setDefaultStorageLocation', { mode: 'workspace-adjacent' }, context);
-    expect(global).toMatchObject({
-      status: 'ready',
-      storage: { location: { mode: 'workspace-adjacent' }, locationSource: 'global' },
-    });
+    expect(global).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
     expect(await capability('listStorageWorkspaces', {}, context)).toMatchObject({
       status: 'ready',
       workspaces: [expect.objectContaining({ workspaceId: harness.identity.workspaceId })],
@@ -80,7 +79,7 @@ describe('workspace.recovery-primitives Web Host capability', () => {
     const inherited = await capability('clearStorageLocationOverride', {
       workspaceId: harness.identity.workspaceId,
     }, context);
-    expect(inherited).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
+    expect(inherited).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
     await expect(capability('createCheckpoint', { name: 'x', workspaceId: '' }, context)).rejects.toThrow(/workspaceId/);
     await expect(capability('recordMutationBefore', {}, context)).rejects.toThrow(/executionId/);
     await expect(capability('prepareCombinedRecovery', {}, context)).rejects.toThrow(/entryId/);

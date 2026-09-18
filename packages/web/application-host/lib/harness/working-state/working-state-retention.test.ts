@@ -5,8 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { listObjectReferences, openRecoveryJournalCatalog, replaceObjectReferences } from "../../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
-import { WorkingStateStore } from "./working-state-store.js";
-import type { WorkspaceRecoveryStorageContext } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { WorkingStateStore, type LocalWorkingStateStorageContext } from "./working-state-store.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -16,7 +15,7 @@ async function setup() {
   const database = await openRecoveryJournalCatalog(root, { create: true });
   if (!database) throw new Error("catalog missing");
   cleanups.push(async () => { database.close(); await fs.promises.rm(root, { recursive: true, force: true }); });
-  const context: WorkspaceRecoveryStorageContext = {
+  const context: LocalWorkingStateStorageContext = {
     root, database, fileStore: createRecoveryFileStore(),
     identity: { workspaceId: "ws", authorityId: "host", canonicalRoot: root, filesystemProfile: "test" },
     resourceOperationGate: { run: async (_resources, operation) => operation() },

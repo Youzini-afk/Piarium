@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
-import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
 import { createThreadRuntime } from "./thread-runtime.js";
 import { IntegrationCoordinator } from "./working-state/integration-coordinator.js";
 import type { RecoveryState } from "./working-state/types.js";
-import { createTestWorkingStateRootAccess } from "./working-state/working-state-root-adapter.test-helper.js";
+import { createTestWorkingStateRootAccess, createWorkingStateObjectCollector, createWorkingStateStoreContextAccess } from "./working-state/working-state-root-adapter.test-helper.js";
 
 const PARENT = { kind: "session" as const, id: "root-session" };
 const roots: string[] = [];
@@ -29,29 +29,19 @@ describe("nested thread production chain", () => {
     const root = await fs.promises.mkdtemp(join(os.tmpdir(), "piarium-nested-threads-"));
     roots.push(root);
     const workspace = join(root, "workspace");
-    const dataDir = join(root, "data");
     await fs.promises.mkdir(workspace, { recursive: true });
     await fs.promises.writeFile(join(workspace, "kept.txt"), "root-at-dispatch\n");
-    const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
-      inspectWorkspace: async () => ({ root: workspace, workspaceId: "ws" }),
-      listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId: "ws" }],
-      beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-      inspectDirtyBuffers: async () => [],
-      runResourceOperation: vi.fn(async (_workspaceId, _resources, operation) => operation()),
-    };
-    const engine = createWorkspaceRecoveryEngine({
-      authorityId: "test",
-      dataDir,
-      documents,
+    const recoveryRoot = join(root, "recovery");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("catalog missing");
+    const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+      database,
       fileStore: createRecoveryFileStore(),
-      sessionNavigation: {
-        prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        commit: async () => ({}),
-        commitLeaf: async () => ({}),
-      },
-    });
-    const workingStates = createTestWorkingStateRootAccess(engine);
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws" },
+      resourceOperationGate: { run: async <Result>(_resources: readonly unknown[], next: () => Promise<Result>) => next() },
+      root: recoveryRoot,
+      collectUnreachableObjects: createWorkingStateObjectCollector(recoveryRoot, database),
+    }));
     const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "host-1" });
     const runtime = createThreadRuntime({
       registry,
@@ -178,7 +168,7 @@ describe("nested thread production chain", () => {
     } finally {
       await runtime.dispose();
       await registry.dispose();
-      await engine.dispose();
+      database.close();
     }
   });
 
@@ -186,29 +176,20 @@ describe("nested thread production chain", () => {
     const root = await fs.promises.mkdtemp(join(os.tmpdir(), "piarium-nested-scopes-"));
     roots.push(root);
     const workspace = join(root, "workspace");
-    const dataDir = join(root, "data");
     await fs.promises.mkdir(workspace, { recursive: true });
     await fs.promises.writeFile(join(workspace, "kept.txt"), "root\n");
     await fs.promises.writeFile(join(workspace, "secret.env"), "parent-secret\n");
-    const engine = createWorkspaceRecoveryEngine({
-      authorityId: "test",
-      dataDir,
-      documents: {
-        inspectWorkspace: async () => ({ root: workspace, workspaceId: "ws" }),
-        listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId: "ws" }],
-        beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-        inspectDirtyBuffers: async () => [],
-        runResourceOperation: vi.fn(async (_workspaceId, _resources, operation) => operation()),
-      },
+    const recoveryRoot = join(root, "recovery");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("catalog missing");
+    const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+      database,
       fileStore: createRecoveryFileStore(),
-      sessionNavigation: {
-        prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        commit: async () => ({}),
-        commitLeaf: async () => ({}),
-      },
-    });
-    const workingStates = createTestWorkingStateRootAccess(engine);
+      identity: { authorityId: "test", canonicalRoot: workspace, filesystemProfile: "test", workspaceId: "ws" },
+      resourceOperationGate: { run: async <Result>(_resources: readonly unknown[], next: () => Promise<Result>) => next() },
+      root: recoveryRoot,
+      collectUnreachableObjects: createWorkingStateObjectCollector(recoveryRoot, database),
+    }));
     const registry = createThreadRegistry({ dataDir: join(root, "threads"), hostId: "host-1" });
     let copyIgnored = ["secret.env"];
     let materializedParentRoot = "";
@@ -316,7 +297,7 @@ describe("nested thread production chain", () => {
     } finally {
       await runtime.dispose();
       await registry.dispose();
-      await engine.dispose();
+      database.close();
     }
   });
 });

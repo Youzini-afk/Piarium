@@ -1,6 +1,9 @@
 import { queryTestFiles } from "./file-query.test-helper.js";
 import type { WorkingStateFileQuery, WorkingStateQueryOptions, WorkingStateQueryResult } from "./query-contract.js";
 import { createHash, randomUUID } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import type { SqliteDatabase } from "../../recovery/journal-catalog.js";
 import { sameState } from "../../recovery/journal-files.js";
 import type {
   RecoveryState,
@@ -14,12 +17,8 @@ import type {
   WorkingStateTreeRead,
   WorkspaceWorkingStateRootAccess,
 } from "./types.js";
-import { WorkingStateStore } from "./working-state-store.js";
+import { WorkingStateStore, type LocalWorkingStateStorageContext } from "./working-state-store.js";
 import type { WorkspaceRecoveryEngine, WorkspaceRecoveryStorageContext } from "../../recovery/journal-engine.js";
-import type {
-  WorkspaceRecoveryEngine as LocalWorkspaceRecoveryEngine,
-  WorkspaceRecoveryStorageContext as LocalWorkspaceRecoveryStorageContext,
-} from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
 import { measurementFromStates } from "./thread-space.js";
 import { createInMemoryRecoveryDurablePort, type InMemoryRecoveryDurablePort } from "../../recovery/recovery-durable-port.test-helper.js";
 
@@ -31,10 +30,70 @@ export interface TestWorkspaceWorkingStateAccess {
   withStore<T>(
     workspaceId: string,
     purpose: string,
-    operation: (store: WorkingStateStore, context: LocalWorkspaceRecoveryStorageContext) => Promise<T> | T,
+    operation: (store: WorkingStateStore, context: LocalWorkingStateStorageContext) => Promise<T> | T,
     mode?: "exclusive" | "shared",
   ): Promise<T>;
 }
+
+/**
+ * Minimal withWorkspaceStorage surface the WorkingStateStore fixtures need.
+ * Journal engines satisfy this structurally; tests may also hand a plain
+ * object when the store only needs its own object root and catalog.
+ */
+export interface TestWorkingStateStorageAccess {
+  withWorkspaceStorage<T>(
+    workspaceId: string,
+    options: { mode: "exclusive" | "shared"; purpose: string; create?: boolean },
+    operation: (context: LocalWorkingStateStorageContext) => Promise<T> | T,
+  ): Promise<T>;
+}
+
+/** withStore-compatible access over a fixed WorkingStateStore context. */
+export const createWorkingStateStoreContextAccess = (
+  context: LocalWorkingStateStorageContext,
+): TestWorkingStateStorageAccess => ({
+  withWorkspaceStorage: async (_workspaceId, _options, operation) => operation(context),
+});
+
+/**
+ * Object-store GC for explicit WorkingStateStore context shims: deletes objects
+ * under `<root>/objects` no longer referenced by the store's own catalog.
+ * Mirrors the retired local engine's collector; production cleanup goes through
+ * the kernel durable port.
+ */
+export const createWorkingStateObjectCollector = (
+  root: string,
+  database: SqliteDatabase,
+): (() => Promise<{ byteLengthReclaimed: number; objectsDeleted: number }>) => async () => {
+  const referenced = new Set(
+    (database.prepare("SELECT DISTINCT object_hash FROM object_references").all() as Array<{ object_hash: string }>)
+      .map((row) => row.object_hash),
+  );
+  const objectsRoot = path.join(root, "objects");
+  let byteLengthReclaimed = 0;
+  let objectsDeleted = 0;
+  const walk = async (directory: string): Promise<void> => {
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    for (const entry of entries) {
+      const target = path.join(directory, entry.name);
+      if (entry.isDirectory()) { await walk(target); continue; }
+      if (!entry.isFile()) continue;
+      const hash = `sha256-${path.relative(objectsRoot, target).replace(/[\\/]/g, "")}`;
+      if (referenced.has(hash)) continue;
+      byteLengthReclaimed += (await fs.promises.stat(target)).size;
+      await fs.promises.rm(target, { force: true });
+      objectsDeleted += 1;
+    }
+  };
+  await walk(objectsRoot);
+  return { byteLengthReclaimed, objectsDeleted };
+};
 
 const normalizeRelative = (value: string): string => {
   const raw = value.replace(/\\/g, "/").replace(/^\.\//, "");
@@ -380,7 +439,7 @@ export class LegacyWorkingStateRootAdapter implements WorkingStateRootStore {
 
 export const asTestWorkingStateRootStore = (
   store: WorkingStateStore,
-  context?: WorkspaceRecoveryStorageContext | LocalWorkspaceRecoveryStorageContext,
+  context?: WorkspaceRecoveryStorageContext | LocalWorkingStateStorageContext,
 ): WorkingStateRootStore => new LegacyWorkingStateRootAdapter(store, context as unknown as WorkspaceRecoveryStorageContext);
 
 export const asTestWorkingStateRootAccess = (
@@ -409,7 +468,7 @@ export const asTestWorkingStateRootAccess = (
 };
 
 export const createTestWorkingStateRootAccess = (
-  recovery: Pick<LocalWorkspaceRecoveryEngine, "withWorkspaceStorage">,
+  recovery: TestWorkingStateStorageAccess,
   durableRecoveryStore: InMemoryRecoveryDurablePort = createInMemoryRecoveryDurablePort(),
 ): TestWorkingStateRootAccess => asTestWorkingStateRootAccess({
   withStore: (workspaceId, purpose, operation, mode = "exclusive") => recovery.withWorkspaceStorage(

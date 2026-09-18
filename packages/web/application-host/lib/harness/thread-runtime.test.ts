@@ -11,7 +11,7 @@ import type { WorkingStateStore } from "./working-state/working-state-store.js";
 import { WorkingStateStore as DurableWorkingStateStore } from "./working-state/working-state-store.js";
 import type { WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from "./working-state/types.js";
 import { asTestWorkingStateRootAccess, type TestWorkspaceWorkingStateAccess } from "./working-state/working-state-root-adapter.test-helper.js";
-import type { WorkspaceRecoveryStorageContext } from "../recovery/local-sqlite-recovery-engine.test-helper.js";
+import type { LocalWorkingStateStorageContext as WorkspaceRecoveryStorageContext } from "./working-state/working-state-store.js";
 import { openRecoveryJournalCatalog } from "../recovery/journal-catalog.js";
 import { createRecoveryFileStore } from "../recovery/file-store.test-helper.js";
 import { createDocumentAuthority } from "../documents/authority.js";

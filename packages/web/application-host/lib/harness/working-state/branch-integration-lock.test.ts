@@ -2,14 +2,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine, type CreateWorkspaceRecoveryEngineOptions } from "../../recovery/local-sqlite-recovery-engine.test-helper.js";
+import { openRecoveryJournalCatalog } from "../../recovery/journal-catalog.js";
+import { createRecoveryFileStore } from "../../recovery/file-store.test-helper.js";
 import { createDocumentAuthority } from "../../documents/authority.js";
 import { createThreadRegistry } from "../thread-registry.js";
 import { createThreadRuntime, type ThreadSessionAdapter } from "../thread-runtime.js";
 import { IntegrationCoordinator } from "./integration-coordinator.js";
 import { ThreadExecutionViewRegistry } from "./execution-view.js";
 import { acquireVirtualWriteTicket, VirtualWriteGate } from "./virtual-write-gate.js";
-import { createTestWorkingStateRootAccess } from "./working-state-root-adapter.test-helper.js";
+import { createTestWorkingStateRootAccess, createWorkingStateObjectCollector, createWorkingStateStoreContextAccess } from "./working-state-root-adapter.test-helper.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -23,7 +24,6 @@ describe("branch integration lock order", () => {
     roots.push(root);
     const workspace = path.join(root, "workspace");
     const scratch = path.join(root, "scratch");
-    const dataDir = path.join(root, "data");
     await fs.promises.mkdir(workspace, { recursive: true });
     await fs.promises.mkdir(scratch, { recursive: true });
     await fs.promises.writeFile(path.join(workspace, "kept.txt"), "parent\n");
@@ -34,25 +34,17 @@ describe("branch integration lock order", () => {
       isTrusted: async () => true,
     });
     const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: workspace });
-    const documents: CreateWorkspaceRecoveryEngineOptions["documents"] = {
-      inspectWorkspace: async () => ({ root: workspace, workspaceId }),
-      listWorkspaceRegistrations: async () => [{ canonicalPath: workspace, workspaceId }],
-      beginDirtyStateBarrier: async () => ({ release: async () => undefined, settle: async () => undefined }),
-      inspectDirtyBuffers: async () => [],
-      runResourceOperation: vi.fn(async (_workspaceId, _resources, operation) => operation()),
-    };
-    const engine = createWorkspaceRecoveryEngine({
-      authorityId: "test-host",
-      dataDir,
-      documents,
-      sessionNavigation: {
-        prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }),
-        commit: async () => ({}),
-        commitLeaf: async () => ({}),
-      },
-    });
-    const workingStates = createTestWorkingStateRootAccess(engine);
+    const recoveryRoot = path.join(root, "recovery");
+    const database = await openRecoveryJournalCatalog(recoveryRoot, { create: true });
+    if (!database) throw new Error("Working-state test catalog is missing");
+    const workingStates = createTestWorkingStateRootAccess(createWorkingStateStoreContextAccess({
+      database,
+      fileStore: createRecoveryFileStore(),
+      identity: { authorityId: "test-host", canonicalRoot: workspace, filesystemProfile: "test", workspaceId },
+      resourceOperationGate: { run: async <Result>(_resources: readonly unknown[], next: () => Promise<Result>) => next() },
+      root: recoveryRoot,
+      collectUnreachableObjects: createWorkingStateObjectCollector(recoveryRoot, database),
+    }));
     const views = new ThreadExecutionViewRegistry();
     const writeGate = new VirtualWriteGate();
     const coordinator = new IntegrationCoordinator({
@@ -192,7 +184,7 @@ describe("branch integration lock order", () => {
     } finally {
       await runtime.dispose();
       await registry.dispose();
-      await engine.dispose();
+      database.close();
       await documentsAuthority.dispose();
     }
   });

@@ -10,7 +10,9 @@ import {
   type DocumentAuthorityHarness,
 } from '../documents/contract-fixtures.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
-import { createLocalSqliteWorkspaceRecoveryEngine as createWorkspaceRecoveryEngine } from './local-sqlite-recovery-engine.test-helper.js';
+import { createWorkspaceRecoveryEngine } from './journal-engine.js';
+import { createRecoveryFileStore } from './file-store.test-helper.js';
+import { createInMemoryRecoveryDurablePort } from './recovery-durable-port.test-helper.js';
 
 let runtime: ApplicationExtensionRuntime | undefined;
 let harness: DocumentAuthorityHarness | undefined;
@@ -38,10 +40,26 @@ describe('Web Application Host workspace recovery service', () => {
     harness = activeHarness;
     const notePath = `${activeHarness.workspaceRoot}/note.txt`;
     await fs.promises.writeFile(notePath, 'before service');
+    const fileStore = createRecoveryFileStore();
+    const recoveryIdentity = {
+      authorityId: activeRuntime.services.hostId,
+      canonicalRoot: activeHarness.workspaceRoot,
+      filesystemProfile: 'test',
+      workspaceId: activeHarness.identity.workspaceId,
+    };
     const engine = createWorkspaceRecoveryEngine({
       authorityId: activeRuntime.services.hostId,
       dataDir: runtimeDataDir,
       documents: activeHarness.authority,
+      durableRecoveryStore: createInMemoryRecoveryDurablePort({
+        captureState: async ({ path: inputPath }) => (
+          await fileStore.captureState(recoveryIdentity, recoveryIdentity.canonicalRoot, inputPath, { store: true })
+        ).state,
+        relativePathFor: async ({ path: inputPath }) => (
+          await fileStore.relativePathFor(recoveryIdentity, inputPath)
+        ).relative,
+      }),
+      fileStore,
       sessionNavigation: {
         commit: async () => ({ alreadyApplied: false, markerId: 'service-marker', snapshot: {} }),
         commitLeaf: async () => ({ alreadyApplied: false, markerId: 'service-undo', snapshot: {} }),
@@ -78,9 +96,9 @@ describe('Web Application Host workspace recovery service', () => {
         dirtyStateBarrier: true,
         journal: true,
         redo: true,
-        retention: true,
-        storageManagement: true,
-        workspaceLease: true,
+        retention: false,
+        storageManagement: false,
+        workspaceLease: false,
       },
     });
     const turn = await api.recordTurnStart({
@@ -138,8 +156,8 @@ describe('Web Application Host workspace recovery service', () => {
       },
       workspaceId: activeHarness.identity.workspaceId,
     })).toMatchObject({
-      status: 'ready',
-      retention: { policy: { maxCheckpointCount: 10, maxOperationCount: 10 } },
+      status: 'failed',
+      failure: { code: 'unavailable' },
     });
     expect(await api.retentionStatus(activeHarness.identity.workspaceId))
       .toMatchObject({ status: 'ready', retention: { workspaceId: activeHarness.identity.workspaceId } });
