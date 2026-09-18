@@ -66,6 +66,13 @@ Run a broader suite when it can expose a different class of failure, not merely 
 Avoid repeating a successful expensive check after changes that cannot affect it. Report important
 coverage gaps instead of converting them into a false pass.
 
+Stage Q, specified in [testing-ci-design.md](testing-ci-design.md) and the
+[harness implementation plan](agent-harness-plan.md), is the next engineering phase before AI4S.
+It will reassess test responsibilities, fixtures, discovery, repeated builds and CI execution across
+the repository. The design is accepted; current scripts remain the command authority until implemented.
+Its success is useful regression protection and faster, clearer feedback, not a deletion quota or a
+required number of checks. Do not turn its one-time cleanup plan into a checklist for every change.
+
 ## Repository and build facts
 
 - The workspace uses Bun `1.3.14`; root and package `package.json` scripts are the command authority.

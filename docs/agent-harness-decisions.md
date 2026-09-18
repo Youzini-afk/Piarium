@@ -28,7 +28,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
-| [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 15 |
+| [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 16 |
 | [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 33 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
@@ -330,3 +330,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-289 | 2026-09-18 | 默认免密钥网页搜索与原文查找/续读；不复用模型账户 | accepted | D-050/D-067/D-283 的搜索默认行为 | 设计 5.8；plan 1b.8；status 1b.3；Web 工具与设置 | [tool-environment](decisions/tool-environment.md) |
 | D-290 | 2026-09-18 | 常用结构包内置、语言服务器按需自动准备与能力设置页 | accepted | D-124/D-128 的默认交付方式 | plan 3.11；status；language-support | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
 | D-291 | 2026-09-19 | AI4S 以异构模型科研集群为中心，动态并行研究分支与事件触发综合 | accepted design / pending implementation | — | research-cluster-design；agent-harness 10.3；plan/roadmap/status | [research-cluster](decisions/research-cluster.md) |
+| D-292 | 2026-09-19 | 阶段 Q：AI4S 前全面重整测试责任、装配、执行入口、构建与 CI | accepted design / pending implementation | 调整 D-291 实施顺序；历史测试卫生条目不代表当前全仓已收口 | testing-ci-design；plan Q0–Q3；roadmap/status；development；research-cluster-design | [foundation-governance](decisions/foundation-governance.md) |

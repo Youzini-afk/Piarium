@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
+Status: core workbench/harness delivered; testing and CI redesign planned before AI4S implementation
 
 Last updated: 2026-09-19
 
@@ -24,7 +24,8 @@ authoritative record of delivery, and each phase names the design document that 
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
-| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation not started |
+| Q | Repository-wide testing and CI redesign | Design accepted (D-292); next implementation phase, not started |
+| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows Q |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -34,7 +35,14 @@ Application Host child; TypeScript retains product/Agent policy and the bundled 
 Agent loop/provider/session authority. Current evidence and platform-specific limits are recorded only in
 [harness status](agent-harness-status.md).
 
-Phase 11 is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
+Stage Q is specified in [testing-ci-design.md](testing-ci-design.md), with Q0–Q3 in the
+[harness implementation plan](agent-harness-plan.md). It covers test value and ownership, fixtures,
+portable discovery, duplicated execution/builds, platform and release checks, and actionable failures.
+The goal is trustworthy feedback with less maintenance, not a target test count or green checks achieved
+by hiding failures. Q is accepted but unimplemented; it precedes AI4S feature implementation. Existing
+repairs and authorized releases continue on their own applicable evidence.
+
+Phase 11 follows Q and is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
 research profile built on the existing Pi runtime, Thread/Run, Host scheduler, retrieval, context,
 permissions and Rust kernel. The first vertical slice is an open research question explored by
 heterogeneous model branches, fast execution workers and event-triggered synthesis. It is a design
@@ -43,6 +51,20 @@ target only; no production research profile is claimed until the status matrix r
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
 parallel; do not treat them as live design authority.
+
+## Stage Q — Testing and CI redesign (planned, D-292)
+
+1. Map the maintained test families and actual runner/build entrypoints across every package, kernel,
+   and delivery script; use existing CI evidence to find concentrated cost and unreliable coverage.
+2. Remove obsolete implementation constraints, merge redundant scenarios, and replace misleading
+   assertions or fixtures while retaining the relevant behavior at its owning layer.
+3. Make discovery portable, eliminate duplicate execution/build work, and assign source, platform,
+   and release checks to their actual responsibility; report the underlying failure rather than only a wrapper error.
+4. Verify the resulting scope and feedback cost, update current evidence references, and close Q before
+   starting the AI4S implementation slices. No fixed deletion ratio, coverage quota, test count, or retry-until-green policy.
+
+Acceptance is defined in the design and plan. The current repository has only the accepted documents;
+the investigation does not count as completed implementation or a full assertion-by-assertion audit.
 
 ## Phase 0 — Foundation (complete)
 

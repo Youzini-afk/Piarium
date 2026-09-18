@@ -18,6 +18,12 @@ Last updated: 2026-09-19
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
+**D-292 阶段 Q：测试与 CI 体系重整（2026-09-19），设计与计划已接受，实施未开始。** 当前下一主线为全仓验证责任、
+测试/夹具质量、执行发现、构建与 CI 重复成本和失败诊断的重整，Q 收口后再实施 AI4S 的 7A–7F。
+目标设计见 [testing-ci-design.md](testing-ci-design.md)，任务与完成判据见 [plan 阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292待实施)。
+现有清点和代表性代码/CI 日志抽查只是方案依据，不表示全仓已验收、测试已删除或 CI 已修复。
+Q0 全仓梳理、Q1 测试与装配清理、Q2 执行/构建/CI 重组、Q3 验证收口均为待实施；本次仅修改文档。
+
 **D-290 编程语言支持开箱即用（2026-09-18）。** 在 TS/JS/JSON 之外，内置 Python、Go、Rust、Java、C/C++、C#、Kotlin、Ruby、PHP、Bash、CSS、HTML、YAML、TOML 的结构包和提取查询。发行构建校验 15 份新增 wasm 的大小/SHA-256 并实际编译查询，运行时仍由 Rust kernel 提取；查询缺失报告 unavailable。不可变语法摘要和 kernel recipe 按身份复用，避免每个源文件重复读取、散列和注册同一个 wasm。
 
 语言服务器方面，新增 Python（Pyright）、HTML、CSS/SCSS/LESS、JSON/JSONC、YAML、Bash 的自包含内置扩展；Rust Analyzer、gopls、clangd、Marksman 在首次实际请求时准备到私有目录。状态查询不启动进程或下载。用户也可单独准备/取消，准备不会创建无文档的常驻 LSP 进程。原生工具优先验证本机可执行程序；没有可用程序时使用固定官方版本，远端资产校验 SHA-256；gopls 需要已有 Go 工具链。安装程序只获 Host 私有工具目录的进程授权，LSP 会话继续使用实际工作区的授权。设置页将安装可用性与运行状态分开，包名/ABI/导入放在技术详情，十种语言文案同步。
@@ -46,6 +52,8 @@ Release workflow 已接入各平台独立组件构建和发布资产；本轮未
 在线安装需对应版本组件资产发布后才可用。macOS/Linux 原生组件与安装器墙钟未在本机验证。
 
 **D-291 AI4S 科研集群设计已接受（2026-09-19），尚未实现或接线。** 研究 Profile 的产品中心是异构模型并行推进开放科学问题：首席研究主线负责问题发现、第一性原理分析和综合，研究 Thread 分支负责调查、设计、实现、复核和写作缺口，Host 调度模型与计算资源，普通批处理和进程监控由程序完成。研究证据、版本、运行和产物是内部事实基础，证据表、协议、Research Diff 和文章结构按需生成。第一条纵切及实现边界见 [research-cluster-design.md](research-cluster-design.md)；当前没有 production consumer，不能标 `implemented`、`wired`、`proven` 或 `default-on`。
+
+D-292 将阶段 Q 排在 AI4S 功能实施之前；科研产品设计保持，现有版本发行按自身适用证据推进。
 
 **D-284 上下文无感续接已实施（2026-09-16）。** 真实请求前预算（`context` hook 覆盖回合内继续）→ 水位触发固定范围后台摘要 →
 前台继续追加 → `session_before_compact` 提交候选或等待/同步 fallback → Pi 持久压缩 → `compaction.after` 重置观察基线 →
