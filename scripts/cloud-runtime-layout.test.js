@@ -112,38 +112,7 @@ describe('Piarium cloud runtime layout', () => {
     expect(lockText).toContain('"packages/pi-host"');
     expect(lockText).toContain('"packages/protocol"');
     expect(lockText).toContain('"packages/web"');
-
-    const builderSource = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
-      'utf8',
-    );
-    expect(builderSource).toContain("'cloud-runtime.bun.lock'");
-    expect(builderSource).toContain("['--frozen-lockfile']");
-    expect(builderSource).toContain("case '--update-lock'");
-    expect(builderSource).toContain('pruneNonRuntimeFiles');
-    expect(builderSource).not.toContain("require('better-sqlite3')");
-    expect(builderSource).toContain("'verify-kernel.mjs'");
-    expect(builderSource).toContain("require.resolve('web-tree-sitter')");
     expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual([]);
-  });
-
-  it('builds every compiled browser dependency before the Web bundle', () => {
-    const builderSource = fs.readFileSync(
-      path.join(repoRoot, 'scripts', 'build-cloud-runtime.mjs'),
-      'utf8',
-    );
-    const buildFunction = builderSource.slice(builderSource.indexOf('const buildSourcePackages'));
-    const extensionHostBuild = buildFunction.indexOf("'packages/extension-host'");
-    const brokerBuild = buildFunction.indexOf("'packages/runtime-broker'");
-    const clientBuild = buildFunction.indexOf("'packages/runtime-client'");
-    const applicationClientBuild = buildFunction.indexOf("'packages/application-client'");
-    const webBuild = buildFunction.indexOf("'packages/web'");
-
-    expect(extensionHostBuild).toBeGreaterThanOrEqual(0);
-    expect(brokerBuild).toBeGreaterThan(extensionHostBuild);
-    expect(clientBuild).toBeGreaterThan(brokerBuild);
-    expect(applicationClientBuild).toBeGreaterThan(clientBuild);
-    expect(webBuild).toBeGreaterThan(applicationClientBuild);
   });
 
   it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {

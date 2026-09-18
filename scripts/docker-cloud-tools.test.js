@@ -12,23 +12,11 @@ const dockerEntrypoint = readRepoFile('scripts/docker-entrypoint.sh');
 const dockerCompose = readRepoFile('docker-compose.yml');
 const dockerComposeToolbelt = readRepoFile('docker-compose.toolbelt.yml');
 const dockerIgnore = readRepoFile('.dockerignore');
-const ciWorkflow = readRepoFile('.github/workflows/ci.yml');
 const dockerWorkflow = readRepoFile('.github/workflows/docker.yml');
 const slimStage = runtimeBaseDockerfile.split('FROM slim AS runtime-base')[0] ?? '';
 const toolbeltStage = runtimeBaseDockerfile.includes('FROM slim AS runtime-base')
   ? runtimeBaseDockerfile.slice(runtimeBaseDockerfile.indexOf('FROM slim AS runtime-base'))
   : '';
-
-const containerSources = {
-  Dockerfile: appDockerfile,
-  'Dockerfile.base': runtimeBaseDockerfile,
-  'docker-compose.yml': dockerCompose,
-  'docker-compose.toolbelt.yml': dockerComposeToolbelt,
-  '.dockerignore': dockerIgnore,
-  'scripts/docker-build-only-wrapper.sh': dockerBuildOnlyWrapper,
-  'scripts/docker-entrypoint.sh': dockerEntrypoint,
-  '.github/workflows/docker.yml': dockerWorkflow,
-};
 
 const getAptInstallPackages = () => {
   const matches = runtimeBaseDockerfile.matchAll(/apt-get install\s+-y\s+--no-install-recommends\s+([\s\S]*?)(?=\s+&&)/g);
@@ -213,100 +201,19 @@ describe('Piarium cloud container runtime', () => {
     }
   });
 
-  it('contains no retired product names in the container contract', () => {
-    const retiredNames = [
-      ['open', 'chamber'].join(''),
-      ['open', 'code'].join(''),
-    ];
-    for (const [sourceName, source] of Object.entries(containerSources)) {
-      if (sourceName === '.dockerignore') continue;
-      for (const retiredName of retiredNames) {
-        expect(source.toLowerCase(), `${sourceName} contains ${retiredName}`).not.toContain(retiredName);
-      }
-    }
-  });
 });
 
 describe('Piarium container publication', () => {
-  it('uses a single Docker workflow and publishes base before app', () => {
-    const workflowDirectory = path.join(repoRoot, '.github', 'workflows');
-    const dockerWorkflows = fs.readdirSync(workflowDirectory)
-      .filter((fileName) => /\.ya?ml$/.test(fileName))
-      .filter((fileName) => {
-        const source = fs.readFileSync(path.join(workflowDirectory, fileName), 'utf8');
-        return source.includes('docker/build-push-action') || /^\s*file:\s*Dockerfile(?:\.base)?\s*$/m.test(source);
-      });
-
-    expect(dockerWorkflows).toEqual(['docker.yml']);
-    expect(dockerWorkflow).toContain('container-contract:');
-    expect(dockerWorkflow).toContain('build-runtime-slim:');
-    expect(dockerWorkflow).toContain('build-runtime-base:');
-    expect(dockerWorkflow).toContain('build-app-slim:');
-    expect(dockerWorkflow).toContain('target: slim');
-    expect(dockerWorkflow).toContain('target: runtime-base');
-    expect(dockerWorkflow).toContain('- docker-compose.toolbelt.yml');
-    expect(dockerWorkflow).toContain('needs: [container-contract, build-runtime-base]');
-    expect(dockerWorkflow).toContain('needs: [container-contract, build-runtime-slim]');
-    expect(dockerWorkflow).toContain('digest: ${{ steps.build.outputs.digest }}');
+  it('promotes only digest-pinned images and never exposes runtime secrets as build arguments', () => {
     expect(dockerWorkflow).toContain('BASE_DIGEST: ${{ needs.build-runtime-base.outputs.digest }}');
     expect(dockerWorkflow).toContain('image=${REGISTRY}/${BASE_IMAGE_NAME}@${BASE_DIGEST}');
     expect(dockerWorkflow).toContain('image=${REGISTRY}/${SLIM_BASE_IMAGE_NAME}@${BASE_DIGEST}');
-    expect(dockerWorkflow).toContain('- scripts/cloud-runtime.bun.lock');
-    expect(dockerWorkflow).toContain('SLIM_APP_IMAGE_NAME: youzini-afk/piarium-slim');
-    expect(dockerWorkflow).toContain('SLIM_BASE_IMAGE_NAME: youzini-afk/piarium-runtime-slim');
-  });
-
-  it('builds multi-architecture candidates and promotes main, latest, sha, and semver tags with GHA caches', () => {
-    expect(dockerWorkflow.match(/docker\/build-push-action@v7/g)).toHaveLength(6);
-    expect(dockerWorkflow.match(/docker\/metadata-action@v6/g)).toHaveLength(8);
-    expect(dockerWorkflow).not.toContain('docker/build-push-action@v6');
-    expect(dockerWorkflow).not.toContain('docker/metadata-action@v5');
-    expect(dockerWorkflow.match(/platforms: linux\/amd64,linux\/arm64/g)).toHaveLength(4);
-    expect(dockerWorkflow).toContain('type=raw,value=main');
-    expect(dockerWorkflow).toContain('type=raw,value=latest');
-    expect(dockerWorkflow).toContain('type=sha,format=short,prefix=sha-');
-    expect(dockerWorkflow).toContain('type=semver,pattern={{version}}');
-    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-runtime-base');
-    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-runtime-base,mode=max');
-    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-runtime-slim');
-    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-runtime-slim,mode=max');
-    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-app');
-    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-app,mode=max');
-    expect(dockerWorkflow).toContain('cache-from: type=gha,scope=piarium-app-slim');
-    expect(dockerWorkflow).toContain('cache-to: type=gha,scope=piarium-app-slim,mode=max');
-    expect(dockerWorkflow.match(/provenance: mode=max/g)).toHaveLength(4);
-    expect(dockerWorkflow.match(/sbom: true/g)).toHaveLength(4);
-    expect(dockerWorkflow).toContain(':candidate-${{ github.run_id }}-${{ github.run_attempt }}');
-    expect(dockerWorkflow).toContain('promote:');
-    expect(dockerWorkflow.match(/docker buildx imagetools create/g)).toHaveLength(4);
-  });
-
-  it('supports a manual base override without passing runtime secrets as build arguments', () => {
-    expect(dockerWorkflow).toContain('workflow_dispatch:');
-    expect(dockerWorkflow).toContain('runtime_base_image:');
-    expect(dockerWorkflow).toContain('runtime_slim_image:');
-    expect(dockerWorkflow).toContain("inputs.runtime_base_image == ''");
-    expect(dockerWorkflow).toContain("inputs.runtime_slim_image == ''");
-    expect(dockerWorkflow).toContain('docker buildx imagetools inspect "$BASE_OVERRIDE"');
     expect(dockerWorkflow).toContain('image=${base_repository}@${resolved_digest}');
-    expect(dockerWorkflow).toContain('RUNTIME_BASE_IMAGE=${{ steps.runtime-base.outputs.image }}');
-    expect(dockerWorkflow).toContain('RUNTIME_BASE_IMAGE=${{ steps.runtime-slim.outputs.image }}');
     expect(dockerWorkflow).not.toContain('PIARIUM_UI_PASSWORD=${{ secrets.');
     expect(dockerWorkflow).not.toContain('PIARIUM_TUNNEL_TOKEN=${{ secrets.');
   });
 
-  it('smokes the immutable amd64 candidate before promoting any installable tag', () => {
-    expect(dockerWorkflow).toContain('smoke-amd64:');
-    expect(dockerWorkflow).toContain('smoke-amd64-slim:');
-    expect(dockerWorkflow).toContain('docker pull --platform linux/amd64');
-    expect(dockerWorkflow).toContain('docker run --detach');
-    expect(dockerWorkflow).toContain('curl --fail --silent --show-error http://127.0.0.1:3000/health');
-    expect(dockerWorkflow).toContain("import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js')");
-    expect(dockerWorkflow).toContain('broker.resolveBundledPiHostEntry()');
-    expect(dockerWorkflow).toContain("new URL('./index.js', pathToFileURL(entry))");
-    expect(dockerWorkflow).not.toContain("require.resolve('@piarium/pi-host')");
-    expect(dockerWorkflow).toContain('EXPECTED_RELEASE_ID: image-${{ github.sha }}');
-    expect(dockerWorkflow).toContain('health.releaseId!==process.env.EXPECTED_RELEASE_ID');
+  it('gates tag promotion on the immutable image smokes', () => {
     expect(dockerWorkflow.indexOf('smoke-amd64:')).toBeLessThan(dockerWorkflow.indexOf('promote:'));
     expect(dockerWorkflow.indexOf('smoke-amd64-slim:')).toBeLessThan(dockerWorkflow.indexOf('promote:'));
     expect(dockerWorkflow).toContain("needs.smoke-amd64.result == 'success'");
@@ -319,38 +226,6 @@ describe('Piarium container publication', () => {
     expect(dockerWorkflow).toContain('verify-pr-image:');
     expect(dockerWorkflow).toContain('localhost:5000/${{ matrix.base_image }}:pr-${{ github.sha }}');
     expect(dockerWorkflow).toContain('${{ matrix.app_image }}:pr-${{ github.sha }}');
-    expect(dockerWorkflow).toContain('base_target: slim');
-    expect(dockerWorkflow).toContain('base_target: runtime-base');
     expect(dockerWorkflow).toContain("github.event_name == 'pull_request'");
-  });
-});
-
-describe('Piarium CI governance', () => {
-  it('keeps three stable required checks with one authoritative source-quality pass', () => {
-    expect(ciWorkflow).toContain('name: Source quality');
-    expect(ciWorkflow).toContain('name: Windows runtime');
-    expect(ciWorkflow).toContain('name: Production build');
-    expect(ciWorkflow).toContain('group: piarium-ci-${{ github.event.pull_request.number || github.ref }}');
-    expect(ciWorkflow).toContain('cancel-in-progress: true');
-    expect(ciWorkflow).not.toContain('matrix.os');
-    expect(ciWorkflow).not.toContain('bun run check:pi');
-    expect(ciWorkflow).not.toContain('bun run --cwd packages/web test');
-    expect(ciWorkflow).not.toContain('bun run dead-code');
-    expect(ciWorkflow.match(/^\s*- run: bun run type-check\s*$/gm)).toHaveLength(1);
-    expect(ciWorkflow.match(/^\s*- run: bun run lint\s*$/gm)).toHaveLength(1);
-    expect(ciWorkflow.match(/^\s*- run: bun run test:pi\s*$/gm)).toHaveLength(2);
-    expect(ciWorkflow.match(/^\s*- run: bun run build\s*$/gm)).toHaveLength(1);
-  });
-
-  it('keeps Windows platform checks focused and leaves full source checks out of Docker', () => {
-    expect(ciWorkflow).toContain('bun run build:type-dependencies');
-    expect(ciWorkflow).toContain('bun run --cwd packages/electron test:architecture');
-    expect(ciWorkflow).toContain('bun run --cwd packages/electron test:updater');
-    expect(dockerWorkflow).toContain('name: Verify container contract');
-    expect(dockerWorkflow).toContain('bun run test:cloud');
-    expect(dockerWorkflow).not.toContain('bun run type-check');
-    expect(dockerWorkflow).not.toContain('bun run lint');
-    expect(dockerWorkflow).not.toContain('bun run check:pi');
-    expect(dockerWorkflow).not.toContain('bun run --cwd packages/web test');
   });
 });

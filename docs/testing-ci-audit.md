@@ -268,14 +268,51 @@ an environment issue and out of editable scope.
 | `thread-runtime.test.ts` (4,007 lines), explore*.test.ts family | **unknown** — reviewed for duplication in Q1 only if touched; they are real behavior tests on inspection samples |
 | `settings-store`, `protocol`, `runtime-*`, `extension-*` suites | **retain** — input/output and boundary tests; glob fix only |
 
-## 9. Open questions carried into Q1
+## 9. Q1 outcomes on the open questions
 
-1. Does deleting `local-sqlite` helper require adapting consumer tests beyond
-   the options signature (both take `CreateWorkspaceRecoveryEngineOptions`)?
-2. Are the 4 retained-migration `.pi-root` deletions leaving any user-visible
-   behavior untested (boot catalog, workspace view resolution)?
-3. Exact location/form of the docs date gate.
-4. Whether `cloud-runtime.bun.lock` stays authoritative for the staged
-   dependency closure after the packaging commit `6bd39269`.
-5. Windows-local cloud install ordering — no real coverage after deleting
-   the text test; acceptable residual gap or needs a fixture-level check.
+1. **local-sqlite helper removal** — resolved. Consumers split into two
+   fixtures: recovery-semantics tests now drive the production
+   `createWorkspaceRecoveryEngine` over a faithful in-memory durable port
+   (`recovery-durable-port.test-helper.ts`), and `WorkingStateStore` tests
+   use an explicit SQLite catalog context shim with real object GC
+   (`working-state-root-adapter.test-helper.ts`). The 3.5k-line retired
+   engine is deleted. Crash/recovery expectations were rewritten to the
+   journal-engine semantics (navigation rejection stays resumable;
+   compensation crash reaches `needs-attention`; host-kill leaves the
+   catalog at the pre-crash state).
+2. **`.pi-root` deletions** — resolved. The 6 files asserted retired
+   OpenCode symbols and identifier presence, not user behavior; boot
+   catalog and surface resolution remain covered by the UI suite.
+3. **Docs date gate** — resolved. `checkLastUpdated` in
+   `scripts/docs/engineering-docs.mjs` compared `Last updated:` against
+   the file's last commit date via a per-file `git log` call in
+   `validate-docs.mjs`. The comparison, the git machinery, and the
+   shallow-clone branch are removed; ISO-format and future-date checks
+   remain.
+4. **`cloud-runtime.bun.lock` authority** — still open for Q2; the lock
+   file remains the `--frozen-lockfile` input, and the cloud smoke's
+   first-deploy failure is a kernel-identity artifact issue (§6), not a
+   lock problem.
+5. **Windows-local install ordering** — residual gap accepted. The
+   statement-order text test is deleted; the Linux deploy smoke covers
+   archive→deploy→health→rollback on the real artifact, and no
+   fixture-level Windows install check exists.
+6. **`terminalViewportRemount.test.ts`** — deleted. It asserted source
+   text of `TerminalView.tsx`/`TerminalViewport.tsx`; the remount-churn
+   regression it guarded (session-id in the viewport key rebuilding the
+   WASM terminal) now has no behavioral coverage — the UI suite has no
+   renderer-level terminal harness. Accepted residual gap.
+7. **`mainLayoutMobileSidebarMount.test.ts`** — listed in the audit but
+   does not exist in the tree; nothing to do.
+8. **`webviewHtml.test.ts`** — replaced with a real `getWebviewHtml`
+   call asserting the generated CSP (`worker-src` allows `blob:`,
+   `script-src` does not).
+9. **VS Code suite** — wired (`test` = `bun test`), all `node:test`
+   imports migrated, `documents.test.ts` isolated from the module-cached
+   bridge via a query-busted bridge + `mock.module`, and the worktree
+   bootstrap test now disables `gc.auto`/`maintenance.auto` in fixture
+   repos and polls bounded `rm` retries, ending the Windows `EBUSY`
+   flake and the dangling git child. `search-runtime` passes against a
+   rebuilt 0.9.12 kernel.
+10. **`startup-pipeline-runtime.test.ts`** — kept the ordering behavior
+    test; removed the retired-OpenCode source scan.

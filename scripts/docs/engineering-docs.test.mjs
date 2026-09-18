@@ -50,8 +50,6 @@ test("readStatusHeader reports missing headers as null", () => {
 test("checkLastUpdated ignores documents without the header", () => {
   const problem = checkLastUpdated({
     lastUpdated: null,
-    lastCommitDate: "2026-08-21",
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.equal(problem, null)
@@ -60,8 +58,6 @@ test("checkLastUpdated ignores documents without the header", () => {
 test("checkLastUpdated rejects a non-ISO date", () => {
   const problem = checkLastUpdated({
     lastUpdated: "Aug 21 2026",
-    lastCommitDate: null,
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.match(problem, /not an ISO/)
@@ -70,8 +66,6 @@ test("checkLastUpdated rejects a non-ISO date", () => {
 test("checkLastUpdated rejects a future date", () => {
   const problem = checkLastUpdated({
     lastUpdated: "2026-09-01",
-    lastCommitDate: "2026-08-21",
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.match(problem, /in the future/)
@@ -80,8 +74,6 @@ test("checkLastUpdated rejects a future date", () => {
 test("checkLastUpdated allows one day of timezone slack ahead of UTC", () => {
   const problem = checkLastUpdated({
     lastUpdated: "2026-08-22",
-    lastCommitDate: "2026-08-22",
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.equal(problem, null)
@@ -90,8 +82,6 @@ test("checkLastUpdated allows one day of timezone slack ahead of UTC", () => {
 test("checkLastUpdated still rejects two days ahead of UTC", () => {
   const problem = checkLastUpdated({
     lastUpdated: "2026-08-23",
-    lastCommitDate: "2026-08-21",
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.match(problem, /in the future/)
@@ -100,50 +90,14 @@ test("checkLastUpdated still rejects two days ahead of UTC", () => {
 test("checkLastUpdated crosses a month boundary when adding slack", () => {
   const problem = checkLastUpdated({
     lastUpdated: "2026-09-01",
-    lastCommitDate: "2026-09-01",
-    hasUncommittedChanges: false,
     today: "2026-08-31",
   })
   assert.equal(problem, null)
 })
 
-test("checkLastUpdated fails a header that predates the document's last commit", () => {
+test("checkLastUpdated does not compare against commit history", () => {
   const problem = checkLastUpdated({
     lastUpdated: "2026-08-14",
-    lastCommitDate: "2026-08-20",
-    hasUncommittedChanges: false,
-    today: "2026-08-21",
-  })
-  assert.match(problem, /predates the last commit/)
-})
-
-test("checkLastUpdated accepts a header at or after the last commit", () => {
-  for (const lastUpdated of ["2026-08-20", "2026-08-21"]) {
-    const problem = checkLastUpdated({
-      lastUpdated,
-      lastCommitDate: "2026-08-20",
-      hasUncommittedChanges: false,
-      today: "2026-08-21",
-    })
-    assert.equal(problem, null, `expected ${lastUpdated} to pass`)
-  }
-})
-
-test("checkLastUpdated skips work in progress", () => {
-  const problem = checkLastUpdated({
-    lastUpdated: "2026-08-14",
-    lastCommitDate: "2026-08-20",
-    hasUncommittedChanges: true,
-    today: "2026-08-21",
-  })
-  assert.equal(problem, null)
-})
-
-test("checkLastUpdated skips an uncommitted or git-less document", () => {
-  const problem = checkLastUpdated({
-    lastUpdated: "2026-08-14",
-    lastCommitDate: null,
-    hasUncommittedChanges: false,
     today: "2026-08-21",
   })
   assert.equal(problem, null)

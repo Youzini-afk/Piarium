@@ -31,8 +31,8 @@ Last updated: 2026-09-19
 | CI 次数、桌面命令数量、源码措辞与文档日期被固定断言 | 存在锁死实现方式、与产品结果无直接关系的检查 |
 | 最新 CI 源码/Windows 检查通过，云运行时首次部署启动失败 | 存在真实成品故障，不能把所有红灯归咎于测试或通过取消检查消除 |
 
-具体入口包括 [CI 源码断言](../scripts/docker-cloud-tools.test.js)、[部署源码断言](../scripts/cloud-remote-deploy.test.js)、
-[桌面契约测试](../packages/electron/desktop-contract.test.ts)、[文档日期检查](../scripts/docs/engineering-docs.mjs)、
+具体入口包括 [CI 源码断言](../scripts/docker-cloud-tools.test.js)、部署源码断言 `scripts/cloud-remote-deploy.test.js`（已按审计删除，改由真实部署 smoke 覆盖）、
+[桌面契约测试](../packages/electron/desktop-contract.test.ts)、[文档检查](../scripts/docs/engineering-docs.mjs)、
 [上下文稳定性测试](../packages/pi-host/test/zone0-stability.test.ts) 和 [原生验收入口](../scripts/test-kernel-authority.mjs)。
 这些是实施时的定位线索，不是必须保持原名或固定数量的契约；清理后同步或移除失效链接。
 

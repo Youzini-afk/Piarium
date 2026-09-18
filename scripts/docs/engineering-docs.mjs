@@ -67,13 +67,11 @@ export const readStatusHeader = (markdown) => {
 }
 
 /**
- * Check a `Last updated:` value against the date of the last commit that touched the file.
- *
- * `lastCommitDate` is `null` when the file is uncommitted or git is unavailable, and
- * `hasUncommittedChanges` is true while the author is still editing. Both cases skip the
- * comparison rather than failing work in progress.
+ * Check a `Last updated:` header for well-formedness: ISO date, not in the future.
+ * The header is a human freshness hint, not a contract — commit-date comparison used to force
+ * contributors to bump it on every edit, which blocked unrelated work without proving anything.
  */
-export const checkLastUpdated = ({ lastUpdated, lastCommitDate, hasUncommittedChanges, today }) => {
+export const checkLastUpdated = ({ lastUpdated, today }) => {
   if (lastUpdated === null) return null
   if (!ISO_DATE.test(lastUpdated)) {
     return `'Last updated: ${lastUpdated}' is not an ISO YYYY-MM-DD date`
@@ -82,11 +80,6 @@ export const checkLastUpdated = ({ lastUpdated, lastCommitDate, hasUncommittedCh
   // rather than failing contributors who are ahead of UTC.
   if (lastUpdated > addDays(today, 1)) {
     return `'Last updated: ${lastUpdated}' is in the future (today is ${today})`
-  }
-  if (hasUncommittedChanges) return null
-  if (lastCommitDate === null || !ISO_DATE.test(lastCommitDate)) return null
-  if (lastUpdated < lastCommitDate) {
-    return `'Last updated: ${lastUpdated}' predates the last commit touching this file (${lastCommitDate}); bump the header when you change the document`
   }
   return null
 }

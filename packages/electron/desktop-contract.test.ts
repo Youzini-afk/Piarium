@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { test } from 'vitest';
 
 import {
@@ -25,12 +22,7 @@ import { createPreloadBootstrapPayload } from './renderer-security-policy.js';
 
 // ---------------------------------------------------------------------------
 // 1. Command catalog completeness — every command in the catalog is known
-//    and the list has exactly 59 entries.
 // ---------------------------------------------------------------------------
-
-test('desktop command catalog has exactly 59 commands', () => {
-  assert.equal(PIARIUM_DESKTOP_COMMAND_LIST.length, 59);
-});
 
 test('desktop command catalog has no duplicates', () => {
   const seen = new Set<PiariumDesktopCommand>();
@@ -67,23 +59,13 @@ test('unknown command is not in the command map', () => {
   assert.equal(isPiariumDesktopCommand('desktop_get_app_version'), true);
 });
 
-test('desktop event catalog covers every event emitted by Electron main', () => {
-  const expectedEvents = [
-    'piarium:update-progress',
-    'piarium:open-session',
-    'piarium:open-draft-session',
-    'piarium:window-resized',
-    'piarium:window-maximized-changed',
-    'piarium:installed-apps-updated',
-    'piarium:system-resume',
-    'piarium:tray-action',
-    'piarium:vibrancy-ready',
-    'piarium:ssh-instance-status',
-    'piarium:menu-action',
-    'piarium:check-for-updates',
-  ];
-  assert.deepEqual([...PIARIUM_DESKTOP_EVENT_LIST].sort(), expectedEvents.sort());
-  for (const event of expectedEvents) assert.equal(isPiariumDesktopEvent(event), true);
+test('desktop event catalog has no duplicates and rejects unknown events', () => {
+  const seen = new Set<string>();
+  for (const event of PIARIUM_DESKTOP_EVENT_LIST) {
+    assert.equal(seen.has(event), false, `duplicate event: ${event}`);
+    assert.equal(isPiariumDesktopEvent(event), true, `catalog event rejected by guard: ${event}`);
+    seen.add(event);
+  }
   assert.equal(isPiariumDesktopEvent('piarium:unknown'), false);
 });
 
@@ -150,44 +132,6 @@ const _requiredArgsInvocation: PiariumDesktopCommandInvocation<'desktop_set_wind
 // Optional-args command: invocation is [{ x?: number, ... }] — can be empty object
 const _optionalArgsInvocation: PiariumDesktopCommandInvocation<'desktop_capture_page_rect'> = [{}];
 void _noArgsInvocation; void _requiredArgsInvocation; void _optionalArgsInvocation;
-
-test('command map covers all command categories', () => {
-  const categories = {
-    window: ['desktop_start_window_drag', 'desktop_close_current_window', 'desktop_new_window'],
-    system: ['desktop_get_app_version', 'desktop_get_lan_address', 'desktop_restart'],
-    capture: ['desktop_browser_capture_page', 'desktop_capture_page_rect'],
-    file: ['desktop_save_markdown_file', 'desktop_read_file', 'desktop_open_path'],
-    host: ['desktop_hosts_get', 'desktop_hosts_set', 'desktop_host_probe'],
-    auth: ['desktop_remote_password_login', 'desktop_install_id_get'],
-    update: ['desktop_check_for_updates', 'desktop_download_and_install_update'],
-    tray: ['desktop_notify', 'desktop_tray_update'],
-    ssh: ['desktop_ssh_connect', 'desktop_ssh_disconnect', 'desktop_ssh_status'],
-  };
-  const catalog = new Set(PIARIUM_DESKTOP_COMMAND_LIST);
-  for (const [category, commands] of Object.entries(categories)) {
-    for (const cmd of commands) {
-      assert.equal(catalog.has(cmd as PiariumDesktopCommand), true, `${category} command ${cmd} missing from catalog`);
-    }
-  }
-});
-
-// ---------------------------------------------------------------------------
-// 4d. main.ts switch exhaustiveness — the default branch must use
-//     `command satisfies never` so adding a new command without a case
-//     is a compile error, not a silent fall-through.
-// ---------------------------------------------------------------------------
-
-test('main.ts handleInvoke switch uses satisfies never for exhaustiveness', () => {
-  const mainPath = path.resolve(
-    path.dirname(fileURLToPath(import.meta.url)),
-    'main.ts',
-  );
-  const source = readFileSync(mainPath, 'utf8');
-  assert.ok(
-    source.includes('command satisfies never'),
-    'main.ts must use `command satisfies never` in the default branch of handleInvoke',
-  );
-});
 
 // ---------------------------------------------------------------------------
 // 5. Bootstrap payload — local carries credentials, remote does not

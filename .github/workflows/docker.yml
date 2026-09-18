@@ -18,7 +18,6 @@ on:
       - packages/**
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
-      - scripts/cloud-remote-deploy.test.js
       - scripts/cloud-runtime.bun.lock
       - scripts/docker-cloud-tools.test.js
       - scripts/docker-build-only-wrapper.sh
@@ -39,7 +38,6 @@ on:
       - packages/**
       - scripts/build-cloud-runtime.mjs
       - scripts/cloud-runtime-layout.test.js
-      - scripts/cloud-remote-deploy.test.js
       - scripts/cloud-runtime.bun.lock
       - scripts/docker-cloud-tools.test.js
       - scripts/docker-build-only-wrapper.sh

@@ -90,7 +90,7 @@ async function exists(absolutePath) {
 
 /**
  * Validate the engineering docs: link integrity, honest status headers, and no orphaned documents.
- * Skipped with a notice when git is unavailable, since file discovery and dates both depend on it.
+ * Skipped with a notice when git is unavailable, since file discovery depends on it.
  */
 async function validateEngineeringDocs(errors) {
   const files = await engineeringDocPaths()
@@ -99,21 +99,7 @@ async function validateEngineeringDocs(errors) {
     return { checked: 0, links: 0 }
   }
 
-  const modified = new Set(
-    (await git(["diff", "--name-only", "HEAD"]) ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0),
-  )
   const today = new Date().toISOString().slice(0, 10)
-
-  // A shallow clone has no per-file history: git reports the single fetched commit for every path,
-  // which would fail every document whose header predates it. Skip the date comparison instead of
-  // reporting dates we cannot actually determine.
-  const shallow = (await git(["rev-parse", "--is-shallow-repository"]))?.trim() === "true"
-  if (shallow) {
-    console.log("Engineering docs: 'Last updated' comparison skipped on a shallow clone.")
-  }
 
   const referencedPaths = new Set()
   let linkCount = 0
@@ -139,16 +125,7 @@ async function validateEngineeringDocs(errors) {
       if (lastUpdated === null) errors.push(`${file}: missing a 'Last updated:' header line`)
     }
 
-    const lastCommitDate = shallow
-      ? null
-      : (await git(["log", "-1", "--format=%ad", "--date=short", "--", file]))?.trim() || null
-
-    const problem = checkLastUpdated({
-      lastUpdated,
-      lastCommitDate,
-      hasUncommittedChanges: modified.has(file),
-      today,
-    })
+    const problem = checkLastUpdated({ lastUpdated, today })
     if (problem) errors.push(`${file}: ${problem}`)
   }
 
