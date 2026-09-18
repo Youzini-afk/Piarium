@@ -3668,7 +3668,6 @@
   "settings.page.harness.page.retrieval.title": "Busca de código",
   "settings.page.harness.page.retrieval.description": "Escolha serviços de embeddings e reordenação para o código.",
   'settings.page.harness.description': 'Configure as ferramentas, shell e saída do agent harness.',
-  'settings.page.harness.nextSession': 'As alterações entram em vigor na próxima sessão.',
   'settings.page.harness.section.tools': 'Ferramentas',
   'settings.page.harness.section.tools.description': 'Ative ou desative ferramentas individuais do harness. As alterações entram em vigor na próxima sessão.',
   'settings.page.harness.section.tools.placeholder': 'Os controles de ferramentas aparecerão aqui conforme as ferramentas são implementadas.',

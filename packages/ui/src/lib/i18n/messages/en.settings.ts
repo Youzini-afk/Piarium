@@ -159,7 +159,6 @@ export const settingsDict = {
   "settings.page.harness.page.retrieval.title": "Code Retrieval",
   "settings.page.harness.page.retrieval.description": "Choose embedding and reranking backends for code retrieval.",
   'settings.page.harness.description': 'Configure agent harness tools, shell, and output settings.',
-  'settings.page.harness.nextSession': 'Changes take effect in the next session.',
   'settings.page.harness.section.tools': 'Tools',
   'settings.page.harness.section.tools.description': 'Enable or disable individual harness tools. Changes take effect in the next session.',
   'settings.page.harness.section.tools.placeholder': 'Tool toggles will appear here as tools are implemented.',

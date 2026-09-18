@@ -142,7 +142,6 @@ export const settingsDict = {
   "settings.page.harness.page.retrieval.title": "コード検索",
   "settings.page.harness.page.retrieval.description": "コード検索の埋め込みと再ランキングを設定します。",
 'settings.page.harness.description': 'Configure agent harness tools, shell, and output settings.',
-'settings.page.harness.nextSession': 'Changes take effect in the next session.',
 'settings.page.harness.section.tools': 'Tools',
 'settings.page.harness.section.tools.description': 'Enable or disable individual harness tools. Changes take effect in the next session.',
 'settings.page.harness.section.tools.placeholder': 'Tool toggles will appear here as tools are implemented.',

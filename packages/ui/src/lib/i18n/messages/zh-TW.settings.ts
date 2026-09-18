@@ -156,7 +156,6 @@
   "settings.page.harness.page.retrieval.title": "程式碼檢索",
   "settings.page.harness.page.retrieval.description": "設定程式碼檢索使用的嵌入與重排服務。",
 'settings.page.harness.description': 'Configure agent harness tools, shell, and output settings.',
-  "settings.page.harness.nextSession": "設定會自動儲存；新對話使用這些預設值。",
   "settings.page.harness.section.tools": "可用工具",
   "settings.page.harness.section.tools.description": "選擇 Agent 可以使用的原生工具。",
 'settings.page.harness.section.tools.placeholder': 'Tool toggles will appear here as tools are implemented.',

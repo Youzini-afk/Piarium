@@ -159,7 +159,6 @@
   "settings.page.harness.page.retrieval.title": "코드 검색",
   "settings.page.harness.page.retrieval.description": "코드 검색의 임베딩 및 재순위 서비스를 설정합니다.",
 'settings.page.harness.description': 'Configure agent harness tools, shell, and output settings.',
-'settings.page.harness.nextSession': 'Changes take effect in the next session.',
 'settings.page.harness.section.tools': 'Tools',
 'settings.page.harness.section.tools.description': 'Enable or disable individual harness tools. Changes take effect in the next session.',
 'settings.page.harness.section.tools.placeholder': 'Tool toggles will appear here as tools are implemented.',

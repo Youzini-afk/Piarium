@@ -28,6 +28,5 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
       <Button variant="outline" size="sm" className="mt-2" onClick={() => { void retry(); }}>{t('settings.harness.retry')}</Button>
     </div> : null}
     {harness ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
-    {harness ? <p className="pb-4 typography-meta text-muted-foreground">{t('settings.page.harness.nextSession')}</p> : null}
   </SettingsPageLayout>;
 }
