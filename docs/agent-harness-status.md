@@ -18,11 +18,18 @@ Last updated: 2026-09-19
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-292 阶段 Q：测试与 CI 体系重整（2026-09-19），设计与计划已接受，实施未开始。** 当前下一主线为全仓验证责任、
-测试/夹具质量、执行发现、构建与 CI 重复成本和失败诊断的重整，Q 收口后再实施 AI4S 的 7A–7F。
-目标设计见 [testing-ci-design.md](testing-ci-design.md)，任务与完成判据见 [plan 阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292待实施)。
-现有清点和代表性代码/CI 日志抽查只是方案依据，不表示全仓已验收、测试已删除或 CI 已修复。
-Q0 全仓梳理、Q1 测试与装配清理、Q2 执行/构建/CI 重组、Q3 验证收口均为待实施；本次仅修改文档。
+**D-292/D-293 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，待主代理验收后收口。** 现状审计与处置见
+[testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。
+
+已交付：kernel/native 验收集由 `packages/web/vitest.kernel.config.ts` 唯一归属（主 Web 套件 271 文件/2334 用例全绿且不再依赖
+Rust 产物；`test:kernel` 26 node 用例 + 17 文件/120 用例全绿）；恢复测试已重定向到生产 journal 引擎与忠实内存 durable
+端口，退役 local-sqlite 引擎与 3585 行 helper 删除；`tsx --test` 递归 glob 全仓加引号统一发现；VS Code 套件接入
+`bun test` 并进入 windows-runtime；Electron vitest 拆分主套件与 updater/linux-desktop 专属入口；i18n 专项 CI 步骤并入
+UI 套件删除；docs 日期门禁移除；`test:node-smoke` 改为消费 production-build 产物；docs-only 变更经 changes job 门控
+不再触发原生/容器构建。云部署 smoke 失败根因确认为产品缺陷（`@piarium/extension-builtins` 误置 devDependencies，
+`server/index.js` 运行时 import 缺失致 daemon 启动即退），已移入 dependencies、重生成云锁文件并在部署/构建校验与
+layout 测试中断言；deploy rollback 现输出 daemon 日志尾部。`thread-wait-admission` 的挂钟断言改为可观察 held 状态 +
+结果断言。
 
 **D-290 编程语言支持开箱即用（2026-09-18）。** 在 TS/JS/JSON 之外，内置 Python、Go、Rust、Java、C/C++、C#、Kotlin、Ruby、PHP、Bash、CSS、HTML、YAML、TOML 的结构包和提取查询。发行构建校验 15 份新增 wasm 的大小/SHA-256 并实际编译查询，运行时仍由 Rust kernel 提取；查询缺失报告 unavailable。不可变语法摘要和 kernel recipe 按身份复用，避免每个源文件重复读取、散列和注册同一个 wasm。
 

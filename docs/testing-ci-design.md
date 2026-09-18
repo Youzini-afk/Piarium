@@ -1,13 +1,13 @@
 # Piarium 测试与 CI 体系重整设计
 
-Status: accepted design (D-292); Stage Q implementation not started; precedes AI4S implementation
+Status: accepted design (D-292); Stage Q implemented (D-293), locally verified and awaiting acceptance
 
 Last updated: 2026-09-19
 
 本文定义全仓测试、测试装配、构建与 CI 的重整目标。实施顺序见
 [agent-harness-plan.md 的阶段 Q](agent-harness-plan.md#阶段-q测试与-ci-体系重整d-292待实施)，
 交付事实仍记在 [agent-harness-status.md](agent-harness-status.md)。这是 AI4S 实施前的独立工程阶段；
-当前只接受设计，没有据此删除测试、改变检查或修复运行行为。
+实施结果与每项处置的实际去向记录在 [testing-ci-audit.md](testing-ci-audit.md)。
 
 ## 1. 要解决的问题
 

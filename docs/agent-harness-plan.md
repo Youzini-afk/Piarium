@@ -1021,11 +1021,11 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 默认 bundled Pi 的已交付路径保持。阶段 R 已由 D-282 收口；外部 adapter 和新领域 profile 使用当前 Rust kernel/TS Host 边界，
 不另建一套资源、存储或进程后端。
 
-## 阶段 Q：测试与 CI 体系重整（D-292，待实施）
+## 阶段 Q：测试与 CI 体系重整（D-292，已实施待验收）
 
-设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓，完成后再开始 AI4S 的 7A–7F。
+设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓，完成后再开始 AI4S 的 7A–7F。
 先建立整体判断，再分责任完成修改；不得把它交付成只修近期几处失败、只删源码断言或只移动 workflow 的局部补丁。
-当前状态是设计已接受、实现未开始，以下编号用于交接和收口，不构成每次日常开发都要重复的检查流程。
+当前状态是 Q0–Q2 已实施并在本地验证（D-293），待主代理验收后收口；以下编号用于交接和收口，不构成每次日常开发都要重复的检查流程。
 
 ### Q0. 全仓现状、责任和目标结构
 

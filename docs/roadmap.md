@@ -24,7 +24,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
-| Q | Repository-wide testing and CI redesign | Design accepted (D-292); next implementation phase, not started |
+| Q | Repository-wide testing and CI redesign | Implemented (D-292/D-293); locally verified, awaiting acceptance |
 | 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows Q |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
@@ -52,7 +52,7 @@ Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence i
 retained contracts, but their implementations were deliberately removed rather than maintained in
 parallel; do not treat them as live design authority.
 
-## Stage Q — Testing and CI redesign (planned, D-292)
+## Stage Q — Testing and CI redesign (implemented, D-292/D-293)
 
 1. Map the maintained test families and actual runner/build entrypoints across every package, kernel,
    and delivery script; use existing CI evidence to find concentrated cost and unreliable coverage.
@@ -63,8 +63,11 @@ parallel; do not treat them as live design authority.
 4. Verify the resulting scope and feedback cost, update current evidence references, and close Q before
    starting the AI4S implementation slices. No fixed deletion ratio, coverage quota, test count, or retry-until-green policy.
 
-Acceptance is defined in the design and plan. The current repository has only the accepted documents;
-the investigation does not count as completed implementation or a full assertion-by-assertion audit.
+Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i18n/Electron/VS Code
+suites, quoted-glob discovery, retargeted recovery evidence on the production journal engine,
+artifact-driven CI with docs-only gating, and the cloud daemon boot failure fixed at its product
+root cause (a production dependency declaration). Locally verified; awaiting primary-agent
+acceptance before AI4S implementation begins.
 
 ## Phase 0 — Foundation (complete)
 
