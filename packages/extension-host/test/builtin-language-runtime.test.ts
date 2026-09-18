@@ -48,7 +48,10 @@ test("the built-in TypeScript language extension materializes lazily and unregis
     assert.equal(calls.length, 0);
 
     await runtime.activateForEvent("workspace-match");
-    const registration = calls.find((call) => call.method === "registerProvider")?.params as {
+    const registration = calls.find((call) => (
+      call.method === "registerProvider"
+      && (call.params as { providerId?: unknown } | undefined)?.providerId === "piarium.typescript-language"
+    ))?.params as {
       args?: string[];
       command?: string;
       initializationOptions?: { tsserver?: { fallbackPath?: string } };

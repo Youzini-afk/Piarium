@@ -102,7 +102,7 @@ jobs:
           INSECURE_ENV_FILE="$RUNNER_TEMP/piarium-cloud-insecure.env"
           LINK_ARCHIVE="$RUNNER_TEMP/piarium-cloud-link-failure.tgz"
           LOCK_ARCHIVE="$RUNNER_TEMP/piarium-cloud-lock-failure.tgz"
-          PORT=$(node -e "const server=require('node:net').createServer();server.listen(0,'::1',()=>{console.log(server.address().port);server.close();});")
+          PORT=$(node -e "const server=require('node:net').createServer();server.listen(0,'127.0.0.1',()=>{console.log(server.address().port);server.close();});")
 
           cleanup() {
             if [ -f "$ROOT/current/packages/web/bin/cli.js" ]; then
@@ -113,7 +113,7 @@ jobs:
 
           verify_good() {
             test "$(basename "$(readlink -f "$ROOT/current")")" = "$GOOD_RELEASE"
-            node --input-type=module -e "const response=await fetch('http://[::1]:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.piRuntime?.ready!==true||body.piRuntime?.source!=='bundled')throw new Error(JSON.stringify(body));"
+            node --input-type=module -e "const response=await fetch('http://127.0.0.1:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.piRuntime?.ready!==true||body.piRuntime?.source!=='bundled')throw new Error(JSON.stringify(body));"
           }
 
           node scripts/build-cloud-runtime.mjs \
@@ -130,7 +130,7 @@ jobs:
             --sha256 "$GOOD_SHA" \
             --release-id "$GOOD_RELEASE" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR"
 
           verify_good
@@ -142,7 +142,7 @@ jobs:
             --sha256 "$GOOD_SHA" \
             --release-id "$GOOD_RELEASE" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR"
           verify_good
 
@@ -155,7 +155,7 @@ jobs:
             --sha256 "$GOOD_SHA" \
             --release-id "insecure-env-${GOOD_SHA:0:16}" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR" \
             --env-file "$INSECURE_ENV_FILE"; then
             echo "Deployment unexpectedly sourced a group/world-readable secret file." >&2
@@ -171,7 +171,7 @@ jobs:
             --sha256 "$GOOD_SHA" \
             --release-id "locked-${GOOD_SHA:0:16}" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR"; then
             echo "Concurrent deployment unexpectedly acquired the active lock." >&2
             exit 1
@@ -199,7 +199,7 @@ jobs:
             --sha256 "$GOOD_SHA" \
             --release-id "link-failure-${GOOD_SHA:0:16}" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR"; then
             echo "Deployment with an injected current-link failure unexpectedly succeeded." >&2
             exit 1
@@ -220,7 +220,7 @@ jobs:
             --sha256 "$BAD_SHA" \
             --release-id "$GOOD_RELEASE" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR"; then
             echo "A release id was unexpectedly reused for a different archive." >&2
             exit 1
@@ -233,7 +233,7 @@ jobs:
             --sha256 "$BAD_SHA" \
             --release-id "bad-${BAD_SHA:0:16}" \
             --port "$PORT" \
-            --bind-host ::1 \
+            --bind-host 127.0.0.1 \
             --data-dir "$DATA_DIR" \
             --health-timeout 5; then
             echo "Broken cloud runtime unexpectedly deployed successfully." >&2
