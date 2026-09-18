@@ -84,9 +84,7 @@ describe("real dependency wait admission", () => {
 
   it("ordinary inform and cosmetic attention changes do not wake or reacquire", async () => {
     const f = await fixture();
-    let returned = false;
-    const pending = f.wait.handle({ ids: [f.child.id], timeoutMs: 180 }, f.context)
-      .then((result) => { returned = true; return result; });
+    const pending = f.wait.handle({ ids: [f.child.id], timeoutMs: 180 }, f.context);
     try {
       await f.yielded();
       const rootContext = { ...f.context, sessionId: root.id,
@@ -94,8 +92,13 @@ describe("real dependency wait admission", () => {
       await f.send.handle({ threadId: f.owner.id, kind: "inform", message: "For later, not a new task.",
         requestId: "ordinary-note", from: "parent-agent" }, rootContext);
       await f.registry.setAttention(workspaceId, f.owner.id, "none");
-      await delay(35);
-      expect(returned).toBe(false);
+      // The inform must be durably held for the next input boundary, not
+      // delivered mid-wait. Once that record exists the wait can only finish
+      // through its own deadline or a real dependency change.
+      await vi.waitFor(async () => {
+        const owner = await f.registry.getThreadById(workspaceId, f.owner.id);
+        expect(owner?.messages?.some((message) => message.id === "ordinary-note" && message.status === "held")).toBe(true);
+      });
       expect(await f.registry.countActiveInRoot(workspaceId, root)).toBe(0);
       expect(f.sendToSession).not.toHaveBeenCalled();
       expect((await pending).timedOut).toBe(true);

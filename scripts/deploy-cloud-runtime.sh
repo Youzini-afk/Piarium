@@ -340,6 +340,7 @@ else
       if (!hostEntry) throw new Error("Pi host entry could not be resolved");
       const require = createRequire(new URL("./packages/web/package.json", import.meta.url));
       require.resolve("sherpa-onnx-node");
+      require.resolve("@piarium/extension-builtins");
       console.log(`Verified Pi host: ${hostEntry}`);
     '
     node verify-kernel.mjs packages/web
@@ -455,6 +456,21 @@ process.exit(1);
 NODE
 }
 
+print_daemon_log_tail() {
+  local log_dir="${PIARIUM_DATA_DIR}/logs"
+  local log_file="${log_dir}/piarium-${PORT}.log"
+  if [[ ! -f "$log_file" ]]; then
+    log_file="$(ls -t "${log_dir}"/piarium-*.log 2>/dev/null | head -1 || true)"
+  fi
+  if [[ -n "$log_file" && -f "$log_file" ]]; then
+    echo "---- Piarium daemon log tail (${log_file}) ----" >&2
+    tail -n 120 "$log_file" >&2 || true
+    echo "---- end Piarium daemon log tail ----" >&2
+  else
+    echo "No Piarium daemon log found under ${log_dir}." >&2
+  fi
+}
+
 rollback() {
   local observed_status=$?
   local status="${1:-$observed_status}"
@@ -462,6 +478,7 @@ rollback() {
   set +e
   if [[ "$ROLLBACK_REQUIRED" = "true" ]]; then
     echo "New Piarium release failed; rolling back." >&2
+    print_daemon_log_tail
     if [[ "$CANDIDATE_START_ATTEMPTED" = "true" ]]; then
       stop_runtime "$RELEASE_DIR"
     fi

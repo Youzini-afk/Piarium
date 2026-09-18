@@ -222,17 +222,30 @@ CI failure signature: `PIARIUM_UI_PASSWORD is not set` →
 `Piarium daemon exited before reporting ready (code 1)` on the **first**
 "good" deploy; rollback scenarios never execute.
 
-Local reproduction with the checked-out generated kernel artifact shows the
-real daemon error: `kernel-manifest-mismatch` (host 0.9.12, kernel 0.9.11).
-Classification: **product/artifact + diagnostics**, not test noise — the
-staged runtime must carry a kernel whose manifest matches the host build;
-the smoke must surface the daemon log tail on failure instead of only
-`code 1`.
+Local reproduction (staged runtime + `bun install --production
+--frozen-lockfile` + `cli.js serve`) produced the real daemon error, now
+surfaced through the new log tail: `Cannot find module
+'@piarium/extension-builtins'` from `server/index.js`. Root cause:
+`extension-builtins` was declared in `devDependencies` (1f83c02b) while the
+shipped server and application host import it at runtime, so the deploy's
+`--production` install never linked it — and the canonical
+`cloud-runtime.bun.lock` was stale (web 0.9.11, missing the dep), which the
+build-time `--frozen-lockfile` verification did not catch because it only
+checks the root manifest.
 
-Disposition: **fix in Q2** — ensure the cloud runtime archive is built
-against a matching release kernel in the same job (identity-bound artifact),
-and print daemon stderr/log on startup failure. The local stale artifact is
-an environment issue and out of editable scope.
+Classification: **product/artifact + diagnostics**, not test noise.
+Resolution in Q2: moved `extension-builtins` to web `dependencies`,
+regenerated `cloud-runtime.bun.lock` (web 0.9.12 + the missing workspace
+dep), added `@piarium/extension-builtins` resolution to both the build-time
+`requireInstall` check and the deploy post-install verification, and made
+`deploy-cloud-runtime.sh` print the daemon log tail on rollback. Verified
+end-to-end locally: staged runtime installs the link, daemon reports ready,
+`/health` answers.
+
+The stale local `kernel/` artifact (0.9.11 vs host 0.9.12) seen during
+reproduction is a separate environment issue — on CI the kernel is compiled
+in the same job (`buildIdentity: 0.9.12` in the failing run's log), so it
+was never the CI cause.
 
 ## 7. Platform coverage
 
@@ -316,3 +329,56 @@ an environment issue and out of editable scope.
    rebuilt 0.9.12 kernel.
 10. **`startup-pipeline-runtime.test.ts`** — kept the ordering behavior
     test; removed the retired-OpenCode source scan.
+
+## 10. Q2 outcomes
+
+- **Kernel/native ownership** — `packages/web/vitest.config.ts` excludes
+  the 17 kernel/native files; `vitest.kernel.config.ts` (rooted at
+  `packages/web`) owns them under `test:kernel`, which first runs the
+  `kernel-client` node:test contract. Measured: main suite 271 files /
+  2,334 tests green; kernel entry 26 node tests + 17 files / 120 tests
+  green. No file executes twice per environment.
+- **Electron split** — main vitest config excludes `updater-*.test.ts`
+  and `linux-autostart.test.ts`; `vitest.dedicated.config.ts` owns them
+  for `test:updater` / `test:linux-desktop`. windows-runtime now runs all
+  three entries; measured 9+4+1 files, each once.
+- **i18n CI step** — dropped from `source-quality` and
+  `desktop-release.yml`; the UI suite inside `test:pi` already covers the
+  same files, so the dedicated step was a second execution of the same
+  environment.
+- **vscode suite in CI** — `bun run --cwd packages/vscode test` added to
+  `windows-runtime` after the kernel build (the native-search case needs
+  the release binary).
+- **node-smoke** — moved out of `source-quality`; `production-build` runs
+  `node --test .../store.smoke.test.ts` against the artifact `bun run
+  build` already produced, instead of rebuilding the host a second time.
+- **Docs-only diffs** — a `changes` job classifies the diff; docs gates
+  (`test:docs`, `docs:validate`) always run in `source-quality`, every
+  other step and the windows-runtime/production-build jobs skip when the
+  diff is docs-only (skipped jobs report success honestly, so required
+  checks still map to real jobs). `docker.yml` gained
+  `!packages/docs/**` with `packages/docs/package.json` re-included.
+- **Cloud failure diagnosis** — deploy script prints the daemon log tail
+  (`$PIARIUM_DATA_DIR/logs/piarium-<port>.log`) inside `rollback`; the
+  post-install check and `requireInstall` verification now assert
+  `@piarium/extension-builtins` resolves.
+- **Clock-assertion flake** — `thread-wait-admission` "inform does not
+  wake" no longer asserts `returned === false` after `delay(35)` (the
+  Windows CI failure was a late-firing timer, not a product defect); it
+  now waits for the durable `held` record and asserts `timedOut` on the
+  result, which fails identically if an inform ever wakes the wait.
+
+### Still open
+
+- `desktop-release.yml` re-verification still re-runs the source suite
+  against the release ref rather than consuming the CI `production-build`
+  artifact — kept deliberately since the ref may differ from any CI run.
+- The `windows-runtime` job re-runs `test:pi` on Windows as platform
+  evidence; that is intentional duplication across platforms, not within
+  one environment.
+- Windows-local deploy/install ordering (what
+  `cloud-remote-deploy.test.js` used to text-assert) has no behavioral
+  coverage — the deploy smoke is Linux-only; accepted residual gap.
+- `thread-runtime.test.ts` (4,007 lines) and the `explore*` family were
+  not restructured — spot checks show real behavior tests, not fixtures
+  worth touching without a concrete defect.

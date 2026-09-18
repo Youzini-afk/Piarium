@@ -45,18 +45,11 @@ run(process.execPath, ['scripts/generate-kernel-protocol.mjs', '--check']);
 run(process.execPath, ['--import', 'tsx', '--test',
   'packages/web/application-host/lib/kernel/kernel-client.test.ts',
 ]);
-// These files each start real kernels, durable stores and OS process trees.
-// Windows CI hit shutdown and transport deadlines while running these together.
-// Isolate file workloads there; concurrency within each test remains exercised.
-run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.config.ts',
+// The kernel Vitest config owns the native-file set (KERNEL_VITEST_FILES in
+// packages/web/vitest.config.ts): every file that starts real kernels, durable
+// stores or OS process trees runs here and nowhere else. Windows CI hit
+// shutdown and transport deadlines while running these together, so isolate
+// file workloads there; concurrency within each test remains exercised.
+run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.kernel.config.ts',
   ...(process.platform === 'win32' ? ['--no-file-parallelism'] : []),
-  'packages/web/application-host/lib/kernel/file-resource-audit.test.ts',
-  'packages/web/application-host/lib/kernel/kernel-compute.test.ts',
-  'packages/web/application-host/lib/kernel/request-window.test.ts',
-  'packages/web/application-host/lib/kernel/kernel-transport.acceptance.test.ts',
-  'packages/web/application-host/lib/kernel/kernel-process.test.ts',
-  'packages/web/application-host/lib/kernel/process-consumers.test.ts',
-  'packages/web/application-host/lib/kernel/storage-adapter.test.ts',
-  'packages/web/application-host/lib/recovery/kernel-durable-engine.test.ts',
-  'packages/web/application-host/lib/harness/shell-assembly.test.ts',
 ]);

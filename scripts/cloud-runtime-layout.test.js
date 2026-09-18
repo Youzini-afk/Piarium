@@ -115,6 +115,48 @@ describe('Piarium cloud runtime layout', () => {
     expect(CLOUD_RUNTIME_TRUSTED_DEPENDENCIES).toEqual([]);
   });
 
+  it('keeps the committed lock in sync with each staged production manifest', () => {
+    // `--frozen-lockfile` only proves the lock resolves; it does not fail when a
+    // manifest gains a production dependency the lock never recorded. That gap
+    // is what let the cloud daemon ship without @piarium/extension-builtins.
+    const lockText = fs.readFileSync(path.join(repoRoot, 'scripts', 'cloud-runtime.bun.lock'), 'utf8');
+    const lock = JSON.parse(lockText.replace(/,(\s*[}\]])/g, '$1'));
+    const lockWorkspaces = lock.workspaces ?? {};
+    for (const directory of CLOUD_RUNTIME_PACKAGE_DIRS) {
+      const manifest = readJson(path.join(repoRoot, 'packages', directory, 'package.json'));
+      const lockEntry = lockWorkspaces[`packages/${directory}`] ?? {};
+      expect(
+        lockEntry.dependencies ?? {},
+        `cloud lock is stale for packages/${directory}; regenerate with \`node scripts/build-cloud-runtime.mjs --update-lock\``,
+      ).toEqual(manifest.dependencies ?? {});
+      expect(lockEntry.version).toBe(manifest.version);
+    }
+  });
+
+  it('declares every workspace import in shipped web code as a production dependency', () => {
+    // server/ is the checked-in artifact the cloud daemon actually runs; a
+    // workspace import landing in devDependencies is invisible to
+    // `bun install --production` and crashes the daemon at boot.
+    const manifest = readJson(path.join(repoRoot, 'packages', 'web', 'package.json'));
+    const prodDeps = new Set(Object.keys(manifest.dependencies ?? {}));
+    const serverDir = path.join(repoRoot, 'packages', 'web', 'server');
+    const offenders = [];
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && entry.name !== 'node_modules') walk(full);
+        else if (entry.isFile() && entry.name.endsWith('.js')) {
+          const source = fs.readFileSync(full, 'utf8');
+          for (const match of source.matchAll(/(?:from|import)\s*['"](@piarium\/[^'"]+)['"]/g)) {
+            if (!prodDeps.has(match[1])) offenders.push(`${path.relative(serverDir, full)} -> ${match[1]}`);
+          }
+        }
+      }
+    };
+    walk(serverDir);
+    expect(offenders).toEqual([]);
+  });
+
   it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {
     const hostManifest = readJson(path.join(repoRoot, 'packages', 'pi-host', 'package.json'));
     for (const name of [

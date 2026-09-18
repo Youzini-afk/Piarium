@@ -278,6 +278,8 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
     if (!existsSync(brokerLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/runtime-broker.');
     const extensionHostLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-host');
     if (!existsSync(extensionHostLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-host.');
+    const extensionBuiltinsLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'extension-builtins');
+    if (!existsSync(extensionBuiltinsLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/extension-builtins.');
     const settingsStoreLink = path.join(outputDir, 'packages', 'web', 'node_modules', '@piarium', 'settings-store');
     if (!existsSync(settingsStoreLink)) throw new Error('Installed cloud runtime cannot resolve @piarium/settings-store.');
   }

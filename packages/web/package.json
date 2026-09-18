@@ -72,6 +72,7 @@
     "@mozilla/readability": "0.6.0",
     "@octokit/rest": "^22.0.1",
     "@piarium/application-client": "workspace:*",
+    "@piarium/extension-builtins": "workspace:*",
     "@piarium/extension-contract": "workspace:*",
     "@piarium/extension-host": "workspace:*",
     "@piarium/protocol": "workspace:*",
@@ -108,7 +109,6 @@
   },
   "devDependencies": {
     "@huggingface/transformers": "4.2.0",
-    "@piarium/extension-builtins": "workspace:*",
     "@piarium/ui": "workspace:*",
     "@types/better-sqlite3": "^9.6.0",
     "@types/compression": "^1.8.1",

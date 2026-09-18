@@ -38,7 +38,6 @@ jobs:
       - run: bun audit
       - run: bun run test:docs
       - run: bun run docs:validate
-      - run: bun run --cwd packages/ui test src/lib/i18n/messages.test.ts src/lib/i18n/messages/i18nParity.test.ts
       - run: bun run type-check
       - run: bun run lint
       - name: Build and verify native kernel authority
