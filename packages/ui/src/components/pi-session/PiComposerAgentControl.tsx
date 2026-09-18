@@ -82,7 +82,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
       aria-label={t('chat.autocomplete.tabs.agents')}
     >
       <Icon name="ai-agent" className="size-4 shrink-0" />
-      <span className="truncate">{selectedAgent?.name ?? 'Pi'}</span>
+      <span className="truncate">{selectedAgent?.name ?? 'Piarium'}</span>
     </button>
   );
 
@@ -96,7 +96,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         )}
         onClick={() => select(undefined)}
       >
-        <span>Pi</span>
+        <span>Piarium</span>
         {!selectedAgent ? <Icon name="check" className="size-4 text-primary" /> : null}
       </button>
       {agents.map((agent) => (
@@ -142,7 +142,7 @@ export const PiComposerAgentControl: React.FC<PiComposerAgentControlProps> = ({
         <DropdownMenuLabel>{t('chat.autocomplete.tabs.agents')}</DropdownMenuLabel>
         <DropdownMenuItem onSelect={() => select(undefined)}>
           <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-            <span className="font-medium">Pi</span>
+            <span className="font-medium">Piarium</span>
             {!selectedAgent ? <Icon name="check" className="size-4 shrink-0 text-primary" /> : null}
           </div>
         </DropdownMenuItem>
