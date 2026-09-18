@@ -6,8 +6,8 @@ import { describe, it } from "node:test";
 import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@earendil-works/pi-ai/compat";
 import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
-import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
+import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
 
 export interface CapturedPayload {
   system: string;
@@ -69,33 +69,23 @@ describe("Zone 0 stability contract (1.2)", () => {
 
     const faux = registerFauxProvider();
     const capturedContexts: Context[] = [];
+    const capture = (reply: Parameters<typeof fauxAssistantMessage>[0]) => (context: Context) => {
+      capturedContexts.push(context);
+      return fauxAssistantMessage(reply);
+    };
 
-    // 5 responses: steps 2 and 4 (0-indexed 1, 3) include tool calls
+    // 7 provider calls for 5 prompts: the tool-call steps (2 and 4) each
+    // consume a second response for the post-tool continuation. An empty
+    // queue surfaces as a provider error, so the fixture must cover every
+    // call the flow makes.
     faux.setResponses([
-      (context) => {
-        capturedContexts.push(context);
-        return fauxAssistantMessage("step 1 done");
-      },
-      (context) => {
-        capturedContexts.push(context);
-        return fauxAssistantMessage([
-          fauxToolCall("read", { path: "test.txt" }),
-        ]);
-      },
-      (context) => {
-        capturedContexts.push(context);
-        return fauxAssistantMessage("step 3 done");
-      },
-      (context) => {
-        capturedContexts.push(context);
-        return fauxAssistantMessage([
-          fauxToolCall("read", { path: "test.txt" }),
-        ]);
-      },
-      (context) => {
-        capturedContexts.push(context);
-        return fauxAssistantMessage("step 5 done");
-      },
+      capture("step 1 done"),
+      capture([fauxToolCall("read", { path: "test.txt" })]),
+      capture("step 2 done"),
+      capture("step 3 done"),
+      capture([fauxToolCall("read", { path: "test.txt" })]),
+      capture("step 4 done"),
+      capture("step 5 done"),
     ]);
 
     const model = faux.getModel();
@@ -121,12 +111,17 @@ describe("Zone 0 stability contract (1.2)", () => {
       return { model };
     };
 
+    const harness = createHarnessEmit({
+      "permission.inspect": permissionInspectResult,
+      "permission.audit": () => ({}),
+    });
     const host = new SessionHost({
       agentDir,
       configureServices,
-      emit: (() => {}) as <E extends HostEvent>(event: E, data: HostEventData<E>) => void,
+      emit: harness.emit,
       projectTrustOverride: true,
     });
+    harness.bind(host);
 
     try {
       const snapshot = await host.create(root);
@@ -157,33 +152,37 @@ describe("Zone 0 stability contract (1.2)", () => {
       await host.prompt(snapshot.sessionId, "step 5");
       await host.session.waitForIdle();
 
-      assert.equal(capturedContexts.length, 5, "5 provider calls expected");
+      // 7 provider calls for 5 prompts (tool-call steps 2 and 4 make a
+      // continuation call). Exactly 7 means no retry and no exhausted queue.
+      assert.equal(capturedContexts.length, 7, "7 provider calls expected");
+      assert.equal(faux.state.callCount, 7, "no provider retries expected");
+      assert.equal(faux.getPendingResponseCount(), 0, "response queue fully consumed");
       const payloads = extractPayloads(capturedContexts);
 
-      // Zone 0: system prompt must be byte-identical across all 5 steps
+      // Zone 0: system prompt must be byte-identical across all calls
       const system0 = payloads[0]!.system;
-      for (let i = 1; i < 5; i++) {
-        assert.equal(payloads[i]!.system, system0, `system prompt must be byte-identical at step ${i + 1}`);
+      for (let i = 1; i < payloads.length; i++) {
+        assert.equal(payloads[i]!.system, system0, `system prompt must be byte-identical at call ${i + 1}`);
       }
 
-      // Zone 0: tools must be byte-identical across all 5 steps
+      // Zone 0: tools must be byte-identical across all calls
       const tools0 = JSON.stringify(payloads[0]!.tools);
-      for (let i = 1; i < 5; i++) {
-        assert.equal(JSON.stringify(payloads[i]!.tools), tools0, `tools must be byte-identical at step ${i + 1}`);
+      for (let i = 1; i < payloads.length; i++) {
+        assert.equal(JSON.stringify(payloads[i]!.tools), tools0, `tools must be byte-identical at call ${i + 1}`);
       }
 
-      // Prefix property: step k messages must be a prefix of step k+1 messages
-      for (let i = 0; i < 4; i++) {
+      // Prefix property: call k messages must be a prefix of call k+1 messages
+      for (let i = 0; i < payloads.length - 1; i++) {
         const msgs1 = payloads[i]!.messages;
         const msgs2 = payloads[i + 1]!.messages;
-        assert.ok(msgs2.length >= msgs1.length, `step ${i + 2} must have >= messages than step ${i + 1}`);
+        assert.ok(msgs2.length >= msgs1.length, `call ${i + 2} must have >= messages than call ${i + 1}`);
         for (let j = 0; j < msgs1.length; j++) {
-          assert.deepEqual(msgs2[j], msgs1[j], `step ${i + 2} message ${j} must equal step ${i + 1} message ${j}`);
+          assert.deepEqual(msgs2[j], msgs1[j], `call ${i + 2} message ${j} must equal call ${i + 1} message ${j}`);
         }
       }
-
-      await host.dispose();
     } finally {
+      await host.dispose();
+      faux.unregister();
       await rm(root, { recursive: true, force: true });
     }
   });

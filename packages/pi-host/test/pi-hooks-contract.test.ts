@@ -19,6 +19,7 @@ import type {
 import type { Context } from "@earendil-works/pi-ai";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
+import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
 
 // ---------------------------------------------------------------------------
 // Compile-time assertions: verify Pi 0.84.3 hook shapes match what the
@@ -174,12 +175,17 @@ describe("Pi hooks contract (0.84.3)", () => {
       return { model };
     };
 
+    const harness = createHarnessEmit({
+      "permission.inspect": permissionInspectResult,
+      "permission.audit": () => ({}),
+    });
     const host = new SessionHost({
       agentDir,
       configureServices,
-      emit: (() => {}) as <E extends HostEvent>(event: E, data: HostEventData<E>) => void,
+      emit: harness.emit,
       projectTrustOverride: true,
     });
+    harness.bind(host);
 
     try {
       const snapshot = await host.create(root);
