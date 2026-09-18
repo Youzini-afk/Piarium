@@ -2,7 +2,7 @@
 
 Status: Pi-native workbench/harness in production; Rust system-kernel Stage R complete through D-282.
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 ## 1. Context
 
@@ -34,6 +34,9 @@ companion mobile client, so no surface moves extension execution into an untrust
 7. Produce signed-ready desktop installers with deterministic runtime diagnostics.
 8. Deliver the Rust workspace, recovery, process, and file/structure computation kernel as stage R,
    preserving one authority per resource and keeping product/model policy in TypeScript.
+9. Support a research profile in which heterogeneous Pi workers and managed compute resources explore a
+   scientific problem in parallel, while reusing the same Thread/Run, Host, Rust kernel, context,
+   permission, and artifact boundaries.
 
 ## 3. Non-goals
 

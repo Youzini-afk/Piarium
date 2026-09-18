@@ -36,6 +36,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
+| [research-cluster](decisions/research-cluster.md) | D-291 AI4S 科研集群、异构模型协作与研究分支调度。 | 1 |
 
 ## 决策索引
 
@@ -328,3 +329,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-288 | 2026-09-18 | 本地语义推理独立组件，用户主动安装，主包不携带模型与专用运行库 | accepted | — | 设计 6.1/8.5；plan/status 3.16；architecture；Electron/semantic documentation | [retrieval](decisions/retrieval.md) |
 | D-289 | 2026-09-18 | 默认免密钥网页搜索与原文查找/续读；不复用模型账户 | accepted | D-050/D-067/D-283 的搜索默认行为 | 设计 5.8；plan 1b.8；status 1b.3；Web 工具与设置 | [tool-environment](decisions/tool-environment.md) |
 | D-290 | 2026-09-18 | 常用结构包内置、语言服务器按需自动准备与能力设置页 | accepted | D-124/D-128 的默认交付方式 | plan 3.11；status；language-support | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
+| D-291 | 2026-09-19 | AI4S 以异构模型科研集群为中心，动态并行研究分支与事件触发综合 | accepted design / pending implementation | — | research-cluster-design；agent-harness 10.3；plan/roadmap/status | [research-cluster](decisions/research-cluster.md) |

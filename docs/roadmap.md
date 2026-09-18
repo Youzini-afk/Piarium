@@ -2,7 +2,7 @@
 
 Status: Pi-native engine, composable workbench, and unified editor delivered; release hardening continues
 
-Last updated: 2026-09-15
+Last updated: 2026-09-19
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -24,6 +24,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
+| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation not started |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -32,6 +33,12 @@ and production/performance/release acceptance. Rust owns those system resources 
 Application Host child; TypeScript retains product/Agent policy and the bundled Pi runtime remains the
 Agent loop/provider/session authority. Current evidence and platform-specific limits are recorded only in
 [harness status](agent-harness-status.md).
+
+Phase 11 is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
+research profile built on the existing Pi runtime, Thread/Run, Host scheduler, retrieval, context,
+permissions and Rust kernel. The first vertical slice is an open research question explored by
+heterogeneous model branches, fast execution workers and event-triggered synthesis. It is a design
+target only; no production research profile is claimed until the status matrix records a real consumer.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

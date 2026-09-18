@@ -2,7 +2,7 @@
 
 Status: active execution plan; accepted capabilities ship as usable defaults (D-078)
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 设计与边界见 [agent-harness.md](agent-harness.md)，Rust 系统内核的完整目标见
 [rust-kernel-design.md](rust-kernel-design.md)，交付事实只看 [agent-harness-status.md](agent-harness-status.md)，
@@ -1010,11 +1010,320 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 - 默认 runtime：直接交付 bundled Pi、Runtime Manager 默认选择与 Git Bash 就绪说明，保留自有 runtime；实际 Electron smoke。
   已有版本依赖明确，不等 harness 全部完成。
 - 外部 runtime：排在 D-283 的原生权限与 web 收口之后；届时按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
-- research/文件知识工作：沿共享工具、存储、文档、验证器做文献/PDF/引用/notebook；按实际用途交付。第二个 profile 发展公共
-  接口，不是允许建接口的前置。SaaS 连接器与 Windows 沙箱保持范围之外。
+- research/文件知识工作：以 [科研集群设计](research-cluster-design.md) 为准，沿共享工具、存储、文档、线程、调度和验证器实现
+  异构模型并行研究。首个纵切从开放计算问题开始，包含问题发现、文献/代码调查、实验设计、快速执行、事件触发综合和写作回流；
+  论文复现只是场景，不先建设科研管理表单或第二套 Agent runtime。第二个 profile 发展公共接口，不是允许建接口的前置。
+  SaaS 连接器与 Windows 沙箱保持范围之外。
 
 默认 bundled Pi 的已交付路径保持。阶段 R 已由 D-282 收口；外部 adapter 和新领域 profile 使用当前 Rust kernel/TS Host 边界，
 不另建一套资源、存储或进程后端。
+
+## 阶段 7：AI4S 科研集群（D-291，设计已接受）
+
+本阶段的产品中心是异构模型科研集群，而不是科研资料管理器。首席研究主线负责问题发现、第一性原理分析、跨分支综合和文章主线；
+研究 Thread 负责独立调查、实验设计、实现、复核和写作缺口；Host 调度模型与实际计算资源，普通批处理和进程监控由程序完成。
+
+首个交付纵切是“开放问题 → 多路调查/假设 → 低成本区分行动 → 快速执行 → 事件触发综合 → 下一轮分配”。实现复用已有
+Thread/Run、WorkingState、检索、上下文、权限、Rust kernel 和 Pi runtime。研究证据、版本、运行和产物是自动保留的内部事实，
+证据表、协议、Research Diff 和文章结构按需生成，不作为用户前置流程。
+
+本阶段尚未实现或接线；交付状态不写入 status 的 wired/proven/default-on，具体目标和边界见
+[research-cluster-design.md](research-cluster-design.md)。以下是执行顺序和不可改变的实现边界。
+
+### 7.0 实施规则与边界
+
+1. **复用已有生命周期。** 科研分支使用现有 `Thread` / `ThreadRun`、`dispatch` / `wait` / `send` /
+   `read_thread` / `kill`、WorkingState、OutputRef/Artifact、Rust kernel 和 Pi SessionHost。不另建
+   `ResearchAgent` 进程、科研专用 thread tree、第二套恢复 writer 或第二个模型调用循环。
+2. **研究状态不是新的事实库。** 文件、运行输出、Pi transcript、来源收据和已发布 Artifact 是事实；研究板和分支摘要是可重建的
+   projection。不能把模型生成的 board 摘要当作原文、运行结果或科学证明。
+3. **结构隐藏在运行时。** 用户可以直接开始研究，不先填写问题、假设、指标或协议表单。必要字段由首席模型和 Host 从真实工作中生成；
+   缺少某个字段不能阻止探索，只有工具本身需要的参数才是准入条件。
+4. **不设通用硬上限。** 并发、模型预算、GPU、磁盘和网络使用已有用户/部署配置；本阶段不新增固定假设数、实验轮数、token、墙钟或
+   分支深度上限。遇到真实资源不足时使用既有排队、背压、取消和 unavailable 状态。
+5. **模型选择不暗中借用。** 当前会话模型作为首席主线的默认输入；专用能力槽位只有在用户配置或 Run 明示 `inherit` 时使用。
+   未配置的能力不得静默冒充已绑定模型。每个 Run 冻结最终模型、工具、权限、scope、输入来源和执行资源。
+6. **先完成一条真实纵切。** 任何抽象接缝都必须由首个开放问题任务消费；只写 DTO、角色目录或 UI 面板不能标记阶段完成。
+
+### 7.1 权威与模块责任
+
+| 对象 | 唯一权威 | 允许的职责 | 禁止的职责 |
+| --- | --- | --- | --- |
+| Thread/Run 生命周期 | ThreadRegistry / Run catalog | 分支身份、父子关系、运行配置、等待、取消、结果入口 | 保存完整科研知识图或复制全部材料 |
+| 研究板 projection | Host 研究协调器，绑定根 Thread 与 revision | 当前问题、分支索引、假设状态、最近综合、待处理事件 | 冒充原文、文件、运行或 Artifact 的事实来源 |
+| 文件与代码 | Documents / WorkingState / Rust kernel | 分支读写、基线、版本、合并和恢复 | 由研究协调器另存一份正文 |
+| 进程与计算 | Rust kernel process/PTY/resource 服务 | 运行、取消、输出、资源占用和退出事实 | 让模型轮询或直接管理 Host 凭据 |
+| 来源与网页 | 现有 web/retrieval/receipt 服务 | 搜索、抓取、来源身份和原文切片 | 把模型摘要当作来源正文 |
+| 研究产物 | Rust object/artifact 及现有引用域 | 图表、数据、日志、报告和版本引用 | 只把短期 OutputRef 当长期成果 |
+| 模型与凭据 | Pi SessionHost / user-owned model slots | 调用、流式事件和 Run 绑定 | 研究 Profile 保存一份凭据或偷偷换 provider |
+
+研究协调器可以把多个事实引用组合成一个 `ResearchBoardRevision`，但该 revision 必须能从 Thread 事件、分支结果和 Artifact 引用重建。
+写入研究板时使用现有 Host/catalog CAS；旧综合不能覆盖新分支事件，冲突时重新取当前 revision 生成下一次综合。
+
+### 7.2 最小研究状态
+
+第一版不建立 `paper` / `citation` / `experiment` 全套强制图。根研究 Thread 可有一个版本化的 `ResearchBoard` projection，最少包含：
+
+```ts
+interface ResearchBoard {
+  rootThreadId: string;
+  revision: number;
+  question: string;
+  constraints?: string[];
+  branchRefs: Array<{
+    threadId: string;
+    purpose: 'investigation' | 'design' | 'execution' | 'review' | 'writing';
+    status: 'queued' | 'active' | 'waiting' | 'settled' | 'cancelled';
+    latestUpdateRef?: string;
+  }>;
+  hypotheses: Array<{
+    id: string;
+    label: string;
+    state: 'open' | 'supported' | 'weakened' | 'blocked' | 'merged';
+    basisRefs: string[];
+    updatedAt: string;
+  }>;
+  openQuestions: string[];
+  latestSynthesisRef?: string;
+  writingRef?: string;
+}
+```
+
+这段结构是 Host/模型间的内部投影，不要求用户逐项编辑。`branchRefs.status` 是对现有 Thread lifecycle、Run outcome 和等待状态的投影，不能替换 Thread 的生命周期权威。`basisRefs` 必须指向实际来源、文件修订、运行或 Artifact；不允许只有模型文字没有依据。
+`hypotheses.state` 描述当前研究状态，不是概率或“可信度百分比”。状态改变应能追溯到触发它的分支更新。
+
+研究板只保存短的当前投影。大段原文、代码、日志和图表通过引用按需读取；历史 board revision 保留在现有结果/消息或对象引用中，
+不能在每次更新时复制全部分支上下文。
+
+### 7.3 Thread、Run 与研究分支
+
+1. 根会话显式进入 research Profile 后，首条研究请求建立一个 root research Thread 或绑定当前研究主线；普通 code session 不自动变成科研集群。
+2. 首席主线派发的每个分支仍调用现有 `thread.dispatch`。研究用途写入 manifest 的 profile/capability/purpose 元数据，
+   不用永久 role 绑定模型。分支只继承 dispatch 时实际可用的材料摘要、来源引用和授权 scope。
+3. 分支 Run 冻结 `modelBinding`、`toolAllowlist`、`permissions`、`workspaceScope`、`inputOrigin`、`resourceRequest` 和 parent board revision。
+   后续升级模型必须新建 Run，不能在活动 Run 中偷偷换模型。
+4. 分支默认独立 WorkingState。只读调查可共享父的固定 view；需要写代码或产物时使用独立 branch，`shared` 仍须显式选择。
+5. 分支完成后通过现有 Thread result/revision 发布，研究更新只引用该 revision。`send` 传递请求或信息，不能代替文件合并、结果发布或
+   研究板 CAS。
+6. 分支可以从新的发现派生子分支，但父分支负责其 scope、资源和取消；不创建跨根群聊，不把孙线程完整 transcript 注入根上下文。
+
+
+### 7.4 能力路由与模型升级
+
+研究 Profile 声明能力目录，不复制当前 `harness-roles` 的永久职业绑定。第一版能力至少包括：
+
+| capability | 输入重点 | 交付重点 | 默认路由 |
+| --- | --- | --- | --- |
+| `frontier-reasoning` | 用户问题、当前 board、关键分支更新 | 新问题、解释框架、方向选择、综合 | 当前主线模型或用户显式绑定 |
+| `deep-design` | 指定假设、来源和约束 | 区分性实验、对照、混淆变量分析 | 用户显式研究模型槽位 |
+| `fast-exploration` | 窄材料、局部问题、快速检索范围 | 术语、反例、局部变体和短调查 | 高吞吐模型槽位 |
+| `high-throughput-execution` | 已确定的代码、数据和参数 | 真实作业、日志、指标和产物 | 快速实现模型或无模型批处理 |
+| `critical-review` | 关键实现、异常结果或候选主张 | 独立反例、方法问题和缺口 | 用户显式复核模型槽位 |
+| `scientific-writing` | board、引用和结果产物 | 备忘录、论点、章节和缺口请求 | 强模型槽位或主线显式派发 |
+
+路由器只根据 capability、用户配置、Run 影响和资源可用性选择候选，不根据模型名字硬编码科学角色。执行前向 Run manifest 写入最终 binding；
+写入后本次 Run 的模型不变。升级行为是“结束/暂停当前 Run → 新建同 Thread 的 Run → 带上结果 revision 和窄输入”，不是在流中切模型。
+
+未配置的专用能力返回明确 unavailable 或等待用户配置。只有 dispatch 明示 `inherit` 时才继承调用者当前模型；不能为了让集群看起来完整而静默借用主模型。
+
+### 7.5 分支交接与事件触发
+
+分支不能直接修改父的 board 或在父 transcript 中写任意总结。分支结束一个有意义的推进后，经 Host 校验生成内部 `ResearchUpdate`：
+
+```ts
+interface ResearchUpdate {
+  updateId: string;
+  rootThreadId: string;
+  branchThreadId: string;
+  runId: string;
+  baseBoardRevision: number;
+  kind: 'finding' | 'conflict' | 'failure' | 'artifact' | 'question' | 'writing-gap';
+  headline: string;
+  impact: string;
+  evidenceRefs: string[];
+  failureKind?: 'implementation' | 'environment' | 'data' | 'scientific' | 'cancelled';
+  alternativeExplanations?: string[];
+  nextActions?: string[];
+}
+```
+
+要求：
+
+1. `updateId` 与 `(branchThreadId, runId, sequence)` 幂等；重连和重复 `wait` 不重复触发综合；
+2. `evidenceRefs` 只能引用授权的来源、文件 revision、运行、Artifact 或 Thread result；不存在的引用返回明确错误，不能用模型正文顶替；
+3. `baseBoardRevision` 不匹配时不能覆盖当前 board；Host 把它作为待综合冲突输入；
+4. `failure` 必须区分实现/环境/数据/科学结果不支持/取消，不能只有一个 failed；
+5. 普通进度、下载百分比、重复日志和心跳只进分支 UI，不生成 ResearchUpdate。
+
+Host 合并更新后，按事件触发一次合并综合。下列事件可触发：新机制、与当前假设冲突的观察、分支间冲突、明确失败原因、低成本批次完成、写作缺口和用户请求。
+同一时间窗内的多个更新合并为一次输入；综合运行中到达的更新排队，不递归启动第二个首席调用。综合以 `baseBoardRevision` 读取 board，成功后 CAS 发布新的 board/summary revision；
+CAS 失败表示研究状态已变，重新读取并建立下一次综合输入，不设固定重试循环。
+
+### 7.6 自适应调度与资源准入
+
+调度器是 Host 内的普通服务，不是一个永久“管理 Agent”。它维护研究 work item 与实际资源事实：
+
+```ts
+interface ResearchWorkItem {
+  id: string;
+  rootThreadId: string;
+  branchThreadId?: string;
+  kind: 'investigation' | 'design' | 'execution' | 'review' | 'synthesis' | 'writing';
+  dependsOn: string[];
+  resourceRequest: {
+    modelCapability?: string;
+    cpu?: number;
+    memoryBytes?: number;
+    gpu?: string;
+    network?: 'none' | 'workspace' | 'external';
+  };
+  inputRefs: string[];
+  requestedBy: 'user' | 'principal' | 'branch';
+}
+```
+
+实现边界：
+
+- `dependsOn` 未完成时进入 waiting，不占用运行名额；等待父线可以处理其他分支；
+- 模型调用、CPU/GPU 作业、外部网络和 workspace 写者分别登记实际资源，不能用一个“并发数”冒充所有资源；
+- read-only 材料、语法包、数据索引和已构建环境可以共享；可变 WorkingState、参数、随机种子和输出必须按分支隔离；
+- 一个执行 Agent 可以提交一批普通作业，作业由程序运行；不为每个 seed/参数组合创建 Thread；
+- 运行中资源取消必须到达实际模型请求或 kernel process，不能只把 UI 状态改成 cancelled；
+- GPU 满载、provider 限流、网络不可用和 workspace writer 冲突分别返回对应 waiting/unavailable/failed 状态；
+- 主线可以提供研究优先级，但调度器不计算科学价值分数，也不自动淘汰所有早期弱信号分支。
+
+动态矩阵以“分支 → 低成本行动 → 结果 → 再分配”为单位扩展。继续、收缩、合并和保留的理由写进 ResearchUpdate 或 board revision，不能只藏在调度器内存。
+
+### 7.7 研究执行适配器
+
+第一版先接本地代码、数据和计算实验，不实现完整 Jupyter 或领域实验室系统。适配器必须调用现有 Rust kernel 受管进程/文件/对象服务，不能由 renderer 或模型直接 spawn 任意 Host 进程。
+
+先定义一个 Host 侧 `ResearchExecutionAdapter`，包含：
+
+1. 输入：代码/命令、工作分支、数据和环境引用、参数、随机种子、资源请求；
+2. 执行：通过 kernel process service 启动或附着，支持取消、输出游标和真实退出事实；
+3. 产物：把 stdout/stderr、指标、图表、数据和报告作为对象或 Artifact 写入，长期引用不使用临时 OutputRef；
+4. 结果：返回 `success`、`failure`、`cancelled`、`unavailable`、`partial`，并带实际输入/环境/产物引用；
+5. 重放：根据 Run manifest 创建干净执行，不能把探索进程内存当作可复现依据。
+
+执行形态分两种：
+
+- **batch**：干净进程运行一个完整脚本或命令，绑定代码、数据、环境和参数，作为首个可复现路径；
+- **explore**：后续可以接持久 Python worker，让多个代码单元共享内存以提高探索速度。每个单元仍须提交需要保留的 Artifact，
+  worker 崩溃后不能假称内存状态恢复；需要复现时回到 batch。
+
+首个纵切可以先以 Python/现有 Shell 执行 batch 为主；不要为了“支持 notebook”先复制一套 Agent loop、Jupyter server 或长期内存数据库。
+如果接入持久 worker，worker 只负责代码执行和 host RPC，不负责研究调度、权限或最终结论。
+
+### 7.8 上下文装配与原始材料
+
+首席综合输入由以下部分组成：当前 board projection、尚未消费的 ResearchUpdate、影响判断的关键引用和用户最新指令。普通分支进度不注入，
+完整原文、代码、日志和图表通过引用按需读取。分支输入只包含其目标、父线已接受的相关材料和授权范围，不复制根线程完整对话。
+
+使用 D-284 的容量驱动后台摘要和 D-286 的 fresh/continue 语义；不要为科研再启一个持续 keeper。board 摘要准备与 ResearchUpdate 提交分开，
+不能在候选生成时推进观察游标或消费用户消息。摘要过期时从 board revision、Thread result 和原始引用重建。
+
+### 7.9 写作回流
+
+写作任务是一个普通 research Thread/Run，默认不自动启动。用户请求写作或首席主线判断结果已形成可表达论点时才派发。
+
+写作 Run：
+
+- 读取指定 board revision 和结果引用；
+- 生成研究备忘录、图表说明或文章段落；
+- 为每个重要主张保留来源/运行引用；
+- 把“无法由当前结果支持”的主张记录为 `writing-gap` ResearchUpdate；
+- 不修改实验结果或原始来源，不由多个写作线程各自维护冲突的文章主线。
+
+写作缺口回到首席主线后，可以派发新的调查、设计或执行分支。文章不是最后一次性搬运结果，而是研究判断的一个反馈入口。
+
+### 7.10 最小 UI 投影
+
+第一阶段 UI 只需要让用户看清研究推进：
+
+1. 当前问题与首席主线暂时判断；
+2. 活跃分支、分支目的、当前状态和最近研究更新；
+3. 正在运行、等待、冲突和卡住的工作；
+4. 下一轮准备投入的模型能力和计算资源；
+5. 结果卡片展开来源、代码、日志、图表和 Artifact；
+6. 派发、暂停、停止、扩大方向、要求综合和继续某条分支的自然语言入口。
+
+不在第一阶段建设复杂的科研数据库编辑器、默认大图、逐工具审批弹窗或完整论文编辑器。证据、实验、产物和文章视图必须共享 board/Thread/Artifact 引用，
+不能在 UI 各自复制一套状态。
+
+### 7.11 分阶段交付
+
+**7A：Profile 与根主线。**
+
+- 增加 research Agent Profile 的能力声明、工具集合和上下文模板；
+- 研究会话显式进入 Profile，普通 code session 不自动改变；
+- 复用当前模型作为首席主线，真实创建 root Thread/Run；
+- 验证用户问题 → 首席模型 → 持久 root Thread 的真实纵切。
+
+**7B：研究分支与能力路由。**
+
+- 扩展 `dispatch` 的 research purpose/capability/resource manifest；
+- 接通 investigation/design/fast-exploration/high-throughput-execution 的模型解析；
+- 实现同 Thread 换模型的新 Run、分支继承窄输入、独立 WorkingState 和取消/等待；
+- 验证未配置能力不静默借模型、Run 配置冻结、分支结果不污染父盘。
+
+**7C：更新交接与自适应调度。**
+
+- 实现 `ResearchUpdate` 的生成、引用校验、幂等、board revision CAS 和事件合并；
+- 接通同根模型/CPU/GPU/网络/写者资源登记与排队；
+- 普通批处理直接由程序执行，异常和冲突才升级模型；
+- 验证重复 update、并发综合、取消、资源等待和 Host 重启后的恢复。
+
+**7D：计算执行纵切。**
+
+- 接入 batch Python/Shell 执行适配器、输入/环境/参数/产物 manifest；
+- 复用 Rust kernel 的 process、file、object、working-state 和 recovery；
+- 产物可从 Thread result 和 board 引用读取，真实退出和取消可见；
+- 先证明一个开放问题的基线运行和一个变体运行，不先实现持久 notebook。
+
+**7E：综合、写作与 UI。**
+
+- 接通事件触发的首席综合与 board projection；
+- 接通按需 writing Thread，以及 writing-gap 回流；
+- 提供最小研究推进视图和自然语言控制；
+- 验证结果冲突、意外发现、文章缺口和用户改方向可以回到下一轮研究。
+
+**7F：完整首个纵切与评估。**
+
+- 用一个真实开放计算问题贯通用户输入、并行调查、实验设计、快速执行、结果回流、综合和写作备忘录；
+- 对比最强单 Agent、异构串行和异构并行三种形态，保持相近资源条件；
+- 观察研究进展、有效实验、结论质量、人工返工和达到下一判断的时间；
+- 只把真实发现的问题加入后续计划，不用一次评测构造永久门槛。
+
+### 7.12 关键验收反例
+
+执行 agent 至少要覆盖以下反例，不能只测 helper 或 mock coordinator：
+
+1. 两条独立分支对同一问题提出不同解释，首席综合看见差异而非重复摘要；
+2. 一个分支先产出异常，能够直接派生下一步，其他分支继续运行；
+3. 快速实现失败时，系统区分代码/环境失败与科学结果不支持，不错误淘汰假设；
+4. 普通日志和进程状态不触发模型，异常和关键结果触发一次合并综合；
+5. 同一 update 重送、Host 重启或综合并发不会重复派发或覆盖新 board；
+6. 分支共享只读准备材料，但可变代码、参数和产物互不污染；
+7. 关键结果升级到强模型时，新 Run 继承正确结果引用，旧 Run 模型和输入保持不变；
+8. 资源等待不占用错误的运行名额，取消真实到达模型/进程并保留已产生的 Artifact；
+9. 过期背景 fresh 后仍能读到 Thread 成果和原始引用，不把旧摘要当作最新事实；
+10. 写作线发现主张缺口并回流新的研究分支，不能只改写没有依据的段落；
+11. 删除或归档根 Thread 时，后代运行、board projection、产物引用和工作区保留责任沿现有级联契约处理；
+12. 没有 research Profile 或专用模型配置时，普通 code harness 行为不改变。
+
+### 7.13 阶段完成判据
+
+阶段 7 完成必须同时满足：
+
+- 公开入口能够从真实用户问题启动 root research Thread；
+- 至少两种不同 capability 的真实子 Run 并行工作并返回 durable update；
+- 至少一个真实代码/数据执行产物进入现有 Artifact/Thread result 路径；
+- 事件触发综合能根据分支结果继续、收缩或派生路线；
+- 用户可以中途改变方向、停止分支、继续旧成果或 fresh 重建输入；
+- Rust kernel、Thread/Run、权限、上下文和文件 authority 没有新增第二套生产实现；
+- 关键反例和一次完整纵切有对应测试/现场证据；
+- status 只按实际达到的 implemented/wired/proven/default-on 级别回写，未观察的真实模型质量、平台和外部计算如实保留。
 
 ## 文档同步与验收
 

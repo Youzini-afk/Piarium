@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -44,6 +44,8 @@ Windows x64 实际产物：安装包 **262,211,818 → 172,679,437 字节**（�
 `harness-316.test.ts` 覆盖失败保留、损坏组件、固定查询模型身份与远程绑定。构建、定向 lint/类型检查、i18n 与文档校验通过。
 Release workflow 已接入各平台独立组件构建和发布资产；本轮未发布新 GitHub release，当前本地安装包可使用离线组件，
 在线安装需对应版本组件资产发布后才可用。macOS/Linux 原生组件与安装器墙钟未在本机验证。
+
+**D-291 AI4S 科研集群设计已接受（2026-09-19），尚未实现或接线。** 研究 Profile 的产品中心是异构模型并行推进开放科学问题：首席研究主线负责问题发现、第一性原理分析和综合，研究 Thread 分支负责调查、设计、实现、复核和写作缺口，Host 调度模型与计算资源，普通批处理和进程监控由程序完成。研究证据、版本、运行和产物是内部事实基础，证据表、协议、Research Diff 和文章结构按需生成。第一条纵切及实现边界见 [research-cluster-design.md](research-cluster-design.md)；当前没有 production consumer，不能标 `implemented`、`wired`、`proven` 或 `default-on`。
 
 **D-284 上下文无感续接已实施（2026-09-16）。** 真实请求前预算（`context` hook 覆盖回合内继续）→ 水位触发固定范围后台摘要 →
 前台继续追加 → `session_before_compact` 提交候选或等待/同步 fallback → Pi 持久压缩 → `compaction.after` 重置观察基线 →

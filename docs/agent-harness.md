@@ -2,7 +2,7 @@
 
 Status: design accepted; D-284–D-286 are implemented and independently corrected by D-287; delivery facts are in agent-harness-status.md
 
-Last updated: 2026-09-18
+Last updated: 2026-09-19
 
 正文为中文。English readers: this document specifies the Piarium-owned agent harness (tools, retrieval,
 knowledge store, context and cache contract, verification, profiles) layered on the Pi agent kernel.
@@ -92,7 +92,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 压缩 | 接近容量时后台准备一次摘要，前台继续追加；真正需要空间时沿 Pi 安全切点切换到新摘要与保留原文。候选绑定被收束的历史前缀，正常新增消息不使其失效；准备与切换分开，不再持续 keeper / coverage 接管（D-284） |
 | 长任务连续性 | 正常路径前台无明显整理窗口期；摘要与近期原文承接工作，缺细节按需回读 Pi 历史。provider 慢或输入突增时真实呈现必要等待，不隐蔽裁剪；不以压缩次数强制委派或 Handoff |
 | 持久知识治理 | agent 只提议（带触发描述），用户审阅接受；自动接受按作用域显式开启；更新用双时态取代不覆盖；召回按触发相关性；保留由用户裁剪 |
-| 多 agent | 主线亲自推进整体工作，按独立成果/探索路线派发；预设可选，允许 task/inherit 与定向父子/兄弟通信。写入线程默认独立 WorkingState，shared 明示选择；同根嵌套共享执行预算，等待让出名额；不建默认群聊或管理层（D-285） |
+| 多 agent | code profile 由主线按独立成果/探索路线派发；research profile 增加首席研究主线、动态研究分支和按结果升级模型的集群调度。预设可选，允许 task/inherit 与定向父子/兄弟通信；写入线程默认独立 WorkingState，shared 明示选择；同根嵌套共享执行预算，等待让出名额；不建永久管理层或默认群聊（D-285/D-291） |
 | 线程与上下文 | Thread 保留工作身份、成果与关系，Run 冻结当次执行和输入。工作相关可继续；背景大半过期可 fresh 而不清成果，无关工作新开线程。结果固定修订，依赖代码须实际纳入，不能仅靠消息同步（D-285/D-286） |
 | 审查 | 实施者正常验证、主线关键验收、按任务安排独立 review/check。自动 review 默认关闭，用户明确开启的选择保留；绑定固定结果与真实 Run，不固定追加审查链（D-285） |
 | 观察类工具 | 可能被反复调用的观察工具（`threads` / `wait` / `read_thread` / `get_output` 对运行中 shell / `diagnostics`）**默认返回自上次查看以来的增量**，全量要显式要；游标由 host 按（观察者，对象）持有，压缩时重置；结果只追加不回改（第 8.7 节） |
@@ -1942,12 +1942,12 @@ Agent Profile 的实际绑定随 Run/配置世代记录，单会话实验覆盖�
 
 ### 10.3 `research`（第二个）
 
-基本是 `code` 的超集：编程工具 + 文献检索（arXiv / Semantic Scholar / OpenAlex 等公开 API）+ PDF 全文抽取与索引 +
-引用完整性检查（引用是否存在、论断能否定位到原文段落）+ notebook / 数据工具 + 知识库中的 `paper` / `claim` /
-`citation` / `experiment` 节点与 `cites` / `supports` / `contradicts` 边。Shell 需要 PDF 阅读面、notebook 面、
-引用面板作为普通 contribution。交互模式采用分钟级、人在环、带检查点的半自主研究（Deep Research 类系统的验证
-路线），不做批处理式 AI Scientist。知识跨会话积累是这个 profile 的核心价值，也是第 7 节 schema 从第一天就是
-workspace 级、跨会话的原因。
+AI4S research profile 的产品中心是 [科研集群设计](research-cluster-design.md) 定义的异构模型协作，而不是资料或记录管理。
+用户面对一条首席研究主线，主线按研究方向派生多个 Thread 分支：强模型负责问题发现、第一性原理分析和跨分支综合，较强模型负责文献深读与实验设计，快速模型负责局部假设、实现、批量分析和异常处理，复核与写作按影响和论证缺口触发。模型按能力路由，分支可以升级、降级或换模型，不把具体型号绑定成永久职业。
+
+研究循环是动态分叉、低成本区分、真实执行、事件触发综合和下一轮资源分配。普通批处理、进程监控和日志整理由程序完成；异常、冲突、关键结果和用户请求才唤醒强模型。Thread 树负责执行责任和生命周期，研究发现通过现有结果引用和定向消息跨分支复用，不另建平行工作图或 Agent runtime。
+
+文献、PDF、代码、数据、Shell、notebook 和领域工具作为 profile 的材料与执行能力接入。证据、版本、运行和产物自动保留为内部事实基础；证据表、实验协议、Research Diff 和文章结构按需生成，不是研究者的前置表单。写作线从研究中途参与，发现论证缺口后回流检索或实验任务。第一阶段从代码、数据和计算实验开始，后续领域通过 Profile/Adapter 扩展，不把产品固定成论文复现工具。
 
 ### 10.4 `knowledge-work-in-files`（第三个，收窄）
 
