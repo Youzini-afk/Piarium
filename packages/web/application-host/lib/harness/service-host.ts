@@ -271,6 +271,8 @@ export interface HarnessServiceHost {
     admitted?: boolean;
     /** Requester identity recorded on a parked continuation. */
     from?: import("@piarium/protocol").ThreadMessagePeer;
+    /** Resolved capability/model re-route frozen for the new Run (7B/D-300). */
+    frozen?: import("@piarium/protocol").ThreadRunFrozenConfig;
   }) => Promise<{ runId?: string }>) | null;
   /** Retry lost Runs under a parent scope when the shared budget may have room. */
   threadResumeLost?: ((workspaceId: string, parent: import("@piarium/protocol").ThreadParent) => Promise<void>) | null;

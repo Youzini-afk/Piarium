@@ -1459,6 +1459,252 @@ describe("thread services", () => {
     }
   });
 
+  // --- Same-Thread capability/model re-route (7B/D-300) ---
+
+  const researchCaller = async (registry: ReturnType<typeof createThreadRegistry>) => {
+    const caller = await registry.createThread({
+      workspaceId: "workspace-1",
+      parent: { kind: "session", id: "root-1" },
+      brief: "principal researcher",
+      kind: "implementation" as const,
+      createdBy: "agent" as const,
+      concurrency: 4,
+      autoRun: true,
+      worktree: "none" as const,
+      workFocus: "research" as const,
+      tools: ["send", "wait", "dispatch"],
+      permissions: {},
+    });
+    const run = await registry.startRun("workspace-1", caller.id);
+    await registry.markRunRunning("workspace-1", caller.id, run.id, "research-caller");
+    return { thread: caller, run, sessionId: "research-caller" };
+  };
+
+  const settledChildOf = async (
+    registry: ReturnType<typeof createThreadRegistry>,
+    parentThreadId: string,
+  ) => {
+    const child = await registry.createThread({
+      workspaceId: "workspace-1",
+      parent: { kind: "thread", id: parentThreadId },
+      brief: "investigate the hypothesis",
+      kind: "implementation" as const,
+      createdBy: "agent" as const,
+      concurrency: 4,
+      autoRun: true,
+      worktree: "isolated" as const,
+      model: { providerId: "old-provider", modelId: "old-model" },
+      tools: ["read"],
+      permissions: {},
+    });
+    const run = await registry.startRun("workspace-1", child.id);
+    await registry.endRun("workspace-1", child.id, run.id, "success", null, {
+      blocksSnapshot: {},
+      changedFiles: [],
+      conclusion: "done",
+      confidence: 0.8,
+      deviations: [],
+      transcriptRef: { fromEntryId: null, runtimeId: "pi", sessionId: "child-1", toEntryId: null },
+      unresolved: [],
+    });
+    return { thread: child, run };
+  };
+
+  it("re-routes a settled Thread's next Run under a research capability", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-upgraded" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await settledChildOf(registry, caller.thread.id);
+      const result = await service.handle({
+        threadId: child.thread.id,
+        message: "Now design the distinguishing experiment",
+        from: "parent-agent",
+        kind: "request",
+        capability: "experimental-design",
+        model: { providerId: "research-provider", modelId: "design-model" },
+      }, threadCtx(caller.sessionId));
+      expect(result).toMatchObject({ accepted: true, delivery: "delivered", runId: "run-upgraded" });
+      expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
+        threadId: child.thread.id,
+        mode: "continue",
+        frozen: expect.objectContaining({
+          model: { providerId: "research-provider", modelId: "design-model" },
+          tools: expect.arrayContaining(["read", "dispatch"]),
+          research: {
+            capability: "experimental-design",
+            resources: expect.objectContaining({ cpu: true }),
+          },
+          inputOrigin: "continue",
+        }),
+      }));
+      // The recorded request is durable on the target's ledger.
+      expect((await registry.getThreadById("workspace-1", child.thread.id))?.messages)
+        .toEqual([expect.objectContaining({ direction: "in", kind: "request", status: "delivered" })]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the target's recorded model on an explicit inherit re-route", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-inherit-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-inherit" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await settledChildOf(registry, caller.thread.id);
+      await service.handle({
+        threadId: child.thread.id,
+        message: "Keep your model; take the exploration tools",
+        from: "parent-agent",
+        kind: "request",
+        capability: "fast-exploration",
+        model: "inherit",
+      }, threadCtx(caller.sessionId));
+      expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
+        frozen: expect.objectContaining({
+          model: { providerId: "old-provider", modelId: "old-model" },
+          tools: expect.arrayContaining(["explore", "recall"]),
+          research: expect.objectContaining({ capability: "fast-exploration" }),
+        }),
+      }));
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a capability without a resolved model and a capability on a live target", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-denied-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-x" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await settledChildOf(registry, caller.thread.id);
+      // A capability re-route without a model cannot silently borrow a slot.
+      await expect(service.handle({
+        threadId: child.thread.id,
+        message: "upgrade",
+        from: "parent-agent",
+        kind: "request",
+        capability: "fast-exploration",
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "unavailable" });
+      // inform cannot carry a re-route — it never starts a Run.
+      await expect(service.handle({
+        threadId: child.thread.id,
+        message: "note only",
+        from: "parent-agent",
+        capability: "fast-exploration",
+        model: "inherit",
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      // A running target cannot be re-routed mid-Run.
+      const live = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "thread", id: caller.thread.id },
+        brief: "live",
+        kind: "implementation" as const,
+        createdBy: "agent" as const,
+        concurrency: 4,
+        autoRun: true,
+        worktree: "isolated" as const,
+        model: { providerId: "old-provider", modelId: "old-model" },
+        tools: ["read"],
+        permissions: {},
+      });
+      const liveRun = await registry.startRun("workspace-1", live.id);
+      await registry.markRunRunning("workspace-1", live.id, liveRun.id, "live-session");
+      await expect(service.handle({
+        threadId: live.id,
+        message: "upgrade mid-flight",
+        from: "parent-agent",
+        kind: "request",
+        capability: "experimental-design",
+        model: { providerId: "p", modelId: "m" },
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "invalid-params" });
+      expect(continueRun).not.toHaveBeenCalled();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("denies capability re-routing for a non-research caller", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-scope-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: vi.fn(async () => ({ runId: "run-y" })),
+    } as never);
+    try {
+      // A code-focus caller has no capability routing authority.
+      const caller = await runningThread(registry, { kind: "session", id: "root-1" }, "code caller");
+      const child = await settledChildOf(registry, caller.thread.id);
+      await expect(service.handle({
+        threadId: child.thread.id,
+        message: "upgrade",
+        from: "parent-agent",
+        kind: "request",
+        capability: "experimental-design",
+        model: { providerId: "p", modelId: "m" },
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({ harnessCode: "denied" });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("parks a capability re-route with its resolved frozen configuration", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-park-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({}));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await settledChildOf(registry, caller.thread.id);
+      const result = await service.handle({
+        threadId: child.thread.id,
+        message: "run when a slot frees",
+        from: "parent-agent",
+        kind: "request",
+        capability: "investigation",
+        model: "inherit",
+        requestId: "req-upgrade-park",
+      }, threadCtx(caller.sessionId));
+      expect(result).toMatchObject({ accepted: true, delivery: "scheduled" });
+      const parked = (await registry.getThreadById("workspace-1", child.thread.id))?.pendingContinuations?.[0];
+      expect(parked?.requestId).toBe("req-upgrade-park");
+      expect(parked?.frozen).toMatchObject({
+        model: { providerId: "old-provider", modelId: "old-model" },
+        research: { capability: "investigation" },
+      });
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("yields the shared execution slot while a thread waits and re-admits on return", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-wait-yield-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

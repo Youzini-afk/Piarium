@@ -21,6 +21,9 @@ export interface HarnessThreadRoutesOptions {
     context?: "continue" | "fresh";
     requestId?: string;
     replyTo?: string;
+    capability?: string;
+    resources?: Record<string, boolean>;
+    model?: { providerId: string; modelId: string } | "inherit";
     signal: AbortSignal;
   }) => Promise<unknown>;
   requireAuth?: RequestHandler;
@@ -132,22 +135,31 @@ const parseSendBody = (value: unknown): {
   context?: "continue" | "fresh";
   requestId?: string;
   replyTo?: string;
+  capability?: string;
+  resources?: Record<string, boolean>;
+  model?: { providerId: string; modelId: string } | "inherit";
 } => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ThreadRuntimeError("invalid-request", "Send request body is malformed");
   const body = value as Record<string, unknown>;
-  const allowed = new Set(["message", "kind", "context", "requestId", "replyTo"]);
+  const allowed = new Set(["message", "kind", "context", "requestId", "replyTo", "capability", "resources", "model"]);
   if (Object.keys(body).some((key) => !allowed.has(key))) throw new ThreadRuntimeError("invalid-request", "Send request contains unsupported fields");
   if (typeof body.message !== "string" || !body.message.trim()) throw new ThreadRuntimeError("invalid-request", "message is required");
   if (body.kind !== undefined && body.kind !== "inform" && body.kind !== "request") throw new ThreadRuntimeError("invalid-request", "kind must be inform or request");
   if (body.context !== undefined && body.context !== "continue" && body.context !== "fresh") throw new ThreadRuntimeError("invalid-request", "context must be continue or fresh");
   if (body.requestId !== undefined && (typeof body.requestId !== "string" || !body.requestId.trim())) throw new ThreadRuntimeError("invalid-request", "requestId must be a non-empty string");
   if (body.replyTo !== undefined && (typeof body.replyTo !== "string" || !body.replyTo.trim())) throw new ThreadRuntimeError("invalid-request", "replyTo must be a non-empty string");
+  if (body.capability !== undefined && (typeof body.capability !== "string" || !body.capability.trim())) throw new ThreadRuntimeError("invalid-request", "capability must be a non-empty string");
+  if (body.resources !== undefined && (typeof body.resources !== "object" || body.resources === null || Array.isArray(body.resources))) throw new ThreadRuntimeError("invalid-request", "resources must be an object");
+  if (body.model !== undefined && body.model !== "inherit" && (typeof body.model !== "object" || body.model === null)) throw new ThreadRuntimeError("invalid-request", "model must be a selection object or \"inherit\"");
   return {
     message: body.message,
     ...(body.kind === undefined ? {} : { kind: body.kind as "inform" | "request" }),
     ...(body.context === undefined ? {} : { context: body.context as "continue" | "fresh" }),
     ...(body.requestId === undefined ? {} : { requestId: body.requestId as string }),
     ...(body.replyTo === undefined ? {} : { replyTo: body.replyTo as string }),
+    ...(body.capability === undefined ? {} : { capability: body.capability as string }),
+    ...(body.resources === undefined ? {} : { resources: body.resources as Record<string, boolean> }),
+    ...(body.model === undefined ? {} : { model: body.model as { providerId: string; modelId: string } | "inherit" }),
   };
 };
 

@@ -3991,6 +3991,83 @@ describe("thread runtime", () => {
     expect(sessionAdapter.open).not.toHaveBeenCalled();
   });
 
+  it("continueRun freezes an explicit capability/model override on the new Run only", async () => {
+    const { thread, run: firstRun } = await settle();
+    const override = {
+      model: { providerId: "research-provider", modelId: "design-model" },
+      tools: ["read", "websearch"],
+      permissions: {},
+      scope: ["src"],
+      worktree: "isolated" as const,
+      systemPromptFragment: "Design distinguishing checks.",
+      inputOrigin: "continue" as const,
+      workFocus: "research" as const,
+      research: { capability: "experimental-design" as const, resources: { cpu: true } },
+    };
+    const { runId } = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "Design the next experiment",
+      frozen: override,
+    });
+    const run = await registry.getActiveRun(WORKSPACE, thread.id);
+    expect(run?.id).toBe(runId);
+    expect(run?.frozen).toMatchObject({
+      model: { providerId: "research-provider", modelId: "design-model" },
+      tools: ["read", "websearch"],
+      research: { capability: "experimental-design", resources: { cpu: true } },
+      inputOrigin: "continue",
+    });
+    // The new Run's frozen model reaches the reopened session.
+    expect(sessionAdapter.open).toHaveBeenCalledWith(expect.objectContaining({
+      model: { providerId: "research-provider", modelId: "design-model" },
+      tools: ["read", "websearch"],
+    }));
+    // The earlier Run's frozen configuration is never rewritten.
+    const runs = await registry.listRuns(WORKSPACE, thread.id);
+    expect(runs.find((entry) => entry.id === firstRun.id)?.frozen?.model)
+      .toEqual({ providerId: "test-provider", modelId: "test-model" });
+    // The intent record carries the resolved upgrade for auditability.
+    expect(run?.request?.frozen?.research?.capability).toBe("experimental-design");
+  });
+
+  it("a parked continuation keeps its resolved frozen override", async () => {
+    const solo = { ...createInput(), concurrency: 1 };
+    const thread = await registry.createThread(solo);
+    const settledRun = await registry.startRun(WORKSPACE, thread.id);
+    await runtime.spawn({ ...solo, threadId: thread.id, runId: settledRun.id });
+    await registry.endRun(WORKSPACE, thread.id, settledRun.id, "success", null, reportFor("child-1"));
+    const blocker = await registry.createThread(solo);
+    const blockerRun = await registry.startRun(WORKSPACE, blocker.id);
+    await runtime.spawn({ ...solo, threadId: blocker.id, runId: blockerRun.id });
+    const override = {
+      model: { providerId: "research-provider", modelId: "design-model" },
+      tools: ["read"],
+      scope: ["src"],
+      worktree: "isolated" as const,
+      systemPromptFragment: null,
+      inputOrigin: "continue" as const,
+      workFocus: "research" as const,
+      research: { capability: "investigation" as const, resources: { network: true } },
+    };
+    const result = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "investigate later",
+      frozen: override,
+    });
+    expect(result).toEqual({});
+    const parkedThread = await registry.getThread(WORKSPACE, PARENT, thread.id);
+    expect(parkedThread?.pendingContinuations?.[0]?.frozen).toMatchObject({
+      model: { providerId: "research-provider", modelId: "design-model" },
+      research: { capability: "investigation" },
+    });
+  });
+
   it("continueRun folds held messages into the new Run's input", async () => {
     const { thread } = await settle();
     await registry.recordThreadMessage(WORKSPACE, thread.id, {

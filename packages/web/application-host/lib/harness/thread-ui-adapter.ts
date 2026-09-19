@@ -1,6 +1,7 @@
 import type { HarnessServiceHost } from "./service-host.js";
 import type { HarnessThreadRoutesOptions } from "./thread-routes.js";
 import type { ThreadRuntime } from "./thread-runtime.js";
+import type { ThreadSendParams } from "@piarium/protocol";
 import { createThreadSendService } from "./thread-services.js";
 
 /**
@@ -25,6 +26,9 @@ export function createUserThreadSendAdapter(
       ...(input.context === undefined ? {} : { context: input.context }),
       ...(input.requestId === undefined ? {} : { requestId: input.requestId }),
       ...(input.replyTo === undefined ? {} : { replyTo: input.replyTo }),
+      ...(input.capability === undefined ? {} : { capability: input.capability as NonNullable<ThreadSendParams["capability"]> }),
+      ...(input.resources === undefined ? {} : { resources: input.resources as NonNullable<ThreadSendParams["resources"]> }),
+      ...(input.model === undefined ? {} : { model: input.model }),
     }, {
       actor: {
         authorityInstanceId: "ui-thread-routes",

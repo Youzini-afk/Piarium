@@ -3485,14 +3485,27 @@ export class SessionHost {
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));
+      // The frozen launch selection must reach the session: options.model wins
+      // over a restored session-file model, so a continuation Run freezes the
+      // model it was admitted with rather than silently replaying the prior
+      // Run's model (7B/D-300).
+      const restored = sessionManager.buildSessionContext();
+      const restoredModel = restored.model;
       const created = await createAgentSessionFromServices({
-        ...(configured?.model === undefined ? {} : { model: configured.model }),
+        ...(sessionModel === undefined ? {} : { model: sessionModel }),
         customTools,
         ...(this.#sessionToolAllowlist === undefined ? {} : { tools: this.#sessionToolAllowlist }),
         services,
         sessionManager,
         ...(sessionStartEvent === undefined ? {} : { sessionStartEvent }),
       });
+      // A continuation Run on a different frozen model is a real switch; the
+      // session file records it so the transcript itself stays auditable.
+      if (selectedLaunchModel !== undefined && restored.messages.length > 0
+        && (restoredModel === null || restoredModel.provider !== selectedLaunchModel.provider
+          || restoredModel.modelId !== selectedLaunchModel.id)) {
+        created.session.sessionManager.appendModelChange(selectedLaunchModel.provider, selectedLaunchModel.id);
+      }
       this.#contextPreparation?.attach(created.session, (event) => {
         this.#emit("agent.event", {
           event: projectAgentEvent(event, {

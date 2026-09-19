@@ -390,6 +390,7 @@ const isPendingContinuation = (value: unknown): value is ThreadPendingContinuati
   isRecord(value)
   && (value.preparedInput === undefined || isString(value.preparedInput))
   && (value.sourceRunId === undefined || isString(value.sourceRunId))
+  && (value.frozen === undefined || isFrozenRunConfig(value.frozen))
   && (value.mode === "continue" || value.mode === "fresh")
   && isString(value.task)
   && isString(value.requestId) && value.requestId.length > 0
@@ -1673,7 +1674,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         sessionId: null,
         sessionOwner: options.sessionOwner ?? "spawned-child",
         ...(inputRevision ? { inputRevision } : {}),
-        frozen: options.frozen ? structuredClone(options.frozen) : {
+        // An explicit frozen override (same-Thread capability/model re-route)
+        // is recorded verbatim except inputOrigin, which always reflects the
+        // continuation mode actually admitted.
+        frozen: options.frozen ? {
+          ...structuredClone(options.frozen),
+          inputOrigin: options.inputOrigin ?? options.frozen.inputOrigin,
+        } : {
           model: structuredClone(thread.model),
           tools: [...thread.manifest.tools],
           ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),

@@ -190,7 +190,9 @@ export function selectHarnessTools(
       result.push(createWaitTool(bridge, sessionId));
     }
     if (tools.send !== false) {
-      result.push(createSendTool(bridge, sessionId));
+      result.push(createSendTool(bridge, sessionId, {
+        ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
+      }));
     }
     if (tools.read_thread !== false) {
       result.push(createReadThreadTool(bridge, sessionId));

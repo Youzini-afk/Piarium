@@ -16,7 +16,7 @@ import type {
   ThreadUpdateResult,
   ThreadKillResult,
 } from "@piarium/protocol";
-import { HARNESS_MAX_REQUEST_TIMEOUT_MS, buildTeamPrompt } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, RESEARCH_CAPABILITY_DEFINITIONS, buildTeamPrompt } from "@piarium/protocol";
 
 /**
  * Build an error result for a thread tool failure.
@@ -48,7 +48,8 @@ const DispatchParams = Type.Object({
     Type.Literal('experimental-design'),
     Type.Literal('fast-exploration'),
     Type.Literal('high-throughput-execution'),
-  ], { description: 'Research capability; available only when its dedicated model slot is configured.' })),
+  ], { description: 'Research capability; runs on its dedicated model slot, or on the caller\'s current model when model:"inherit" is passed explicitly.' })),
+  model: Type.Optional(Type.Literal("inherit", { description: 'For a capability dispatch, explicitly inherit the caller\'s current model instead of the capability\'s configured slot' })),
   resources: Type.Optional(Type.Object({
     cpu: Type.Optional(Type.Boolean()),
     gpu: Type.Optional(Type.Boolean()),
@@ -81,6 +82,19 @@ const ThreadSendParams = Type.Object({
   ], { description: "For a request on a settled thread: continue resumes its retained session (default); fresh rebuilds the input on a new session" })),
   requestId: Type.Optional(Type.String({ description: "Idempotency key — a retry with the same id returns the recorded outcome instead of duplicating delivery" })),
   replyTo: Type.Optional(Type.String({ description: "The requestId of a request you are answering — completes the requester's wait" })),
+  capability: Type.Optional(Type.Union([
+    Type.Literal('investigation'),
+    Type.Literal('experimental-design'),
+    Type.Literal('fast-exploration'),
+    Type.Literal('high-throughput-execution'),
+  ], { description: "With kind=request on a settled thread: the new Run re-routes under this capability's frozen tools/model — earlier Runs stay immutable" })),
+  model: Type.Optional(Type.Literal("inherit", { description: "With capability: keep the target thread's recorded model when the capability's slot is not configured" })),
+  resources: Type.Optional(Type.Object({
+    cpu: Type.Optional(Type.Boolean()),
+    gpu: Type.Optional(Type.Boolean()),
+    network: Type.Optional(Type.Boolean()),
+    longRunning: Type.Optional(Type.Boolean()),
+  }, { description: "Resource manifest merged over the capability defaults" })),
 });
 
 const ThreadReadParams = Type.Object({
@@ -165,13 +179,7 @@ export function createDispatchTool(
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
         if (params.capability !== undefined) {
           const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
-          if (!resolved) {
-            return {
-              content: [{ type: 'text' as const, text: `research capability unavailable: ${params.capability}. Configure its dedicated model slot first.` }],
-              isError: true,
-              details: { code: 'unavailable', capability: params.capability },
-            };
-          }
+          const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
           if (params.preset !== undefined) {
             return {
               content: [{ type: 'text' as const, text: 'dispatch failed: capability cannot be combined with preset' }],
@@ -179,11 +187,35 @@ export function createDispatchTool(
               details: { code: 'invalid-params' },
             };
           }
-          model = resolved.model;
-          tools = resolved.definition.tools;
+          if (params.model === "inherit") {
+            const current = ctx?.model;
+            if (!current) {
+              return {
+                content: [{ type: 'text' as const, text: "dispatch failed: model \"inherit\" needs a current model on the calling session" }],
+                isError: true,
+                details: { code: 'unavailable' },
+              };
+            }
+            model = { providerId: current.provider, modelId: current.id };
+          } else if (resolved) {
+            model = resolved.model;
+          } else {
+            return {
+              content: [{ type: 'text' as const, text: `research capability unavailable: ${params.capability}. Configure its dedicated model slot first, or pass model:"inherit" to use your current model.` }],
+              isError: true,
+              details: { code: 'unavailable', capability: params.capability },
+            };
+          }
+          tools = definition.tools;
           research = {
-            capability: resolved.capability,
-            resources: { ...resolved.definition.defaultResources, ...(params.resources ?? {}) },
+            capability: definition.capability,
+            resources: { ...definition.defaultResources, ...(params.resources ?? {}) },
+          };
+        } else if (params.model !== undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'dispatch failed: model applies only together with a capability' }],
+            isError: true,
+            details: { code: 'invalid-params' },
           };
         }
         if (params.preset !== undefined) {
@@ -311,17 +343,44 @@ export function createWaitTool(bridge: HostServicesBridge, _sessionId: string): 
   });
 }
 
-export function createSendTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+export function createSendTool(bridge: HostServicesBridge, _sessionId: string, options: {
+  resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
+} = {}): ToolDefinition {
+  const researchCapabilities = options.resolvedResearchCapabilities ?? [];
   return defineTool({
     name: "send",
     label: "Send",
-    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait.",
+    description: "Send a message to a related thread (child, sibling, or parent). kind: 'inform' delivers without waking a waiting thread; 'request' asks for execution — on a settled thread it starts a new Run (context: 'continue' resumes its session; 'fresh' rebuilds the input). replyTo answers a request and completes the requester's wait. capability re-routes the new Run under that capability's frozen configuration.",
     promptSnippet: "send: inform a teammate; kind=request resumes a settled thread",
     promptGuidelines: [],
     parameters: ThreadSendParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       try {
+        let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
+        let model: { providerId: string; modelId: string } | "inherit" | undefined;
+        if (params.capability !== undefined) {
+          const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
+          const definition = RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+          if (resolved === undefined && params.model !== "inherit") {
+            return {
+              content: [{ type: 'text' as const, text: `research capability unavailable: ${params.capability}. Configure its dedicated model slot first, or pass model:"inherit" to keep the thread's model.` }],
+              isError: true,
+              details: { code: 'unavailable', capability: params.capability },
+            };
+          }
+          model = params.model === "inherit" ? "inherit" : resolved!.model;
+          research = {
+            capability: definition.capability,
+            resources: { ...definition.defaultResources, ...(params.resources ?? {}) },
+          };
+        } else if (params.model !== undefined || params.resources !== undefined) {
+          return {
+            content: [{ type: 'text' as const, text: 'send failed: model/resources apply only together with a capability' }],
+            isError: true,
+            details: { code: 'invalid-params' },
+          };
+        }
         const result = await bridge.request<"thread.send">("thread.send", {
           ...(params.threadId !== undefined ? { threadId: params.threadId } : {}),
           ...(params.to !== undefined ? { to: params.to } : {}),
@@ -331,6 +390,9 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string): 
           ...(params.context !== undefined ? { context: params.context } : {}),
           ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
           ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
+          ...(params.capability !== undefined ? { capability: params.capability } : {}),
+          ...(research !== undefined ? { resources: research.resources } : {}),
+          ...(model !== undefined ? { model } : {}),
         });
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;

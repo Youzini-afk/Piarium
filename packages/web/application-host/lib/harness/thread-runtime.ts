@@ -5507,6 +5507,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     /** Skips the shared-budget admission check (dequeue path already gated). */
     admitted?: boolean;
     from?: import("@piarium/protocol").ThreadMessagePeer;
+    /**
+     * Resolved capability/model re-route for the new Run (7B/D-300). Frozen
+     * at request time; a parked continuation keeps this exact configuration.
+     */
+    frozen?: import("@piarium/protocol").ThreadRunFrozenConfig;
   }): Promise<{ runId?: string }> => {
     const requestId = input.requestId ?? `continuation-${randomUUID()}`;
     const from = input.from ?? { kind: "user" as const, id: "host" };
@@ -5542,6 +5547,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         task: input.task,
         requestId,
         from,
+        ...(input.frozen ? { frozen: input.frozen } : {}),
         at: new Date().toISOString(),
       });
     };
@@ -5592,7 +5598,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         allowSettled: true,
         inputOrigin: input.mode,
         request: { requestId, mode: input.mode, task: input.task, from, at: new Date().toISOString(),
+          ...(input.frozen ? { frozen: input.frozen } : {}),
           ...(freshInput ? { preparedInput: freshInput.text } : {}) },
+        ...(input.frozen ? { frozen: input.frozen } : {}),
       });
       if (!admitted.started) return { runId: admitted.run.id };
       run = admitted.run;

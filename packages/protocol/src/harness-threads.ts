@@ -8,7 +8,7 @@
 
 import type { PermissionPolicy } from "./permission-gate.js";
 import type { WorkFocusId } from "./work-focus.js";
-import type { ThreadResearchManifest } from "./research-capabilities.js";
+import type { ResearchCapability, ResearchResourceManifest, ThreadResearchManifest } from "./research-capabilities.js";
 
 export type ThreadKind = "discussion" | "implementation";
 export type ThreadPurpose = "task" | "research-root";
@@ -480,6 +480,12 @@ export interface ThreadPendingContinuation {
   /** Prepared before Run admission; persisted for an interrupted fresh launch. */
   preparedInput?: string;
   sourceRunId?: string;
+  /**
+   * Resolved upgrade frozen when the request was recorded (7B/D-300). A parked
+   * capability/model re-route keeps the exact configuration it was admitted
+   * with; the new Run freezes it while earlier Runs stay immutable.
+   */
+  frozen?: ThreadRunFrozenConfig;
   mode: "continue" | "fresh";
   task: string;
   requestId: string;
@@ -815,6 +821,21 @@ export interface ThreadSendParams {
    * dependency wait.
    */
   replyTo?: string;
+  /**
+   * Re-route the next Run on the target under a research capability (7B/D-300):
+   * the new Run freezes the capability's tools, model, prompt fragment, and
+   * resource manifest while earlier Runs stay immutable. Only valid with
+   * kind "request" on a Thread that can start a new Run.
+   */
+  capability?: ResearchCapability;
+  /** Optional resource manifest merged over the capability defaults. */
+  resources?: ResearchResourceManifest;
+  /**
+   * Model for the next Run. An explicit selection re-routes the Thread; the
+   * literal "inherit" keeps the target Thread's recorded model when the
+   * capability's dedicated slot is not configured.
+   */
+  model?: import("./harness-settings.js").ModelSelection | "inherit";
 }
 
 export interface ThreadSendResult {

@@ -29,6 +29,7 @@ export const createOnThreadDequeued = (options: {
         task: continuation.task,
         from: continuation.from,
         ...(continuation.requestId !== undefined ? { requestId: continuation.requestId } : {}),
+        ...(continuation.frozen !== undefined ? { frozen: continuation.frozen } : {}),
         admitted: true,
       }).then(({ runId }) => (
         continuation.requestId !== undefined && runId !== undefined

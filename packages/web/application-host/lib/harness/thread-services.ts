@@ -791,6 +791,37 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           "context only applies to an execution request (kind: \"request\")",
         );
       }
+      // Capability/model re-routing (7B/D-300) re-freezes the target's next
+      // Run; it is meaningless on a notification or a session target.
+      const upgradeRequested = params.capability !== undefined
+        || (params.model !== undefined && params.model !== "inherit");
+      if (params.capability !== undefined && !isResearchCapability(params.capability)) {
+        throw new HarnessServiceError("invalid-params", `Unknown research capability: ${params.capability}`);
+      }
+      if (params.resources !== undefined && (params.capability === undefined
+        || typeof params.resources !== "object" || params.resources === null
+        || Object.entries(params.resources).some(([key, value]) => (
+          !["cpu", "gpu", "network", "longRunning"].includes(key) || typeof value !== "boolean"
+        )))) {
+        throw new HarnessServiceError("invalid-params", "resources must be a valid manifest and require a capability");
+      }
+      if (params.model !== undefined && params.model !== "inherit") {
+        const selected = params.model as { providerId?: unknown; modelId?: unknown };
+        if (typeof selected.providerId !== "string" || !selected.providerId
+          || typeof selected.modelId !== "string" || !selected.modelId) {
+          throw new HarnessServiceError("invalid-params", "model must be a resolved selection or \"inherit\"");
+        }
+      }
+      if (upgradeRequested && kind !== "request") {
+        throw new HarnessServiceError("invalid-params", "capability/model re-routing only applies to an execution request");
+      }
+      if (upgradeRequested && params.to === "parent") {
+        throw new HarnessServiceError("invalid-params", "capability/model re-routing applies to a Thread target, not a session");
+      }
+      if (params.capability !== undefined && ctx.requestSource !== "user"
+        && owner?.execution.workFocus !== "research") {
+        throw new HarnessServiceError("denied", "Capability re-routing requires a research work focus");
+      }
       if (params.to === "parent" && params.threadId !== undefined) {
         throw new HarnessServiceError("invalid-params", "to: \"parent\" and threadId are mutually exclusive");
       }
@@ -948,6 +979,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         throw new HarnessServiceError("unavailable", `Thread is being deleted: ${thread.id}`);
       }
       if (thread.lifecycle === "queued") {
+        if (upgradeRequested) {
+          throw new HarnessServiceError("invalid-params", "capability/model re-routing needs a Thread that has completed a Run; dispatch carries the initial configuration");
+        }
         // Held messages flush into the first Run's prompt at dequeue.
         await recordState("pending");
         return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
@@ -956,6 +990,10 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const run = await registry.getActiveRun(workspaceId, thread.id);
       const lostWorker = thread.lifecycle === "active"
         && (run?.outcome === "lost" || run?.workerState === "lost");
+
+      if (upgradeRequested && !(thread.lifecycle === "settled" || lostWorker)) {
+        throw new HarnessServiceError("invalid-params", `capability/model re-routing starts a new Run; the target is not continuable from lifecycle ${thread.lifecycle}`);
+      }
 
       if (thread.lifecycle === "settled" || lostWorker) {
         if (kind === "inform") {
@@ -966,6 +1004,39 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         }
         if (!host.threadContinueRun) {
           throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
+        }
+        // A capability/model re-route resolves its frozen configuration now:
+        // "inherit" keeps the Thread's recorded model, an explicit selection
+        // re-routes it, and a capability carries its own tools/fragment/
+        // resources. Earlier Runs are never rewritten (7B/D-300).
+        let frozen: ThreadRun["frozen"];
+        if (upgradeRequested) {
+          const definition = params.capability === undefined
+            ? undefined
+            : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+          const model = params.model === "inherit" ? thread.model : params.model ?? null;
+          if (params.model === "inherit" && !thread.model) {
+            throw new HarnessServiceError("unavailable", "The target Thread has no recorded model to inherit");
+          }
+          if (definition && !model) {
+            throw new HarnessServiceError("unavailable", `Research capability ${definition.capability} has no configured model slot; pass model "inherit" to keep the Thread's model`);
+          }
+          frozen = {
+            model: model ?? thread.model,
+            tools: definition ? [...definition.tools] : [...thread.manifest.tools],
+            ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
+            scope: [...thread.manifest.scope],
+            worktree: definition?.worktree ?? thread.manifest.worktree,
+            systemPromptFragment: definition?.systemPromptFragment ?? thread.manifest.systemPromptFragment,
+            inputOrigin: params.context ?? "continue",
+            workFocus: thread.manifest.workFocus,
+            ...(definition ? {
+              research: {
+                capability: definition.capability,
+                resources: { ...definition.defaultResources, ...(params.resources ?? {}) },
+              },
+            } : {}),
+          };
         }
         // Record first so a retry cannot double-schedule while the Run starts.
         await recordState("pending");
@@ -979,6 +1050,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
             task: params.message,
             requestId,
             from: fromPeer,
+            ...(frozen ? { frozen } : {}),
           });
         } catch (error) {
           return continueError(error);
@@ -988,7 +1060,8 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           // a pending message. The runtime normally recorded it; enforce that
           // postcondition idempotently at this public admission boundary too.
           await registry.enqueueContinuation(workspaceId, thread.id, {
-            requestId, mode: params.context ?? "continue", task: params.message, from: fromPeer, at: recordedAt,
+            requestId, mode: params.context ?? "continue", task: params.message, from: fromPeer,
+            ...(frozen ? { frozen } : {}), at: recordedAt,
           });
           return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
         }
