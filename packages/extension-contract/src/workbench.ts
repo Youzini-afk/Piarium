@@ -144,7 +144,7 @@ export class PiariumWorkbenchShellContractError extends Error {
 }
 
 const isShellSurface = (value: unknown): value is PiariumApplicationSurface => (
-  value === "desktop" || value === "mobile" || value === "vscode" || value === "web"
+  value === "desktop" || value === "mobile" || value === "web"
 );
 
 const validateSeamIdentifiers = (
@@ -381,7 +381,7 @@ export interface PiariumWorkbenchResolvedLayout {
   replacementSelections: Record<string, string>;
 }
 
-const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "vscode", "web"]);
+const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "web"]);
 const SCOPES = new Set<PiariumWorkbenchLayoutScope>(["distribution", "user", "workspace"]);
 const ID_PATTERN = /^[a-z0-9]+(?:[._-][a-z0-9]+)*$/;
 

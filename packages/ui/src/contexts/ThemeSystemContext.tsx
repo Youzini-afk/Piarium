@@ -8,7 +8,7 @@ import React, {
 import { flushSync } from 'react-dom';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
-import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell } from '@/lib/desktop';
 import { setDesktopWindowTheme } from '@/lib/desktopNative';
 import { CSSVariableGenerator } from '@/lib/theme/cssGenerator';
 import { updateDesktopSettings } from '@/lib/persistence';
@@ -21,7 +21,6 @@ import {
 } from '@/lib/theme/themes';
 import { withPrColors } from '@/lib/theme/themes/prColors';
 import { ThemeSystemContext, type ThemeContextValue } from './theme-system-context';
-import type { VSCodeThemePayload } from '@/lib/theme/vscode/adapter';
 import { runtimeFetch } from '@piarium/application-client';
 import {
   getInitialSystemPreference,
@@ -146,14 +145,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   const [embeddedBootstrapTheme] = useState<Theme | null>(() => readEmbeddedCurrentTheme());
   const [embeddedSyncedTheme, setEmbeddedSyncedTheme] = useState<Theme | null>(null);
   const [customThemesLoading, setCustomThemesLoading] = useState(false);
-  const [vscodeTheme, setVSCodeTheme] = useState<Theme | null>(() => {
-    if (typeof window === 'undefined' || !isVSCodeRuntime()) {
-      return null;
-    }
-    const existing = (window as unknown as { __PIARIUM_VSCODE_THEME__?: Theme }).__PIARIUM_VSCODE_THEME__;
-    return existing || null;
-  });
-  const isVSCode = useMemo(() => isVSCodeRuntime(), []);
   const isDesktopShell = useMemo(() => detectDesktopShell(), []);
   const customThemesRequestRef = useRef(0);
   const receivesParentThemeSync = useMemo(() => {
@@ -174,10 +165,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
       merged.push(theme);
     };
 
-    if (isVSCode && vscodeTheme) {
-      add(vscodeTheme);
-    }
-
     // Live-synced theme wins over bootstrap theme when IDs match (add is first-wins).
     if (embeddedSyncedTheme) {
       add(embeddedSyncedTheme);
@@ -195,7 +182,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     themes.forEach(add);
 
     return merged;
-  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme, isVSCode, vscodeTheme]);
+  }, [customThemes, developmentThemes, embeddedBootstrapTheme, embeddedSyncedTheme]);
 
   useEffect(() => {
     const handleThemeHmr = (event: Event) => {
@@ -235,9 +222,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   );
 
   const currentTheme = useMemo(() => {
-    if (isVSCode && vscodeTheme) {
-      return vscodeTheme;
-    }
     if (preferences.themeMode === 'light') {
       return ensureThemeById(preferences.lightThemeId, 'light');
     }
@@ -247,10 +231,10 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     return systemPrefersDark
       ? ensureThemeById(preferences.darkThemeId, 'dark')
       : ensureThemeById(preferences.lightThemeId, 'light');
-  }, [ensureThemeById, isVSCode, preferences, systemPrefersDark, vscodeTheme]);
+  }, [ensureThemeById, preferences, systemPrefersDark]);
 
   const reloadCustomThemes = useCallback(async () => {
-    if (typeof window === 'undefined' || isVSCode) {
+    if (typeof window === 'undefined') {
       return;
     }
 
@@ -287,44 +271,19 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
         setCustomThemesLoading(false);
       }
     }
-  }, [isVSCode]);
+  }, []);
 
   useEffect(() => {
     void reloadCustomThemes();
   }, [reloadCustomThemes]);
 
   useEffect(() => subscribeRuntimeEndpointChanged((detail) => {
-    if (detail.runtimeKey === detail.previousRuntimeKey || isVSCode) return;
+    if (detail.runtimeKey === detail.previousRuntimeKey) return;
     customThemesRequestRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
     void reloadCustomThemes();
-  }), [isVSCode, reloadCustomThemes]);
-
-  useEffect(() => {
-    if (!isVSCode) {
-      return;
-    }
-
-    const applyVSCodeTheme = (theme: Theme) => {
-      setVSCodeTheme(theme);
-    };
-
-    const handleThemeEvent = (event: Event) => {
-      const detail = (event as CustomEvent<VSCodeThemePayload>).detail;
-      if (detail?.theme) {
-        applyVSCodeTheme(detail.theme);
-      }
-    };
-
-    const existing = (window as unknown as { __PIARIUM_VSCODE_THEME__?: Theme }).__PIARIUM_VSCODE_THEME__;
-    if (existing) {
-      applyVSCodeTheme(existing);
-    }
-
-    window.addEventListener('piarium:vscode-theme', handleThemeEvent as EventListener);
-    return () => window.removeEventListener('piarium:vscode-theme', handleThemeEvent as EventListener);
-  }, [isVSCode]);
+  }), [reloadCustomThemes]);
 
   const updateBrowserChrome = useCallback((theme: Theme) => {
     if (typeof document === 'undefined') {
@@ -360,13 +319,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     metaThemeColorMedia.setAttribute('content', chromeColor);
   }, []);
 
-  const applyVSCodeRuntimeClass = useCallback((enabled: boolean) => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    document.documentElement.classList.toggle('vscode-runtime', enabled);
-  }, []);
-
   useIsomorphicLayoutEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -376,7 +328,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     if (!receivesParentThemeSync) {
       publishEmbeddedThemeBootstrap(currentTheme);
     }
-    applyVSCodeRuntimeClass(isVSCode);
     updateBrowserChrome(currentTheme);
 
     const root = document.documentElement;
@@ -384,7 +335,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     root.classList.add(currentTheme.metadata.variant);
 
     return restoreTransitions;
-  }, [applyVSCodeRuntimeClass, cssGenerator, currentTheme, isVSCode, updateBrowserChrome]);
+  }, [cssGenerator, currentTheme, updateBrowserChrome]);
 
   useEffect(() => {
     if (preferences.themeMode !== 'system' || typeof window === 'undefined') {

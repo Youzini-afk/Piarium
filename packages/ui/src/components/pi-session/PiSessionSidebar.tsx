@@ -48,7 +48,6 @@ import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
 import { usePiInteractionStore } from '@/stores/usePiInteractionStore';
 import {
   selectActivePiSessions,
-  selectArchivedPiSessions,
   type PiSessionAttentionState,
   usePiSessionStore,
 } from '@/stores/usePiSessionStore';
@@ -141,7 +140,6 @@ interface SessionRowProps {
   onSelect(session: SessionSummary): void;
   onToggleExpanded(sessionId: string): void;
   onTogglePinned(session: SessionSummary): void;
-  onUnarchive(session: SessionSummary): void;
   pendingDialogCountBySession: Readonly<Record<string, number>>;
   pinnedIds: Set<string>;
   selectedIds: ReadonlySet<string>;
@@ -170,7 +168,6 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
   );
   const attention = props.attentionBySession[session.id];
   const selected = props.selectedIds.has(session.id);
-  const archived = session.archivedAt !== undefined;
   const pendingRenameRef = React.useRef(false);
   const decorationRenderers = useWorkbenchMatchRenderers<{
     attention?: PiSessionAttentionState;
@@ -336,17 +333,10 @@ const PiSessionRow: React.FC<SessionRowProps> = (props) => {
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuSeparator />
-            {archived ? (
-              <DropdownMenuItem onClick={() => props.onUnarchive(session)}>
-                <Icon name="inbox-unarchive" className="mr-2 size-4" />
-                {t('sessions.sidebar.session.menu.restore')}
-              </DropdownMenuItem>
-            ) : (
-              <DropdownMenuItem onClick={() => props.onArchive(node)}>
-                <Icon name="inbox-archive" className="mr-2 size-4" />
-                {t('sessions.sidebar.bulkActions.archive')}
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem onClick={() => props.onArchive(node)}>
+              <Icon name="inbox-archive" className="mr-2 size-4" />
+              {t('sessions.sidebar.bulkActions.archive')}
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => props.onDelete(node)}
               className="text-destructive focus:text-destructive"
@@ -375,10 +365,9 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   onRequestClose,
 }) => {
   const { t } = useI18n();
-  const { files, runtime } = useRuntimeAPIs();
+  const { files } = useRuntimeAPIs();
   const summaries = usePiSessionStore((state) => state.summaries);
   const activeSessions = usePiSessionStore(selectActivePiSessions);
-  const archivedSessions = usePiSessionStore(selectArchivedPiSessions);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
   const attentionBySession = usePiSessionStore((state) => state.attentionBySession);
   const catalogLoaded = usePiSessionStore((state) => state.catalogLoaded);
@@ -389,7 +378,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const renameSession = usePiSessionStore((state) => state.renameSession);
   const archiveSession = usePiSessionStore((state) => state.archiveSession);
-  const unarchiveSession = usePiSessionStore((state) => state.unarchiveSession);
   const deleteSession = usePiSessionStore((state) => state.deleteSession);
   const pendingDialogs = usePiInteractionStore((state) => state.dialogs);
   const pendingDialogCountBySession = React.useMemo(() => {
@@ -422,8 +410,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const toggleStickyZoneHeaders = useSessionDisplayStore((state) => state.toggleStickyZoneHeaders);
   const showRecentSection = useSessionDisplayStore((state) => state.showRecentSection);
   const toggleRecentSection = useSessionDisplayStore((state) => state.toggleRecentSection);
-  const showArchivedSessions = useSessionDisplayStore((state) => state.showArchivedSessions);
-  const toggleArchivedSessions = useSessionDisplayStore((state) => state.toggleArchivedSessions);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const [query, setQuery] = React.useState('');
@@ -438,8 +424,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   const [actionPending, setActionPending] = React.useState(false);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const untitled = t('sessions.sidebar.session.untitled');
-
-  const showArchived = runtime.isVSCode && showArchivedSessions;
 
   React.useEffect(() => {
     void loadCatalog();
@@ -472,10 +456,9 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   }, []);
 
   const workspaceGroups = React.useMemo(() => {
-    const source = showArchived ? archivedSessions : activeSessions;
-    const forest = buildPiSessionForest(source, isPinned);
+    const forest = buildPiSessionForest(activeSessions, isPinned);
     return groupPiSessionForestByWorkspace(forest, orderedProjects, isPinned, {
-      includeEmptyProjects: !showArchived,
+      includeEmptyProjects: true,
       showRecentSection,
     }).map((group) => {
       const label = group.project?.label?.trim()
@@ -489,7 +472,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
         label,
       };
     });
-  }, [activeSessions, archivedSessions, isPinned, orderedProjects, sessionGroupingMode, showArchived, showRecentSection, t]);
+  }, [activeSessions, isPinned, orderedProjects, sessionGroupingMode, showRecentSection, t]);
 
   const groups = React.useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase();
@@ -579,14 +562,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   }, [mobileVariant, onRequestClose, openMultiRunLauncher, setSessionSwitcherOpen]);
 
   const handleOpenArchive = React.useCallback(() => {
-    if (runtime.isVSCode) {
-      toggleArchivedSessions();
-      return;
-    }
     setArchivePageOpen(true);
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
-  }, [mobileVariant, onRequestClose, runtime.isVSCode, setArchivePageOpen, setSessionSwitcherOpen, toggleArchivedSessions]);
+  }, [mobileVariant, onRequestClose, setArchivePageOpen, setSessionSwitcherOpen]);
 
   const handleOpenSettings = React.useCallback(() => {
     if (mobileVariant) setSessionSwitcherOpen(false);
@@ -623,7 +602,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
   ]);
 
   const canRevealProject = Boolean(files.revealPath)
-    && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
+    && isDesktopLocalOriginActive();
 
   const showUpdateButton = autoUpdateChecksEnabled
     && updateAvailable
@@ -870,10 +849,10 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="min-w-56 overflow-y-auto">
-              {!runtime.isVSCode ? <DropdownMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
+              <DropdownMenuItem onClick={() => workspaceEvents.requestDirectoryDialog()}>
                 <Icon name="folder-add" className="size-4" />
                 {t('sessions.sidebar.header.actions.addProject')}
-              </DropdownMenuItem> : null}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={handleOpenScheduledTasks}>
                 <Icon name="calendar-schedule" className="size-4" />
                 {t('sessions.sidebar.header.actions.scheduledTasks')}
@@ -918,12 +897,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                 <DropdownMenuRadioItem value="flat">{t('sessions.sidebar.header.grouping.flat')}</DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
-              {runtime.isVSCode ? (
-                <DropdownMenuItem onClick={toggleArchivedSessions}>
-                  <Icon name={showArchived ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
-                  {t('sessions.sidebar.header.displayMode.showArchived')}
-                </DropdownMenuItem>
-              ) : null}
               <DropdownMenuItem onClick={toggleRecentSection}>
                 <Icon name={showRecentSection ? 'check' : 'checkbox-blank'} className="mr-2 size-4" />
                 {t('sessions.sidebar.header.displayMode.showRecent')}
@@ -1012,16 +985,12 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               <p className="typography-ui-label text-foreground">
                 {query
                   ? t('sessions.sidebar.empty.noMatches.title')
-                  : showArchived
-                    ? t('sessions.sidebar.group.empty.noArchivedSessions')
-                    : t('sessions.sidebar.empty.noSessions.title')}
+                  : t('sessions.sidebar.empty.noSessions.title')}
               </p>
               <p className="mt-1 typography-meta text-muted-foreground">
                 {query
                   ? t('sessions.sidebar.empty.noMatches.description')
-                  : showArchived
-                    ? t('sessions.sidebar.grouping.archivedDescription')
-                    : t('sessions.sidebar.empty.noSessions.description')}
+                  : t('sessions.sidebar.empty.noSessions.description')}
               </p>
             </div>
           ) : (
@@ -1033,7 +1002,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               const projectIndex = project
                 ? projects.findIndex((candidate) => candidate.id === project.id)
                 : -1;
-              const canManageProject = project !== null && !runtime.isVSCode;
+              const canManageProject = project !== null;
               const groupHeaderContent = (
                 <>
                   <button
@@ -1052,7 +1021,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                   >
                     <Icon name={expanded ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5 shrink-0 opacity-70" />
                     <Icon
-                      name={showArchived ? 'archive' : group.id === 'recent' ? 'history' : 'folder'}
+                      name={group.id === 'recent' ? 'history' : 'folder'}
                       className="size-3.5 shrink-0"
                     />
                     <span className="min-w-0 flex-1 truncate typography-ui-label font-medium">
@@ -1060,8 +1029,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                     </span>
                   </button>
                   <span className="shrink-0 typography-micro opacity-70">{group.forest.length}</span>
-                  {!showArchived ? (
-                    <Tooltip>
+                  <Tooltip>
                       <TooltipTrigger asChild>
                         <button
                           type="button"
@@ -1075,8 +1043,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                       <TooltipContent side="right">
                         {t('sessions.sidebar.group.actions.newDraftInGroupAria', { label: group.label })}
                       </TooltipContent>
-                    </Tooltip>
-                  ) : null}
+                  </Tooltip>
                 </>
               );
               return (
@@ -1126,8 +1093,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                           </ContextMenuItem>
                         </>
                       ) : null}
-                      {!showArchived ? (
-                        <>
+                      <>
                           {(canManageProject || canRevealProject) ? <ContextMenuSeparator /> : null}
                           <ContextMenuItem
                             disabled={projectSessionIds.length === 0}
@@ -1141,8 +1107,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                             <Icon name="inbox-archive" className="mr-2 size-4" />
                             {t('sessions.sidebar.project.actions.archiveChats')}
                           </ContextMenuItem>
-                        </>
-                      ) : null}
+                      </>
                       {canManageProject ? (
                         <>
                           <ContextMenuSeparator />
@@ -1227,13 +1192,6 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                         title: piSessionTitle(selected.session, untitled),
                       })}
                       onOpenMiniChat={handleOpenMiniChat}
-                      onUnarchive={(session) => {
-                        void unarchiveSession(session.id).then(() => {
-                          toast.success(t('sessions.sidebar.session.unarchive.success'));
-                        }).catch(() => {
-                          toast.error(t('sessions.sidebar.session.unarchive.error'));
-                        });
-                      }}
                     />
                   ))}
                 </div> : null}
@@ -1253,7 +1211,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                 type="button"
                 variant="ghost"
                 size="sm"
-                disabled={selectedSessionIds.size === 0 || showArchived}
+                disabled={selectedSessionIds.size === 0}
                 onClick={() => requestBulkAction('archive')}
                 className="h-7 px-2 text-muted-foreground hover:text-foreground disabled:opacity-50"
                 aria-label={t('sessions.sidebar.bulkActions.archive')}
@@ -1317,8 +1275,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               </TooltipTrigger>
               <TooltipContent side="top">{t('sessions.sidebar.footer.actions.shortcuts')}</TooltipContent>
             </Tooltip>
-            {!runtime.isVSCode ? (
-              <Tooltip>
+            <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     type="button"
@@ -1332,8 +1289,7 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="top">{t('sessions.sidebar.footer.actions.aboutPiarium')}</TooltipContent>
-              </Tooltip>
-            ) : null}
+            </Tooltip>
             {showUpdateButton ? (
               <Tooltip>
                 <TooltipTrigger asChild>

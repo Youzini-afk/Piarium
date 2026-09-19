@@ -1,7 +1,7 @@
 # CodeMirror boundary
 
 CodeMirror is a purpose-specific mobile and embedded editor dependency. It is not a fallback for the
-desktop/Web Workbench file editor and is not loaded by the VS Code companion.
+desktop/Web Workbench file editor.
 
 Retained consumers:
 
@@ -18,5 +18,5 @@ Retained consumers:
 - `workbench/editors/view-state.ts` is the mobile/embedded CodeMirror view-state adapter. Desktop/Web
   Monaco persists its own provider payload.
 
-Do not add `runtime.isVSCode` or desktop Monaco-failure branches here. A Monaco failure is a local
-official-provider failure with retry/recovery; it does not revive a second file editor implementation.
+Do not add desktop Monaco-failure branches here. A Monaco failure is a local official-provider failure
+with retry/recovery; it does not revive a second file editor implementation.

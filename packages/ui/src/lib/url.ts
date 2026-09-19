@@ -1,5 +1,3 @@
-import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-
 type DesktopBridgeGlobal = {
   openExternal?: (url: string) => Promise<unknown>;
 };
@@ -108,16 +106,6 @@ export const openExternalUrl = async (url: string): Promise<boolean> => {
   }
 
   const normalizedTarget = parsed.toString();
-
-  const runtimeApis = getRegisteredRuntimeAPIs();
-  if (runtimeApis?.runtime?.isVSCode && runtimeApis.vscode?.openExternalUrl) {
-    try {
-      await runtimeApis.vscode.openExternalUrl(normalizedTarget);
-      return true;
-    } catch {
-      return false;
-    }
-  }
 
   const desktop = (window as unknown as { __PIARIUM_DESKTOP__?: DesktopBridgeGlobal }).__PIARIUM_DESKTOP__;
   if (desktop?.openExternal) {

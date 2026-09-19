@@ -54,7 +54,7 @@ describe('resolveDefaultDirectory', () => {
   test('does not use the server workspace root for a local desktop runtime', async () => {
     let calls = 0;
     const apis = {
-      runtime: { platform: 'desktop', isDesktop: true, isVSCode: false },
+      runtime: { platform: 'desktop', isDesktop: true },
       workspace: { getRoot: async () => { calls += 1; throw new Error('must not load'); } },
     } as unknown as RuntimeAPIs;
     expect(await resolveRuntimeWorkspaceRoot(apis, { desktopLocal: true })).toBeNull();

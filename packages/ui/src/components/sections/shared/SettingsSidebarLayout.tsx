@@ -1,6 +1,5 @@
 import React from 'react';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 
 interface SettingsSidebarLayoutProps {
@@ -36,15 +35,13 @@ export const SettingsSidebarLayout: React.FC<SettingsSidebarLayoutProps> = ({
   className,
   variant = 'sidebar',
 }) => {
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-
   const scrollRef = React.useRef<HTMLElement | null>(null);
   const [showTopShadow, setShowTopShadow] = React.useState(false);
   const [showBottomShadow, setShowBottomShadow] = React.useState(false);
 
   const bgClass = variant === 'background'
     ? 'bg-background'
-    : (isVSCode ? 'bg-background' : 'bg-sidebar');
+    : 'bg-sidebar';
 
   const bgVar = bgClass === 'bg-background'
     ? 'var(--surface-background)'

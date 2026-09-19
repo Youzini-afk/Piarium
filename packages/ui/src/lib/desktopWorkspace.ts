@@ -1,7 +1,6 @@
 import {
   canUseElectronDesktopIPC,
   isDesktopLocalOriginActive,
-  isVSCodeRuntime,
   requestDirectoryAccess,
   startAccessingDirectory,
 } from '@/lib/desktop';
@@ -17,7 +16,7 @@ export type DesktopWorkspaceSwitchResult =
   | { status: 'error'; error: string };
 
 export const canChooseDesktopWorkspace = (): boolean => (
-  canUseElectronDesktopIPC() && isDesktopLocalOriginActive() && !isVSCodeRuntime()
+  canUseElectronDesktopIPC() && isDesktopLocalOriginActive()
 );
 
 export const switchDesktopWorkspaceFromPicker = async (): Promise<DesktopWorkspaceSwitchResult> => {

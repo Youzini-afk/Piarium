@@ -14,5 +14,3 @@ export const useRuntimeAPI = <TValue,>(selector: RuntimeAPISelector<TValue>): TV
   const apis = useRuntimeAPIs();
   return selector(apis);
 };
-
-export const useIsVSCodeRuntime = (): boolean => useRuntimeAPI((api) => api.runtime.isVSCode);

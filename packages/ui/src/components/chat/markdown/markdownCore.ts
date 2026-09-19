@@ -3,7 +3,6 @@ import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { highlightCodeInWorker } from './markdown-worker';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
@@ -228,7 +227,6 @@ const CODE_BLOCK_RE = /<pre><code(?:\s+class="language-([^"]*)")?>([\s\S]*?)<\/c
 // Skip syntax highlighting for very large blocks — tokenizing thousands of
 // lines blocks the main thread. Plain (escaped) code is shown instead.
 const CODE_HIGHLIGHT_LINE_LIMIT = 1200;
-const VSCODE_CODE_HIGHLIGHT_LINE_LIMIT = 200;
 
 const exceedsLineLimit = (value: string, limit: number): boolean => {
   let lines = 1;
@@ -250,8 +248,6 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
   const matches = [...html.matchAll(CODE_BLOCK_RE)];
   if (matches.length === 0) return html;
 
-  const lineLimit = isVSCodeRuntime() ? VSCODE_CODE_HIGHLIGHT_LINE_LIMIT : CODE_HIGHLIGHT_LINE_LIMIT;
-
   let result = html;
   for (const match of matches) {
     const [full, rawLang, escapedCode] = match;
@@ -263,7 +259,7 @@ const highlightCodeBlocks = async (html: string): Promise<string> => {
     const code = unescapeHtml(escapedCode ?? '');
 
     // Oversized block: skip highlight, keep plain code but stamp the language.
-    if (exceedsLineLimit(code, lineLimit)) {
+    if (exceedsLineLimit(code, CODE_HIGHLIGHT_LINE_LIMIT)) {
       result = result.replace(full, () => full.replace('<pre', `<pre data-md-lang="${requested}"`));
       continue;
     }

@@ -13,7 +13,7 @@ import { documentKey, type DocumentEditResult, type DocumentIdentity, type Docum
 
 /**
  * Document-bound CodeMirror projection for mobile and embedded workspace editors.
- * Desktop/Web Workbench file tabs use Monaco; VS Code keeps its host editor.
+ * Desktop/Web Workbench file tabs use Monaco.
  */
 type DocumentCodeMirrorProps = Omit<React.ComponentProps<typeof CodeMirrorEditor>, 'value' | 'onChange'> & {
   identity: DocumentIdentity | undefined;

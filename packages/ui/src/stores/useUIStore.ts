@@ -106,28 +106,6 @@ const runtimeMemoryKey = (value?: string | null): string => {
   return key || 'default';
 };
 
-type VSCodeSettingsRuntime = {
-  openSettings?: (settingsPage?: string) => Promise<void>;
-  executeCommand?: (command: string, ...args: unknown[]) => Promise<unknown>;
-};
-
-const getVSCodeSettingsRuntime = (): VSCodeSettingsRuntime | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  const win = window as typeof window & {
-    __VSCODE_CONFIG__?: unknown;
-    __PIARIUM_RUNTIME_APIS__?: { vscode?: VSCodeSettingsRuntime };
-  };
-
-  if (!win.__VSCODE_CONFIG__) {
-    return null;
-  }
-
-  return win.__PIARIUM_RUNTIME_APIS__?.vscode ?? null;
-};
-
 // Shared with rail/panel consumers so contextPanelByDirectory lookups agree on keys.
 export const normalizeContextPanelDirectoryKey = (value: string): string => normalizeDirectoryPath(value);
 
@@ -1570,19 +1548,6 @@ export const useUIStore = create<UIStore>()(
         },
 
         setSettingsDialogOpen: (open) => {
-          if (open) {
-            const vscodeApi = getVSCodeSettingsRuntime();
-            if (vscodeApi) {
-              const page = get().settingsPage;
-              if (typeof vscodeApi.openSettings === 'function') {
-                void vscodeApi.openSettings(page);
-              } else if (typeof vscodeApi.executeCommand === 'function') {
-                void vscodeApi.executeCommand('piarium.showSettings', page);
-              }
-              return;
-            }
-          }
-
           set((state) => {
             if (!open) {
               return { isSettingsDialogOpen: false };

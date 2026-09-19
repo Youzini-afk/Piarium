@@ -10,7 +10,7 @@ import {
   SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from "@/components/icon/Icon";
 import { McpIcon } from '@/components/icons/McpIcon';
@@ -57,9 +57,8 @@ function buildRuntimeContext(
   isMobile: boolean,
   mcpInstalled: boolean,
 ): SettingsRuntimeContext {
-  const isVSCode = isVSCodeRuntime();
   const isWeb = !isDesktop && isWebRuntime();
-  return { isVSCode, isWeb, isDesktop, isMobile, mcpInstalled };
+  return { isWeb, isDesktop, isMobile, mcpInstalled };
 }
 
 function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): boolean {
@@ -165,14 +164,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
   // Load project-scoped content when its page becomes active.
   React.useEffect(() => {
-    if (!isSettingsDialogOpen && !runtimeCtx.isVSCode && !isWindowed) {
+    if (!isSettingsDialogOpen && !isWindowed) {
       return;
     }
 
     if (settingsSlug === 'snippets') {
       void useSnippetsStore.getState().loadSnippets();
     }
-  }, [activeProjectId, isSettingsDialogOpen, isWindowed, runtimeCtx.isVSCode, settingsSlug]);
+  }, [activeProjectId, isSettingsDialogOpen, isWindowed, settingsSlug]);
 
   const openPage = React.useCallback((slug: SettingsPageSlug) => {
     setSettingsPage(slug);
@@ -647,7 +646,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     if (activePageMeta.kind === 'split') {
       return (
         <div className="flex h-full min-h-0 overflow-hidden">
-          <div className={cn('border-r', runtimeCtx.isVSCode ? 'bg-background' : 'bg-sidebar')} style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
+          <div className="border-r bg-sidebar" style={{ width: SETTINGS_SPLIT_SIDEBAR_WIDTH, minWidth: SETTINGS_SPLIT_SIDEBAR_WIDTH, borderColor: 'var(--interactive-border)' }}>
             <ErrorBoundary>{renderPageSidebar(settingsSlug, {})}</ErrorBoundary>
           </div>
           <div className="flex-1 min-h-0 overflow-y-scroll overflow-x-hidden bg-background">
@@ -753,11 +752,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             <div
               className={cn(
                 'relative flex h-full min-h-0 flex-col overflow-hidden border-r',
-                isDesktopApp
-                  ? 'bg-sidebar'
-                  : runtimeCtx.isVSCode
-                    ? 'bg-background'
-                    : 'bg-sidebar',
+                'bg-sidebar',
               )}
               style={{
                 width: `${SETTINGS_NAV_WIDTH}px`,

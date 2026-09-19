@@ -4,7 +4,7 @@ Framework-neutral Piarium application client boundary.
 
 ## Purpose
 
-This package owns the `RuntimeAPIs` aggregate interface, all 25 API interfaces (Terminal, Git,
+This package owns the `RuntimeAPIs` aggregate interface and the API interfaces (Terminal, Git,
 Files, Documents, Settings, Permissions, Notifications, Extensions, Language, LanguageSupport, Tasks, Debug, Tests,
 etc.), typed failures (`DocumentsError`, `FilesystemError`, `LanguageServicesError`,
 `LanguageSupportError`, `RunServicesError`, `WorkspaceSearchError`), pure DTO types (`WorktreeMetadata`,
@@ -29,12 +29,11 @@ It has no React, Zustand, or UI component dependencies. It depends only on `@pia
 ## Consumers
 
 - `packages/web` — Web/remote surface API implementations
-- `packages/vscode` — VS Code webview API implementations
 - `packages/ui` — shared React presentation and client-side kernels
 - `packages/electron` — Electron main/preload import the focused `@piarium/application-client/desktop`
   subpath so bundling the native bridge does not pull in unrelated HTTP/relay transport modules
 
-All four consumers import contracts and transport primitives directly from
+All three product consumers import contracts and transport primitives directly from
 `@piarium/application-client`; the former UI forwarding modules have been removed. Relay is injected
 through `registerRelayTunnelProvider` and `registerRelayTunnelLifecycle`, so this package never imports
 the UI tunnel implementation. Selecting Relay without a registered lifecycle fails explicitly.

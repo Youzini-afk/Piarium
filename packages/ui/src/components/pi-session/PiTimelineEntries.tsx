@@ -24,11 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
-import { toAbsoluteFilePath } from '@/lib/path-utils';
-import type { EditorAPI } from '@piarium/application-client';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
@@ -378,21 +375,19 @@ const ToolResultContent: React.FC<{
 const PiToolCard: React.FC<{
   call: PiToolCall;
   cwd: string;
-  editor?: EditorAPI;
   execution?: PiToolExecutionState;
   result?: PiToolResultMessage;
-}> = ({ call, cwd, editor, execution, result }) => {
+}> = ({ call, cwd, execution, result }) => {
   const { t } = useI18n();
   const toolRenderers = useWorkbenchMatchRenderers<{
     call: PiToolCall;
     cwd: string;
-    editor?: EditorAPI;
     execution?: PiToolExecutionState;
     result?: PiToolResultMessage;
   }>('tool-renderer', 'chat.timeline.tools');
   const workspaceId = useWorkbenchWorkspaceId();
   const sessionId = usePiSessionStore((state) => state.currentSessionId);
-  const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, editor, execution, result });
+  const extensionRendered = renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   const resultText = result ? piContentText(result.content).trim() : '';
   if (extensionRendered !== undefined) return (
     <>
@@ -507,15 +502,7 @@ const PiToolCard: React.FC<{
                         workspaceRoot: cwd,
                         ...(sessionId ? { sessionId } : {}),
                         ...(call.id ? { toolCallId: call.id } : {}),
-                        ...(editor ? { editor } : {}),
                       });
-                    }
-                    if (!editor) return;
-                    const absolutePath = toAbsoluteFilePath(cwd, file.filePath);
-                    if (file.patch) {
-                      void editor.openDiff('', absolutePath, `${file.filePath} (changes)`, { patch: file.patch });
-                    } else {
-                      void editor.openFile(absolutePath);
                     }
                   }}
                   className="inline-flex min-w-0 items-center gap-1 rounded-md border border-border/60 px-2 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:cursor-default disabled:opacity-50"
@@ -532,7 +519,6 @@ const PiToolCard: React.FC<{
                   cwd={cwd}
                   filePath={file.filePath}
                   patch={file.patch}
-                  {...(editor ? { editor } : {})}
                   {...(sessionId ? { sessionId } : {})}
                   {...(call.id ? { toolCallId: call.id } : {})}
                 />
@@ -548,10 +534,9 @@ const PiToolCard: React.FC<{
 const PiReadOnlyToolGroup: React.FC<{
   calls: PiToolCall[];
   cwd: string;
-  editor?: EditorAPI;
   executionById: Record<string, PiToolExecutionState>;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
-}> = ({ calls, cwd, editor, executionById, resultByCallId }) => {
+}> = ({ calls, cwd, executionById, resultByCallId }) => {
   const states = calls.map((call) => {
     const result = resultByCallId.get(call.id);
     return result ? (result.isError ? 'error' : 'success') : executionById[call.id]?.status ?? 'running';
@@ -589,7 +574,6 @@ const PiReadOnlyToolGroup: React.FC<{
             key={call.id}
             call={call}
             cwd={cwd}
-            editor={editor}
             execution={executionById[call.id]}
             result={resultByCallId.get(call.id)}
           />
@@ -611,14 +595,13 @@ const MetaEntry: React.FC<{
 
 const AssistantMessage: React.FC<{
   cwd: string;
-  editor?: EditorAPI;
   entryId: string;
   executionById: Record<string, PiToolExecutionState>;
   hiddenThinkingLabel?: string;
   message: PiAssistantMessage;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
   streaming?: boolean;
-}> = ({ cwd, editor, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => {
+}> = ({ cwd, entryId, executionById, hiddenThinkingLabel, message, resultByCallId, streaming = false }) => {
   const rendered: React.ReactNode[] = [];
   for (let index = 0; index < message.content.length;) {
     const content = message.content[index]!;
@@ -645,7 +628,6 @@ const AssistantMessage: React.FC<{
               key={`${entryId}:tool:${call.id}`}
               call={call}
               cwd={cwd}
-              editor={editor}
               execution={executionById[call.id]}
               result={resultByCallId.get(call.id)}
             />,
@@ -657,7 +639,6 @@ const AssistantMessage: React.FC<{
               key={`${entryId}:tools:${calls[0]!.id}`}
               calls={calls}
               cwd={cwd}
-              editor={editor}
               executionById={executionById}
               resultByCallId={resultByCallId}
             />,
@@ -726,12 +707,11 @@ const AssistantMessage: React.FC<{
 
 const PiSortedActivityGroup: React.FC<{
   cwd: string;
-  editor?: EditorAPI;
   executionById: Record<string, PiToolExecutionState>;
   hiddenThinkingLabel: string;
   projection: PiSortedTurnProjection;
   resultByCallId: ReadonlyMap<string, PiToolResultMessage>;
-}> = ({ cwd, editor, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
+}> = ({ cwd, executionById, hiddenThinkingLabel, projection, resultByCallId }) => {
   const { t } = useI18n();
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
   const [expanded, setExpanded] = React.useState(activityRenderMode === 'summary');
@@ -784,7 +764,6 @@ const PiSortedActivityGroup: React.FC<{
                   <PiToolCard
                     call={item.call}
                     cwd={cwd}
-                    editor={editor}
                     execution={executionById[item.call.id]}
                     result={resultByCallId.get(item.call.id)}
                   />
@@ -990,7 +969,6 @@ export const PiTimelineEntryList: React.FC<Omit<
   const { t } = useI18n();
   const isMobile = useUIStore((state) => state.isMobile);
   const chatRenderMode = useUIStore((state) => state.chatRenderMode);
-  const { editor } = useRuntimeAPIs();
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
     entry: PiSessionEntry;
@@ -1062,7 +1040,6 @@ export const PiTimelineEntryList: React.FC<Omit<
                   {showsActivity && sortedProjection ? (
                     <PiSortedActivityGroup
                       cwd={cwd}
-                      editor={editor}
                       executionById={toolExecutions}
                       hiddenThinkingLabel={resolvedThinkingLabel}
                       projection={sortedProjection}
@@ -1072,7 +1049,6 @@ export const PiTimelineEntryList: React.FC<Omit<
                   {displayedMessage ? (
                     <AssistantMessage
                       cwd={cwd}
-                      editor={editor}
                       entryId={entry.id}
                       executionById={toolExecutions}
                       hiddenThinkingLabel={resolvedThinkingLabel}
@@ -1321,7 +1297,6 @@ export const PiTimelineEntryList: React.FC<Omit<
               {showsActivity && sortedProjection ? (
                 <PiSortedActivityGroup
                   cwd={cwd}
-                  editor={editor}
                   executionById={toolExecutions}
                   hiddenThinkingLabel={resolvedThinkingLabel}
                   projection={sortedProjection}
@@ -1331,7 +1306,6 @@ export const PiTimelineEntryList: React.FC<Omit<
               {displayedMessage ? (
                 <AssistantMessage
                   cwd={cwd}
-                  editor={editor}
                   entryId={`live:${sessionId}`}
                   executionById={toolExecutions}
                   hiddenThinkingLabel={resolvedThinkingLabel}

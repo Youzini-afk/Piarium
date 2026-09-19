@@ -30,7 +30,7 @@ import { toast } from '@/components/ui';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import type { SessionSummary } from '@piarium/protocol';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
-import { isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { getSettingsNavIcon, type SettingsRuntimeContext } from '@/lib/settings/metadata';
 import { useSettingsPageRegistrations } from '@/lib/settings/surface-registry';
 import { useWorkbenchCommandRegistrations } from '@/lib/commands/surface-command-registry';
@@ -228,7 +228,6 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
   const settingsRuntimeCtx = React.useMemo<SettingsRuntimeContext>(() => {
     const isDesktop = isDesktopShell();
     return {
-      isVSCode: isVSCodeRuntime(),
       isWeb: !isDesktop && isWebRuntime(),
       isDesktop,
       isMobile,

@@ -1,6 +1,6 @@
 # Shared UI architecture and conventions
 
-`@piarium/ui` is the React surface shared by Web, Electron, mobile, and the VS Code companion. It owns
+`@piarium/ui` is the React surface shared by Web, Electron, and mobile. It owns
 presentation and client-side kernels, not privileged filesystem, credential, shell, or process work.
 Surface-specific packages provide `RuntimeAPIs` and host bridges; shared components consume those
 contracts without hardcoding an origin, port, desktop IPC channel, or local path.

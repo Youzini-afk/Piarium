@@ -42,7 +42,8 @@ Global maintenance, clone/new-workspace fallback, Git inspection, full-manifest 
 multi-step conversation/files saga then placed exceptional recovery concerns on every normal message
 rollback. Durable operation records could also grow with the complete workspace.
 
-Mature editors use a narrower unit:
+Mature editors use a narrower unit. The following editor behaviors are historical external evidence,
+not current Piarium integrations:
 
 - VS Code captures a file baseline when that file is first edited in a request and records file
   operations afterward;
@@ -87,8 +88,8 @@ created.
 ## Capture protocol
 
 The Web Host advertises `HostHandshakeParams.capabilities.workspaceMutationJournal`. A Pi worker enables
-the bridge only when this value is explicitly true, so other Pi Hosts and the VS Code companion cannot
-be left waiting for an acknowledgement they do not implement.
+the bridge only when this value is explicitly true, so other Pi Hosts cannot be left waiting for an
+acknowledgement they do not implement.
 
 When enabled, Piarium supplies same-name custom definitions for Pi's built-in `write` and `edit` tools.
 They reuse Pi's original schemas, rendering, validation, and execution. Only the execution boundary is

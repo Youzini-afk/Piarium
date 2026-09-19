@@ -1,17 +1,16 @@
 ---
 title: 安装
-description: 从源码或 Docker 为桌面、Web 或 VS Code 安装 Piarium。
+description: 从源码或 Docker 为桌面或 Web 安装 Piarium。
 ---
 
 # 安装
 
 Piarium 目前是 pre-1.0。今天支持的运行方式只有**从源码**和**使用 Docker**。打包的 npm 和 GitHub Release 下载尚未发布。
 
-有三种产品界面：
+有两个主要产品界面：
 
 - 桌面应用（Electron）
 - 由本地服务器托管的 Web 应用，可以像手机应用一样安装（即 PWA）
-- VS Code 扩展
 
 ## 前提条件
 
@@ -67,10 +66,6 @@ Compose 默认拉取精简镜像 `ghcr.io/youzini-afk/piarium-slim:latest`（用
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
-
-## VS Code
-
-用 `bun run vscode:build` / `bun run vscode:package` 从此仓库构建扩展。它尚未发布到 Marketplace。
 
 ## CLI 一行安装（尚未发布）
 

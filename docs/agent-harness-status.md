@@ -30,12 +30,10 @@ UI 套件删除；docs 日期门禁移除；`test:node-smoke` 改为消费 produ
 layout 测试中断言；deploy rollback 现输出 daemon 日志尾部。`thread-wait-admission` 的挂钟断言改为可观察 held 状态 +
 结果断言。
 
-**D-294 VS Code 适配层不计入正式产品证据。** `packages/vscode` 是历史适配层，长期荒废，当前 deprecated / unsupported：
-其 `bun test` 全套件实测 57–58 pass、1–2 fail——`src/webviewHtml.test.ts` 单独运行通过，全套件内被跨文件
-`mock.module('vscode')` 污染而失败，worktree bootstrap fixture 另有抖动；均为测试装配问题而非产品故障。Q 阶段曾短暂把
-该套件接入 windows-runtime，现按 D-294 移除；D-295 进一步移除根聚合 `type-check`/`lint` 与 production-build 中的
-VS Code runtime 门禁，保留现有 build 入口直到后续清理阶段。它不算 Q 的 required CI 证据，不宣称已接入且全绿，本轮也不修测试、不删代码；需要时仍可手动运行其
-脚本。VS Code 完整删除、构建入口、专属文档与发布链清理列为后续独立阶段。
+**D-294/D-295 的历史边界已由 D-296 收束。** 旧 VS Code 适配层曾被移出正式产品证据与
+required CI，D-296 已删除其包、开发/构建/打包入口、共享表面契约、专属文档与发布链，不保留兼容
+副本。文档、根构建与 built-server knowledge smoke 已在本地完成验证；未把 packaged、跨平台或远端
+CI 结果外推为本地证据。AI4S 现可进入下一阶段。
 
 **D-290 编程语言支持开箱即用（2026-09-18）。** 在 TS/JS/JSON 之外，内置 Python、Go、Rust、Java、C/C++、C#、Kotlin、Ruby、PHP、Bash、CSS、HTML、YAML、TOML 的结构包和提取查询。发行构建校验 15 份新增 wasm 的大小/SHA-256 并实际编译查询，运行时仍由 Rust kernel 提取；查询缺失报告 unavailable。不可变语法摘要和 kernel recipe 按身份复用，避免每个源文件重复读取、散列和注册同一个 wasm。
 
@@ -100,7 +98,7 @@ Note（inform）定向消息控件与最近消息来源/held状态显示；公�
 路由经与Pi Host工具相同的`thread.send`服务投递，`sendError`把`HarnessServiceError`映射为400/403/404/503；role-required、
 单向send、永久执行manifest与per-parent准入等旧路径已移除，无重复兼容实现。
 
-**D-282 已完成 R0/R6，并据此完成阶段 R。** R0–R6 的生产责任均已按各自可执行契约接管：Rust kernel 统一拥有工作状态/恢复元数据、文件资源与物化、受管进程/PTY、固定视图文件与结构计算；TypeScript Application Host 保留产品策略、公开 API、Documents/Registry 协调、知识与模型编排，Pi worker 保留 Agent loop、provider、会话和扩展。R0 的 request-credit、取消/断线和发行身份，R6 的 Desktop/Web/云/VS Code 产物、旧原生依赖与测试实现清理、真实 surface 纵切及资源测量均已进入默认生产/发行路径。阶段 R 不再是当前实施主线。
+**D-282 已完成 R0/R6，并据此完成阶段 R。** R0–R6 的生产责任均已按各自可执行契约接管：Rust kernel 统一拥有工作状态/恢复元数据、文件资源与物化、受管进程/PTY、固定视图文件与结构计算；TypeScript Application Host 保留产品策略、公开 API、Documents/Registry 协调、知识与模型编排，Pi worker 保留 Agent loop、provider、会话和扩展。R0 的 request-credit、取消/断线和发行身份，以及当时 Desktop/Web/云/VS Code 发行布局的历史证据，均已在该阶段收口；VS Code companion 的当前支持面随后由 D-296 退役。阶段 R 不再是当前实施主线。
 
 完整边界见 [rust-kernel-design.md](rust-kernel-design.md)。本机真实证据为 Windows x64；Windows ARM64、Linux x64/ARM64、macOS x64/ARM64 的相同 native build/verify/package/smoke 已固化在 release workflow，当前提交尚未观察这些远端 runner 的实际结果，因此不把本机结果外推成其他平台实测。代码签名仍按产品合同可选，真实 ReFS/APFS extent sharing、物理断电和付费模型质量不是阶段 R 的实现完成条件。
 D-253 明确当前无用户兼容需求：取消默认旧内部库转换要求，直接替换内部格式并删除旧路径；正常新格式的数据完整性契约保留。
@@ -260,7 +258,7 @@ D-277 接入了 R3 filesystem capture、immutable-root materialization、目录�
 | R3 基线与物化 | **Complete**（fixed baseline / durable materialization handoff / managed lifecycle） | Rust scan/capture/materialize/measure/remove、Git execution metadata 与 writeback 已接入；D-278 的真实 owning/execution、managed-root admission、分页、未收集内容和 readonly 修复保持。D-279 将固定 source root/revision/writeRevision、kernel operationId、persistent handoff pin、Git executionBaseline receipt、Thread Registry 与 execution view 串成可重入 handoff；pin release 成功后才清 intent，失败保留 receipt 供重启重试。setup timeout/abort 只有收到 child `close` 才结束。Windows 只证明实际 copy；未测平台不虚报 CoW |
 | R4 进程与终端 | **Complete**（native process authority / production consumers / failure evidence，D-280） | format v10 增加同一 Storage 下的 process records；真实 PTY/pipe、原字节 cursor、stdin sequence/ack、process tree 与 writer 归 Rust。用户 terminal、Harness shell、Thread setup、LSP/DAP、任务、内置 Node 测试与测试 provider 均接同一后端；Host/kernel loss、kill refusal、权限撤销与未确认退出保留 handle/writer，不猜 code 0 或盲重放。Host 产品 startup owner 等异步 spawn/close，不是另一套 PID authority。现有 native CI 执行真实测试；本地只声明 Windows 验证，完整发行/旧分发依赖清理和性能对照仍归 R0/R6 |
 | R5 文件与结构计算 | **Complete**（native compute / production consumers / index inputs，D-281） | WorkingState 查询持有 immutable pin，read/search/list/structure/chunks 直接在该 root 上执行；live workspace search/inventory 使用 Host-admitted canonical root，并给每条正文/结构结果绑定 native revision，漂移只返回 partial/failed，不伪造 fixed snapshot。`search.content`、file find、Harness grep/explore、目录/语言目录、symbol graph 与 semantic disk scan 均复用唯一 native compute/file inventory；virtual Thread semantic 只列 pin 内文件并让 native `unitsFixed` 直接切块，不再把整分支正文搬进 TS。2 个 foreground worker + 独立 background lane、bounded record cursor/backpressure、实际 cancel→terminal→release 已验证。surface draft 仍由 Registry 捕获为固定 object overlay；TriviumDB/vector store/embedder/Pi/LSP 产品协议保持原权威。Host `web-tree-sitter` 只保留 grammar 安装 ABI admission，不解析 workspace source；旧 TS ripgrep/recursive scan、branch corpus/body mirror、Host AST/chunker discovery 已从生产链删除 |
-| R6 完整收口 | **Complete**（production cleanup / measured structure / release surfaces） | 真实 Web staged release、Windows unpacked Electron、云运行时与 VS Code companion 均携带并校验 kernel；生产包不再携带 `node-pty`、`bun-pty`、`better-sqlite3` authority 或 rebuild probe。emitted Host import graph 会删除不可达旧实现/测试产物并拒绝可达依赖。受控 TS baseline/Rust 测量记录语料、冷/热、事件循环、Host+kernel RSS、节点/写入和取消；没有虚构统一提速倍数。当前态设计、计划、状态、roadmap 与模块文档已统一 |
+| R6 完整收口 | **Complete**（production cleanup / measured structure / release surfaces） | 真实 Web staged release、Windows unpacked Electron、云运行时与其他当时发行布局均携带并校验 kernel；VS Code 条目属于 D-282 历史交付证据，当前 companion 由 D-296 退役。生产包不再携带 `node-pty`、`bun-pty`、`better-sqlite3` authority 或 rebuild probe。emitted Host import graph 会删除不可达旧实现/测试产物并拒绝可达依赖。受控 TS baseline/Rust 测量记录语料、冷/热、事件循环、Host+kernel RSS、节点/写入和取消；没有虚构统一提速倍数。当前态设计、计划、状态、roadmap 与模块文档已统一 |
 
 **D-281 R5 收口证据（2026-09-15，历史交付点）**：Windows release kernel 的 `kernel-compute.test.ts` **10/10** 通过，覆盖 immutable pin 对父 live 漂移、draft/tombstone、scope、UTF-16 column、reader+GC、前台/后台隔离与真实取消、Git ignore + force-tracked、native tree-sitter fixed text / live disk / fixed pin chunks，以及 root replacement 失败；R5 focused consumer 回归 **13 files / 118 tests** 全绿，覆盖 search/routes、Harness grep/explore、WorkingBranch、catalog、symbol graph、semantic disk/thread view。当时完整 `bun run test:kernel` 为 **90/90**，R0/R6 尚未收口；当前结论由 D-282 取代。
 

@@ -1,6 +1,6 @@
 # Piarium 测试与 CI 体系重整设计
 
-Status: accepted design (D-292); Stage Q implemented and accepted (D-293/D-295), locally verified; `packages/vscode` adapter deprecated and excluded from formal evidence
+Status: accepted design (D-292); Stage Q implemented and accepted (D-293/D-295), locally verified; the former VS Code companion was retired under D-296 and locally verified
 
 Last updated: 2026-09-19
 
@@ -42,7 +42,7 @@ Zone 0 测试的模拟回复不足以覆盖其完整 prompt/tool 继续流程，
 
 ## 2. 全仓范围与边界
 
-范围包括所有维护中的包：UI、Web/CLI/Application Host、Electron、Mobile、VS Code、Pi host、broker/client、
+范围包括所有维护中的包：UI、Web/CLI/Application Host、Electron、Mobile、Pi host、broker/client、
 protocol、settings、extension 系列，以及 Rust kernel、根脚本、测试辅助实现、构建和发行 workflows。
 同时检查 `node:test`、Vitest、Cargo、独立进程/打包 smoke 的执行归属。源码树之外的依赖、缓存和构建副本不计入自有测试清单。
 

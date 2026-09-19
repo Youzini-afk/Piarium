@@ -7,7 +7,6 @@ export type SettingsPageSlug = string;
 export type SettingsPageGroup = 'general' | 'projects' | 'harness' | 'pi' | 'content';
 
 export interface SettingsRuntimeContext {
-  isVSCode: boolean;
   isWeb: boolean;
   isDesktop: boolean;
   isMobile: boolean;

@@ -2,7 +2,7 @@
  * Shared concurrency gate for background network traffic.
  *
  * The browser allows only ~6 concurrent HTTP/1.1 connections per origin, and
- * every runtime (web, desktop loopback, VS Code, mobile host) funnels API
+ * every runtime (web, desktop loopback, mobile host) funnels API
  * traffic through one origin. During startup many subsystems fan out at once —
  * per-directory session/status polls, git checks per project and worktree,
  * command/skill discovery, global session pages — and several of those calls

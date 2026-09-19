@@ -15,7 +15,6 @@
       "entry": [
         "src/apps/renderMobileApp.tsx",
         "src/apps/renderElectronMiniChatApp.tsx",
-        "src/apps/renderVSCodeApp.tsx",
         "src/lib/monaco/fixture.ts",
         "src/**/*.{test,spec}.{js,cjs,mjs,jsx,ts,tsx}",
         "src/**/__tests__/**/*.{js,cjs,mjs,jsx,ts,tsx}"
@@ -52,17 +51,6 @@
       "project": [
         "*.{js,cjs,mjs}",
         "scripts/**/*.{js,cjs,mjs}"
-      ]
-    },
-    "packages/vscode": {
-      "entry": [
-        "webview/main.tsx",
-        "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
-        "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
-      ],
-      "project": [
-        "src/**/*.{ts,tsx}",
-        "webview/**/*.{ts,tsx}"
       ]
     },
     "packages/pi-host": {

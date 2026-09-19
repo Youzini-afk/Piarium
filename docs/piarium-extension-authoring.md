@@ -244,7 +244,7 @@ metadata; its version must match the manifest version.
         "id": "dev.example.memory-workbench.main",
         "file": "dist/surface.cjs",
         "mode": "managed",
-        "supports": ["desktop", "mobile", "vscode", "web"]
+        "supports": ["desktop", "mobile", "web"]
       }
     ]
   },
@@ -316,7 +316,7 @@ export default defineSurfaceExtension((context) => {
     data: {},
     id: "dev.example.my-extension.page",
     kind: "page",
-    supports: ["desktop", "mobile", "vscode", "web"],
+    supports: ["desktop", "mobile", "web"],
     title: "My Page",
   }, defineSurfaceMount((container, mount) => {
     container.textContent = String(mount.props.title ?? "My Page")
@@ -616,8 +616,8 @@ enable it with the ordinary lifecycle switch. A denial is still a completed deci
 may activate with only the capabilities actually granted and must handle their absence.
 
 The application host owns installation and execution. Switching the active Pi runtime does not move
-or reinstall Piarium extensions. Web/cloud and Electron-hosted Web use the server application host;
-VS Code uses its extension host and global storage. A Surface reports unsupported/waiting state when
+or reinstall Piarium extensions. Web/cloud and Electron-hosted Web use the server application host.
+A Surface reports unsupported/waiting state when
 an entrypoint or capability is unavailable there instead of disabling compatible Surfaces.
 
 An external source cannot stage a candidate over a distribution-owned built-in ID. Built-ins are

@@ -117,7 +117,7 @@ const catalogEntry = (options: {
   failed?: boolean;
   contributionId: string;
   extensionId: string;
-  supports?: Array<"desktop" | "mobile" | "vscode" | "web">;
+  supports?: Array<"desktop" | "mobile" | "web">;
 }) => ({
   actual: options.failed
     ? [{
@@ -248,8 +248,6 @@ test("default Agent profile seeds the official shell on web, desktop, and mobile
       PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
     );
   }
-  const vscode = resolvePiariumWorkbenchLayout(document, { surface: "vscode", userId: "default" });
-  assert.equal(vscode.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
   assert.equal(migratePiariumWorkbenchProfileDocument(document), false);
 });
 
@@ -352,7 +350,6 @@ test("resolves the official Agent Workspace shell without mutating enablement", 
   const ready = resolvePiariumWorkbenchProfile(document, extensions, context);
   assert.equal(ready.status, "ready");
   assert.equal(ready.shellContributionId, PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
-  assert.equal(resolvePiariumWorkbenchProfile(document, extensions, { surface: "vscode", userId: "default" }).status, "builtin");
 });
 
 test("resolves the official IDE Workbench on web and desktop without forcing mobile", () => {

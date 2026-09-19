@@ -6,7 +6,7 @@ export type JsonPrimitive = boolean | number | string | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = { [key: string]: JsonValue };
 
-export type PiariumApplicationSurface = "desktop" | "mobile" | "vscode" | "web";
+export type PiariumApplicationSurface = "desktop" | "mobile" | "web";
 export type PiariumExtensionHostMode = "brokered" | "native";
 
 export type PiariumContextValue = string | number | boolean;

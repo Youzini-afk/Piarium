@@ -8,7 +8,6 @@ import { Icon } from "@/components/icon/Icon";
 import { PROJECT_COLOR_MAP, PROJECT_ICON_MAP, ProjectIconImage } from '@/lib/projectMeta';
 import { cn } from '@/lib/utils';
 import { RiAddLine, RiFolderLine } from '@remixicon/react';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -20,8 +19,6 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
   const selectedId = useUIStore((state) => state.settingsProjectsSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
   const { currentTheme } = useThemeSystem();
-
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
 
   const handleAddProject = React.useCallback(() => {
     workspaceEvents.requestDirectoryDialog();
@@ -48,8 +45,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
           <h2 className={`${SETTINGS_PANEL_TITLE_CLASS} mb-3`}>{t('settings.page.projects.title')}</h2>
           <div className="flex items-center justify-between gap-2">
             <span className="typography-meta text-muted-foreground">{t('settings.projects.sidebar.total', { count: projects.length })}</span>
-            {!isVSCode && (
-              <Button
+            <Button
                 type="button"
                 variant="ghost"
                 size="icon"
@@ -58,8 +54,7 @@ export const ProjectsSidebar: React.FC<{ onItemSelect?: () => void }> = ({ onIte
                 aria-label={t('settings.projects.sidebar.actions.addProject')}
               >
                 <RiAddLine className="size-4" />
-              </Button>
-            )}
+            </Button>
           </div>
         </div>
       }

@@ -1,5 +1,5 @@
 import type { RuntimeAPIs } from '@piarium/application-client';
-import { isDesktopLocalOriginActive, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import {
   resolveRuntimeWorkspaceRoot,
   resolveWorkspaceAwareRestoredDirectory,
@@ -35,8 +35,6 @@ export const applyPersistedDirectoryPreferences = async (
   // synchronizeHomeDirectory would persist a possibly stale value back into
   // desktop settings, overriding the authoritative resolution
   // (initializeHomeDirectory → /api/fs/home) that runs on every startup.
-
-  if (isVSCodeRuntime()) return;
 
   let workspaceRoot: string | null = null;
   if (apis) {

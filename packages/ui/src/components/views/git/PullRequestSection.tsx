@@ -35,7 +35,6 @@ import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { formatDateTimeForPreference } from '@/lib/timeFormat';
 import { ensurePiSessionDraftTarget } from '@/lib/pi-runtime/sessionDrafts';
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from '@/stores/useInlineCommentDraftStore';
@@ -343,7 +342,7 @@ export const PullRequestSection: React.FC<{
   const { isMobile, hasTouchInput, screenWidth } = useDeviceInfo();
   const openContextSurface = useUIStore((state) => state.openContextSurface);
   const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
-  const showWalkthroughAction = !isMobile && screenWidth >= 768 && !isVSCodeRuntime();
+  const showWalkthroughAction = !isMobile && screenWidth >= 768;
 
   const openGitHubSettings = React.useCallback(() => {
     setSettingsPage('github');

@@ -20,7 +20,6 @@ const readSurface = (): PiariumApplicationSurface => {
   if (typeof window === 'undefined') return 'web';
   if (window.__PIARIUM_SURFACE__ === 'mobile') return 'mobile';
   const runtime = getRegisteredRuntimeAPIs()?.runtime;
-  if (runtime?.isVSCode) return 'vscode';
   if (runtime?.isDesktop) return 'desktop';
   return 'web';
 };

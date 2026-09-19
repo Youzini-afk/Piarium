@@ -562,7 +562,7 @@ export const SidebarFilesTree: React.FC<{
   const canRename = Boolean(files.rename);
   const canDelete = Boolean(files.delete);
   const canReveal = Boolean(files.revealPath)
-    && (runtime.platform === 'vscode' || isDesktopLocalOriginActive());
+    && isDesktopLocalOriginActive();
 
   const fileRowPermissions = React.useMemo(
     () => ({ canRename, canCreateFile, canCreateFolder, canDelete, canReveal }),

@@ -13,7 +13,6 @@ mock.module('@/lib/runtime-api/registry', () => ({
     },
     runtime: {
       isDesktop: true,
-      isVSCode: false,
       label: 'Desktop',
       platform: 'desktop',
     },

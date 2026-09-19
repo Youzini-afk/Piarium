@@ -15,7 +15,7 @@ Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains
 - `surface-snapshot-store.js` — content-hash-deduplicated in-memory copies of one input surface's dirty buffers, including encoding/BOM metadata, editor `bufferHash`, `lineEnding`, and content serialized with its original line endings so consumers can reproduce save bytes. Pending snapshots become active only after Pi accepts the input; replacement, rollback, session drop, and Host disposal release content references. The internal clone operation lets Thread dispatch copy a validated snapshot into persistent WorkingState; it is not a renderer route.
 - `routes.js`: `registerDocumentRoutes(app, { documents, uiAuthController })` — authenticated `/api/documents/*` routes.
 - `capability.js`: `createDocumentsCapabilityHandler(authority)` — resource-scoped `workspace.documents` Host capability.
-- `contract-fixtures.js`: shared Web/VS Code contract tests.
+- `contract-fixtures.js`: shared Web contract fixtures.
 
 ## Routes
 

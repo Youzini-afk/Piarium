@@ -1,5 +1,4 @@
-import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { isVSCodeRuntime, saveDesktopMarkdownFile } from '@/lib/desktop';
+import { saveDesktopMarkdownFile } from '@/lib/desktop';
 
 export const downloadAsMarkdown = (content: string, filename: string): void => {
   const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -18,20 +17,7 @@ export const saveAsMarkdownDesktop = async (
   filename: string,
 ): Promise<string | null> => {
   const desktopPath = await saveDesktopMarkdownFile(filename, content);
-  if (desktopPath) return desktopPath;
-  if (!isVSCodeRuntime()) return null;
-
-  try {
-    const payload = await getRegisteredRuntimeAPIs()?.vscode?.saveMarkdown?.({
-      content,
-      fileName: filename,
-    }) as { path?: string; saved?: boolean } | undefined;
-    if (payload?.saved !== true) return null;
-    const savedPath = typeof payload.path === 'string' ? payload.path.trim() : '';
-    return savedPath || null;
-  } catch {
-    return null;
-  }
+  return desktopPath || null;
 };
 
 export const buildExportFilename = (sessionTitle?: string | null): string => {

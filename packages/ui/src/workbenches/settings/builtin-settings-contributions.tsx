@@ -71,7 +71,7 @@ export const registerBuiltinSettingsContributions = (context: SurfaceActivationC
       id: `${BUILTIN_SETTINGS_EXTENSION_ID}.page.${spec.meta.slug}`,
       kind: 'settings-page',
       contractVersion: 1,
-      supports: ['web', 'desktop', 'mobile', 'vscode'],
+      supports: ['web', 'desktop', 'mobile'],
       placement: { slot: `settings.nav.${spec.meta.group}`, order: spec.meta.order },
       data: {
         slug: spec.meta.slug,

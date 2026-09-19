@@ -97,14 +97,12 @@ Exécutez les commandes depuis la racine du dépôt, sauf indication contraire.
 | Empaqueter le bureau pour le système d'exploitation courant | `bun run electron:build` |
 | Empaqueter l'installateur NSIS Windows x64 | `bun run electron:build:win` |
 | Tester rapidement une build Windows décompressée | `bun run electron:smoke:win` |
-| Hôte de développement d'extensions VS Code | `bun run vscode:dev` |
-| Compiler ou empaqueter VS Code | `bun run vscode:build` / `bun run vscode:package` |
 | Compiler les ressources mobiles | `bun run mobile:build` |
 | Compiler le runtime cloud canonique | `bun run build:cloud-runtime` |
 | Valider le site de documentation | `bun run docs:validate` |
 
 L'interface utilisateur partagée est une bibliothèque source plutôt qu'une application autonome. Exercez le
-comportement de l'interface via Web, Desktop ou VS Code afin que le contexte d'exécution soit réel.
+comportement de l'interface via Web ou Desktop afin que le contexte d'exécution soit réel.
 
 ## Choisir le package propriétaire
 
@@ -113,7 +111,6 @@ comportement de l'interface via Web, Desktop ou VS Code afin que le contexte d'e
 | Composants partagés, stores, paramètres, chat et interface graphique des plugins | `packages/ui` |
 | Serveur navigateur/distant, API HTTP, transport WebSocket, CLI cloud | `packages/web` |
 | Shell Windows/macOS/Linux, preload/IPC, SSH, mise à jour, empaquetage | `packages/electron` |
-| Hôte VS Code, contexte de l'éditeur, transport de la webview | `packages/vscode` |
 | Shell natif Capacitor | `packages/mobile` |
 | Contrat filaire compatible JSON et validation | `packages/protocol` |
 | Client runtime du navigateur/de l'éditeur | `packages/runtime-client` |
@@ -135,7 +132,7 @@ réalisée uniquement dans le renderer.
 4. Ajoutez ou mettez à jour le test de régression le plus ciblé qui démontre le comportement à la frontière qui en
    est propriétaire.
 5. Exercez chaque surface d'exécution dont le contrat a changé. La vérification des types d'un type partagé ne prouve
-   pas que le comportement fonctionne dans Desktop, Web, le relais, VS Code ou le mobile.
+   pas que le comportement fonctionne dans Desktop, Web, le relais ou le mobile.
 6. Mettez à jour la documentation utilisateur, contributeur, d'architecture, de sécurité ou d'exploitation dans la
    même modification lorsque son contrat a changé.
 
@@ -165,7 +162,6 @@ Exécutez les vérifications suivantes lorsque la frontière concernée s'appliq
 | Runtime cloud, Docker ou déploiement SSH | `bun run test:cloud` et une build de runtime canonique |
 | Cycle de vie, architecture ou mise à jour Electron | `bun run --cwd packages/electron test:architecture` et/ou `test:updater` |
 | Empaquetage Windows ou modules natifs | `bun run electron:build:win` puis `bun run electron:smoke:win` |
-| Runtime VS Code (déprécié, manuel uniquement) | Hors CI obligatoire ; uniquement si l’adaptateur historique est explicitement maintenu, exécuter `bun run --cwd packages/vscode verify:pi-runtime` et la commande de build/package concernée |
 | Imports, exports ou suppression | `bun run dead-code` et une build de production de chaque surface concernée |
 | Site de documentation | `bun run docs:validate` et vérification manuelle des liens locaux modifiés |
 | `package.json` de l'espace de travail ou lockfile racine | `bun run update:cloud-runtime-lock` afin que `scripts/cloud-runtime.bun.lock` reste gelé |

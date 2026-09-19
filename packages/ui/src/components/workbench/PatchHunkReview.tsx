@@ -8,13 +8,11 @@ import { applyPatchDecisionsToDocument } from '@/lib/agent-editor/document-write
 import { parseUnifiedHunks } from '@/lib/agent-editor/patch';
 import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import type { HunkDecision } from '@/lib/agent-editor/types';
-import type { EditorAPI } from '@piarium/application-client';
 
 type PatchHunkReviewProps = {
   cwd: string;
   filePath: string;
   patch: string;
-  editor?: EditorAPI;
   sessionId?: string;
   entryId?: string;
   toolCallId?: string;
@@ -24,7 +22,6 @@ export const PatchHunkReview: React.FC<PatchHunkReviewProps> = ({
   cwd,
   filePath,
   patch,
-  editor,
   sessionId,
   entryId,
   toolCallId,
@@ -66,7 +63,6 @@ export const PatchHunkReview: React.FC<PatchHunkReviewProps> = ({
         ...(sessionId ? { sessionId } : {}),
         ...(entryId ? { entryId } : {}),
         ...(toolCallId ? { toolCallId } : {}),
-        ...(editor ? { editor } : {}),
       });
       return;
     }

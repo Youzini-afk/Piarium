@@ -34,8 +34,7 @@ the exact temporary owner returned to the uploading grant. `KernelClient.scoped(
 domain method; it is not a mutable global identity.
 
 The R0 production assembly starts from `application-host/index.ts` for Web/serve and Electron's embedded Host.
-Electron stages the executable outside `app.asar`; Web/cloud stage it in package `kernel/`, and VS Code uses
-its own `dist/kernel` release resource.
+Electron stages the executable outside `app.asar`; Web/cloud stage it in package `kernel/`.
 The private storage root is `<PIARIUM_DATA_DIR>/kernel/<hostId>`, with an OS-held owner lock (the
 diagnostic record is not the lock) preventing two Hosts from writing it at once. Built-in Recovery shares
 this root and reports `application-data` with `storageManagement: false`; it is not independently relocatable.
@@ -75,8 +74,7 @@ side effects or public completion. The old local SQLite recovery engine is a tes
 There is no transient close-time flush, WorkingState fallback, or optional durable dual-write path.
 
 R0/R6 release closure uses the same boundary in every shipped Host. Web/cloud stage `kernel/{manifest,binary}`;
-Electron places it at `resources/kernel`; the VS Code companion places it at `dist/kernel` and routes workspace
-content search through it. Release smoke starts emitted Host JavaScript and the executable from an unrelated cwd,
+Electron places it at `resources/kernel`. Release smoke starts emitted Host JavaScript and the executable from an unrelated cwd,
 copies the installation and reopens the same catalog under a new epoch, and rejects a bad manifest. Electron no
 longer ships or rebuilds `better-sqlite3`, `node-pty`, or `bun-pty`; target TriviumDB and sherpa binaries retain
 their own package checks. The emitted Application Host import graph rejects a reachable legacy/test implementation

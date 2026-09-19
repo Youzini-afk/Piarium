@@ -18,7 +18,7 @@ Piarium 是拥有工作台和 Agent Harness 的独立产品，默认内置钉住
 
 目标架构由三部分组成：Rust 系统内核、TypeScript Application Host/产品层、TypeScript/Node Pi worker。
 Rust 负责文件与资源的实际操作、工作状态和恢复事务、进程/PTY 底层、文件与结构计算；TS 负责模型和任务策略、
-公开 API、编辑器协调、知识领域操作与呈现。Electron、Web/远程、移动端和 VS Code 沿同一服务契约使用内核。
+公开 API、编辑器协调、知识领域操作与呈现。Electron、Web/远程与移动端沿同一服务契约使用内核。
 
 本阶段必须形成这些结果：
 
@@ -34,7 +34,7 @@ Rust 负责文件与资源的实际操作、工作状态和恢复事务、进程
 ## 2. 最终进程边界与职责
 
 ```text
-Electron / Web / Mobile / VS Code surface
+Electron / Web / Mobile surface
     | 既有 authenticated application / runtime API
     v
 TypeScript Application Host
@@ -314,15 +314,14 @@ cancel 是独立控制帧，因此 serial Storage 忙或输出背压时仍能到
 畸形 request 和超窗发送；截断/损坏输入终结该 epoch，取消剩余工作并完成 worker/writer 排空。关闭不凭固定等待推断成功。
 
 发行树是生产事实。Web/云包包含 `packages/web/kernel/{manifest,binary}` 与独立 verify 脚本；Electron 把 kernel 放在
-`resources/kernel`，在打包前和 after-pack/unpacked smoke 中核对 target、架构、build identity 与 SHA-256；VS Code companion
-把相同资源放入 `dist/kernel`，workspace search 直接启动它，缺资源时明确失败。支持矩阵由 Windows x64/ARM64、Linux x64/ARM64、
+`resources/kernel`，在打包前和 after-pack/unpacked smoke 中核对 target、架构、build identity 与 SHA-256。支持矩阵由 Windows x64/ARM64、Linux x64/ARM64、
 macOS x64/ARM64 的 native runner 构建与 smoke，当前本机只声明 Windows x64 实测。复制 release 目录后的新安装可用新 epoch 重开
 同一 current-format catalog；坏 manifest 不能启动。客户端不安装 Cargo/Rust，也没有 source/Cargo/ripgrep production fallback。
 
 R6 清理同时删除 Web/Electron 生产 `node-pty`、`bun-pty`、`better-sqlite3` 依赖和 rebuild 脚本；TriviumDB、sherpa 与 Pi
 仍按各自领域验证。Application Host 构建从实际 emitted `index.js`/`public-contract.js` 追踪 import/worker URL，任何可达旧 store 或
 test helper 都失败；不可达测试/旧实现不进入 release，并生成 production-boundary manifest。旧 TS file writer 只在显式 test-helper
-文件中存在，生产 `journal-files` 只保留 path/hash reader。Web/VS Code watch 传递 surface-operation，Document Registry dispose
+文件中存在，生产 `journal-files` 只保留 path/hash reader。Web watch 传递 surface-operation，Document Registry dispose
 等待最后 journal 与 dirty-owner release，真实 Rust+Registry surface/disk Integration 覆盖 apply/undo。
 
 `scripts/measure-kernel.mjs` 使用固定 corpus hash、同机交替顺序、独立进程、首调/预热/8 次热样本比较已验收的 TS baseline 与

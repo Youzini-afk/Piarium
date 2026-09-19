@@ -32,7 +32,6 @@ import {
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
 import { useI18n, type I18nKey } from "@/lib/i18n";
-import { isVSCodeRuntime } from "@/lib/desktop";
 
 type ShortcutIcon = React.ComponentType<{ className?: string }>;
 
@@ -59,7 +58,6 @@ export const HelpDialog: React.FC = () => {
   const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const mod = getModifierLabel();
-  const isVSCode = isVSCodeRuntime();
 
   const shortcuts: ShortcutSection[] = [
     {
@@ -241,9 +239,7 @@ export const HelpDialog: React.FC = () => {
                   {t(section.categoryKey)}
                 </h3>
                 <div className="space-y-1">
-                  {section.items
-                    .filter((shortcut) => !(isVSCode && shortcut.id === 'toggle_prompt_navigator'))
-                    .map((shortcut) => {
+                  {section.items.map((shortcut) => {
                     const displayKeys = shortcut.id
                       ? renderShortcut(shortcut.id, Array.isArray(shortcut.keys) ? shortcut.keys[0] : shortcut.keys, shortcutOverrides)
                       : (Array.isArray(shortcut.keys) ? shortcut.keys : shortcut.keys.split(" / "));

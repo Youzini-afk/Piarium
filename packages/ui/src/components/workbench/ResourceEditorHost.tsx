@@ -595,7 +595,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         <DocumentConflictBanner identity={identity} />
         <div className="min-h-0 flex-1 overflow-hidden">
           {/* Mobile owns the document-bound CodeMirror adapter. Desktop/Web use the
-              shared Monaco model; the VS Code companion never mounts this host. */}
+              shared Monaco model. */}
           {isMobile ? (
             <DocumentCodeMirror
               identity={identity}

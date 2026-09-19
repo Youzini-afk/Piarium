@@ -4,7 +4,7 @@
  *
  * This script owns the interactive `bun run piarium-dev` menu and the equivalent
  * non-interactive commands for common local workflows: web deploys, mobile
- * builds/device deploys, Electron, VS Code, and maintainer release tasks.
+ * builds/device deploys, Electron, and maintainer release tasks.
  *
  * Personal or machine-specific options are intentionally kept out of git.
  * The only supported user config is:
@@ -22,7 +22,7 @@
  * prompts for safety.
  */
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,8 +58,6 @@ Actions:
   mobile-tools                     Mobile build/sync/deploy helper menu
   start-electron-app               Start Electron app in dev mode
   build-electron-app               Build Electron app artifacts
-  start-vscode-extension           Build + launch VS Code extension host
-  install-vscode-extension-local   Build, package, and install local VSIX
   create-release                   Validate and bump release version
 
 Options:
@@ -71,7 +69,6 @@ Options:
   --mobile-mode <ios-sim-local|ios-sim-lan|android-local|android-lan>
   --mobile-task <task>
   --adb-address <host:port>        Wireless ADB address for android-connect
-  --vsix-cleanup <delete|keep>
   --version <semver>
   -h, --help
 
@@ -121,9 +118,6 @@ function parseArgs(argv) {
         break;
       case '--adb-address':
         options.adbAddress = readValue();
-        break;
-      case '--vsix-cleanup':
-        options.vsixCleanup = readValue();
         break;
       case '--version':
         options.version = readValue();
@@ -205,8 +199,6 @@ function normalizeAction(action = '') {
     'remote-deploy-web': 'remote-deploy-web',
     'electron-dev': 'start-electron-app',
     'electron-build': 'build-electron-app',
-    'vscode-dev': 'start-vscode-extension',
-    'vscode-install-local': 'install-vscode-extension-local',
     release: 'create-release',
   };
   return aliases[normalized] || normalized;
@@ -257,14 +249,6 @@ function detectLanIp() {
     }
   }
   return '';
-}
-
-function removeFilesByPrefixSuffix(directory, prefix, suffix) {
-  if (!existsSync(directory)) return;
-  for (const entry of readdirSync(directory)) {
-    if (!entry.startsWith(prefix) || !entry.endsWith(suffix)) continue;
-    unlinkSync(path.join(directory, entry));
-  }
 }
 
 function latestFileByExtensions(directory, extensions) {
@@ -685,37 +669,6 @@ function buildElectronApp() {
   if (artifact) run('open', [artifact]);
 }
 
-function startVsCodeExtension() {
-  const vscodeDir = path.join(repoRoot, 'packages/vscode');
-  removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix');
-  step('Building VS Code extension', () => run('bun', ['run', 'vscode:build']));
-  run('code', ['--extensionDevelopmentPath', vscodeDir]);
-}
-
-async function installVsCodeExtensionLocal(options) {
-  let cleanup = options.vsixCleanup;
-  if (!cleanup && isTty) {
-    cleanup = await chooseValue('', [
-      { value: 'delete', label: 'Delete VSIX after install' },
-      { value: 'keep', label: 'Keep VSIX after install' },
-    ], 'Select VSIX cleanup mode');
-  }
-  cleanup ||= 'delete';
-  if (!['delete', 'keep'].includes(cleanup)) throw new Error('Invalid --vsix-cleanup. Use delete or keep.');
-
-  const vscodeDir = path.join(repoRoot, 'packages/vscode');
-  step('Building VS Code extension', () => run('bun', ['run', '--cwd', 'packages/vscode', 'build']));
-  step('Removing found VSIX package(s) before install flow', () => removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix'));
-  step('Packaging VSIX', () => run('bunx', ['vsce', 'package', '--no-dependencies'], { cwd: vscodeDir }));
-  step('Installing VSIX locally', () => {
-    run('code', ['--uninstall-extension', 'youzini-afk.piarium'], { label: 'uninstall current extension', allowFail: true });
-    run('code --install-extension packages/vscode/piarium-*.vsix', [], { shell: true, label: 'install VSIX' });
-  });
-  if (cleanup === 'delete') {
-    step('Removing local VSIX package(s) after install', () => removeFilesByPrefixSuffix(vscodeDir, 'piarium-', '.vsix'));
-  }
-}
-
 async function createRelease(options) {
   if (!options.config?.features?.releaseTools) {
     throw new Error(`Release tools are disabled. Set features.releaseTools=true in ${configPath} to enable this maintainer task.`);
@@ -744,8 +697,6 @@ async function chooseAction(config) {
     { value: 'mobile-tools', label: 'Mobile tools' },
     { value: 'start-electron-app', label: 'Start Electron app' },
     { value: 'build-electron-app', label: 'Build Electron app' },
-    { value: 'start-vscode-extension', label: 'Start VS Code extension' },
-    { value: 'install-vscode-extension-local', label: 'Install VS Code extension locally' },
   ];
 
   if (config.features?.releaseTools) {
@@ -791,12 +742,6 @@ async function main() {
       break;
     case 'build-electron-app':
       buildElectronApp();
-      break;
-    case 'start-vscode-extension':
-      startVsCodeExtension();
-      break;
-    case 'install-vscode-extension-local':
-      await installVsCodeExtensionLocal(options);
       break;
     case 'create-release':
       options.config = config;

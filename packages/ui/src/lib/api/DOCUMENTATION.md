@@ -1,11 +1,11 @@
 # Shared runtime API boundary
 
-Shared UI code can run in Web, Electron-through-Web, the VS Code companion, hosted mobile, or a
-Capacitor client. `@piarium/application-client` owns the framework-neutral `RuntimeAPIs` contract
+Shared UI code can run in Web, Electron-through-Web, hosted mobile, or a Capacitor client.
+`@piarium/application-client` owns the framework-neutral `RuntimeAPIs` contract
 and typed failure shapes; each surface supplies the implementations that actually apply to it.
 
-The former `src/lib/api/*` and `src/lib/runtime-*` forwarding modules have been removed. UI, Web, and
-VS Code code import from `@piarium/application-client` directly.
+The former `src/lib/api/*` and `src/lib/runtime-*` forwarding modules have been removed. UI and Web
+code import from `@piarium/application-client` directly.
 
 ## Choosing an owner
 
@@ -17,9 +17,8 @@ VS Code code import from `@piarium/application-client` directly.
 | Browser-owned asset, iframe, download, SSE, or WebSocket | The runtime URL/auth resolver and its owning transport |
 | Intentional third-party service | Direct `fetch` with an explicit external-origin and credential contract |
 
-`@piarium/application-client` is the shared interface. Web composition lives under `packages/web/src/api`,
-the VS Code webview composition under `packages/vscode/webview/api`, and native VS Code handlers under
-`packages/vscode/src`. Electron normally reuses the Web host; inherently native behavior stays behind
+`@piarium/application-client` is the shared interface. Web composition lives under `packages/web/src/api`.
+Electron normally reuses the Web host; inherently native behavior stays behind
 its preload/main boundary.
 
 React code consumes the provider hooks. Non-React owners use the registered API accessor only when a

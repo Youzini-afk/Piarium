@@ -21,7 +21,6 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import {
   sortContextSurfaces,
   type ContextSurfaceDescriptor,
@@ -148,9 +147,6 @@ export const ContextPanelRail: React.FC = () => {
   const surfaces = React.useMemo(() => {
     return sortContextSurfaces(contextRailOrder).filter((surface) => {
       if (surface.id === 'plan' && !planModeEnabled) {
-        return false;
-      }
-      if (surface.id === 'walkthrough' && isVSCodeRuntime()) {
         return false;
       }
       if (surface.availability === 'has-content') {

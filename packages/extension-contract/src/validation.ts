@@ -81,7 +81,7 @@ const INTEGRITY_PATTERN = /^sha256-[0-9a-f]{64}$/;
 
 const HOST_MODES = new Set(["brokered", "native"]);
 const SURFACE_MODES = new Set(["declarative", "isolated", "managed", "native"]);
-const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "vscode", "web"]);
+const SURFACES = new Set<PiariumApplicationSurface>(["desktop", "mobile", "web"]);
 const ACTIVATION_EVENTS = new Set<PiariumExtensionActivationEvent>([
   "application-startup",
   "background",

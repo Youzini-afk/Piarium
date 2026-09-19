@@ -2,7 +2,7 @@
 
 The shared Pi prompt composer is orchestrated by
 `components/pi-session/PiComposer.tsx`. Agent Profile, IDE Profile, desktop,
-Web, mobile, mini chat, and the VS Code companion all reach the same component
+Web, mobile, and mini chat all reach the same component
 through `PiChatView`; they do not own separate send semantics.
 
 ## Ownership

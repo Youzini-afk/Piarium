@@ -134,8 +134,7 @@ le compositeur sur un écran de téléphone.
   changement est immédiat, sans rechargement des documents, sans redémarrage de l'exécution Pi et
   sans perte de l'état partagé de l'espace de travail.
 - **Plusieurs surfaces produit :** une interface React partagée alimente Electron, le web et la
-  coque mobile Capacitor à travers des capacités d'exécution explicites, avec VS Code comme
-  compagnon qui apporte le contexte de l'éditeur à Piarium plutôt qu'un second workbench.
+  coque mobile Capacitor à travers des capacités d'exécution explicites.
 - **Fonctionnement cloud et distant :** accès WebSocket authentifié, prise en charge des
   relais/tunnels, conteneurs multi-architectures et déploiement SSH atomique avec validation de
   santé et rollback.
@@ -210,8 +209,8 @@ redémarrer après activation. Electron contient l'exécution Node nécessaire �
 que Pi reste un outil géré indépendamment. Les paquets de bureau natifs x64/ARM64 pour Windows, Linux
 et macOS sont validés sur des runners correspondants pour le démarrage de l'application, le Runtime
 Manager, la santé et le cycle de vie du terminal ; les installeurs hors ligne facultatifs restent à
-faire. Les conteneurs et l'extension VS Code conservent une exécution Pi épinglée et autonome, pour
-une exécution reproductible sans surveillance et dans l'hôte éditeur.
+faire. Les conteneurs conservent une exécution Pi épinglée et autonome, pour une exécution reproductible
+sans surveillance.
 
 ### Lancer la surface de développement web
 
@@ -332,7 +331,6 @@ d'exposer une instance distante ou d'installer du code inconnu.
 | `packages/ui` | Interface React Pi-native partagée, stores, réglages et surfaces d'extension |
 | `packages/web` | Frontend navigateur/distant, hôte applicatif de confiance et CLI cloud |
 | `packages/electron` | Coque bureau native, frontière privilégiée, packaging, SSH et mises à jour |
-| `packages/vscode` | Hôte d'extension VS Code, webview et pont d'exécution |
 | `packages/mobile` | Coque Capacitor iOS/Android connectée à un serveur Piarium |
 | `packages/protocol` | Protocole worker et surface versionné, sûr en JSON |
 | `packages/runtime-client` | Client de requêtes/événements d'exécution utilisable en navigateur |
@@ -392,7 +390,6 @@ Avant de contribuer, lisez [le guide d'ingénierie](../../docs/development.md),
 - [Contrat du workbench composable et de l'IDE](../../docs/composable-workbench.md) (en chinois simplifié)
 - [Plateforme d'éditeur de fichiers unifié](../../docs/unified-file-editor-platform.md)
 - [Plateforme d'extensions Piarium](../../docs/piarium-extension-platform.md)
-- [Migration vers le compagnon VS Code](../../docs/vscode-companion.md)
 - [Contrat de migration d'OpenChamber vers Pi](../../docs/openchamber-pi-migration.md)
 - [Conception de l'interface et de la possession des plugins](../../docs/plugin-gui-design.md)
 - [Modèle de restauration](../../docs/recovery.md)

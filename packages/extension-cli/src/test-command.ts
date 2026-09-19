@@ -35,7 +35,7 @@ const runSurfaceConformance = async (
   projectId: string,
   version: string,
   entrypointId: string,
-  supports: readonly ("desktop" | "mobile" | "vscode" | "web")[],
+  supports: readonly ("desktop" | "mobile" | "web")[],
   mode: "managed" | "isolated" | "native",
   module: PiariumManagedSurfaceModule,
 ): Promise<void> => {
@@ -69,7 +69,7 @@ const runSurfaceConformance = async (
 const runDeclarativeConformance = async (
   manifest: PiariumExtensionManifest,
   entrypointId: string,
-  supports: readonly ("desktop" | "mobile" | "vscode" | "web")[],
+  supports: readonly ("desktop" | "mobile" | "web")[],
 ): Promise<void> => {
   const surface = supports[0] ?? "web";
   const runtime = new SurfaceExtensionRuntime({ surface });
@@ -107,7 +107,7 @@ export const runShellCompositionSmoke = async (
   const shellContribution = (manifest.contributions ?? []).find((c) => c.kind === "shell");
   if (!shellContribution) return; // Not a shell extension — skip
   const extension = resolveSurfaceExtensionModule(module);
-  const surface = (shellContribution.supports[0] ?? "web") as "desktop" | "mobile" | "vscode" | "web";
+  const surface = (shellContribution.supports[0] ?? "web") as "desktop" | "mobile" | "web";
   const runtime = new SurfaceExtensionRuntime({ surface });
   const hostId = "00000000-0000-4000-8000-000000000002";
   const owner = {

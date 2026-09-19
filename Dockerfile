@@ -65,8 +65,6 @@ COPY packages/runtime-broker/package.json ./packages/runtime-broker/package.json
 COPY packages/runtime-client/package.json ./packages/runtime-client/package.json
 COPY packages/settings-store/package.json ./packages/settings-store/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
-COPY packages/vscode/package.json ./packages/vscode/package.json
-COPY packages/vscode/runtime/package.json ./packages/vscode/runtime/package.json
 COPY packages/web/package.json ./packages/web/package.json
 RUN bun install --frozen-lockfile --ignore-scripts \
   && node ./scripts/fix-deprecation.js

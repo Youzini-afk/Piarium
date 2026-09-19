@@ -280,3 +280,26 @@ agent-harness 及 research-cluster-design 的入口/实施前置。D-291 的科�
 既有修复和授权发行继续依据各自产物证据推进，不以 Q 尚未完成作为通用阻断。
 
 状态：设计与计划已接受；Q0–Q3 待实施。本条不宣称测试清理、CI 修复或全仓验收完成。
+
+### D-296 · 2026-09-19 · 退役 VS Code companion，进入 AI4S 前的收口阶段
+
+类型：accepted implementation plan / implemented and locally verified
+
+背景：D-294/D-295 已把长期荒废的 VS Code 适配层移出正式产品证据，但仍留下包、开发/构建/打包
+入口、共享表面契约、安装与专属文档入口。继续把它作为手动可用的当前产品面会让产品边界与发行
+事实分裂。历史 changelog 与既有决策正文继续作为交付证据保留。
+
+决定：在 AI4S 实施前完成一次性完整退役：删除 `packages/vscode` 及其当前入口和发布接线，删除
+companion-only shared contracts 与当前安装/Marketplace/配置/开发说明，不保留归档兼容副本。仍有
+LSP 包、TextMate 格式、外部编辑器启动或 provenance 含义的 VS Code 文字按原语义保留，并在历史
+设计处标明其范围。
+
+计划与状态：文档、根 README/AGENTS、贡献指南、公开 docs-site 与包级文档已同步；代码、配置、脚本、
+构建和发布清理由实现 owner 完成。根构建（含 Web Host+Vite、Electron bundle、Mobile assets）与
+built-server knowledge smoke 2/2 已本地通过。未把 packaged、跨平台或远端 CI 结果外推为本地证据；AI4S
+进入下一阶段。
+
+影响：当前架构/开发/路线图/状态说明、公开 docs-site 和包文档；D-293–D-295 的既有索引状态不扩写，
+本条只记录新的退休阶段。
+
+状态：已实施；本地验证通过，未宣称 packaged、跨平台或远端 CI 已完成。

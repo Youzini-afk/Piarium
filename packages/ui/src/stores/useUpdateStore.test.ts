@@ -8,7 +8,6 @@ mock.module('@/lib/desktop', () => ({
   downloadDesktopUpdate: async () => false,
   isDesktopShell: () => true,
   isElectronShell: () => true,
-  isVSCodeRuntime: () => false,
   isWebRuntime: () => false,
   restartToApplyUpdate: () => {
     restartCalls += 1;

@@ -205,7 +205,7 @@ Document Registry 继续拥有未保存缓冲。混合操作在内核记录同�
 调用真实 Registry 的修订检查与 grouped undo，不隐式保存、不建第二缓冲权威。Thread/Pi/知识的跨域清理按持久操作与幂等回执协调。
 
 真实链路是 `Application Host → 私有 KernelClient → piarium-kernel 子进程 → framed protocol → kernel SQLite/object store`；
-Electron/Web/serve/云与 VS Code companion 都从自己的发行目录使用 manifest-verified executable，kernel 不监听公共端口。
+Electron/Web/serve/云从自己的发行目录使用 manifest-verified executable，kernel 不监听公共端口。
 R1–R5 已分别接管 immutable root/trie、blob/branch/revision/CAS/pin/Recovery/GC、文件资源与物化、PTY/pipe、固定视图搜索和
 tree-sitter 结构计算。所有生产消费者走 root/path/domain/file/process/compute API；旧 TS writer 只保留为明确测试 helper，发行树会
 审计并删掉不可达测试/旧实现。

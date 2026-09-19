@@ -49,8 +49,7 @@ of legacy open paths into Editor Workbench.
 
 Desktop/Web official text tabs project the Document Registry into a shared Monaco model. Tab owners
 survive Shell/Profile remounts; visible views own only Monaco editor DOM, layout, language subscriptions,
-and decorations. Mobile keeps the document-bound CodeMirror adapter, and VS Code companion keeps the
-host editor rather than loading another Monaco instance.
+and decorations. Mobile keeps the document-bound CodeMirror adapter.
 
 Workbench Profile context supplies presentation defaults only. Agent uses a compact editor surface and
 IDE enables the full minimap/sticky-scroll presentation, while validated user settings override both.

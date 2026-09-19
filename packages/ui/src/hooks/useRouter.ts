@@ -9,17 +9,6 @@ import { isEmbeddedSessionChat } from '@/components/layout/contextPanelEmbeddedC
 import { openPiSessionFromNavigation } from '@/lib/pi-runtime/sessionNavigation';
 
 /**
- * Check if running in VS Code webview context.
- */
-function isVSCodeContext(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  const win = window as { __VSCODE_CONFIG__?: unknown };
-  return win.__VSCODE_CONFIG__ !== undefined;
-}
-
-/**
  * Hook that provides bidirectional URL routing for Piarium.
  *
  * On mount:
@@ -30,7 +19,6 @@ function isVSCodeContext(): boolean {
  * Works in:
  * - Web: Full bidirectional sync
  * - Desktop: Full bidirectional sync
- * - VS Code: State-only (no URL updates, reads initial params)
  * - Embedded session-chat iframe (`?piPanel=session-chat`): No URL updates.
  *   The iframe's session identity is fixed at mount (the parent builds the
  *   src with `sessionId`); in-place subtask navigation must NOT rewrite the
@@ -40,7 +28,6 @@ function isVSCodeContext(): boolean {
  */
 export function useRouter(options: { enabled?: boolean } = {}): void {
   const enabled = options.enabled ?? true;
-  const isVSCode = React.useMemo(() => isVSCodeContext(), []);
   // Captured once at mount: the iframe's embedded-ness never changes during
   // its lifetime (a parent src swap is a full reload).
   const isEmbeddedChat = React.useMemo(() => isEmbeddedSessionChat(), []);
@@ -141,14 +128,14 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
    */
   const syncURLFromState = React.useCallback(
     (options: { replace?: boolean } = {}) => {
-      if (!enabled || isVSCode || isEmbeddedChat || isApplyingRouteRef.current) {
+      if (!enabled || isEmbeddedChat || isApplyingRouteRef.current) {
         return;
       }
 
       const state = getCurrentAppState();
       updateBrowserURL(state, options);
     },
-    [enabled, isVSCode, isEmbeddedChat, getCurrentAppState]
+    [enabled, isEmbeddedChat, getCurrentAppState]
   );
 
   // Initialize: parse URL and apply route on mount
@@ -179,7 +166,7 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
       // Use the parsed route values instead of an immediate store snapshot so
       // deep links do not briefly normalize `?session=...` back to `/` while
       // the session's directory/message bootstrap is still catching up.
-      if (!isVSCode && !isEmbeddedChat) {
+      if (!isEmbeddedChat) {
         updateBrowserURL({
           ...getCurrentAppState(),
           sessionId: route.sessionId ?? usePiSessionStore.getState().currentSessionId,
@@ -191,11 +178,11 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     };
 
     void initializeRoute();
-  }, [applyRoute, enabled, getCurrentAppState, isVSCode, isEmbeddedChat]);
+  }, [applyRoute, enabled, getCurrentAppState, isEmbeddedChat]);
 
   // Subscribe to session changes
   React.useEffect(() => {
-    if (!enabled || isVSCode || isEmbeddedChat) {
+    if (!enabled || isEmbeddedChat) {
       return;
     }
 
@@ -214,11 +201,11 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     });
 
     return unsubscribe;
-  }, [enabled, isVSCode, isEmbeddedChat, syncURLFromState]);
+  }, [enabled, isEmbeddedChat, syncURLFromState]);
 
   // Subscribe to UI store changes (tab, settings)
   React.useEffect(() => {
-    if (!enabled || isVSCode || isEmbeddedChat) {
+    if (!enabled || isEmbeddedChat) {
       return;
     }
 
@@ -251,11 +238,11 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     });
 
     return unsubscribe;
-  }, [enabled, isVSCode, isEmbeddedChat, syncURLFromState]);
+  }, [enabled, isEmbeddedChat, syncURLFromState]);
 
   // Listen for browser back/forward navigation
   React.useEffect(() => {
-    if (typeof window === 'undefined' || !enabled || isVSCode || isEmbeddedChat) {
+    if (typeof window === 'undefined' || !enabled || isEmbeddedChat) {
       return;
     }
 
@@ -285,5 +272,5 @@ export function useRouter(options: { enabled?: boolean } = {}): void {
     return () => {
       window.removeEventListener('popstate', handlePopState);
     };
-  }, [applyRoute, enabled, isVSCode, isEmbeddedChat, setActiveMainTab, setSettingsDialogOpen]);
+  }, [applyRoute, enabled, isEmbeddedChat, setActiveMainTab, setSettingsDialogOpen]);
 }

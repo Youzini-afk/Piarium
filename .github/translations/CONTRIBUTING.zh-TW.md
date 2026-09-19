@@ -78,13 +78,11 @@ bun run check:pi
 | 為目前的作業系統封裝桌面版 | `bun run electron:build` |
 | 封裝 Windows x64 NSIS 安裝程式 | `bun run electron:build:win` |
 | 對未封裝的 Windows 建置執行冒煙測試 | `bun run electron:smoke:win` |
-| VS Code 擴充功能開發主機 | `bun run vscode:dev` |
-| 建置或封裝 VS Code | `bun run vscode:build` / `bun run vscode:package` |
 | 建置行動裝置資產 | `bun run mobile:build` |
 | 建置標準雲端執行環境 | `bun run build:cloud-runtime` |
 | 驗證文件網站 | `bun run docs:validate` |
 
-共用 UI 是原始碼函式庫，而非獨立應用程式。請透過 Web、Desktop 或 VS Code 執行 UI 行為，確保執行時期環境是真實的。
+共用 UI 是原始碼函式庫，而非獨立應用程式。請透過 Web 或 Desktop 執行 UI 行為，確保執行時期環境是真實的。
 
 ## 選擇負責的套件
 
@@ -93,7 +91,6 @@ bun run check:pi
 | 共用元件、儲存區、設定、聊天和外掛程式 GUI | `packages/ui` |
 | 瀏覽器/遠端伺服器、HTTP API、WebSocket 傳輸、雲端 CLI | `packages/web` |
 | Windows/macOS/Linux shell、preload/IPC、SSH、更新器、封裝 | `packages/electron` |
-| VS Code 主機、編輯器內容、webview 傳輸 | `packages/vscode` |
 | Capacitor 原生 shell | `packages/mobile` |
 | 可安全轉換為 JSON 的線路契約與驗證 | `packages/protocol` |
 | 瀏覽器/編輯器執行時期用戶端 | `packages/runtime-client` |
@@ -109,7 +106,7 @@ bun run check:pi
 2. 編輯匯入的產品程式碼之前，請閱讀 `AGENTS.md`、最近套件的 README 或 `DOCUMENTATION.md`，以及所有相符的專案 skill。
 3. 讓變更保持聚焦。加入直接必要的清理與測試，但把會增加審查難度的無關重構分開。
 4. 在負責該行為的邊界，新增或更新能證明行為的最小回歸測試。
-5. 執行每個契約有所變更的執行時期介面。對共用型別進行型別檢查，並不能證明 Desktop、Web、中繼、VS Code 或行動端的行為有效。
+5. 執行每個契約有所變更的執行時期介面。對共用型別進行型別檢查，並不能證明 Desktop、Web、中繼或行動端的行為有效。
 6. 當契約有所變更時，在同一項變更中更新使用者、貢獻者、架構、安全性或作業文件。
 
 變更有版本或持久化的結構時，請優先採用一次清楚遷移到目前結構的方式。只有在真實使用者資料或獨立部署的用戶端確實需要時，
@@ -137,7 +134,6 @@ bun run build
 | 雲端執行環境、Docker 或 SSH 部署 | `bun run test:cloud` 和標準執行環境建置 |
 | Electron 生命週期、架構或更新器 | `bun run --cwd packages/electron test:architecture` 和/或 `test:updater` |
 | Windows 封裝或原生模組 | `bun run electron:build:win`，接著執行 `bun run electron:smoke:win` |
-| VS Code 執行環境（已棄用，僅手動） | 不屬於必要 CI；只有明確維護這個歷史介面層時，才執行 `bun run --cwd packages/vscode verify:pi-runtime` 與相關建置/封裝命令 |
 | 匯入、匯出或刪除 | `bun run dead-code` 和每個受影響介面的正式建置 |
 | 文件網站 | `bun run docs:validate` 和手動檢查變更的本機連結 |
 | 工作區 `package.json` 或根目錄 lockfile | `bun run update:cloud-runtime-lock`，讓 `scripts/cloud-runtime.bun.lock` 保持凍結 |

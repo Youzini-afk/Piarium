@@ -69,7 +69,6 @@ Production Web sets `isTrusted` to false. There is no HTTP route that registers 
 - `GET /api/language/events?workspaceId=` SSE (credentials in headers). Payloads must not include file bodies.
 
 Application-host endpoint/workspace switch disposes sessions. Electron reuses this Web host.
-VS Code webviews report language services as `absent` and do not spawn.
 
 ## Managed native servers
 

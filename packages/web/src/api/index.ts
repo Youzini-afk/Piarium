@@ -49,7 +49,7 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   const activeUrls = createActiveRuntimeUrlResolver();
 
   return {
-    runtime: { platform: 'web', isDesktop: false, isVSCode: false, label: 'web' },
+    runtime: { platform: 'web', isDesktop: false, label: 'web' },
     piRuntime: createWebPiRuntimeAPI(),
     terminal: createWebTerminalAPI(),
     git: createWebGitAPI(),

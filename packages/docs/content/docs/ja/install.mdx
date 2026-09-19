@@ -1,17 +1,16 @@
 ---
 title: インストール
-description: ソースまたは Docker から、デスクトップ、Web、VS Code 向けに Piarium をインストールします。
+description: ソースまたは Docker から、デスクトップまたは Web 向けに Piarium をインストールします。
 ---
 
 # インストール
 
 Piarium は pre-1.0 です。現在サポートされている実行方法は**ソースから**と **Docker を使う**ことだけです。パッケージ化された npm と GitHub Release のダウンロードはまだ公開されていません。
 
-製品面は 3 つあります。
+主な製品画面は 2 つです。
 
 - デスクトップアプリ（Electron）
 - ローカルサーバーがホストする Web アプリ。スマホアプリのようにインストールできます（PWA）
-- VS Code 拡張
 
 ## 前提条件
 
@@ -67,10 +66,6 @@ Compose は既定で軽量イメージ `ghcr.io/youzini-afk/piarium-slim:latest`
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.toolbelt.yml up -d
 ```
-
-## VS Code
-
-このリポジトリから `bun run vscode:build` / `bun run vscode:package` で拡張をビルドします。Marketplace にはまだ公開されていません。
 
 ## CLI ワンライナー（未公開）
 

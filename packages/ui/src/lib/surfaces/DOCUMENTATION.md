@@ -52,5 +52,5 @@ the `openContext*` actions in `useUIStore`.
 - Recovery is a singleton surface. It follows the currently selected Pi session
   and reads provider state from `usePiSessionStore`; history and snapshots
   remain owned by Pi and the active recovery extensions.
-- Runtime scope: desktop/web `MainLayout` only. VS Code and the dedicated
-  mobile shell have their own layouts and do not consume this registry.
+- Runtime scope: desktop/web `MainLayout` only. The dedicated mobile shell has
+  its own layout and does not consume this registry.

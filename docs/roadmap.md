@@ -25,7 +25,8 @@ authoritative record of delivery, and each phase names the design document that 
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
-| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows Q |
+| D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
+| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows D-296 |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -39,10 +40,10 @@ Stage Q is specified in [testing-ci-design.md](testing-ci-design.md), with Q0–
 [harness implementation plan](agent-harness-plan.md). It covers test value and ownership, fixtures,
 portable discovery, duplicated execution/builds, platform and release checks, and actionable failures.
 The goal is trustworthy feedback with less maintenance, not a target test count or green checks achieved
-by hiding failures. Q is accepted but unimplemented; it precedes AI4S feature implementation. Existing
-repairs and authorized releases continue on their own applicable evidence.
+by hiding failures. Q is accepted and locally verified. Existing repairs and authorized releases
+continue on their own applicable evidence.
 
-Phase 11 follows Q and is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
+Phase 11 follows D-296 and is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
 research profile built on the existing Pi runtime, Thread/Run, Host scheduler, retrieval, context,
 permissions and Rust kernel. The first vertical slice is an open research question explored by
 heterogeneous model branches, fast execution workers and event-triggered synthesis. It is a design
@@ -61,14 +62,25 @@ parallel; do not treat them as live design authority.
 3. Make discovery portable, eliminate duplicate execution/build work, and assign source, platform,
    and release checks to their actual responsibility; report the underlying failure rather than only a wrapper error.
 4. Verify the resulting scope and feedback cost, update current evidence references, and close Q before
-   starting the AI4S implementation slices. No fixed deletion ratio, coverage quota, test count, or retry-until-green policy.
+   the D-296 retirement and AI4S implementation slices. No fixed deletion ratio, coverage quota, test count,
+   or retry-until-green policy.
 
 Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i18n/Electron
 suites, quoted-glob discovery, retargeted recovery evidence on the production journal engine,
 artifact-driven CI with docs-only gating, and the cloud daemon boot failure fixed at its product
-root cause (a production dependency declaration). The dormant VS Code adapter is deprecated
-(D-294/D-295) and excluded from formal evidence; its removal is a later dedicated stage. Q is
-accepted and AI4S implementation may begin.
+root cause (a production dependency declaration). The former VS Code companion is outside the
+formal product surface under D-294/D-295. D-296 has retired its remaining package, entrypoints,
+contracts, and current documentation before AI4S begins; root build and built-server knowledge smoke
+are locally verified.
+
+## D-296 — Former VS Code companion retirement
+
+The retirement stage removes the companion package and every current development, build, packaging,
+installation, marketplace, and companion-only contract entrypoint. It keeps references that describe
+LSP packages, TextMate formats, external editor launching, or provenance, and leaves historical
+changelog and decision bodies intact. The documentation, implementation, root build, and built-server
+knowledge smoke are complete and locally verified. Packaged, cross-platform, and remote-CI checks are
+not inferred from this result. No compatibility archive is planned, and AI4S follows.
 
 ## Phase 0 — Foundation (complete)
 
@@ -593,8 +605,8 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
     editor context, switches sessions, and keeps the workspace bridge. The parallel Settings panel,
     session editor tabs, and agent-management shell were removed rather than maintained as a second
     product UI. Run, debug, and test remain truthfully `absent`/`unsupported` there, and the official
-    IDE chrome is not loaded into the VS Code webview. The migration contract, including deep links
-    and the keep/migrate/refuse disposition, is [vscode-companion.md](vscode-companion.md).
+    IDE chrome is not loaded into the former VS Code webview. The keep/migrate/refuse disposition is
+    retained here as historical delivery context; the companion is retired under D-296.
 12. **Unified desktop/Web editor through collaboration workflows.** Agent and IDE now share Monaco
     models, rich Host language features, atomic workspace edits, file/Git diffs, breakpoint/current-
     frame/test-failure decorations, exact panel navigation, inline comments, and session-scoped Agent

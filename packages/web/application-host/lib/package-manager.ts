@@ -13,7 +13,7 @@ const CHANGELOG_URL = 'https://raw.githubusercontent.com/Youzini-afk/Piarium/mai
 const GITHUB_RELEASES_URL = 'https://github.com/Youzini-afk/Piarium/releases';
 const GITHUB_RELEASES_API_URL = 'https://api.github.com/repos/Youzini-afk/Piarium/releases';
 type PackageManager = 'bun' | 'electron' | 'npm' | 'pnpm' | 'yarn';
-type UpdateAppType = 'desktop-electron' | 'mobile-capacitor' | 'vscode' | 'web';
+type UpdateAppType = 'desktop-electron' | 'mobile-capacitor' | 'web';
 type UpdatePlatform = 'android' | 'ios' | 'linux' | 'macos' | 'web' | 'windows';
 type UpdateArch = 'arm64' | 'unknown' | 'x64';
 
@@ -90,7 +90,7 @@ function mapArch(value: unknown): UpdateArch {
 }
 
 function normalizeAppType(value: unknown): UpdateAppType {
-  if (value === 'web' || value === 'desktop-electron' || value === 'vscode' || value === 'mobile-capacitor') return value;
+  if (value === 'web' || value === 'desktop-electron' || value === 'mobile-capacitor') return value;
   return 'web';
 }
 
@@ -150,7 +150,7 @@ async function checkForUpdatesFromApi(currentVersion: string, options: UpdateChe
     const appType = normalizeAppType(options.appType);
     const hostPlatform = mapPlatform(process.platform);
     const hostArch = mapArch(process.arch);
-    const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'vscode' || appType === 'mobile-capacitor';
+    const shouldTrustClientPlatform = appType === 'desktop-electron' || appType === 'mobile-capacitor';
     const platform = shouldTrustClientPlatform ? normalizePlatform(options.platform) : hostPlatform;
     const arch = shouldTrustClientPlatform ? normalizeArch(options.arch) : hostArch;
     const payload = {

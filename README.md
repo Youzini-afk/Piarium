@@ -14,7 +14,7 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
 **A Pi-native, recomposable workspace and governed agent harness for coding agents: built for
-local work and usable across desktop, web, editors, and mobile clients.**
+local work and usable across desktop, web, and mobile clients.**
 
 Piarium turns the [Pi coding agent](https://github.com/earendil-works/pi) into a complete product.
 Pi stays the agent kernel — model and provider stack, session tree, package manager, and extension
@@ -118,8 +118,7 @@ phone-sized screen.
   with community contributions. Switching happens live, without reloading documents, restarting the
   Pi runtime, or losing shared workspace state.
 - **Multiple product surfaces:** a shared React UI powers Electron, Web, and the Capacitor mobile
-  shell through explicit runtime capabilities, with VS Code as a companion that brings editor context
-  to Piarium rather than a second workbench.
+  shell through explicit runtime capabilities.
 - **Cloud and remote operation:** authenticated WebSocket access, relay/tunnel support,
   multi-architecture containers, and atomic SSH deployment with health validation and rollback.
 
@@ -184,8 +183,8 @@ after a real Host handshake and does not need to restart after activation. Elect
 Node runtime needed to run the application, while Pi remains an independently managed tool. Native
 x64/ARM64 desktop packages for Windows, Linux, and macOS are validated on matching runners for
 application startup, Runtime Manager, health, and terminal lifecycle; optional offline installers
-remain future work. Containers and the VS Code extension keep a pinned, self-contained Pi runtime
-for reproducible unattended and editor-host execution.
+remain future work. Containers keep a pinned, self-contained Pi runtime for reproducible unattended
+execution.
 
 ### Run the Web development surface
 
@@ -299,7 +298,6 @@ turn trusted extensions into a complete sandbox. Read the [security policy](.git
 | `packages/ui` | Shared Pi-native React UI, stores, settings, and extension surfaces |
 | `packages/web` | Browser/remote frontend, trusted Application Host, and cloud CLI |
 | `packages/electron` | Native desktop shell, privileged boundary, packaging, SSH, and updates |
-| `packages/vscode` | VS Code extension host, webview, and runtime bridge |
 | `packages/mobile` | Capacitor iOS/Android shell connected to a Piarium server |
 | `packages/protocol` | Versioned, JSON-safe worker and surface protocol |
 | `packages/runtime-client` | Browser-safe runtime request/event client |
@@ -356,7 +354,6 @@ Before contributing, read [CONTRIBUTING.md](.github/CONTRIBUTING.md), the reposi
 - [Composable workbench and IDE contract](docs/composable-workbench.md) (Chinese)
 - [Unified file editor platform](docs/unified-file-editor-platform.md)
 - [Piarium extension platform](docs/piarium-extension-platform.md)
-- [VS Code companion migration](docs/vscode-companion.md)
 - [OpenChamber-to-Pi migration contract](docs/openchamber-pi-migration.md)
 - [Plugin GUI and ownership design](docs/plugin-gui-design.md)
 - [Recovery model](docs/recovery.md)

@@ -83,12 +83,7 @@ describe('logo geometry', () => {
       ['packages', 'web', 'public', 'logo-dark-512x512.svg'],
       ['packages', 'web', 'public', 'logo-light-512x512.svg'],
     ].map((segments) => readFileSync(path.join(repoRoot, ...segments), 'utf8'));
-    const activityBarVector = readFileSync(
-      path.join(repoRoot, 'packages', 'vscode', 'assets', 'icon.svg'),
-      'utf8',
-    );
-
-    for (const vector of [...fullVectors, activityBarVector]) {
+    for (const vector of fullVectors) {
       expect(vector).toContain(LOGO_LEFT_FACE_PATH);
       expect(vector).toContain(LOGO_PROJECTED_MARK_PATH);
       expect(vector).not.toContain('OpenChamber');

@@ -526,7 +526,7 @@ export class SurfaceExtensionLoader {
     this.#accessContext = () => {
       const provided = options.accessContext?.();
       return {
-        access: provided?.access ?? (options.surface === "desktop" || options.surface === "vscode" ? "local" : "remote"),
+        access: provided?.access ?? (options.surface === "desktop" ? "local" : "remote"),
         projectTrusted: provided?.projectTrusted ?? false,
         surface: options.surface,
       };

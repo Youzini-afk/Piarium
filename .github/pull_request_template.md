@@ -21,5 +21,5 @@ If you skipped a check, say so rather than leaving it blank.
 
 ## 备注 / Notes
 
-<!-- 受影响的产品端（Web / 桌面 / VS Code / 移动端）。残留风险。 -->
-<!-- Affected surfaces (web / desktop / VS Code / mobile). Remaining risk. -->
+<!-- 受影响的产品端（Web / 桌面 / 移动端）。残留风险。 -->
+<!-- Affected surfaces (web / desktop / mobile). Remaining risk. -->

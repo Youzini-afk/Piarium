@@ -143,7 +143,7 @@ export const registerBuiltinWorkbenchCommands = (context: SurfaceActivationConte
       id: contributionIdForCommand(definition.meta.commandId),
       kind: 'command',
       contractVersion: 1,
-      supports: ['web', 'desktop', 'mobile', 'vscode'],
+      supports: ['web', 'desktop', 'mobile'],
       placement: { slot: 'command-palette.primary', order: definition.meta.order },
       data: {
         commandId: definition.meta.commandId,

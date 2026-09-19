@@ -406,7 +406,6 @@ telling someone to upgrade would send them after the wrong thing.
 
 ## Runtime availability
 
-Web and desktop reach these routes normally. VS Code serves Git through its own
-bridge rather than the Piarium Git routes, so the feature is not offered there.
+Web and desktop reach these routes normally.
 Piarium mobile currently has no context-panel surface, so this phase does not
 claim a mobile UI that cannot be reached.

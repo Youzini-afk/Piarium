@@ -249,11 +249,6 @@
                   "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["mobile"] } } } } } }
                 },
                 {
-                  "if": { "properties": { "supports": { "contains": { "const": "vscode" } } } },
-                  "then": { "properties": { "data": { "properties": { "seams": { "required": ["vscode"] } } } } },
-                  "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["vscode"] } } } } } }
-                },
-                {
                   "if": { "properties": { "supports": { "contains": { "const": "web" } } } },
                   "then": { "properties": { "data": { "properties": { "seams": { "required": ["web"] } } } } },
                   "else": { "properties": { "data": { "properties": { "seams": { "not": { "required": ["web"] } } } } } }
@@ -333,7 +328,6 @@
           "properties": {
             "desktop": { "$ref": "#/$defs/shellSurfaceSeams" },
             "mobile": { "$ref": "#/$defs/shellSurfaceSeams" },
-            "vscode": { "$ref": "#/$defs/shellSurfaceSeams" },
             "web": { "$ref": "#/$defs/shellSurfaceSeams" }
           },
           "additionalProperties": false
@@ -384,7 +378,7 @@
         "version": { "type": "integer", "minimum": 1 }
       }
     },
-    "surface": { "enum": ["desktop", "mobile", "vscode", "web"] },
+    "surface": { "enum": ["desktop", "mobile", "web"] },
     "text": { "type": "string", "minLength": 1 },
     "contextExpression": {
       "oneOf": [

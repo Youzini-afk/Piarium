@@ -62,7 +62,7 @@ import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { collectPiSessionSubtreeIds, piSessionTitle } from '@/components/pi-session/sessionPresentation';
-import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
+import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -808,8 +808,7 @@ export const Header: React.FC<HeaderProps> = ({
     }
   }, [desktopServicesTab, isDesktopApp]);
 
-  const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
-  const showDesktopHeaderContextUsage = !isVSCode && activeMainTab === 'chat' && !!contextUsage && contextUsage.totalTokens > 0;
+  const showDesktopHeaderContextUsage = activeMainTab === 'chat' && !!contextUsage && contextUsage.totalTokens > 0;
   const desktopHeaderDisplayPercentage = contextUsage && contextUsage.contextLimit > 0
     ? Math.min(999, (contextUsage.totalTokens / contextUsage.contextLimit) * 100)
     : 0;
@@ -1440,11 +1439,11 @@ export const Header: React.FC<HeaderProps> = ({
     if (isTabletStandalonePwa) {
       return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
     }
-    if ((!isDesktopApp || usesFramelessChrome) && !isVSCode) {
+    if (!isDesktopApp || usesFramelessChrome) {
       return 'calc(0.75rem + var(--oc-wco-left-inset, 0px))';
     }
     return '0.75rem';
-  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, isVSCode, usesFramelessChrome]);
+  }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, usesFramelessChrome]);
 
   useEffect(() => {
     if (typeof document === 'undefined') {
@@ -1513,7 +1512,7 @@ export const Header: React.FC<HeaderProps> = ({
   }, [isDesktopApp, isMacPlatform, macosMajorVersion]);
 
   const webWindowControlsOverlayStyle = React.useMemo<React.CSSProperties | undefined>(() => {
-    if ((isDesktopApp && !usesFramelessChrome) || isVSCode) {
+    if (isDesktopApp && !usesFramelessChrome) {
       return undefined;
     }
 
@@ -1524,7 +1523,7 @@ export const Header: React.FC<HeaderProps> = ({
       minHeight: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
       height: 'max(2.5rem, var(--oc-wco-titlebar-height, 0px))',
     };
-  }, [isDesktopApp, isVSCode, usesFramelessChrome]);
+  }, [isDesktopApp, usesFramelessChrome]);
 
   const updateHeaderHeight = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -1646,10 +1645,9 @@ export const Header: React.FC<HeaderProps> = ({
   const showDevShutdown = React.useMemo(() => {
     if (typeof window === 'undefined') return false;
     if (isDesktopApp) return false;
-    if (isVSCode) return false;
     const host = window.location.hostname;
     return host === 'localhost' || host === '127.0.0.1' || host === '::1';
-  }, [isDesktopApp, isVSCode]);
+  }, [isDesktopApp]);
 
   const handleDevShutdown = React.useCallback(async () => {
     if (isDevShutdownInFlight) return;

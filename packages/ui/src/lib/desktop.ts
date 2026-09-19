@@ -531,28 +531,22 @@ export const startDesktopWindowDrag = async (): Promise<boolean> => {
   }
 };
 
-export const isVSCodeRuntime = (): boolean => {
-  const apis = getRegisteredRuntimeAPIs();
-  return apis?.runtime?.isVSCode === true;
-};
-
 export const isWebRuntime = (): boolean => {
   const apis = getRegisteredRuntimeAPIs();
   const platform = apis?.runtime?.platform;
   if (platform === 'web') {
     return true;
   }
-  if (platform === 'desktop' || platform === 'vscode') {
+  if (platform === 'desktop') {
     return false;
   }
-  // Default: anything that's not VSCode behaves like web (HTTP UI).
-  return !isVSCodeRuntime();
+  return true;
 };
 
 /** Electron shares the web API implementation, so the API platform alone does
  * not tell us whether an action can use a browser download or local shell. */
 export const isBrowserClientRuntime = (
-  platform: 'web' | 'desktop' | 'vscode',
+  platform: 'web' | 'desktop',
   desktopShell = isDesktopShell(),
 ): boolean => platform === 'web' && !desktopShell;
 

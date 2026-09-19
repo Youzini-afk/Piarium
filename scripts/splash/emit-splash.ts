@@ -2,8 +2,8 @@
  * Regenerate the splash blocks embedded in the two pre-paint HTML hosts.
  *
  * `packages/web/index.html` and `packages/web/mini-chat.html` have to paint before any module is
- * evaluated, so they cannot import the splash modules the way the React component and the VS Code
- * webview do. They embed generated output instead, between sentinels, and
+ * evaluated, so they cannot import the splash modules the way the React component does.
+ * They embed generated output instead, between sentinels, and
  * `packages/ui/src/components/ui/piarium-splash-lattice.test.ts` asserts each embedded block still
  * equals what the generator produces, character for character.
  *

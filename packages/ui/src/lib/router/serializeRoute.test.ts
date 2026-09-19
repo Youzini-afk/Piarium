@@ -72,13 +72,12 @@ const sessionState = (sessionId: string): AppRouteState => ({
 });
 
 describe('updateBrowserURL embedded-session-chat guard', () => {
-  test('is a no-op in the embedded session-chat iframe (mirrors isVSCodeContext)', () => {
+  test('is a no-op in the embedded session-chat iframe', () => {
     // The embedded iframe's Piarium URL identity must never be rewritten.
     // updateBrowserURL rebuilds the
     // query string from scratch, which would strip piPanel and break
     // isEmbeddedSessionChat().
-    // The guard prevents this, exactly like isVSCodeContext() does for
-    // VS Code webviews.
+    // The guard preserves the fixed embedded identity.
     const history = installWindow(
       'http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_child&piDirectory=%2Frepo&piReadOnly=1',
     );
@@ -100,11 +99,9 @@ describe('updateBrowserURL embedded-session-chat guard', () => {
 });
 
 describe('isEmbeddedSessionChat caching', () => {
-  test('caches the first result so URL rewrites cannot flip it (mirrors VS Code stable global)', () => {
-    // VS Code detects its webview via the stable `window.__VSCODE_CONFIG__`
-    // global — it never changes. The embedded iframe's identity is equally
-    // fixed at mount (the parent builds the src); caching the first read
-    // makes detection just as stable, surviving any URL rewrite.
+  test('caches the first result so URL rewrites cannot flip it', () => {
+    // The embedded iframe's identity is fixed at mount (the parent builds the
+    // src); caching the first read keeps detection stable across URL rewrites.
     //
     // We need a fresh module cache for this test. Since the cache is
     // module-level, we test the invariant: once true, always true.

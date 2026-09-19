@@ -1,5 +1,3 @@
-import type { RuntimeAPIs } from '@piarium/application-client';
-import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { getResolvedWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { resourceIdFromWorkspacePath } from '@/lib/documents/path';
 import { openWorkbenchEditor } from '@/lib/workbench/editors/session';
@@ -45,19 +43,6 @@ const isPathWithinRoot = (path: string, root: string): boolean => {
   return comparablePath === comparableRoot || comparablePath.startsWith(`${comparableRoot}/`);
 };
 
-const getVSCodeRuntimeEditor = (): RuntimeAPIs['editor'] | undefined => {
-  if (typeof window === 'undefined') {
-    return undefined;
-  }
-
-  const apis = getRegisteredRuntimeAPIs();
-  if (!apis?.runtime?.isVSCode || !apis.editor?.openFile) {
-    return undefined;
-  }
-
-  return apis.editor;
-};
-
 export const openFileInMainEditor = (
   directory: string | null | undefined,
   filePath: string | null | undefined,
@@ -65,19 +50,6 @@ export const openFileInMainEditor = (
 ): boolean => {
   const root = normalizePath((directory || '').trim());
   const targetPath = normalizePath((filePath || '').trim());
-
-  const vscodeEditor = getVSCodeRuntimeEditor();
-  if (vscodeEditor && targetPath) {
-    const line = Number.isFinite(options.line ?? Number.NaN)
-      ? Math.max(1, Math.trunc(options.line as number))
-      : undefined;
-    const column = Number.isFinite(options.column ?? Number.NaN)
-      ? Math.max(1, Math.trunc(options.column as number))
-      : undefined;
-
-    void vscodeEditor.openFile(targetPath, line, column).catch(() => {});
-    return true;
-  }
 
   if (!root || !targetPath || !isPathWithinRoot(targetPath, root)) {
     return false;

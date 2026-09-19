@@ -191,8 +191,8 @@ test("rejects invalid Piarium SemVer ranges and checks compatibility at range bo
 test("rejects traversal, duplicate IDs, and unsupported surfaces together", () => {
   const candidate = manifest();
   candidate.entrypoints.surfaces = [
-    { id: "main", file: "../surface.mjs", mode: "managed", supports: ["browser"] },
-    { id: "main", file: "dist/other.mjs", mode: "managed", supports: ["web"] },
+    { id: "main", file: "../surface.mjs", mode: "managed", supports: ["web"] },
+    { id: "main", file: "dist/other.mjs", mode: "managed", supports: ["vscode"] },
   ];
   assert.throws(
     () => parsePiariumExtensionManifest(candidate),

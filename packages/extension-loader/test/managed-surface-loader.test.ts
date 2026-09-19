@@ -103,7 +103,7 @@ const hostState = (
   },
 });
 
-for (const surface of ["web", "desktop", "vscode"] as const satisfies readonly PiariumApplicationSurface[]) {
+for (const surface of ["web", "desktop", "mobile"] as const satisfies readonly PiariumApplicationSurface[]) {
   test(`pure declarative ${surface} lifecycle registers without module bytes and withdraws on disable`, async () => {
     const artifactIntegrity = integrityFor(`declarative-${surface}`);
     const declarativeManifest: PiariumExtensionManifest = {
@@ -682,7 +682,7 @@ const matrixProvider = (providerId: string): PiariumExtensionHostStateSnapshot["
 test("service binding matrix: single requires exactly one provider", async () => {
   const artifactIntegrity = integrityFor("binding-single");
   const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("single") };
-  let current = snapshot(1, entry);
+  const current = snapshot(1, entry);
   let stateRevision = 1;
   let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });
@@ -729,7 +729,7 @@ test("service binding matrix: single requires exactly one provider", async () =>
 test("service binding matrix: selected requires and resolves the explicit provider", async () => {
   const artifactIntegrity = integrityFor("binding-selected");
   const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("selected") };
-  let current = snapshot(1, entry);
+  const current = snapshot(1, entry);
   let stateRevision = 1;
   let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
   let selections: Record<string, string> = {};
@@ -801,7 +801,7 @@ test("service binding matrix: selected requires and resolves the explicit provid
 test("service binding matrix: all activates with at least one provider", async () => {
   const artifactIntegrity = integrityFor("binding-all");
   const entry: PiariumExtensionCatalogEntry = { ...catalogEntry("1.0.0", artifactIntegrity), manifest: serviceManifest("all") };
-  let current = snapshot(1, entry);
+  const current = snapshot(1, entry);
   let stateRevision = 1;
   let providers: PiariumExtensionHostStateSnapshot["services"]["providers"] = [];
   const runtime = new SurfaceExtensionRuntime({ surface: "web" });

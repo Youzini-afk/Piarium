@@ -1,4 +1,4 @@
-import { isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { isDesktopShell } from '@/lib/desktop';
 
 /** True when running inside the native Capacitor shell (iOS/Android app), not the web/PWA. */
 export const isCapacitorApp = (): boolean => {
@@ -22,7 +22,7 @@ export const isIPadApp = (): boolean => {
     || (/Macintosh|MacIntel/i.test(userAgent) && maxTouchPoints > 1);
 };
 
-export type ClientPlatform = 'ios' | 'android' | 'vscode' | 'desktop' | 'web';
+export type ClientPlatform = 'ios' | 'android' | 'desktop' | 'web';
 
 /**
  * The runtime surface this client is. Used by the push presence model: only 'ios'/'android'
@@ -35,7 +35,6 @@ export const getClientPlatform = (): ClientPlatform => {
     const native = capacitor?.getPlatform?.();
     if (native === 'ios' || native === 'android') return native;
   }
-  if (isVSCodeRuntime()) return 'vscode';
   if (isDesktopShell()) return 'desktop';
   return 'web';
 };

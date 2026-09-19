@@ -44,13 +44,13 @@ const writeExtension = async (
     version,
     engines: { piarium: piariumRange },
     entrypoints: {
-      surfaces: [{ id: "main", file: "surface.js", mode, supports: ["web", "desktop", "vscode"] }],
+      surfaces: [{ id: "main", file: "surface.js", mode, supports: ["web", "desktop", "mobile"] }],
     },
   }), "utf8");
   await writeFile(join(directory, "package.json"), JSON.stringify({ name: id, version, type: "module" }), "utf8");
   await writeFile(join(directory, "surface.js"), [
     "import './theme.css';",
-    `export default { activate(context) { context.contribute({ id: '${id}.page', kind: 'page', contractVersion: 1, supports: ['web', 'desktop', 'vscode'], data: {} }, { version: '${version}' }); } };`,
+    `export default { activate(context) { context.contribute({ id: '${id}.page', kind: 'page', contractVersion: 1, supports: ['web', 'desktop', 'mobile'], data: {} }, { version: '${version}' }); } };`,
   ].join("\n"), "utf8");
   await writeFile(join(directory, "theme.css"), `.extension-${version.replaceAll(".", "-")} { color: green; }`, "utf8");
   await writeFile(join(directory, "icon.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>", "utf8");

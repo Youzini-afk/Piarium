@@ -39,7 +39,6 @@ const resetHarness = () => {
   hookIndex = 0;
   pendingEffects = [];
   desktopShell = false;
-  vscodeRuntime = false;
   runtimeApiBaseUrl = '';
   runtimeKey = 'local';
   runtimeStatusCode = 401;
@@ -224,7 +223,6 @@ const reactJsxRuntime = {
 };
 
 let desktopShell = false;
-let vscodeRuntime = false;
 let runtimeFetchRejects = true;
 let runtimeApiBaseUrl = '';
 let runtimeKey = 'local';
@@ -298,7 +296,6 @@ mock.module('@/lib/i18n', () => ({
 mock.module('@/lib/desktop', () => ({
   invokeDesktop: () => desktopInvoke(),
   isDesktopShell: mock(() => desktopShell),
-  isVSCodeRuntime: mock(() => vscodeRuntime),
 }));
 
 mock.module('@/lib/persistence', () => ({
@@ -440,24 +437,6 @@ describe('SessionAuthGate status-check failure behavior', () => {
     desktopShell = false;
     runtimeFetchRejects = false;
     runtimeStatusCode = 200;
-    let finishRestore = () => {};
-    restoreDirectoryPreferences = () => new Promise<void>((resolve) => { finishRestore = resolve; });
-
-    const loadingTree = await renderGate();
-    expect(collectText(loadingTree)).not.toContain('child');
-
-    finishRestore();
-    await Promise.resolve();
-    await Promise.resolve();
-    const readyTree = await renderGate();
-    await flushEffects();
-
-    expect(collectText(readyTree)).toContain('child');
-  });
-
-  test('restores settings before mounting a runtime that skips web authentication', async () => {
-    resetHarness();
-    vscodeRuntime = true;
     let finishRestore = () => {};
     restoreDirectoryPreferences = () => new Promise<void>((resolve) => { finishRestore = resolve; });
 

@@ -13,7 +13,7 @@ import { DesktopNetworkSettings } from './DesktopNetworkSettings';
 import { KeyboardShortcutsSettings } from './KeyboardShortcutsSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { useDeviceInfo } from '@/lib/device';
-import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
+import { isDesktopLocalOriginActive, isDesktopShell, isWebRuntime } from '@/lib/desktop';
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
@@ -40,7 +40,6 @@ export const PiariumSettingsPage: React.FC<PiariumSettingsPageProps> = ({ sectio
     const { isMobile } = useDeviceInfo();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     const showAbout = isMobile && isWebRuntime();
-    const isVSCode = isVSCodeRuntime();
     void runtimeEndpointEpoch;
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
 
@@ -53,7 +52,7 @@ export const PiariumSettingsPage: React.FC<PiariumSettingsPageProps> = ({ sectio
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
                 <SessionRetentionSettings />
                 <PiSettingsContributionSlot slot="settings.sessions.panels" />
-                {isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp() && <PasskeySettings />}
+                {isWebRuntime() && !isDesktopShell() && !isCapacitorApp() && <PasskeySettings />}
                 {showAbout && <AboutSettings />}
             </SettingsPageLayout>
         );
@@ -136,13 +135,12 @@ const ShortcutsSectionContent: React.FC = () => {
 // General section: app-level settings — startup/tray/network, access password,
 // passkeys, and editor behavior.
 const GeneralSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
     const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
     void runtimeEndpointEpoch;
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
     // Passkeys only work against the browser's WebAuthn UI on the web surface —
-    // desktop shell, VS Code, and the Capacitor app never show the login screen.
-    const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isVSCode && !isCapacitorApp();
+    // Desktop and Capacitor shells never show the browser login screen.
+    const showPasskeySettings = isWebRuntime() && !isDesktopShell() && !isCapacitorApp();
     return (
         <>
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
@@ -152,9 +150,9 @@ const GeneralSectionContent: React.FC = () => {
                 'fileEditorPreferences',
                 'autoSaveEnabled',
                 'expandedEditorToolbar',
-                ...(!isVSCode ? ['terminalQuickKeys' as const] : []),
-                ...(!isVSCode ? ['terminalShell' as const] : []),
-                ...(!isVSCode ? ['terminalLoginShell' as const] : []),
+                'terminalQuickKeys',
+                'terminalShell',
+                'terminalLoginShell',
             ]} />
         </>
     );
@@ -162,7 +160,6 @@ const GeneralSectionContent: React.FC = () => {
 
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
     return <PiariumVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
@@ -170,7 +167,7 @@ const VisualSectionContent: React.FC = () => {
         'pwaOrientation',
         'mobileKeyboardMode',
         'timeFormat',
-        ...(!isVSCode ? ['weekStart' as const] : []),
+        'weekStart',
         'fontSize',
         'terminalFontSize',
         'editorFontSize',
@@ -181,7 +178,6 @@ const VisualSectionContent: React.FC = () => {
 
 // Chat section: User message rendering, Diff layout, Mobile status bar, Show reasoning traces, Follow-up behavior, Persist draft
 const ChatSectionContent: React.FC = () => {
-    const isVSCode = isVSCodeRuntime();
     return (
         <PiariumVisualSettings
             visibleSettings={[
@@ -196,7 +192,7 @@ const ChatSectionContent: React.FC = () => {
                 'expandedTools',
                 'collapsibleUserMessages',
                 'stickyUserHeader',
-                ...(!isVSCode ? ['promptNavigatorEnabled' as const] : []),
+                'promptNavigatorEnabled',
                 'wideChatLayout',
                 'codeBlockLineWrap',
                 'splitAssistantMessageActions',
@@ -230,9 +226,6 @@ const GitSectionContent: React.FC = () => {
 
 // GitHub section: Connect account for PR/issue workflows
 const GitHubSectionContent: React.FC = () => {
-    if (isVSCodeRuntime()) {
-        return null;
-    }
     return <GitHubSettings />;
 };
 
@@ -243,15 +236,9 @@ const NotificationSectionContent: React.FC = () => {
 
 // Voice section: Language selection and continuous mode
 const VoiceSectionContent: React.FC = () => {
-    if (isVSCodeRuntime()) {
-        return null;
-    }
     return <VoiceSettings />;
 };
 
 const TunnelSectionContent: React.FC = () => {
-    if (isVSCodeRuntime()) {
-        return null;
-    }
     return <TunnelSettings />;
 };

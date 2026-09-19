@@ -30,7 +30,6 @@ export const setPiariumExtensionProjectTrust = (trusted: boolean): void => {
 export const surfaceExtensionLoader = new SurfaceExtensionLoader({
   accessContext: () => ({
     access: piariumSurfaceRuntime.surface === 'desktop'
-      || piariumSurfaceRuntime.surface === 'vscode'
       || (typeof window !== 'undefined' && typeof window.__PIARIUM_LOCAL_ORIGIN__ === 'string')
       ? 'local'
       : 'remote',

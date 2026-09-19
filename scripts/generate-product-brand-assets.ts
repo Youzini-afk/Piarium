@@ -17,7 +17,6 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronIcons = path.join(repoRoot, 'packages', 'electron', 'resources', 'icons');
 const webPublic = path.join(repoRoot, 'packages', 'web', 'public');
-const vscodeAssets = path.join(repoRoot, 'packages', 'vscode', 'assets');
 
 const PRODUCT_BACKGROUND = '#151313';
 const PRODUCT_INK = '#f5f5f5';
@@ -146,8 +145,6 @@ const createIcns = async (): Promise<Buffer> => {
 const productSvg = appIconSvg();
 const darkMarkSvg = transparentMarkSvg({ ink: PRODUCT_INK });
 const lightMarkSvg = transparentMarkSvg({ ink: LIGHT_SURFACE_INK });
-const compactCurrentColor = transparentMarkSvg({ compact: true, ink: 'currentColor', size: 24 });
-const compactDarkSurface = transparentMarkSvg({ compact: true, ink: PRODUCT_INK, size: 24 });
 const productPng = await raster(productSvg, 1024);
 
 await Promise.all([
@@ -175,9 +172,6 @@ await Promise.all([
     await raster(productSvg, size),
   )),
 
-  save(path.join(vscodeAssets, 'app-icon.png'), await raster(productSvg, 512)),
-  save(path.join(vscodeAssets, 'icon.svg'), compactCurrentColor),
-  save(path.join(vscodeAssets, 'icon-titlebar.svg'), compactDarkSurface),
 ]);
 
-console.log('[branding] Generated Piarium desktop, Web, README, and VS Code assets from the splash mark.');
+console.log('[branding] Generated Piarium desktop and Web assets from the splash mark.');

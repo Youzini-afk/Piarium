@@ -19,8 +19,7 @@ other runtime API.
   0. OpenChamber's own settings override (Settings → Sessions → Small Model):
      when `smallModelUseDefault` is `false`, `smallModelOverride`
      (`provider/model`) outranks everything below. Sanitized in
-     `settings-helpers.js` (server), `persistence.ts` (client), and
-     `bridge-settings-runtime.ts` (VS Code).
+     `settings-helpers.js` (server) and `persistence.ts` (client).
   1. `small_model` from the merged OpenCode config layers (`provider/model`).
   2. Family-priority scan (`gemini-flash` → `gpt-nano` → `claude-haiku`)
      **within the session's provider first** (`preferredProviderID`, like

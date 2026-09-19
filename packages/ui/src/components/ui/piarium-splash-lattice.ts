@@ -353,10 +353,8 @@ export const PIARIUM_SPLASH_COLORS: SplashPlaneColors = {
 /**
  * The splash's visual rules, as one string.
  *
- * Four surfaces paint a splash and only two of them can import anything, so the rules would otherwise
- * exist in four hand-maintained copies. The React component and the VS Code webview call this;
- * `index.html` and `mini-chat.html` embed its output verbatim, and the geometry tests assert those copies
- * still equal it exactly.
+ * The React component calls this while `index.html` and `mini-chat.html` embed its output verbatim.
+ * Geometry tests assert those copies still equal it exactly.
  *
  * Emitted without leading indentation so an embedded copy can match character for character.
  */

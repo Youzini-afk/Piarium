@@ -2,6 +2,10 @@
 
 Status: implemented; the public authoring toolchain is released on npm
 
+Current boundary (D-296): supported application-host surfaces are Web, Electron, hosted mobile,
+Capacitor, and headless consumers. The former VS Code companion and its host bridge are retired;
+historical references in delivery notes do not define a current target.
+
 Last updated: 2026-09-02
 
 ## 1. Decision
@@ -41,7 +45,7 @@ or public Cordis-shaped API is selected by this document.
 | Contribution | Piarium Surface Runtime | A UI surface | A page, view, panel, command, menu, renderer, theme, layout item, or replacement implementation |
 | Service | Piarium component runtime | Host or surface realm | A versioned capability provided by one component and consumed by another |
 | Distribution profile | Piarium product distribution | Piarium application host | A selected set of built-in/external extensions, defaults, layout, and service selections |
-| Application host | Piarium Web server, Electron-local server, or VS Code extension host | Trusted Node runtime | Owns Piarium extension installation, desired state, assets, host entrypoints, and surface catalog |
+| Application host | Piarium Web server or Electron-local server | Trusted Node runtime | Owns Piarium extension installation, desired state, assets, host entrypoints, and surface catalog |
 | Pi runtime target | Local or remote Piarium Pi runtime selected by the user | Pi host/broker | Owns Pi sessions, Pi packages, models, commands, and agent execution |
 
 An application host and a Pi runtime target are intentionally different identities. Desktop can
@@ -68,10 +72,10 @@ the other.
 2. Dynamically enable and disable reversible or isolated extensions without reloading the whole UI.
 3. Allow maximum-freedom native extensions without falsely claiming that arbitrary same-realm
    JavaScript can be physically unloaded.
-4. Keep Web, Electron, VS Code, hosted mobile, and Capacitor behavior explicit for every shared
+4. Keep Web, Electron, hosted mobile, and Capacitor behavior explicit for every shared
    contribution and capability.
-5. Keep privileged operations in the application host, Pi host, Electron main process, or VS Code
-   extension host rather than granting them implicitly to renderer code.
+5. Keep privileged operations in the application host, Pi host, or Electron main process rather than
+   granting them implicitly to renderer code.
 6. Preserve Pi session JSONL, Pi settings/packages, extension-native files, and plugin-native
    databases as their documented authorities.
 7. Let built-in and external features use one component, service, contribution, and lifecycle model
@@ -203,7 +207,7 @@ The exact package names may be finalized during implementation, but ownership re
 renamed Pi extension messages and do not make Pi workers aware of Piarium UI modules.
 
 The shared UI receives an `extensions` capability through `RuntimeAPIs`; Web, Electron-through-Web,
-VS Code, hosted mobile, and Capacitor define explicit behavior. Extension code never hardcodes a
+hosted mobile, and Capacitor define explicit behavior. Extension code never hardcodes a
 server origin, port, credential, local path, or Electron IPC channel.
 
 ### 6.2 Application-host ownership by surface
@@ -212,7 +216,6 @@ server origin, port, credential, local path, or Electron IPC channel.
 | --- | --- |
 | Web / cloud | The trusted Piarium server owns extension installation, host entrypoints, assets, and desired state |
 | Electron | The in-process local Web server remains the application host; Electron main owns only inherently native grants |
-| VS Code | The VS Code extension host implements the same extension-host contract and brokers assets/capabilities to the webview |
 | Hosted mobile | The paired Piarium server is the application host; the mobile client activates only compatible surface entrypoints |
 | Capacitor without a host | Built-in surface extensions work; external host-dependent extensions return a stable unsupported state |
 | Headless/test | The host supervisor and service runtime run without a Surface for tests, automation, and diagnostics |
@@ -257,7 +260,7 @@ The following shape communicates the target ownership; it is not a frozen schema
         "id": "main",
         "file": "dist/surface.mjs",
         "mode": "managed",
-        "supports": ["web", "desktop", "vscode", "mobile"]
+        "supports": ["web", "desktop", "mobile"]
       }
     ]
   },
@@ -641,8 +644,8 @@ The browser implementation uses two shapes:
   followed by a versioned MessagePort capability handshake. Their blob/srcdoc identity is owned by
   one realm and carries no reusable application credential.
 
-The browser asset implementation must work for Web, packaged Electron, VS Code webview, hosted
-mobile, and runtime switching. A focused prototype will choose between a self-contained fetched ESM
+The browser asset implementation must work for Web, packaged Electron, hosted mobile, and runtime
+switching. A focused prototype will choose between a self-contained fetched ESM
 bundle and a scoped asset origin; this choice is private to the asset service and does not change the
 manifest, contribution, or lifecycle contracts.
 
@@ -836,12 +839,11 @@ to discourage ordinary configuration. Examples include:
 - provider/model requests;
 - notifications and background work;
 - Electron-native operations;
-- VS Code editor/workspace operations;
 - native Surface execution.
 
 Managed and isolated entrypoints receive scoped capability clients. The privileged implementation
-and input validation remain in Web server, Extension Host, Electron main/preload, VS Code extension
-host, or Pi host. Remote pages do not inherit local desktop privileges.
+and input validation remain in Web server, Extension Host, Electron main/preload, or Pi host. Remote
+pages do not inherit local desktop privileges.
 
 Trusted-native code has ambient access that cannot be reduced to the same claim. Piarium shows that
 mode and its capability delta explicitly. Project-local executable extensions also require the
@@ -897,7 +899,7 @@ The platform is not complete until these invariants hold:
   disabling compatible Surfaces;
 - trusted-native or irreversible external effects report restart/non-reversible semantics instead
   of claiming a clean rollback;
-- Web, Electron, VS Code, hosted mobile, Capacitor, and headless behavior is intentionally specified
+- Web, Electron, hosted mobile, Capacitor, and headless behavior is intentionally specified
   for every shared contract;
 - the fallback manager can start with all non-kernel extensions disabled after a crash loop.
 

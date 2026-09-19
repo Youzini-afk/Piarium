@@ -121,8 +121,7 @@ IDE プロファイルは、ワークスペースのナビゲーションとエ�
   切り替えはライブで行われ、ドキュメントの再読み込み、Pi ランタイムの再起動、共有ワークスペース
   状態の喪失はありません。
 - **複数のプロダクト画面：** 共有の React UI が、明示的なランタイムケイパビリティを通じて
-  Electron、Web、Capacitor モバイルシェルを駆動します。VS Code はエディタコンテキストを Piarium
-  へ持ち込むコンパニオンであり、第 2 のワークベンチではありません。
+  Electron、Web、Capacitor モバイルシェルを駆動します。
 - **クラウドとリモート運用：** 認証付き WebSocket アクセス、リレー/トンネル対応、マルチ
   アーキテクチャコンテナ、ヘルス検証とロールバックを備えたアトミックな SSH デプロイ。
 
@@ -191,8 +190,7 @@ Electron にはアプリケーションの実行に必要な Node ランタイ�
 ツールであり続けます。Windows、Linux、macOS 向けのネイティブ x64/ARM64 デスクトップパッケージは、
 対応するアーキテクチャのランナーで、アプリケーション起動、Runtime Manager、ヘルス、ターミナル
 ライフサイクルが検証されています。オプションのオフラインインストーラーは今後の課題です。
-コンテナと VS Code 拡張は、再現性のある無人実行とエディタホスト実行のために、固定された自己完結型の
-Pi ランタイムを保持します。
+コンテナは、再現性のある無人実行のために、固定された自己完結型の Pi ランタイムを保持します。
 
 ### Web 開発画面を起動する
 
@@ -309,7 +307,6 @@ Electron は同じホストをメインプロセスで実行し、並列のデ�
 | `packages/ui` | 共有の Pi ネイティブ React UI、ストア、設定、拡張画面 |
 | `packages/web` | ブラウザ/リモートフロントエンド、信頼された Application Host、クラウド CLI |
 | `packages/electron` | ネイティブデスクトップシェル、特権境界、パッケージング、SSH、更新 |
-| `packages/vscode` | VS Code 拡張ホスト、webview、ランタイムブリッジ |
 | `packages/mobile` | Piarium サーバーに接続する Capacitor iOS/Android シェル |
 | `packages/protocol` | バージョン管理された JSON セーフなワーカー/画面プロトコル |
 | `packages/runtime-client` | ブラウザで安全なランタイムリクエスト/イベントクライアント |
@@ -366,7 +363,6 @@ CI は責務の異なる 3 つの安定したゲートを公開しています�
 - [コンポーザブルワークベンチと IDE 契約](../../docs/composable-workbench.md)（中国語）
 - [統合ファイルエディタプラットフォーム](../../docs/unified-file-editor-platform.md)
 - [Piarium 拡張プラットフォーム](../../docs/piarium-extension-platform.md)
-- [VS Code コンパニオン移行](../../docs/vscode-companion.md)
 - [OpenChamber から Pi への移行契約](../../docs/openchamber-pi-migration.md)
 - [プラグイン GUI と所有権設計](../../docs/plugin-gui-design.md)
 - [リカバリモデル](../../docs/recovery.md)

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
+import { getDesktopHomeDirectory } from '@/lib/desktop';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -130,7 +130,7 @@ const getHomeDirectory = () => {
     }
 
     const storedHome = getStoredHomeDirectory();
-    if (storedHome && !isVSCodeRuntime()) {
+    if (storedHome) {
       cachedHomeDirectory = storedHome;
       return storedHome;
     }
@@ -204,26 +204,10 @@ const initializeHomeDirectory = async () => {
   return fallback;
 };
 
-const getVsCodeWorkspaceFolder = (): string | null => {
-  if (!isVSCodeRuntime()) {
-    return null;
-  }
-  const workspaceFolder = (window as unknown as { __VSCODE_CONFIG__?: { workspaceFolder?: unknown } }).__VSCODE_CONFIG__?.workspaceFolder;
-  if (typeof workspaceFolder !== 'string' || workspaceFolder.trim().length === 0) {
-    return null;
-  }
-  const normalized = normalizeDirectoryPath(workspaceFolder);
-  return normalized.length > 0 ? normalized : null;
-};
-
 const initialHomeDirectory = getHomeDirectory();
 const initialCurrentDirectory = (() => {
-  const vscodeWorkspaceFolder = getVsCodeWorkspaceFolder();
-  if (vscodeWorkspaceFolder) {
-    return vscodeWorkspaceFolder;
-  }
   const persisted = getStoredLastDirectory();
-  if (persisted && !isVSCodeRuntime()) {
+  if (persisted) {
     return resolveDirectoryPath(persisted, initialHomeDirectory);
   }
   return initialHomeDirectory;

@@ -1,4 +1,3 @@
-import type { EditorAPI } from '@piarium/application-client';
 import type { DocumentIdentity } from '@/lib/documents/types';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
@@ -30,7 +29,6 @@ export const revealResourceInEditor = (input: {
   sessionId?: string;
   entryId?: string;
   toolCallId?: string;
-  editor?: EditorAPI;
 }): void => {
   const identity = { workspaceId: input.workspaceId, resourceId: input.resourceId };
   if (input.sessionId) {
@@ -53,9 +51,6 @@ export const revealResourceInEditor = (input: {
       cursorLine: input.line,
       ...(input.column ? { cursorColumn: input.column } : {}),
     }));
-  }
-  if (input.editor && !openedInMain) {
-    void input.editor.openFile(path, input.line, input.column);
   }
 };
 

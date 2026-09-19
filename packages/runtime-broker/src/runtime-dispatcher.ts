@@ -379,7 +379,6 @@ async function dispatchRuntimeRequestUnchecked(
         "headless",
         "mobile",
         "test",
-        "vscode",
         "web",
       ]);
       return broker.warmup();

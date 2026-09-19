@@ -37,7 +37,6 @@ import { workspaceEvents } from '@/lib/workspaceEvents';
 import { useI18n } from '@/lib/i18n';
 import type { I18nKey } from '@/lib/i18n/store';
 import { fileDiffFromPatch } from '@/lib/diff/patchFileDiff';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { startReviewFlow } from '@/lib/reviewFlow';
 import { WALKTHROUGH_ACTION_CLASS } from '@/components/views/walkthrough/walkthroughAction';
 import { useWalkthroughStore } from '@/stores/useWalkthroughStore';
@@ -604,7 +603,7 @@ const MultiFileDiffEntry = React.memo<MultiFileDiffEntryProps>(({
     const { t } = useI18n();
     const { git } = useRuntimeAPIs();
     const { isMobile } = useDeviceInfo();
-    const useMonacoFileDiff = !isMobile && !isVSCodeRuntime();
+    const useMonacoFileDiff = !isMobile;
     const workspace = useWorkbenchWorkspace();
     const absoluteFilePath = toAbsolutePath(directory, file.path);
     const documentResourceId = workspace.status === 'ready'
@@ -1000,7 +999,7 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const openContextSurface = useUIStore((state) => state.openContextSurface);
     const requestWalkthroughSource = useWalkthroughStore((state) => state.requestSource);
     const { screenWidth, isMobile } = useDeviceInfo();
-    const useMonacoFileDiff = !isMobile && !isVSCodeRuntime();
+    const useMonacoFileDiff = !isMobile;
 
     const isGitRepo = useIsGitRepo(effectiveDirectory ?? null);
     const status = useGitStatus(effectiveDirectory ?? null);
@@ -1040,8 +1039,8 @@ export const DiffView: React.FC<DiffViewProps> = ({
     const activeDiffStaged = forcedStaged ?? displayFileStaged;
 
     const isMobileLayout = isMobile || screenWidth <= 768;
-    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout && !isVSCodeRuntime();
-    const showWalkthroughAction = !isMobileLayout && !isVSCodeRuntime();
+    const showReviewAction = Boolean(currentSessionId) && !isMobileLayout;
+    const showWalkthroughAction = !isMobileLayout;
     const showFileSidebar = !hideStackedFileSidebar && !isMobileLayout && screenWidth >= 1024;
     const diffScrollRef = React.useRef<HTMLElement | null>(null);
     const fileSectionRefs = React.useRef(new Map<string, HTMLDivElement | null>());

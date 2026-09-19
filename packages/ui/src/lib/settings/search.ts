@@ -63,21 +63,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'appearance',
     titleKey: 'settings.piarium.visual.field.weekStartsOn',
     keywords: ['calendar', 'monday', 'sunday'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.light-theme',
     page: 'appearance',
     titleKey: 'settings.piarium.visual.field.lightTheme',
     keywords: ['theme', 'color', 'light mode'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.dark-theme',
     page: 'appearance',
     titleKey: 'settings.piarium.visual.field.darkTheme',
     keywords: ['theme', 'color', 'dark mode'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.window-transparency',
@@ -103,7 +100,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.visual.field.installAppName',
     descriptionKey: 'settings.piarium.visual.field.installAppNameHint',
     keywords: ['pwa', 'installed app'],
-    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
+    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop,
   },
   {
     id: 'appearance.pwa-orientation',
@@ -111,7 +108,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.visual.field.installOrientation',
     descriptionKey: 'settings.piarium.visual.field.installOrientationHint',
     keywords: ['pwa', 'portrait', 'landscape'],
-    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
+    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop,
   },
   {
     id: 'appearance.mobile-keyboard-mode',
@@ -119,7 +116,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.visual.field.mobileKeyboardMode',
     descriptionKey: 'settings.piarium.visual.field.mobileKeyboardModeHint',
     keywords: ['mobile', 'keyboard', 'resize'],
-    isAvailable: (ctx) => ctx.isMobile && ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
+    isAvailable: (ctx) => ctx.isMobile && ctx.isWeb && !ctx.isDesktop,
   },
   {
     id: 'appearance.interface-font-size',
@@ -140,7 +137,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.visual.field.terminalShell',
     descriptionKey: 'settings.piarium.visual.field.terminalShellHint',
     keywords: ['terminal', 'shell', 'bash', 'zsh', 'fish', 'pwsh', 'powershell'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.editor-font-size',
@@ -175,7 +171,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'general',
     titleKey: 'settings.piarium.visual.field.expandedEditorToolbar',
     keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'appearance.file-editor-keymap',
@@ -196,7 +191,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.visual.field.terminalQuickKeys',
     descriptionKey: 'settings.piarium.visual.field.terminalQuickKeysTooltip',
     keywords: ['terminal', 'keyboard', 'esc', 'ctrl', 'arrows'],
-    isAvailable: (ctx) => !ctx.isMobile && !ctx.isVSCode,
+    isAvailable: (ctx) => !ctx.isMobile,
   },
   {
     id: 'chat.render-mode',
@@ -233,14 +228,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.piarium.visual.field.sessionGoal',
     keywords: ['goal', 'objective', 'auto continue', 'small model'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'chat.session-goal-budget',
     page: 'chat',
     titleKey: 'settings.piarium.visual.goal.budgetLabel',
     keywords: ['goal', 'budget', 'tokens', 'limit'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'chat.reasoning-traces',
@@ -265,7 +258,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.piarium.visual.field.promptNavigatorEnabled',
     keywords: ['prompt', 'navigator', 'navigation', 'timeline', 'scroll'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'chat.collapsible-user-messages',
@@ -340,7 +332,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'chat',
     titleKey: 'settings.piarium.visual.field.showDotfiles',
     keywords: ['hidden files'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'chat.follow-up-behavior',
@@ -576,7 +567,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.remoteInstances.clientAuth.title',
     descriptionKey: 'settings.remoteInstances.clientAuth.description',
     keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'remote-instances.direct-hosts',
@@ -877,21 +867,18 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'magic-prompts',
     titleKey: 'settings.magicPrompts.page.block.visiblePrompt',
     keywords: ['prompt text', 'user message', 'template'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'magic-prompts.instructions',
     page: 'magic-prompts',
     titleKey: 'settings.magicPrompts.page.block.instructions',
     keywords: ['hidden prompt', 'instructions', 'template'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'magic-prompts.reset-overrides',
     page: 'magic-prompts',
     titleKey: 'settings.magicPrompts.page.actions.resetAllOverrides',
     keywords: ['reset', 'default prompts', 'overrides'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'shortcuts.keyboard-shortcuts',
@@ -918,14 +905,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.tunnel.field.provider',
     descriptionKey: 'settings.piarium.tunnel.description',
     keywords: ['remote access', 'cloudflare', 'ngrok'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.type',
     page: 'tunnel',
     titleKey: 'settings.piarium.tunnel.field.tunnelType',
     keywords: ['quick', 'managed remote', 'managed local'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.ttl',
@@ -933,14 +918,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.tunnel.field.connectLinkTtl',
     descriptionKey: 'settings.piarium.tunnel.field.tunnelSessionTtl',
     keywords: ['expiry', 'expiration', 'session ttl', 'connect link ttl'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.managed-remote',
     page: 'tunnel',
     titleKey: 'settings.piarium.tunnel.section.savedManagedRemoteTunnels',
     keywords: ['cloudflare', 'hostname', 'token', 'managed remote'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.managed-local-config',
@@ -948,7 +931,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.tunnel.field.configurationFile',
     descriptionKey: 'settings.piarium.tunnel.note.managedLocalUsesConfig',
     keywords: ['cloudflared', 'config', 'yaml', 'json', 'managed local'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'tunnel.start',
@@ -956,7 +938,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     titleKey: 'settings.piarium.tunnel.actions.startTunnel',
     descriptionKey: 'settings.piarium.tunnel.note.connectLinksOneTime',
     keywords: ['connect link', 'qr code', 'public url', 'remote access'],
-    isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'notifications.delivery',
@@ -975,7 +956,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'notifications',
     titleKey: 'settings.notifications.page.push.title',
     keywords: ['background', 'push'],
-    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop && !ctx.isVSCode,
+    isAvailable: (ctx) => ctx.isWeb && !ctx.isDesktop,
   },
 ] as const;
 

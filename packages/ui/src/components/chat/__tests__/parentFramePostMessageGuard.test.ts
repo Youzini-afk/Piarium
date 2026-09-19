@@ -2,9 +2,8 @@ import { describe, expect, test } from 'bun:test';
 
 /**
  * Mirrors the ChatContainer chat-settings-sync guard.
- * VS Code/Cursor/Positron webviews delete `window.parent`, so the old
- * `window.parent === window` check still fell through to `.postMessage` and
- * crashed chat open with:
+ * Some embedded hosts can omit `window.parent`, so the old equality check
+ * still fell through to `.postMessage` and crashed chat open with:
  * TypeError: Cannot read properties of undefined (reading 'postMessage')
  */
 const canPostMessageToParentFrame = (win: { parent?: unknown } | undefined): boolean => {
@@ -12,10 +11,10 @@ const canPostMessageToParentFrame = (win: { parent?: unknown } | undefined): boo
   return Boolean(win.parent) && win.parent !== win;
 };
 
-describe('parent-frame postMessage guard (VS Code webview)', () => {
-  test('rejects when parent was deleted (VS Code webview injector behavior)', () => {
-    const vscodeLikeWindow = { parent: undefined };
-    expect(canPostMessageToParentFrame(vscodeLikeWindow)).toBe(false);
+describe('parent-frame postMessage guard', () => {
+  test('rejects when parent is missing', () => {
+    const detachedWindow = { parent: undefined };
+    expect(canPostMessageToParentFrame(detachedWindow)).toBe(false);
   });
 
   test('rejects when parent is null', () => {
@@ -35,8 +34,8 @@ describe('parent-frame postMessage guard (VS Code webview)', () => {
   });
 
   test('old guard incorrectly allows deleted parent', () => {
-    const vscodeLikeWindow = { parent: undefined as unknown };
-    const oldGuardWouldSkip = vscodeLikeWindow.parent === vscodeLikeWindow;
+    const detachedWindow = { parent: undefined as unknown };
+    const oldGuardWouldSkip = detachedWindow.parent === detachedWindow;
     expect(oldGuardWouldSkip).toBe(false);
   });
 });

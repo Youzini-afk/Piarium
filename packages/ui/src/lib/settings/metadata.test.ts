@@ -36,7 +36,6 @@ for (const [index, definition] of BUILTIN_PI_INTEGRATION_DEFINITIONS.entries()) 
 const runtimeContext = (mcpInstalled: boolean): SettingsRuntimeContext => ({
   isDesktop: false,
   isMobile: false,
-  isVSCode: false,
   isWeb: true,
   mcpInstalled,
 });

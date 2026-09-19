@@ -151,8 +151,8 @@ MiniLM inference through Electron, so successful compilation alone does not esta
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 
-Every desktop icon, Web/README mark, VS Code icon, and mobile launcher asset is generated from the same
-startup-cube projection with `bun run branding:generate`. macOS packaging additionally compiles the
+Every desktop icon, Web/README mark, and mobile launcher asset is generated from the same startup-cube
+projection with `bun run branding:generate`. macOS packaging additionally compiles the
 generated light/dark Icon Composer sources into `Assets.car` on the native Mac runner before packaging.
 
 For a local or CI Windows x64 NSIS build, run from the repo root:
@@ -251,8 +251,8 @@ upgrade that installation; a newer Pi is retained, and no downgrade or silent up
 
 Electron's executable provides Node mode for the Piarium Host process, so running the desktop shell
 does not require a separately installed Node runtime. Pi remains an independent user-level tool and
-can still be used by the Pi CLI outside Piarium. Cloud and VS Code distributions deliberately keep a
-pinned Pi runtime because their unattended/isolated hosts have different reproducibility needs.
+can still be used by the Pi CLI outside Piarium. Cloud distributions deliberately keep a pinned Pi
+runtime because their unattended hosts have different reproducibility needs.
 
 The official ordinary installer still has to prove that its final dependency inventory contains no
 unused Pi SDK copy; the optional offline distribution may instead carry an explicitly verified

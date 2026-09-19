@@ -29,7 +29,6 @@ mock.module('./utils/safeStorage', () => ({
 }));
 
 mock.module('@/lib/desktop', () => ({
-  isVSCodeRuntime: () => false,
 }));
 
 mock.module('@piarium/application-client', () => ({

@@ -83,13 +83,11 @@ bun run check:pi
 | 为当前操作系统打包桌面端 | `bun run electron:build` |
 | 构建 Windows x64 NSIS 安装包 | `bun run electron:build:win` |
 | 烟测解包后的 Windows 应用 | `bun run electron:smoke:win` |
-| 启动 VS Code Extension Development Host | `bun run vscode:dev` |
-| 构建或打包 VS Code 扩展 | `bun run vscode:build` / `bun run vscode:package` |
 | 构建移动端资源 | `bun run mobile:build` |
 | 构建规范的云端运行时 | `bun run build:cloud-runtime` |
 | 校验文档站 | `bun run docs:validate` |
 
-共享 UI 是源码级库，不是独立应用。请通过 Web、Desktop 或 VS Code 验证 UI 行为，确保它运行在
+共享 UI 是源码级库，不是独立应用。请通过 Web 或 Desktop 验证 UI 行为，确保它运行在
 真实的宿主上下文中。
 
 ## 选择负责改动的包
@@ -99,7 +97,6 @@ bun run check:pi
 | 共享组件、状态、设置、聊天与插件 GUI | `packages/ui` |
 | 浏览器/远程服务、HTTP API、WebSocket 传输、云端 CLI | `packages/web` |
 | Windows/macOS/Linux 外壳、preload/IPC、SSH、更新和打包 | `packages/electron` |
-| VS Code 宿主、编辑器上下文与 Webview 传输 | `packages/vscode` |
 | Capacitor 原生外壳 | `packages/mobile` |
 | 可安全 JSON 序列化的协议与校验 | `packages/protocol` |
 | 浏览器/编辑器运行时客户端 | `packages/runtime-client` |
@@ -116,8 +113,8 @@ bun run check:pi
    改动匹配的全部项目 Skill。
 3. 保持改动聚焦。应包含直接需要的清理和测试，但无关重构应拆开，以免增加审查难度。
 4. 在真正负责该行为的边界添加或更新最小范围的回归测试。
-5. 验证协议涉及的每个运行端。共享类型通过类型检查，并不能证明 Desktop、Web、Relay、VS Code
-   或移动端实际可用。
+5. 验证协议涉及的每个运行端。共享类型通过类型检查，并不能证明 Desktop、Web、Relay 或移动端
+   实际可用。
 6. 用户行为、贡献流程、架构、安全或运维约定发生变化时，在同一改动中更新对应文档。
 
 修改带版本或持久化的数据形状时，优先提供一次明确迁移，将旧数据转换到当前形状。只有真实用户数据
@@ -145,7 +142,6 @@ bun run build
 | 云端运行时、Docker 或 SSH 部署 | `bun run test:cloud`，并构建一次规范云端运行时 |
 | Electron 生命周期、架构或更新器 | `bun run --cwd packages/electron test:architecture` 和/或 `test:updater` |
 | Windows 打包或原生模块 | `bun run electron:build:win`，随后运行 `bun run electron:smoke:win` |
-| VS Code 运行时（已弃用，仅手动） | 不属于正式 CI；只有明确维护这个历史适配层时，才运行 `bun run --cwd packages/vscode verify:pi-runtime` 和相应构建/打包命令 |
 | 导入、导出或删除 | `bun run dead-code`，并生产构建每个受影响的产品端 |
 | 文档站 | `bun run docs:validate`，并手动检查改动过的本地链接 |
 | 工作区 `package.json` 或根 lockfile | 运行 `bun run update:cloud-runtime-lock`，保持 `scripts/cloud-runtime.bun.lock` 与冻结安装一致 |

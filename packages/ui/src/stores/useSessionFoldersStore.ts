@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { getDeferredSafeStorage, getSafeStorage } from './utils/safeStorage';
-import { isVSCodeRuntime } from '@/lib/desktop';
 import { runtimeFetch } from '@piarium/application-client';
 import { getRuntimeKey } from '@piarium/application-client';
 
@@ -86,24 +85,8 @@ const touchRuntimeStorage = (runtimeKey: string, updatedAt = Date.now(), targetS
   targetStorage.setItem(STORAGE_INDEX_KEY, JSON.stringify({ runtimes }));
 };
 
-const isVSCodeWebview = (): boolean => {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  if (isVSCodeRuntime()) {
-    return true;
-  }
-
-  return (window as { __VSCODE_CONFIG__?: unknown }).__VSCODE_CONFIG__ !== undefined;
-};
-
 const schedulePersistToDisk = (foldersMap: SessionFoldersMap, collapsedFolderIds: Set<string>): void => {
   if (typeof window === 'undefined') {
-    return;
-  }
-
-  if (isVSCodeWebview()) {
     return;
   }
 
@@ -591,11 +574,6 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
 
 const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   if (diskHydrated || diskHydrationInFlight || typeof window === 'undefined') {
-    return;
-  }
-
-  if (isVSCodeWebview()) {
-    diskHydrated = true;
     return;
   }
 

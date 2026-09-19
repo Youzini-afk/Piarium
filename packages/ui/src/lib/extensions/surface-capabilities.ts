@@ -100,5 +100,5 @@ surfaceCapabilityRegistry.register({
   exposure: 'remote-safe',
   id: 'workspace.documents',
   projectTrust: 'required',
-  supports: ['desktop', 'mobile', 'vscode', 'web'],
+  supports: ['desktop', 'mobile', 'web'],
 }, documentCapability);

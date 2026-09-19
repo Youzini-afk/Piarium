@@ -41,7 +41,6 @@ identity (when active) and authoritative breakpoint list.
 Credentials stay in headers. Payloads must not include file bodies.
 
 Application-host endpoint/workspace switch disposes owners. Electron reuses this Web host.
-VS Code webviews report run/debug/test as `absent`/`unsupported` and do not spawn.
 The official IDE Run view unsubscribes when hidden and does not keep refreshing.
 
 ## Native lifetime handoff

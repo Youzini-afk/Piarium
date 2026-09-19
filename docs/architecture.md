@@ -2,6 +2,12 @@
 
 Status: Pi-native workbench/harness in production; Rust system-kernel Stage R complete through D-282.
 
+Current boundary (D-296): the former VS Code companion is retired before AI4S. The companion package,
+its build and packaging entrypoints, and companion-only shared surface contracts are not current
+product surfaces. The cleanup and root build were locally verified; packaged, cross-platform, and
+remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
+evidence may still name that surface where it records work completed before retirement.
+
 Last updated: 2026-09-19
 
 ## 1. Context
@@ -127,7 +133,7 @@ modes authorize loading Pi extension code or private plugin state in the rendere
 operation crosses a typed preload or runtime capability. OpenCode SDK types are removed from feature
 code rather than preserved behind a compatibility facade. The former SDK client, sync stores,
 optimistic session graph, old chat composer/turn projection, and old session sidebar have no parallel
-copy: their unreachable source and tests were deleted after all four production roots passed type,
+copy: their unreachable source and tests were deleted after all supported production roots passed type,
 lint, test, and bundle validation.
 
 Composer drafts are keyed by Pi runtime and session. Workspace surfaces may seed visible text and
@@ -139,8 +145,8 @@ creates a session: either one registered workspace ID or an explicit unbound/gen
 That metadata controls navigation grouping only and never replaces the Pi cwd. Native Pi sessions
 without Piarium metadata are grouped by their cwd, while an explicitly unbound session remains in
 Recent even when its runtime cwd happens to sit below a registered workspace. The same workspace
-picker, grouping rules, and navigation path are used by Web, Electron, mobile, the IDE shell, and
-the VS Code companion instead of keeping platform-specific workspace state.
+picker, grouping rules, and navigation path are used by Web, Electron, mobile, and the IDE shell
+instead of keeping platform-specific workspace state.
 
 The composer keeps three different controls semantically separate. Model and thinking mutate the Pi
 session or seed its creation. An Agent target applies only to the next draft and is rendered through
@@ -156,12 +162,9 @@ messages project into stable turns, the timeline has one virtual-list and scroll
 state comes only from the Pi runtime. OpenChamber's current chat is reference evidence rather than a
 second renderer or state layer.
 
-VS Code active-editor state is transient Piarium view state, not an OpenCode attachment contract.
-The Pi composer turns an accepted selection into the same session-scoped structured context used by
-file/diff comments, preserving the relative path and line range; accepting the whole file adds an
-explicit path context for Pi to read. Session completion/error attention is likewise owned by the Pi
-session store, derived from routed `agent.event`/`host.error` envelopes, cleared when the session is
-viewed, and shared by the sidebar, switcher, and mobile widget snapshot.
+Session completion and error attention are owned by the Pi session store. They are derived from routed
+`agent.event`/`host.error` envelopes, cleared when the session is viewed, and shared by the sidebar,
+switcher, and mobile widget snapshot.
 
 ### 4.2 Electron/web shell and broker
 
@@ -194,7 +197,7 @@ deployments may opt into them with `PIARIUM_RUNTIME_MAX_PAYLOAD_BYTES`,
 `PIARIUM_RUNTIME_MAX_PENDING_REQUESTS`, and `PIARIUM_RUNTIME_MAX_BUFFERED_BYTES`.
 
 `@piarium/application-client` is the framework-neutral application client boundary. It owns the
-`RuntimeAPIs` aggregate interface, all 24 API interfaces (Terminal, Git, Files, Documents, Settings,
+`RuntimeAPIs` aggregate interface and the named API interfaces (Terminal, Git, Files, Documents, Settings,
 Permissions, Notifications, Extensions, Language, Tasks, Debug, Tests, etc.), typed failures
 (DocumentsError, FilesystemError, LanguageServicesError, RunServicesError, WorkspaceSearchError),
 pure DTO types (WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch), and the single desktop
@@ -202,7 +205,7 @@ IPC contract (`desktop.ts`, exported as `@piarium/application-client/desktop`): 
 `PiariumDesktopCommandMap` for all 58 `desktop_*` commands, the `PiariumDesktopBridge` interface, the
 `PreloadBootstrapPayload` discriminated union, exhaustive runtime command/event catalogs, and the
 remote-safe command catalog. It has no React, Zustand, or UI component dependencies —
-only `@piarium/protocol` and `@piarium/extension-contract`. Web, VS Code, Electron main/preload, and
+only `@piarium/protocol` and `@piarium/extension-contract`. Web, Electron main/preload, and
 UI non-render code import from it directly rather than reaching into `@piarium/ui/lib/api`.
 
 Privileged runtime source and deployable artifacts are intentionally separate. Application Host source
@@ -257,7 +260,7 @@ Dead owners are reclaimed by process identity; deployments may opt into a wait b
 `PIARIUM_PROVIDER_CONFIG_LOCK_TIMEOUT_MS`, while `0` keeps the budget disabled.
 
 Application settings have one file authority, `@piarium/settings-store`, shared by the Web host,
-Electron, the VS Code companion, and the CLI. Reads distinguish a missing file from malformed or
+Electron, and the CLI. Reads distinguish a missing file from malformed or
 unreadable state. Every mutation re-reads under an owner lock and replaces the document through a
 complete temporary file; interrupted Windows replacement retains a complete `.previous` document.
 No surface may independently perform a whole-file read-modify-write or treat invalid JSON as an empty
@@ -528,8 +531,7 @@ extension, and migration contract is
 
 Mobile and embedded CodeMirror views submit offset edits against the same captured Document Registry
 revision and consume the applicable subset of the shared language DTO. They are separate Surface
-adapters, not a desktop compatibility renderer. The VS Code companion keeps the host editor and does
-not mount Piarium's file editor. Public custom editors use the framework-neutral document controller;
+adapters, not a desktop compatibility renderer. Public custom editors use the framework-neutral document controller;
 extensions that only augment the official desktop/Web editor can request the optional, owner-scoped
 `piarium.editor.monaco` v1 service. That service exposes serialized view state and declarative actions
 or decorations, never a raw model, DOM node, file authority, or process capability.
@@ -564,11 +566,8 @@ records determine the captured source. File, selection, diff, inline-comment, an
 follow one document identity instead of competing projections.
 
 Surface parity is explicit rather than assumed. Agent Workspace declares web, desktop, and mobile;
-the official IDE Workbench declares web and desktop only. VS Code is a companion that opens Piarium,
-sends editor context, and bridges the workspace; run, debug, and test stay truthfully
-`absent`/`unsupported` there and the official IDE chrome is not loaded into its webview. See
-[vscode-companion.md](vscode-companion.md). The full workbench contract, performance requirements,
-and per-slice acceptance criteria are in
+the official IDE Workbench declares web and desktop only. The full workbench contract, performance
+requirements, and per-slice acceptance criteria are in
 [composable-workbench.md](composable-workbench.md).
 
 ## 5. Versioned host protocol
@@ -1062,9 +1061,8 @@ The third slice adds `@piarium/extension-sdk`, `@piarium/extension-react`,
 the application host returns authenticated bytes rather than credential-bearing module URLs. A
 Surface verifies those bytes, stages every compatible entrypoint plus its styles and object URLs, and
 uses one revision-checked candidate-selection transaction. Activation or catalog-commit failure keeps
-the previous selected version and active generation. Web, bundled Electron, and VS Code use the same
-loader contract; VS Code owns its catalog in extension global storage and retains its no-blob-script
-CSP.
+the previous selected version and active generation. Web and bundled Electron use the same loader
+contract.
 
 The platform makes built-in pages and workflows replaceable above a narrow recovery kernel, supports
 declarative, managed, isolated, and explicitly trusted-native Surface entrypoints, and defines
@@ -1185,7 +1183,7 @@ settings, package source URLs, message content, fleet goals, or unknown health f
 ## 12. OpenChamber product-base migration
 
 The maintainer's OpenChamber fork is copied into Piarium as the authoritative application base.
-Its UI, session UX, desktop/web/mobile/VS Code surfaces, custom providers, remote/cloud access,
+Its UI, session UX, desktop/web/mobile surfaces, custom providers, remote/cloud access,
 workspace operations, terminal, Git, settings, archive restore, and security customizations are
 preserved unless a reviewed Pi-native implementation is demonstrably equivalent.
 
@@ -1343,10 +1341,9 @@ in-flight IDs and malformed/over-window admission terminate the epoch, and trunc
 worker before a clean restart. Host close waits admitted work and actual child exit instead of treating a
 caller-side cancellation as native completion.
 
-Web, cloud, Electron and VS Code release layouts now carry a manifest-verified kernel. Electron verifies the
-target TriviumDB and sherpa binaries and no longer ships or rebuilds `better-sqlite3`, `node-pty` or `bun-pty`;
-the Rust kernel owns those former storage/process responsibilities. The VS Code companion's workspace search
-uses its packaged kernel and has no Cargo/ripgrep fallback. Application Host build output is audited from its
+Web, cloud, and Electron release layouts carry a manifest-verified kernel. Electron verifies the target
+TriviumDB and sherpa binaries and no longer ships or rebuilds `better-sqlite3`, `node-pty` or `bun-pty`;
+the Rust kernel owns those former storage/process responsibilities. Application Host build output is audited from its
 real runtime entrypoints: a reachable legacy store/test helper fails the build, while unreachable test and old
 authority artifacts are pruned before publication. The legacy TS recovery file writer is now an explicit test
 helper; production retains only read-only path/hash utilities around the Rust file backend.

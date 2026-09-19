@@ -2310,7 +2310,7 @@ export const ContextPanel: React.FC = () => {
   const resizeAvailableWidthRef = React.useRef<number | null>(null);
   // The panel content follows the guide line lazily: the real width is
   // re-applied at most every RESIZE_FOLLOW_INTERVAL_MS and the standing
-  // 200ms width transition smooths each step, VS Code-style.
+  // 200ms width transition smooths each resize step.
   const resizeFollowTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const applyFollowWidth = React.useCallback(() => {

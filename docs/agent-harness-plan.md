@@ -9,8 +9,9 @@ Last updated: 2026-09-19
 理由追加到 [agent-harness-decisions.md](agent-harness-decisions.md)。正式能力直接实施、完成后默认提供；独立评测不是前置。
 全部交付后删除本计划，决策日志归档保留。
 
-当前下一实施阶段为 **Q：测试与 CI 体系重整（D-292）**，设计见 [testing-ci-design.md](testing-ci-design.md)。
-Q 收口后进入 AI4S 阶段 7；Q 的接受不表示测试/CI 已经改动，也不阻塞既有版本按自身产物证据发行。
+当前已完成 **D-296：退役原 VS Code companion**，决策与范围见
+[foundation-governance.md](decisions/foundation-governance.md)。下一阶段进入 AI4S 阶段 7；Q
+已完成并作为 D-296 的验证基础，不阻塞既有版本按自身产物证据发行。
 
 ## 0. 执行者须知
 
@@ -107,7 +108,7 @@ foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 
 
 **D-284–D-286 已实施，D-287 已完成消费者验收收口。** 容量驱动的后台摘要、按需续接与 history 回读，以及
 3.18A–E 的普通派发/可选预设、task/inherit/continue/fresh、定向通信、共享准入与连续交付均已进入生产链；当前事实见 status。
-**接下来先完成阶段 Q（D-292），再进入 AI4S 阶段 7（D-291）。** 外部 runtime adapter 是独立后续能力，不是 AI4S 的隐含前置。
+**阶段 Q（D-292）与 D-296 均已完成；接下来进入 AI4S 阶段 7（D-291）。** 外部 runtime adapter 是独立后续能力，不是 AI4S 的隐含前置。
 Q 整理全仓验证责任、测试装配与执行成本，不重开已完成的 Harness/Rust 迁移，也不把当前红灯一概当作测试问题。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
@@ -1023,14 +1024,16 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 
 ## 阶段 Q：测试与 CI 体系重整（D-292，已验收收口）
 
-设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓，完成后再开始 AI4S 的 7A–7F。
+设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓；其后 D-296 已收口，再开始 AI4S 的 7A–7F。
 先建立整体判断，再分责任完成修改；不得把它交付成只修近期几处失败、只删源码断言或只移动 workflow 的局部补丁。
-当前状态是 Q0–Q3 已实施并经主代理验收收口（D-293/D-295）；`packages/vscode` 适配层按 D-294/D-295 标记为 deprecated/unsupported，不计入本阶段正式产品测试证据或 required CI。以下编号保留为实施记录，不构成每次日常开发都要重复的检查流程。
+当前状态是 Q0–Q3 已实施并经主代理验收收口（D-293/D-295）；D-296 已完成原 VS Code
+companion 的完整退役，故它不再是当前 required CI 或手动入口。以下编号保留为实施记录，不构成每次
+日常开发都要重复的检查流程。
 
 ### Q0. 全仓现状、责任和目标结构
 
 1. 从当前 tracked 文件、各 package scripts、runner 配置、Cargo 与独立 smoke/workflow 入口建立测试家族与执行关系。
-   覆盖 UI/Web/CLI/Electron/Mobile/VS Code、Pi/broker/client、protocol/settings/extensions、kernel、构建/部署脚本；
+   覆盖 UI/Web/CLI/Electron/Mobile、Pi/broker/client、protocol/settings/extensions、kernel、构建/部署脚本；
    排除依赖和产物副本。统计测试文件与实际发现/执行集合时分别标明口径，不用 grep 出来的声明数量冒充通过用例数。
 2. 复用近期 CI 日志，定位时间集中项、重复运行/构建、失败和未执行入口。对代表性慢测试、易碎测试与关键正确性链读取
    完整装配和消费者，区分产品问题、测试问题、环境故障。不能仅按 `mock`、`readFile`、文件长度等关键词判定删除。
@@ -1102,11 +1105,22 @@ Q1 与 Q2 可在责任明确后交错推进，但不得先隐藏未解决失败�
 诊断问题已收口。当前重大产品错误不得冒充测试噪声；无关外部服务短暂失败和可选优化不把本阶段变成无限验收。
 不要求固定次数全绿、付费模型实验、全量 mutation testing 或新增监控平台。
 
-Q 完成后再实施 7A；AI4S 直接沿用整理后的职责与脚本，不为科研 Profile 重建一套验证体系。
+Q 完成后已实施 D-296；AI4S 直接沿用整理后的职责与脚本，不为科研 Profile 重建一套验证体系。
+
+## D-296：退役原 VS Code companion（AI4S 前）
+
+D-296 紧接阶段 Q，完成 AI4S 7A–7F 之前的产品边界收口。实现范围是删除 companion 包、开发/构建/打包
+入口、companion-only shared contracts，以及当前安装、Marketplace、配置和开发说明；不保留归档兼容副本。
+涉及 LSP 包、TextMate 格式、外部编辑器启动或 provenance 的文字按原语义保留，历史 changelog、决策正文
+和阶段 R 交付证据不改写。
+
+当前状态：文档与公共入口说明已同步；代码、配置、脚本和发布链已完成。根构建（含 Web
+Host+Vite、Electron bundle、Mobile assets）与 built-server knowledge smoke 2/2 已本地通过。未把
+packaged、跨平台或远端 CI 结果外推为本地证据；D-296 已完成，下一阶段进入 AI4S。
 
 ## 阶段 7：AI4S 科研集群（D-291，设计已接受）
 
-实施前先完成阶段 Q（D-292）。科研设计与讨论可继续，7A–7F 的功能实施在测试与 CI 重整收口后启动。
+阶段 Q（D-292）与 D-296 已完成。科研设计与讨论可继续，7A–7F 的功能实施现在可以启动。
 
 本阶段的产品中心是异构模型科研集群，而不是科研资料管理器。首席研究主线负责问题发现、第一性原理分析、跨分支综合和文章主线；
 研究 Thread 负责独立调查、实验设计、实现、复核和写作缺口；Host 调度模型与实际计算资源，普通批处理和进程监控由程序完成。

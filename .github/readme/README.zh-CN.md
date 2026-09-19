@@ -102,7 +102,7 @@ IDE Profile 将工作区导航和编辑器基础设施与完整的 Pi 智能体�
   编辑器、面板、Composer、Timeline 或状态栏，并混用官方与社区贡献。切换是实时的，不刷新文档、
   不重启 Pi 运行时、不丢失共享的工作区状态。
 - **多个产品端：** Electron、Web 和 Capacitor 移动端外壳共享一套 React UI，并通过明确的运行时
-  能力与宿主通信；VS Code 是把编辑器上下文送进 Piarium 的伴侧扩展，而不是第二套工作台。
+  能力与宿主通信。
 - **云端与远程运行：** 支持带认证的 WebSocket、Relay/隧道、多架构容器，以及经过健康检查和
   可回滚的原子 SSH 部署。
 
@@ -162,7 +162,7 @@ Piarium 自带捆绑的 Pi 运行时，并通过 Runtime Manager 发现用户级
 升级 Pi；完成真实 Host 握手后即可使用，无需重启 Piarium。Electron 自带运行应用所需的 Node 环境，
 但 Pi 本身仍作为独立的用户级工具存在。Windows、Linux 和 macOS 的 x64/ARM64 原生桌面包均在对应
 架构的 runner 上验证应用启动、Runtime Manager、健康检查和终端生命周期；可选离线包仍待后续提供。
-容器和 VS Code 扩展则固定自带经过验证的 Pi 运行时，以保证无人值守部署和编辑器宿主可复现。
+容器固定自带经过验证的 Pi 运行时，以保证无人值守部署可复现。
 
 ### 运行 Web 开发环境
 
@@ -267,7 +267,6 @@ Electron 在主进程里运行同一个宿主，而不是再造一套桌面后�
 | `packages/ui` | 共享的 Pi 原生 React UI、状态、设置和扩展界面 |
 | `packages/web` | 浏览器/远程前端、可信 Application Host 与云端 CLI |
 | `packages/electron` | 原生桌面外壳、特权边界、打包、SSH 和更新 |
-| `packages/vscode` | VS Code 扩展宿主、Webview 和运行时桥接 |
 | `packages/mobile` | 连接 Piarium 服务端的 Capacitor iOS/Android 外壳 |
 | `packages/protocol` | 带版本且可安全 JSON 序列化的工作进程/产品端协议 |
 | `packages/runtime-client` | 可在浏览器中使用的运行时请求/事件客户端 |
@@ -321,7 +320,6 @@ CI 固定为三条职责不同的门禁：Ubuntu 源码质量、Windows 运行�
 - [可组合工作台与 IDE 约定](../../docs/composable-workbench.md)
 - [统一文件编辑器平台](../../docs/unified-file-editor-platform.md)
 - [Piarium 扩展平台](../../docs/piarium-extension-platform.md)
-- [VS Code 伴侧迁移](../../docs/vscode-companion.md)
 - [从 OpenChamber 迁移到 Pi 的约定](../../docs/openchamber-pi-migration.md)
 - [插件 GUI 与状态归属设计](../../docs/plugin-gui-design.md)
 - [恢复模型](../../docs/recovery.md)

@@ -2,6 +2,10 @@
 
 Status: current unified editor architecture and acceptance contract
 
+Current boundary (D-296): this contract covers the supported Web, Electron, mobile, and embedded
+editor surfaces. The former VS Code companion material below is retained only as historical rationale
+for the editor boundary; it is not a supported integration or compatibility target.
+
 Last updated: 2026-09-02
 
 本文规定 Piarium 文件编辑能力的产品目标、权威边界、桌面/Web 与移动端分工、Monaco
@@ -21,14 +25,11 @@ Piarium 不维护 Agent 一套文件编辑器、IDE 另一套文件编辑器。�
 - 官方 mobile Agent 使用轻量 CodeMirror adapter。Monaco 官方明确不支持移动浏览器，因此移动
   端不伪装成 Monaco parity，但仍共用 Document Registry、DocumentsAPI、保存/冲突语义、命令
   ID 和语言服务 DTO；
-- VS Code companion 不挂载 `ResourceEditorHost` 或官方 IDE Workbench。文件继续由宿主 VS Code
-  editor 显示，companion 只桥接当前文件/选区和共享 Runtime DTO，因此它既不加载第二份 Monaco，
-  也不需要 CodeMirror 文件 adapter；
 - 聊天 composer、设置 JSON/JSONC、Prompt 等嵌入式小编辑器继续使用 textarea 或
   CodeMirror。它们不是文件工作台，不建设第二套文件 IDE 能力；
 - 桌面/Web 文件 diff 使用 Monaco diff editor；聊天消息、PR 展示等非文件型只读 diff 可以继续
   使用现有专用 renderer；
-- 不 fork Code OSS，不运行 VS Code extension host，不把 VS Code 扩展误当成 Piarium 扩展；
+- 不 fork Code OSS，不把外部编辑器扩展误当成 Piarium 扩展；
 - 社区扩展仍可通过 `editor` contribution 完整替换官方文件编辑器，使用任意框架或渲染技术。
 
 这不是“把 CodeMirror 组件换成 Monaco 组件”。目标是把现有已经正确的 Piarium 文档权威接到
@@ -473,7 +474,7 @@ path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 s
   变化；
 - 隐藏的 debug/test/Git/Agent editor integration 不保留 rAF、DOM observer 或无消费者 subscription。
 
-## 11. 移动端、VS Code companion 与嵌入式编辑器
+## 11. 移动端与嵌入式编辑器
 
 移动端不是降级成另一套产品状态：
 
@@ -483,12 +484,6 @@ path 注册 Host-side server，不在 Web renderer 中 spawn，也不写死进 s
 - mobile 不下载 Monaco runtime、features、language definitions 或 workers；
 - 官方 IDE Profile 继续不声明 mobile 支持；第三方 mobile editor provider 仍可完整替换官方 adapter。
 
-VS Code companion 是另一条明确边界：
-
-- 它不渲染官方文件 workbench，不创建 Piarium file model，也不加载 Monaco/CodeMirror 文件 adapter；
-- 文件正文、光标、选区和编辑快捷键继续由宿主 VS Code editor 拥有；
-- companion 把宿主当前文件/选区投影成 Piarium Agent context，并保留 documents/search/language 的
-  extension-host bridge 以满足共享 RuntimeAPI contract；
 - Phase 4 更新其 DTO/contract fixtures 只是在保持 Runtime parity，不代表给 webview 增加文件编辑器；
 - 继续拒绝把 `piarium.ide` 或第二套 Settings/Agent Manager/session editor 放回 webview。
 

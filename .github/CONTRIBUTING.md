@@ -94,14 +94,12 @@ Run commands from the repository root unless noted otherwise.
 | Package desktop for the current OS | `bun run electron:build` |
 | Package Windows x64 NSIS installer | `bun run electron:build:win` |
 | Smoke an unpacked Windows build | `bun run electron:smoke:win` |
-| VS Code Extension Development Host | `bun run vscode:dev` |
-| Build or package VS Code | `bun run vscode:build` / `bun run vscode:package` |
 | Build mobile assets | `bun run mobile:build` |
 | Build canonical cloud runtime | `bun run build:cloud-runtime` |
 | Validate documentation site | `bun run docs:validate` |
 
-The shared UI is a source library rather than a standalone app. Exercise UI behavior through Web,
-Desktop, or VS Code so the runtime context is real.
+The shared UI is a source library rather than a standalone app. Exercise UI behavior through Web or
+Desktop so the runtime context is real.
 
 ## Choosing the owning package
 
@@ -110,7 +108,6 @@ Desktop, or VS Code so the runtime context is real.
 | Shared components, stores, settings, chat, and plugin GUI | `packages/ui` |
 | Browser/remote server, HTTP APIs, WebSocket transport, cloud CLI | `packages/web` |
 | Windows/macOS/Linux shell, preload/IPC, SSH, updater, packaging | `packages/electron` |
-| VS Code host, editor context, webview transport | `packages/vscode` |
 | Capacitor native shell | `packages/mobile` |
 | JSON-safe wire contract and validation | `packages/protocol` |
 | Browser/editor runtime client | `packages/runtime-client` |
@@ -130,7 +127,7 @@ work around a missing contract with an unrelated local store or a renderer-only 
    refactors that make review harder.
 4. Add or update the narrowest regression test that proves the behavior at its owning boundary.
 5. Exercise every runtime surface whose contract changed. Type-checking a shared type is not proof
-   that Desktop, Web, relay, VS Code, or mobile behavior works.
+   that Desktop, Web, relay, or mobile behavior works.
 6. Update user, contributor, architecture, security, or operational documentation in the same
    change when its contract changed.
 
@@ -160,7 +157,6 @@ Run these when the affected boundary applies:
 | Cloud runtime, Docker, or SSH deployment | `bun run test:cloud` and a canonical runtime build |
 | Electron lifecycle, architecture, or updater | `bun run --cwd packages/electron test:architecture` and/or `test:updater` |
 | Windows packaging or native modules | `bun run electron:build:win` followed by `bun run electron:smoke:win` |
-| VS Code runtime (deprecated/manual only) | Not a required CI path; if the historical adapter is explicitly maintained, run `bun run --cwd packages/vscode verify:pi-runtime` plus the relevant build/package command |
 | Imports, exports, or deletion | `bun run dead-code` and a production build of each affected surface |
 | Documentation site | `bun run docs:validate` and manual checking of changed local links |
 | Workspace `package.json` or root lockfile | `bun run update:cloud-runtime-lock` so `scripts/cloud-runtime.bun.lock` stays frozen |

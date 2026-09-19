@@ -39,7 +39,7 @@ export interface PiariumBuiltinPluginAdapterData {
 export const PIARIUM_BUILTIN_EXTENSION_VERSION = "0.1.0";
 export const PIARIUM_BUILTIN_EXTENSION_PREFIX = "piarium.builtin.";
 export const PIARIUM_INTEGRATION_ENTRYPOINT_ID = "main";
-export const PIARIUM_INTEGRATION_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile", "vscode"];
+export const PIARIUM_INTEGRATION_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_ID = "piarium.builtin.typescript-language";
 export const PIARIUM_BUILTIN_TYPESCRIPT_LANGUAGE_EXTENSION_VERSION = "5.3.0+typescript.5.9.3.piarium.1";
 export const PIARIUM_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID = "piarium.builtin.language-servers";

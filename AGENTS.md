@@ -45,7 +45,6 @@ reliable as code, a script, or normal documentation.
   language, task, debug, test, and Pi runtime services.
 - `packages/electron` is the native shell. It hosts the Web application host in-process and must not
   grow a parallel backend.
-- `packages/vscode` is a companion extension and runtime bridge, not a second workbench.
 - `packages/mobile` is a Capacitor client connected to a Piarium server.
 - Runtime, protocol, and extension packages own their named process and contract boundaries as mapped in
   [docs/architecture.md](docs/architecture.md).
@@ -57,8 +56,8 @@ reliable as code, a script, or normal documentation.
   harness status.
 
 Never execute Pi extensions in a renderer. Keep privileged filesystem, network, credential, shell, and
-process behavior in the application host, Electron main/preload, VS Code extension host, or Pi host as
-appropriate. Validate untrusted process/network input and never log credentials, prompt bodies,
+process behavior in the application host, Electron main/preload, or Pi host as appropriate. Validate
+untrusted process/network input and never log credentials, prompt bodies,
 bearer/pairing data, or file contents.
 
 ## Workbench and data invariants
@@ -70,7 +69,7 @@ bearer/pairing data, or file contents.
 - `DocumentsAPI` is the single text-content path. `FilesAPI` remains browse/binary/CRUD and
   `WorkspaceAPI` remains project/tree/Git/upload.
 - Desktop/Web Agent and IDE share the Monaco document path. Mobile and embedded editors use their
-  purpose-specific CodeMirror adapters; VS Code keeps its host editor. None creates another buffer,
+  purpose-specific CodeMirror adapters. None creates another buffer,
   dirty-state, save, or language-process authority.
 - Pi session JSONL, Pi settings/packages, and plugin-native configuration remain their documented
   authorities. Missing, empty, malformed, stale, failed, and conflicting states must not collapse into

@@ -297,10 +297,6 @@ html[data-piarium-vibrancy] .piarium-vibrancy-pill {
   color: color-mix(in srgb, var(--syntax-comment) 85%, var(--syntax-foreground) 15%);
 }
 
-:root.vscode-runtime [data-chat-input="true"] .cm-placeholder {
-  color: color-mix(in srgb, var(--vscode-input-placeholderForeground, var(--muted-foreground)) 65%, transparent);
-}
-
 /* Match chat footer background to input in WebKit to avoid dual-tone hover/focus */
 div[data-chat-input-footer="true"] {
   background: transparent !important;
@@ -759,21 +755,21 @@ html:not(.dark) .chat-scroll {
 }
 
 /* Header tab responsiveness */
-:root:not(.mobile-pointer):not(.vscode-runtime) .header-tab-label {
+:root:not(.mobile-pointer) .header-tab-label {
   display: inline;
 }
-:root:not(.mobile-pointer):not(.vscode-runtime) .header-open-label {
+:root:not(.mobile-pointer) .header-open-label {
   display: inline;
 }
 
 @media (max-width: 940px) {
-  :root:not(.mobile-pointer):not(.vscode-runtime) .header-tab-label {
+  :root:not(.mobile-pointer) .header-tab-label {
     display: none;
   }
-  :root:not(.mobile-pointer):not(.vscode-runtime) .header-open-label {
+  :root:not(.mobile-pointer) .header-open-label {
     display: none;
   }
-  :root:not(.mobile-pointer):not(.vscode-runtime) .header-tab-badge {
+  :root:not(.mobile-pointer) .header-tab-badge {
     margin-left: -0.125rem;
   }
 }
@@ -783,7 +779,7 @@ html:not(.dark) .chat-scroll {
    Minimal overrides - fonts only, using Streamdown defaults
    ============================================ */
 
-/* VS Code webviews can inject default pre/code/blockquote backgrounds; tool input/output should inherit the card surface. */
+/* Tool input/output should inherit the card surface. */
 .tool-input-surface pre,
 .tool-input-surface code,
 .tool-input-surface blockquote,
@@ -792,57 +788,25 @@ html:not(.dark) .chat-scroll {
   background-color: transparent !important;
 }
 
-/* VSCode: tool cards should honor semantic code sizing, even when syntax themes inject sizes. */
-:root.vscode-runtime .tool-input-surface,
-:root.vscode-runtime .tool-output-surface {
-  font-size: var(--text-code) !important;
-}
-
-:root.vscode-runtime .tool-input-surface code,
-:root.vscode-runtime .tool-input-surface pre,
-:root.vscode-runtime .tool-output-surface code,
-:root.vscode-runtime .tool-output-surface pre {
-  font-size: inherit !important;
-}
-
 /* Model/agent controls: progressively collapse labels to icon-only as the row narrows.
    Hide priority (most aggressive first → most resilient last): agent, variant, model. */
 
-/* Desktop (non-VSCode): pick thresholds that fire BEFORE the per-label `max-w-[Xpx]`
+/* Pick thresholds that fire BEFORE the per-label `max-w-[Xpx]`
    constraints would truncate text with an ellipsis. */
 @container model-controls (max-width: 22rem) {
-  :root:not(.vscode-runtime) .model-controls__agent-label {
+  .model-controls__agent-label {
     display: none;
   }
 }
 
 @container model-controls (max-width: 14rem) {
-  :root:not(.vscode-runtime) .model-controls__variant-label {
+  .model-controls__variant-label {
     display: none;
   }
 }
 
 @container model-controls (max-width: 10rem) {
-  :root:not(.vscode-runtime) .model-controls__model-label {
-    display: none;
-  }
-}
-
-/* VS Code side panel: tighter thresholds since the panel is narrow and labels are smaller. */
-@container model-controls (max-width: 11rem) {
-  :root.vscode-runtime .model-controls__agent-label {
-    display: none;
-  }
-}
-
-@container model-controls (max-width: 9rem) {
-  :root.vscode-runtime .model-controls__variant-label {
-    display: none;
-  }
-}
-
-@container model-controls (max-width: 10rem) {
-  :root.vscode-runtime .model-controls__model-label {
+  .model-controls__model-label {
     display: none;
   }
 }

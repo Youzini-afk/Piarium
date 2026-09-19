@@ -43,14 +43,14 @@ describe('Pi editor context store', () => {
 
   test('accepts a host-owned editor without inventing a Piarium workspace identity', () => {
     expect(normalizePiActiveEditorFile({
-      documentInstanceId: 'vscode:file:///work/example.ts:3',
+      documentInstanceId: 'monaco:file:///work/example.ts:3',
       fileName: 'example.ts',
       filePath: 'D:/work/example.ts',
       fileSize: null,
       relativePath: 'example.ts',
       runtimeKey: getRuntimeKey(),
       selection: null,
-      viewId: 'vscode:active-editor',
+      viewId: 'monaco:active-editor',
       workspaceId: null,
     })?.workspaceId).toBeNull();
   });

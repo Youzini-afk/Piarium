@@ -32,14 +32,12 @@ import type {
   JsonValue,
 } from '@piarium/extension-contract';
 
-export type RuntimePlatform = 'web' | 'desktop' | 'vscode';
+export type RuntimePlatform = 'web' | 'desktop';
 
 export interface RuntimeDescriptor {
   platform: RuntimePlatform;
 
   isDesktop: boolean;
-
-  isVSCode: boolean;
 
   label?: string;
 }
@@ -780,26 +778,6 @@ export interface ToolsAPI {
   getAvailableTools(): Promise<string[]>;
 }
 
-export interface EditorAPI {
-  openFile(path: string, line?: number, column?: number): Promise<void>;
-  openDiff(
-    original: string,
-    modified: string,
-    label?: string,
-    options?: { line?: number; patch?: string },
-  ): Promise<void>;
-}
-
-export interface VSCodeAPI {
-  executeCommand(command: string, ...args: unknown[]): Promise<unknown>;
-  openAgentManager(): Promise<void>;
-  openSettings?(settingsPage?: string): Promise<void>;
-  openExternalUrl(url: string): Promise<void>;
-  pickFiles?(options?: { extensions?: string[] }): Promise<unknown>;
-  saveImage?(payload: unknown): Promise<unknown>;
-  saveMarkdown?(payload: unknown): Promise<unknown>;
-}
-
 export interface PushSubscribePayload {
   endpoint: string;
   keys: {
@@ -807,7 +785,7 @@ export interface PushSubscribePayload {
     auth: string;
   };
   origin?: string;
-  /** Runtime surface ('ios' | 'android' | 'vscode' | 'desktop' | 'web') for presence-aware routing. */
+  /** Runtime surface for presence-aware routing. */
   platform?: string;
 }
 
@@ -2534,8 +2512,6 @@ export interface RuntimeAPIs {
   smartSearch?: SmartSearchAPI;
   extensions: ExtensionsAPI;
   tools: ToolsAPI;
-  editor?: EditorAPI;
-  vscode?: VSCodeAPI;
   worktrees?: WorktreeMetadata[];
 }
 

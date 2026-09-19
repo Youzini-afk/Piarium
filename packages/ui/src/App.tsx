@@ -209,7 +209,6 @@ function App({ apis }: AppProps) {
   const setDirectory = useDirectoryStore((state) => state.setDirectory);
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
-  const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
@@ -236,10 +235,6 @@ function App({ apis }: AppProps) {
   }, [mobileKeyboardMode]);
 
   useMobileAppViewport(enableMobileAppViewport);
-
-  React.useEffect(() => {
-    setIsVSCodeRuntime(apis.runtime.isVSCode);
-  }, [apis.runtime.isVSCode]);
 
   React.useEffect(() => {
     return subscribeRuntimeEndpointChanged((detail) => {
@@ -443,7 +438,7 @@ function App({ apis }: AppProps) {
   }, [embeddedSessionChat]);
 
   React.useEffect(() => {
-    if (!embeddedSessionChat?.directory || isVSCodeRuntime) {
+    if (!embeddedSessionChat?.directory) {
       return;
     }
 
@@ -452,7 +447,7 @@ function App({ apis }: AppProps) {
     }
 
     setDirectory(embeddedSessionChat.directory, { showOverlay: false });
-  }, [currentDirectory, embeddedSessionChat, isVSCodeRuntime, setDirectory]);
+  }, [currentDirectory, embeddedSessionChat, setDirectory]);
 
   React.useEffect(() => {
     if (!embeddedSessionChat || typeof window === 'undefined') {

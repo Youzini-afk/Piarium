@@ -47,7 +47,7 @@ export const resolveRuntimeWorkspaceRoot = async (
   apis: RuntimeAPIs,
   options: { desktopLocal?: boolean } = {},
 ): Promise<string | null> => {
-  if (options.desktopLocal || apis.runtime.isVSCode || !apis.workspace) return null;
+  if (options.desktopLocal || !apis.workspace) return null;
   const snapshot = await apis.workspace.getRoot();
   return normalizeFilePath(snapshot.root) || null;
 };

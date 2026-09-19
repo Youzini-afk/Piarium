@@ -68,7 +68,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   }
   if (settings.activeProjectId) {
     localStorage.setItem('activeProjectId', settings.activeProjectId);
-  } else if (settings.activeProjectId === null || !getRegisteredRuntimeAPIs()?.runtime.isVSCode) {
+  } else if (settings.activeProjectId === null) {
     localStorage.setItem('activeProjectId', NO_ACTIVE_PROJECT_STORAGE_VALUE);
   }
   if (Array.isArray(settings.pinnedDirectories) && settings.pinnedDirectories.length > 0) {

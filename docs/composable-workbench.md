@@ -2,6 +2,10 @@
 
 Status: current architecture and ownership contract
 
+Current boundary (D-296): the former VS Code companion is retired from the supported product
+surface. References to that adapter in older delivery notes are historical and do not define a
+current surface contract.
+
 Last updated: 2026-09-02
 
 这份文档规定 Piarium 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
@@ -49,7 +53,6 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 | 动态切换 | 同一 Surface 内热切换；新 Shell 就绪前保留旧 Shell，失败时不提交选择 |
 | 故障恢复 | Recovery Shell 由 Core 固定提供；它只负责恢复扩展/Profile，不是第三套日常工作区 |
 | 移动端 | 官方移动端继续以 Agent Profile 为主；完整官方 IDE 初始只声明 desktop/web 支持 |
-| VS Code | 暂时保留；自有 IDE 达到验收后收敛成 Companion，不继续建设第二套完整工作台 |
 | Pi 插件 | Pi Packages、Plugin Settings 及其原生数据权威不并入 Piarium 扩展生命周期 |
 | 发布 | 代码交付与 GitHub Release、npm tag、公共 SDK 发布是分别授权的动作 |
 
@@ -62,7 +65,7 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 - `piarium.builtin.agent-workspace` 与 `piarium.builtin.ide-workbench` 是普通 built-in Shell contribution；
 - Agent Shell 的 `MainLayout.tsx` 是第一方内部组合，不是 Core fallback；IDE 的六个结构区域是真实 replacement host；
 - Application Host 的 revisioned Documents authority、客户端 Document Registry 和 Editor Workbench Kernel 是唯一共享文档路径；
-- desktop/Web 官方编辑器使用 Monaco，mobile/embedded 使用 CodeMirror adapter，VS Code 保留宿主编辑器；
+- desktop/Web 官方编辑器使用 Monaco，mobile/embedded 使用 CodeMirror adapter；
 - Search、Language、Run、Debug 和 Tests 由 Host provider/service 管理，renderer 不启动特权进程；
 - 固定 Recovery Shell 只负责修复扩展/Profile，不是第三套日常工作台。
 
@@ -129,7 +132,7 @@ interface PiariumConnectionOwner {
 
 interface PiariumSurfaceIdentity {
   applicationHostId: string;
-  surface: 'desktop' | 'web' | 'mobile' | 'vscode';
+  surface: 'desktop' | 'web' | 'mobile';
   surfaceInstanceId: string;
 }
 
@@ -342,7 +345,6 @@ type PiariumWorkspaceFileEvent =
 - reconnect/overflow 发送 `reset`，消费者重新读取打开文档和可见树，不从不完整事件推断删除；
 - Web 使用认证后的已有 transport/明确 route；凭据不进入 URL；
 - Electron 复用 Web/Application Host，不新增文件系统 preload IPC；
-- VS Code 通过 extension host 的 workspace filesystem watcher 实现相同抽象；
 - hosted mobile 复用远端 Web host；本地 Capacitor 文件系统不意外 fall through；
 - watcher 只通知元数据，不发送文件正文，不记录正文；
 - visible/open resources 驱动读取，隐藏 Shell 不启动第二个 watcher。
@@ -533,7 +535,7 @@ versioned Host service `piarium.language` 由多 provider 路由选择具体实�
 - 不在 renderer、Pi worker 或 Electron preload 中启动 language server；
 - 不把所有语言服务器打进普通安装包。第一方/社区 language extension 提供 discovery、command 和配置。
 
-Electron 复用同进程 Web/Application Host。远程 Web 在服务器工作区运行 LSP。VS Code 可以桥接其 extension host 或稳定声明 unsupported，不允许浏览器意外 spawn。
+Electron 复用同进程 Web/Application Host。远程 Web 在服务器工作区运行 LSP，不允许浏览器意外 spawn。
 
 ## 12. Agent 与编辑器协作
 
@@ -580,7 +582,6 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 | Electron | 复用 Web Host | 完整 | 完整 | 只有窗口/菜单/对话框等原生能力走 Electron IPC |
 | Hosted mobile | 复用远端 Web Host | 完整移动布局 | 官方 IDE 初始不声明支持 | 远端 Host |
 | Capacitor | 连接 Piarium server | 完整移动布局 | 稳定 unsupported | 不直接访问设备项目文件 |
-| VS Code | extension-host bridge | 保留当前工作流 | 官方 IDE 不声明支持 | 文件/LSP 可桥接或明确 unsupported |
 | Headless | Host contract only | 无 Surface | 无 Surface | Documents/search/language provider 可供协议测试 |
 
 每个新增 Runtime API 在共享接口中明确以上行为。Electron 不因为“桌面 IDE”而获得一个并行文件后端。
@@ -691,7 +692,6 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 | 公共 SDK 过早冻结错误抽象 | 官方 Agent、IDE、editor、LSP 先消费，再按真实使用结果演进公共契约 |
 | LSP/DAP 子进程失控 | Application Host supervisor、owner generation、workspace trust、shutdown cleanup |
 | Electron 重复后端 | Electron 继续复用 Web/Application Host |
-| VS Code 永久双实现 | VS Code 保持 Companion 边界，不继续建设第二套完整工作台 |
 | 为大文件/仓库随意加小上限 | 先测量真实 scale，使用警告、按需加载、索引、背压或可配置策略 |
 
 ## 19. 最高风险的边界
@@ -703,5 +703,5 @@ Pi 和 Pi 插件继续写真实 workspace 文件。Document watcher 负责协调
 3. Agent/IDE 热切换状态保留；
 4. external extension disable/update cleanup；
 5. LSP/DAP provider generation 与 workspace trust；
-6. Web/Electron/VS Code/mobile 明确 parity；
+6. Web/Electron/mobile 明确 parity；
 7. 公共 npm tarball 与文档契约一致。

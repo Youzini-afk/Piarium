@@ -11,7 +11,7 @@ export type JsonPrimitive = boolean | number | string | null;
 
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
-export type HostMode = "desktop" | "headless" | "mobile" | "test" | "vscode" | "web";
+export type HostMode = "desktop" | "headless" | "mobile" | "test" | "web";
 
 export type RuntimeSourceKind =
   | "bundled"

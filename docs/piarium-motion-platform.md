@@ -320,7 +320,6 @@ Scene 平台的硬上限。
 | Electron managed | 复用同一 Web Surface host，不新增 preload 动画 API |
 | Hosted mobile | 远端 Web Host + mobile Surface；只有支持 mobile 的 scene 参与 |
 | Capacitor | 使用同一 Surface contract；不取得设备文件权限 |
-| VS Code companion | 不加载官方完整 Workbench；稳定不消费 Profile scene |
 | declarative | descriptor 可被索引；可执行 entrypoint 未激活前不冒充 renderer |
 | isolated iframe | iframe mount + serialized frame；realm teardown 物理卸载 |
 | isolated Worker | 无视觉 contribution，继续拒绝 transition-scene |

@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
+import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
@@ -337,10 +337,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   children,
 }) => {
   const { t } = useI18n();
-  const vscodeRuntime = React.useMemo(() => isVSCodeRuntime(), []);
-  const skipAuth = vscodeRuntime;
-  const showHostSwitcher = React.useMemo(() => isDesktopShell() && !vscodeRuntime, [vscodeRuntime]);
-  const [state, setState] = React.useState<GateState>(() => (skipAuth ? 'authenticated' : 'pending'));
+  const showHostSwitcher = React.useMemo(() => isDesktopShell(), []);
+  const [state, setState] = React.useState<GateState>('pending');
   const [password, setPassword] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState('');
@@ -367,10 +365,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [trustDevice]);
 
   const refreshPasskeyStatus = React.useCallback(async (runtime = captureRuntimeIdentity()) => {
-    if (skipAuth) {
-      return defaultPasskeyStatus;
-    }
-
     try {
       const nextStatus = await fetchPasskeyStatus();
       if (isRuntimeIdentityActive(runtime)) {
@@ -383,14 +377,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       }
       return defaultPasskeyStatus;
     }
-  }, [skipAuth]);
+  }, []);
 
   React.useEffect(() => {
     let cancelled = false;
-
-    if (skipAuth) {
-      return;
-    }
 
     void (async () => {
       try {
@@ -413,7 +403,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [skipAuth]);
+  }, []);
 
   // Bounded retry scheduling for transient session-check failures. Lives in refs
   // so retries survive re-renders; the timer is cleared on unmount, endpoint
@@ -450,11 +440,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   React.useEffect(() => clearTransientRetry, [clearTransientRetry]);
 
   const checkStatus = React.useCallback(async () => {
-    if (skipAuth) {
-      setState('authenticated');
-      return;
-    }
-
     const runtime = captureRuntimeIdentity();
     setState((prev) => (prev === 'authenticated' ? prev : 'pending'));
     try {
@@ -525,24 +510,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('error');
       setIsTunnelLocked(false);
     }
-  }, [refreshPasskeyStatus, resetTransientRetry, scheduleTransientRetry, skipAuth]);
+  }, [refreshPasskeyStatus, resetTransientRetry, scheduleTransientRetry]);
 
   React.useEffect(() => {
     checkStatusRef.current = checkStatus;
   }, [checkStatus]);
 
   React.useEffect(() => {
-    if (skipAuth) {
-      return;
-    }
     void checkStatus();
-  }, [checkStatus, skipAuth]);
+  }, [checkStatus]);
 
   React.useEffect(() => {
-    if (skipAuth) {
-      return;
-    }
-
     return subscribeRuntimeEndpointChanged(() => {
       cancelPasskeyCeremony();
       setPassword('');
@@ -559,15 +537,15 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('pending');
       void checkStatus();
     });
-  }, [checkStatus, resetTransientRetry, skipAuth]);
+  }, [checkStatus, resetTransientRetry]);
 
   React.useEffect(() => {
-    if (!skipAuth && state === 'locked') {
+    if (state === 'locked') {
       hasResyncedRef.current = false;
       preferencesSyncRef.current = null;
       setPreferencesReady(false);
     }
-  }, [skipAuth, state]);
+  }, [state]);
 
   React.useEffect(() => {
     if (state === 'locked' && passwordInputRef.current) {

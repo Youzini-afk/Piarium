@@ -167,11 +167,9 @@ describe('isEmbeddedSessionChat', () => {
     expect(isEmbeddedSessionChat()).toBe(false);
   });
 
-  test('caches the first result so URL rewrites cannot flip it (mirrors VS Code stable global)', () => {
-    // VS Code detects its webview via the stable `window.__VSCODE_CONFIG__`
-    // global — it never changes. The embedded iframe's identity is equally
-    // fixed at mount (the parent builds the src); caching the first read
-    // makes detection just as stable, surviving any URL rewrite.
+  test('caches the first result so URL rewrites cannot flip it', () => {
+    // The embedded iframe's identity is fixed at mount (the parent builds the
+    // src); caching the first read keeps detection stable across URL rewrites.
     installWindowLocation('http://127.0.0.1:5173/app?piPanel=session-chat&piSessionId=ses_1');
     resetEmbeddedSessionChatCache();
 
