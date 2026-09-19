@@ -1345,6 +1345,49 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         }
         return { text: full, report, transcriptRef: report.transcriptRef, eof: true };
       }
+      if (what === "transcript") {
+        if (!host.threadHistoryEntries) {
+          throw new HarnessServiceError("unavailable", "Transcript history is unavailable");
+        }
+        // Default to the Run that owns visible output: the active Run, else
+        // the latest retained session — the same identity the status table
+        // excerpts, so an entry id always resolves against it.
+        const source = run?.sessionId ? run
+          : (await registry.listRuns(workspaceId, thread.id)).findLast((candidate) => candidate.sessionId);
+        if (!source?.sessionId) {
+          return { text: `Thread ${thread.id} has no retained transcript yet`, report: null, transcriptRef: null };
+        }
+        const history = await host.threadHistoryEntries(source.sessionId);
+        ctx.signal.throwIfAborted();
+        if (history.sessionId !== source.sessionId || history.scope !== "branch") {
+          throw new HarnessServiceError("unavailable", "The transcript identity did not match the selected Run");
+        }
+        let page: ReturnType<typeof readHistoryPage>;
+        try {
+          page = readHistoryPage(history.entries, {
+            ...(params.entry !== undefined ? { entry: params.entry } : {}),
+            ...(params.before !== undefined ? { before: params.before } : {}),
+            ...(params.after !== undefined ? { after: params.after } : {}),
+            ...(params.limit !== undefined ? { limit: params.limit } : {}),
+            ...(params.query !== undefined ? { query: params.query } : {}),
+            ...(params.path !== undefined ? { path: params.path } : {}),
+            ...(params.offset !== undefined ? { offset: params.offset } : {}),
+          });
+        } catch (error) {
+          throw new HarnessServiceError("invalid-params", error instanceof Error ? error.message : String(error));
+        }
+        const text = page.content
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join("\n");
+        const images = page.content.length - page.content.filter((part) => part.type === "text").length;
+        return {
+          text: images > 0 ? `${text}\n[${images} image(s) retained in the transcript — not rendered here]` : text,
+          report: null,
+          transcriptRef: source.report?.transcriptRef ?? delivery?.transcriptRef ?? null,
+          details: { ...page.details, threadId: thread.id, runId: source.id, sessionId: source.sessionId },
+        };
+      }
       const since = params.since ?? 0;
       if (!delivery) {
         return { text: `Thread ${thread.id} has no durable transcript reference yet`, report: null, transcriptRef: null };

@@ -158,6 +158,7 @@ import {
 import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
 import { createZone2Extension } from "./harness/zone2-extension.js";
+import { createThreadStatusInjector } from "./harness/thread-status-injector.js";
 import {
   createContextPreparationExtension,
   type ContextPreparationExtension,
@@ -3205,6 +3206,7 @@ export class SessionHost {
             {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
+                  inject: createThreadStatusInjector(hostServicesBridge),
                   completeSimple: (model, context, requestOptions) => {
                     const modelRuntime = serviceRef.current?.modelRuntime;
                     if (!modelRuntime) {

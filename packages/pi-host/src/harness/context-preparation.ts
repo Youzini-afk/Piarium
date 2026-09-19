@@ -20,6 +20,7 @@ import { retainedContextState } from "./retained-context.js";
 import {
   attachContextRequestBoundary, ContextCapacityError, contextRequestKey, estimateModelInputTokens,
   type ContextModelRequest,
+  type ContextRequestBoundaryOptions,
 } from "./context-request-boundary.js";
 
 /**
@@ -101,6 +102,8 @@ export interface ContextPreparationOptions {
   getExplicitKeepRecentTokens?: () => number | undefined;
   /** Publish native raw retention after an actual compaction or branch navigation. */
   onRetention?: (params: import("@piarium/protocol").ContextRetentionParams) => void | Promise<void>;
+  /** Per-request injection seam forwarded to the request boundary (D-300). */
+  inject?: ContextRequestBoundaryOptions["inject"];
   onFailure?: (phase: "prepare" | "commit", message: string) => void;
   onSuccess?: (phase: "prepare" | "commit") => void;
   onStatus?: () => void;
@@ -671,6 +674,7 @@ export function createContextPreparationExtension(
     boundary = attachContextRequestBoundary(session, {
       getCompactionSettings: options.getCompactionSettings,
       observe: extension.observeRequest,
+      ...(options.inject ? { inject: options.inject } : {}),
       onEvent,
       onStatus: () => options.onStatus?.(),
       compact: async (request, signal) => {

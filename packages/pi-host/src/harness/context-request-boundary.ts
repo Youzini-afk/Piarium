@@ -105,6 +105,17 @@ export interface ContextRequestBoundaryOptions {
   observe(request: ContextModelRequest): void;
   /** Return one fixed, validated compaction. Failure must not fall through. */
   compact(request: ContextModelRequest, signal: AbortSignal): Promise<CompactionResult>;
+  /**
+   * Per-request injection seam (D-300): runs once per dispatched request,
+   * after the capacity loop, and may replace the request context (e.g. a
+   * request-scoped status trailer). `confirm` fires only after the provider
+   * request was actually dispatched — a failed or superseded request never
+   * claims delivery.
+   */
+  inject?(request: ContextModelRequest): Promise<{
+    request?: ContextModelRequest;
+    confirm?(): void;
+  } | undefined>;
   onEvent?(event: AgentSessionEvent): void;
   onStatus?(): void;
 }
@@ -216,12 +227,16 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         }
       }
       signal.throwIfAborted();
+      const injection = await options.inject?.(next);
+      signal.throwIfAborted();
+      if (injection?.request) next = injection.request;
       // Calling the original SDK stream preserves ModelRuntime auth, provider
       // headers, retries, payload hooks, and all applicable main-request options.
       const outgoing = structuredClone(next.context);
       const key = contextRequestKey(next.model, outgoing, next.options);
       const sentGeneration = generation;
       const result = await stream(next.model, next.context, { ...rawOptions, ...next.options, signal });
+      injection?.confirm?.();
       void result.result().then((response) => {
         if (!disposed && generation === sentGeneration) budget.record(key, outgoing, response);
       }).catch(() => undefined);

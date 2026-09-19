@@ -106,10 +106,17 @@ const ThreadReadParams = Type.Object({
     Type.Literal("blocks"),
     Type.Literal("report"),
     Type.Literal("steps"),
+    Type.Literal("transcript"),
   ])),
   since: Type.Optional(Type.Integer({ minimum: 0 })),
-  offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-8 byte offset for report paging" })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: "UTF-8 byte offset for report paging, or match offset for transcript search" })),
   length: Type.Optional(Type.Integer({ minimum: 1, description: "UTF-8 byte length for report paging" })),
+  entry: Type.Optional(Type.String({ description: "transcript: locate one immutable session entry id — e.g. the reference a status excerpt carries — with before/after neighbours" })),
+  before: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+  after: Type.Optional(Type.Integer({ minimum: 0, maximum: 20 })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
+  query: Type.Optional(Type.String({ description: "transcript: search the branch for entries containing this text" })),
+  path: Type.Optional(Type.String({ description: "transcript: narrow the search to entries mentioning this path" })),
 });
 
 const ThreadMergeParams = Type.Object({
@@ -420,8 +427,8 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
   return defineTool({
     name: "read_thread",
     label: "Read Thread",
-    description: "Read a teammate's notes, delivery report or transcript slice. Use runId or resultRevision for an immutable earlier delivery; viewing never executes work.",
-    promptSnippet: "read_thread: read a teammate's notes (blocks), report, or steps",
+    description: "Read a teammate's notes, delivery report, transcript slice, or transcript entries. Use runId or resultRevision for an immutable earlier delivery; what:'transcript' with an entry id expands the exact passage a status excerpt cites; viewing never executes work.",
+    promptSnippet: "read_thread: read a teammate's notes (blocks), report, steps, or transcript entries",
     promptGuidelines: [
       "read_thread shows a teammate's notes first; only read steps when the notes are not enough.",
     ],
@@ -437,6 +444,12 @@ export function createReadThreadTool(bridge: HostServicesBridge, _sessionId: str
           ...(params.since !== undefined ? { since: params.since } : {}),
           ...(params.offset !== undefined ? { offset: params.offset } : {}),
           ...(params.length !== undefined ? { length: params.length } : {}),
+          ...(params.entry !== undefined ? { entry: params.entry } : {}),
+          ...(params.before !== undefined ? { before: params.before } : {}),
+          ...(params.after !== undefined ? { after: params.after } : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
+          ...(params.query !== undefined ? { query: params.query } : {}),
+          ...(params.path !== undefined ? { path: params.path } : {}),
         }, signal ? { signal } : undefined);
         const typed = result as ThreadReadResult;
         return {

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-export type ObservationObjectKind = "diagnostics" | "shell" | "zone2-threads";
+export type ObservationObjectKind = "diagnostics" | "shell" | "zone2-threads" | "thread-status";
 
 export interface ObservationCursorEntry<T> {
   /** Native-history receipts needed to interpret this incremental baseline. */
@@ -269,9 +269,9 @@ export function createObservationCursorStore(
     },
 
     clearObserver(observerSessionId: string): void {
-      invalidate(observerSessionId, "diagnostics");
-      invalidate(observerSessionId, "shell");
-      invalidate(observerSessionId, "zone2-threads");
+      for (const kind of ["diagnostics", "shell", "zone2-threads", "thread-status"] as const) {
+        invalidate(observerSessionId, kind);
+      }
       observers.delete(observerSessionId);
     },
 
@@ -279,7 +279,7 @@ export function createObservationCursorStore(
       const kinds = observers.get(observerSessionId);
       // A pending response prepared before compaction cannot resurrect a
       // removed baseline. Retained committed cursors themselves stay unchanged.
-      for (const kind of ["diagnostics", "shell", "zone2-threads"] as const) {
+      for (const kind of ["diagnostics", "shell", "zone2-threads", "thread-status"] as const) {
         invalidate(observerSessionId, kind);
         const entries = kinds?.get(kind);
         if (!entries) continue;

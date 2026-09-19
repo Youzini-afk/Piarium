@@ -1338,7 +1338,7 @@ describe("thread services", () => {
   it("a retry with the same requestId keeps waiting without re-delivering", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-wait-retry-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const sendToSession = vi.fn(async () => {});
+    const sendToSession = vi.fn(async (_sessionId: string) => {});
     const service = createThreadSendService({
       threadRegistry: registry,
       threadSendToSession: sendToSession,
@@ -1375,7 +1375,7 @@ describe("thread services", () => {
   it("returns the recorded outcome for a duplicate requestId instead of re-delivering", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-dedupe-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
-    const sendToSession = vi.fn(async () => {});
+    const sendToSession = vi.fn(async (_sessionId: string) => {});
     const service = createThreadSendService({
       threadRegistry: registry,
       threadSendToSession: sendToSession,

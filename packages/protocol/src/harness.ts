@@ -415,6 +415,32 @@ export interface ContextRetentionParams {
   retainedGit: boolean;
 }
 
+/**
+ * Per-request team status (7E/D-300). The Host prepares a delta against the
+ * observer's committed cursor and returns it uncommitted; the caller confirms
+ * with zone2.statusDelivered only after the request carrying the rows was
+ * actually dispatched, so a failed request never claims delivery.
+ */
+export interface Zone2StatusParams {
+  /** Full table instead of a delta (e.g. after a compaction rebuild). */
+  full?: boolean;
+}
+
+export interface Zone2StatusResult {
+  /** Formatted status lines, or null when nothing changed since delivery. */
+  content: string | null;
+  /** Pending observation identity to pass to zone2.statusDelivered. */
+  observationRef?: string;
+}
+
+export interface Zone2StatusDeliveredParams {
+  observationRef: string;
+}
+
+export interface Zone2StatusDeliveredResult {
+  committed: boolean;
+}
+
 export interface ContextRetentionResult {
   acknowledged: boolean;
 }
@@ -1127,6 +1153,8 @@ export interface HarnessServiceMap {
   "web.fetch": { params: { url: string; render?: boolean }; result: FetchResult };
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
+  "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };
+  "zone2.statusDelivered": { params: Zone2StatusDeliveredParams; result: Zone2StatusDeliveredResult };
   "context.retained": { params: ContextRetentionParams; result: ContextRetentionResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
@@ -1230,6 +1258,8 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.fetch": "read.web",
   "web.search": "read.web",
   "zone2.assemble": "context.session",
+  "zone2.status": "context.session",
+  "zone2.statusDelivered": "context.session",
   "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
@@ -1302,6 +1332,8 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.fetch",
   "web.search",
   "zone2.assemble",
+  "zone2.status",
+  "zone2.statusDelivered",
   "context.retained",
   "todo.upsert",
   "recall.search",

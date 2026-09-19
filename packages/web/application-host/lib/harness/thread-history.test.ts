@@ -124,9 +124,12 @@ describe("user Thread history release", () => {
     await h.publish("old\n"); await h.publish("current\n");
     await request(h.app).get(h.url).expect(401);
     await request(h.app).post(`${h.url}/release`).send({ branchId: h.branchId, resultRevisions: [1] }).expect(401);
-    await request(h.app).get(h.url.replace("/parent/", "/unrelated/")).set("Authorization", "test").expect(404);
+    // An existing thread outside the session's research tree is denied; a
+    // thread that does not exist at all is not found.
+    await request(h.app).get(h.url.replace("/parent/", "/unrelated/")).set("Authorization", "test").expect(403);
     await request(h.app).post(`${h.url.replace("/parent/", "/unrelated/")}/release`)
-      .set("Authorization", "test").send({ branchId: h.branchId, resultRevisions: [1] }).expect(404);
+      .set("Authorization", "test").send({ branchId: h.branchId, resultRevisions: [1] }).expect(403);
+    await request(h.app).get(h.url.replace(`/${h.thread.id}/`, "/missing-thread/")).set("Authorization", "test").expect(404);
     await h.release([1], "stale-branch").expect(409);
     await h.release([1, 2]).expect(409);
     await h.release([0]).expect(400);

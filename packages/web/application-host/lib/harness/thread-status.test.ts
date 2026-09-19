@@ -1,0 +1,293 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { PiSessionEntry, SessionEntriesResult, ThreadMessageRecord, ThreadReport } from "@piarium/protocol";
+import { createObservationCursorStore } from "./observation-cursors.js";
+import { createThreadRegistry, type CreateThreadInput } from "./thread-registry.js";
+import {
+  createThreadStatusDelivery,
+  createThreadStatusProjector,
+  lastVisibleOutput,
+  threadStatusState,
+} from "./thread-status.js";
+import { createZone2StatusServices } from "./harness-services.js";
+import { createThreadReadService } from "./thread-services.js";
+import type { HarnessServiceHost } from "./service-host.js";
+import type { HarnessServiceContext } from "./router.js";
+
+const WORKSPACE = "workspace-1";
+const PARENT = { kind: "session", id: "parent-1" } as const;
+
+const input = (overrides: Partial<CreateThreadInput> = {}): CreateThreadInput => ({
+  workspaceId: WORKSPACE,
+  parent: PARENT,
+  brief: "verify the implementation",
+  preset: "check",
+  kind: "implementation",
+  createdBy: "agent",
+  concurrency: 12,
+  autoRun: true,
+  worktree: "isolated",
+  tools: [],
+  permissions: {},
+  ...overrides,
+});
+
+const report = (): ThreadReport => ({
+  conclusion: "all checks pass",
+  changedFiles: ["a.ts"],
+  unresolved: [],
+  deviations: [],
+  confidence: 0.9,
+  transcriptRef: { runtimeId: "pi", sessionId: "child-1", fromEntryId: null, toEntryId: null },
+  blocksSnapshot: {},
+});
+
+const assistantEntry = (id: string, text: string, stopReason = "stop"): PiSessionEntry => ({
+  type: "message",
+  id,
+  parentId: null,
+  timestamp: `2026-01-01T00:00:${id.padStart(2, "0")}.000Z`,
+  message: {
+    role: "assistant",
+    api: "openai",
+    model: "m",
+    provider: "p",
+    stopReason: stopReason as "stop",
+    timestamp: Date.now(),
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    content: [{ type: "text", text }],
+  },
+});
+
+const entriesResult = (entries: PiSessionEntry[], sessionId = "s"): SessionEntriesResult => ({
+  entries,
+  leafId: entries.at(-1)?.id ?? null,
+  scope: "branch",
+  sessionId,
+});
+
+const ctx = (sessionId: string): HarnessServiceContext => ({
+  actor: {
+    authorityInstanceId: "authority",
+    sessionId,
+    workerId: "worker",
+    workerGeneration: 1,
+    workspaceId: WORKSPACE,
+    grantedCapabilities: ["context.session"],
+  },
+  authorizedPaths: [],
+  sessionId,
+  workspaceId: WORKSPACE,
+  signal: new AbortController().signal,
+});
+
+describe("thread status projection", () => {
+  let dataDir: string;
+  let registry: ReturnType<typeof createThreadRegistry>;
+  let cursors: ReturnType<typeof createObservationCursorStore>;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "thread-status-"));
+    registry = createThreadRegistry({ dataDir, hostId: "test-host" });
+    cursors = createObservationCursorStore();
+  });
+
+  afterEach(async () => {
+    cursors.dispose();
+    await registry.dispose();
+    try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }
+  });
+
+  it("excerpts the last completed visible output, skipping pending streams", () => {
+    const entries = [
+      assistantEntry("1", "first answer"),
+      assistantEntry("2", "still streaming", "pending"),
+      assistantEntry("3", "final answer with quite a lot of visible text"),
+    ];
+    const excerpt = lastVisibleOutput(entries);
+    expect(excerpt?.entryId).toBe("3");
+    expect([...excerpt!.text].length).toBeLessThanOrEqual(21);
+    expect(excerpt?.text.endsWith("…")).toBe(true);
+  });
+
+  it("maps lifecycle, attention, and worker state into the state column", async () => {
+    const thread = await registry.createThread(input());
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    expect(threadStatusState(thread, run)).toBe("queued");
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-1");
+    const running = (await registry.getThread(WORKSPACE, PARENT, thread.id))!;
+    const runningRun = (await registry.listRuns(WORKSPACE, thread.id)).find((r) => r.id === run.id)!;
+    expect(threadStatusState(running, runningRun)).toBe("working");
+  });
+
+  it("emits the full table once, then only real changes after commit", async () => {
+    const first = await registry.createThread(input({ brief: "alpha task" }));
+    await registry.createThread(input({ brief: "beta task" }));
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async () => entriesResult([]),
+    } as unknown as HarnessServiceHost;
+    const services = createZone2StatusServices(host);
+    const observer = ctx(PARENT.id);
+
+    const initial = await services.status.handle({}, observer);
+    expect(initial.content).toContain(`${first.id} [check] · alpha task`);
+    expect(initial.observationRef).toBeDefined();
+    // Without delivery confirmation the same table is offered again.
+    const repeated = await services.status.handle({}, observer);
+    expect(repeated.content).toContain("alpha task");
+    // A superseded pending observation can no longer claim delivery.
+    const stale = await services.delivered.handle({ observationRef: initial.observationRef! }, observer);
+    expect(stale.committed).toBe(false);
+
+    const committed = await services.delivered.handle({ observationRef: repeated.observationRef! }, observer);
+    expect(committed.committed).toBe(true);
+    const after = await services.status.handle({}, observer);
+    expect(after.content).toBeNull();
+  });
+
+  it("surfaces an inbound message once, then stays quiet when it clears", async () => {
+    const sender = await registry.createThread(input({ brief: "sender" }));
+    const target = await registry.createThread(input({ brief: "target" }));
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async () => entriesResult([]),
+    } as unknown as HarnessServiceHost;
+    const services = createZone2StatusServices(host);
+    const observer = ctx(PARENT.id);
+
+    const first = await services.status.handle({}, observer);
+    await services.delivered.handle({ observationRef: first.observationRef! }, observer);
+
+    const message: Omit<ThreadMessageRecord, "direction"> = {
+      id: "m-1",
+      from: { kind: "thread", id: sender.id },
+      to: { kind: "thread", id: target.id },
+      kind: "inform",
+      text: "the dataset is ready for review",
+      status: "delivered",
+      at: new Date().toISOString(),
+    };
+    await registry.recordDirectedMessage(WORKSPACE, message);
+
+    const update = await services.status.handle({}, observer);
+    expect(update.content).toContain(target.id);
+    expect(update.content).toContain(`message m-1 from thread ${sender.id}`);
+    expect(update.content).not.toContain(`${sender.id} [check]`);
+    await services.delivered.handle({ observationRef: update.observationRef! }, observer);
+
+    // The marker was presented; its disappearance is not itself a change.
+    const quiet = await services.status.handle({}, observer);
+    expect(quiet.content).toBeNull();
+  });
+
+  it("marks a new result revision and reports removal honestly", async () => {
+    const thread = await registry.createThread(input({ brief: "worker" }));
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-1");
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async () => entriesResult([]),
+    } as unknown as HarnessServiceHost;
+    const services = createZone2StatusServices(host);
+    const observer = ctx(PARENT.id);
+
+    const first = await services.status.handle({}, observer);
+    await services.delivered.handle({ observationRef: first.observationRef! }, observer);
+
+    await registry.setWorkingState(WORKSPACE, thread.id, { branchId: "b-1", resultRevision: 2 });
+    const revised = await services.status.handle({}, observer);
+    expect(revised.content).toContain("result r2");
+    await services.delivered.handle({ observationRef: revised.observationRef! }, observer);
+
+    // A thread leaving the scope is reported, not silently dropped.
+    const gone = await registry.createThread(input({ brief: "gone", autoRun: false }));
+    const withGone = await services.status.handle({}, observer);
+    expect(withGone.content).toContain("gone");
+    await services.delivered.handle({ observationRef: withGone.observationRef! }, observer);
+    await registry.deleteThread(WORKSPACE, PARENT, gone.id);
+    const removed = await services.status.handle({}, observer);
+    expect(removed.content).toContain(`− ${gone.id} (no longer in scope)`);
+  });
+
+  it("keeps progress sourced from an earlier run instead of disguising it", async () => {
+    const thread = await registry.createThread(input({ brief: "writer" }));
+    const run1 = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run1.id, "session-a");
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => (
+        sessionId === "session-a" ? entriesResult([assistantEntry("7", "drafted the survey outline")], sessionId) : entriesResult([], sessionId)
+      ),
+    } as unknown as HarnessServiceHost;
+    const projector = createThreadStatusProjector({
+      registry: () => host.threadRegistry ?? null,
+      readEntries: host.threadHistoryEntries ?? null,
+    });
+    const { rows } = await projector.build(WORKSPACE, PARENT, null);
+    expect(rows[0]?.progress?.text).toContain("drafted the survey");
+    expect(rows[0]?.progress?.entryId).toBe("7");
+    expect(rows[0]?.progress?.fromEarlierRun).toBe(false);
+    expect(rows[0]?.progress?.runId).toBe(run1.id);
+  });
+
+  it("expands a cited excerpt through read_thread transcript entry lookup", async () => {
+    const thread = await registry.createThread(input({ brief: "writer" }));
+    const run = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, run.id, "session-a");
+    const entries = [
+      assistantEntry("3", "gathered the samples"),
+      assistantEntry("7", "drafted the survey outline"),
+      assistantEntry("9", "polished the wording"),
+    ];
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => entriesResult(entries, sessionId),
+    } as unknown as HarnessServiceHost;
+    const read = createThreadReadService(host);
+
+    const page = await read.handle(
+      { threadId: thread.id, what: "transcript", entry: "7", before: 1, after: 1 },
+      ctx(PARENT.id),
+    );
+    expect(page.details).toMatchObject({ found: true, entry: "7", runId: run.id, sessionId: "session-a" });
+    expect(page.text).toContain("gathered the samples");
+    expect(page.text).toContain("drafted the survey outline");
+    expect(page.text).toContain("polished the wording");
+
+    // The status excerpt's citation resolves to this same passage.
+    const projector = createThreadStatusProjector({
+      registry: () => registry,
+      readEntries: host.threadHistoryEntries ?? null,
+    });
+    const { rows } = await projector.build(WORKSPACE, PARENT, null);
+    expect(rows[0]?.progress?.entryId).toBe("9");
+    const cited = await read.handle(
+      { threadId: thread.id, what: "transcript", entry: rows[0]!.progress!.entryId },
+      ctx(PARENT.id),
+    );
+    expect(cited.text).toContain("polished the wording");
+  });
+
+  it("bounds the emitted table and reports the omitted range", async () => {
+    for (let i = 0; i < 35; i += 1) {
+      await registry.createThread(input({ brief: `task-${String(i).padStart(2, "0")}`, autoRun: false }));
+    }
+    const host = {
+      observationCursors: cursors,
+      threadRegistry: registry,
+      threadHistoryEntries: async () => entriesResult([]),
+    } as unknown as HarnessServiceHost;
+    const services = createZone2StatusServices(host);
+    const result = await services.status.handle({}, ctx(PARENT.id));
+    expect(result.content).toContain("5 more threads in scope");
+    expect(result.content).toContain("call threads for the full table");
+  });
+});

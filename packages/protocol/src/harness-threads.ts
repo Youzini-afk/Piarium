@@ -872,7 +872,7 @@ export interface ThreadSendResult {
   timedOut?: boolean;
 }
 
-export type ThreadReadWhat = "blocks" | "report" | "steps";
+export type ThreadReadWhat = "blocks" | "report" | "steps" | "transcript";
 
 export interface ThreadReadParams {
   threadId: string;
@@ -885,6 +885,18 @@ export interface ThreadReadParams {
   offset?: number;
   /** UTF-8 byte length when paging a retrieval report. */
   length?: number;
+  /**
+   * Transcript expansion (what:"transcript"). `entry` locates one immutable
+   * session entry by id — the references status excerpts and history output
+   * carry — with `before`/`after` neighbours. `query`/`path`/`offset`/`limit`
+   * search and page the branch instead.
+   */
+  entry?: string;
+  before?: number;
+  after?: number;
+  limit?: number;
+  query?: string;
+  path?: string;
 }
 
 export interface ThreadReadResult {
@@ -893,6 +905,8 @@ export interface ThreadReadResult {
   transcriptRef: TranscriptRef | null;
   nextOffset?: number;
   eof?: boolean;
+  /** Transcript page metadata (found/matches/nextOffset and scope identity). */
+  details?: Record<string, import("./types.js").JsonValue>;
 }
 
 export type IntegrationApplyPhase =
