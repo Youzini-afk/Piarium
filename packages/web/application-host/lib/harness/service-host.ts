@@ -57,7 +57,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -78,6 +78,12 @@ export function deriveHarnessCapabilities(
     && ["dispatch", "threads", "wait", "send", "read_thread", "merge", "kill", "submit_facts", "update"].some((name) => tools.has(name))
   ) {
     capabilities.add("control.thread");
+  }
+  if (
+    availability.experiments
+    && ["experiment", "resources", "research_source"].some((name) => tools.has(name))
+  ) {
+    capabilities.add("control.experiment");
   }
   return [...capabilities];
 }
@@ -376,6 +382,10 @@ export interface HarnessServiceHost {
   commitAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { committed: boolean };
   releaseAgentInputContext: (sessionId: string, context: import("@piarium/protocol").AgentInputContext) => { released: boolean };
   verification: VerificationCoordinator;
+  // Phase 4: experiment execution and resource facts (7C/7D, D-300)
+  experimentService: import("./experiments.js").ExperimentService | null;
+  resourceService: import("./resources.js").ResourceService | null;
+  sourceService: import("./sources.js").SourceService | null;
   dispose(): Promise<void>;
 }
 
@@ -464,6 +474,9 @@ export interface HarnessServiceHostOptions {
   lookupWebFetchReceipt?: HarnessServiceHost["lookupWebFetchReceipt"];
   releaseWebFetchReceipts?: HarnessServiceHost["releaseWebFetchReceipts"];
   releaseRetrievalTemporaryArtifacts?: HarnessServiceHost["releaseRetrievalTemporaryArtifacts"];
+  experimentService?: HarnessServiceHost["experimentService"];
+  resourceService?: HarnessServiceHost["resourceService"];
+  sourceService?: HarnessServiceHost["sourceService"];
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -753,6 +766,9 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     threadTranscriptReader,
     threadHistoryEntries,
     verification,
+    experimentService: options.experimentService ?? null,
+    resourceService: options.resourceService ?? null,
+    sourceService: options.sourceService ?? null,
     commitAgentInputContext,
     releaseAgentInputContext,
     registerSession,

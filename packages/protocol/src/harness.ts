@@ -1218,6 +1218,17 @@ export interface HarnessServiceMap {
   "workingBranch.ensureMaterialized": { params: Record<string, never>; result: WorkingBranchEnsureMaterializedResult };
   "surface.snapshot.commit": { params: { context: AgentInputContext }; result: { committed: boolean } };
   "surface.snapshot.release": { params: { context: AgentInputContext }; result: { released: boolean } };
+  // Phase 7C/7D: experiment execution and resource facts (D-300)
+  "experiment.submit": { params: import("./harness-experiments.js").ExperimentSubmitParams; result: import("./harness-experiments.js").ExperimentSubmitResult };
+  "experiment.list": { params: import("./harness-experiments.js").ExperimentListParams; result: import("./harness-experiments.js").ExperimentListResult };
+  "experiment.get": { params: import("./harness-experiments.js").ExperimentGetParams; result: import("./harness-experiments.js").ExperimentGetResult };
+  "experiment.logs": { params: import("./harness-experiments.js").ExperimentLogsParams; result: import("./harness-experiments.js").ExperimentLogsResult };
+  "experiment.cancel": { params: import("./harness-experiments.js").ExperimentCancelParams; result: import("./harness-experiments.js").ExperimentCancelResult };
+  "experiment.wait": { params: import("./harness-experiments.js").ExperimentWaitParams; result: import("./harness-experiments.js").ExperimentWaitResult };
+  "experiment.collect": { params: import("./harness-experiments.js").ExperimentCollectParams; result: import("./harness-experiments.js").ExperimentCollectResult };
+  "resource.list": { params: Record<string, never>; result: import("./harness-experiments.js").ResourceListResult };
+  "source.register": { params: import("./harness-experiments.js").SourceRegisterParams; result: import("./harness-experiments.js").SourceRegisterResult };
+  "source.list": { params: import("./harness-experiments.js").SourceListParams; result: import("./harness-experiments.js").SourceListResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -1229,6 +1240,7 @@ export type HarnessMethod = keyof HarnessServiceMap;
  */
 export type HarnessCapability =
   | "context.session"
+  | "control.experiment"
   | "control.thread"
   | "process.shell"
   | "read.lsp"
@@ -1292,6 +1304,16 @@ export const HARNESS_METHOD_CAPABILITY = {
   "workingBranch.ensureMaterialized": "write.document",
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
+  "experiment.submit": "control.experiment",
+  "experiment.list": "control.experiment",
+  "experiment.get": "control.experiment",
+  "experiment.logs": "control.experiment",
+  "experiment.cancel": "control.experiment",
+  "experiment.wait": "control.experiment",
+  "experiment.collect": "control.experiment",
+  "resource.list": "control.experiment",
+  "source.register": "control.experiment",
+  "source.list": "control.experiment",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1366,6 +1388,16 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "workingBranch.ensureMaterialized",
   "surface.snapshot.commit",
   "surface.snapshot.release",
+  "experiment.submit",
+  "experiment.list",
+  "experiment.get",
+  "experiment.logs",
+  "experiment.cancel",
+  "experiment.wait",
+  "experiment.collect",
+  "resource.list",
+  "source.register",
+  "source.list",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

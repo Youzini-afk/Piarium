@@ -10,6 +10,7 @@ export * from "./harness-inference.js";
 export * from "./harness-model-slots.js";
 export * from "./harness-presets.js";
 export * from "./harness-fresh-input.js";
+export * from "./harness-experiments.js";
 export * from "./harness-history.js";
 export * from "./harness-tools.js";
 export * from "./harness-threads.js";

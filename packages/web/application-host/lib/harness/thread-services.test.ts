@@ -264,7 +264,7 @@ describe("thread services", () => {
         autoRun: false,
         worktree: "none",
         workFocus: "research",
-        tools: ["dispatch", "read", "grep", "find", "ls", "explore", "related", "recall", "threads", "wait", "send", "read_thread"],
+        tools: ["dispatch", "read", "grep", "find", "ls", "explore", "related", "recall", "threads", "wait", "send", "read_thread", "resources", "research_source"],
         permissions: {},
         hidden: true,
       });

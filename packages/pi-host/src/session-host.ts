@@ -640,6 +640,7 @@ export class SessionHost {
   #workspaceMutationJournal: WorkspaceMutationJournalBridge | undefined;
   #workspaceMutationJournalEnabled = false;
   #harnessThreadRuntimeEnabled = false;
+  #harnessExperimentsEnabled = false;
   #harnessLspNavigationEnabled = false;
   #harnessDocumentReadEnabled = false;
   #harnessDocumentPathOverlayEnabled = false;
@@ -702,6 +703,10 @@ export class SessionHost {
 
   setHarnessThreadRuntimeEnabled(enabled: boolean): void {
     this.#harnessThreadRuntimeEnabled = enabled;
+  }
+
+  setHarnessExperimentsEnabled(enabled: boolean): void {
+    this.#harnessExperimentsEnabled = enabled;
   }
 
   setHarnessLspNavigationEnabled(enabled: boolean): void {
@@ -3482,6 +3487,7 @@ export class SessionHost {
         ...(completeExplore ? { completeExplore } : {}),
         webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
+        experimentAvailable: this.#harnessExperimentsEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],

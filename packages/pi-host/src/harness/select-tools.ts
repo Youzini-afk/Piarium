@@ -31,6 +31,11 @@ import {
   createKillTool,
 } from "./thread-tools.js";
 import { createSubmitFactsTool } from "./submit-facts-tool.js";
+import {
+  createExperimentTool,
+  createResourcesTool,
+  createResearchSourceTool,
+} from "./experiment-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 
@@ -57,6 +62,9 @@ export interface SelectHarnessToolsDeps {
   /** Whether the host provides a thread runtime (thread registry + spawn).
    * When false, thread tools are not registered. */
   threadRuntimeAvailable?: boolean;
+  /** Whether the Host registered experiment/resource/source services (7C/7D).
+   * When false, the experiment tool family is not registered. */
+  experimentAvailable?: boolean;
   /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
@@ -100,6 +108,7 @@ export function selectHarnessTools(
     readPage,
     webSearchAvailable,
     threadRuntimeAvailable,
+    experimentAvailable,
     resolvedPresets,
     resolvedResearchCapabilities,
     getActiveToolNames,
@@ -205,6 +214,19 @@ export function selectHarnessTools(
     }
     if (tools.kill !== false) {
       result.push(createKillTool(bridge, sessionId));
+    }
+  }
+  // Experiment tools — only registered when the Host exposes the
+  // experiment/resource/source services (7C/7D, D-300).
+  if (experimentAvailable) {
+    if (tools.experiment !== false) {
+      result.push(createExperimentTool(bridge, sessionId));
+    }
+    if (tools.resources !== false) {
+      result.push(createResourcesTool(bridge, sessionId));
+    }
+    if (tools.research_source !== false) {
+      result.push(createResearchSourceTool(bridge, sessionId));
     }
   }
   if (

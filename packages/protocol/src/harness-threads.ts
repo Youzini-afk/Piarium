@@ -15,7 +15,7 @@ export type ThreadPurpose = "task" | "research-root";
 export type ThreadSessionOwner = "spawned-child" | "attached-root";
 export type ThreadCreatedBy = "user" | "agent";
 export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";
-export type ThreadAttention = "none" | "user" | "permission" | "thread" | "stalled" | "looping";
+export type ThreadAttention = "none" | "user" | "permission" | "thread" | "experiment" | "stalled" | "looping";
 export type ThreadIntegration = "none" | "dirty" | "merge-ready" | "conflict" | "merged";
 export type ThreadRunWorkerState = "starting" | "running" | "lost" | "exited";
 export type ThreadRunOutcome = "success" | "failure" | "cancelled" | "lost";
@@ -274,7 +274,7 @@ export interface TranscriptRef {
 }
 
 export interface ThreadWaitingFor {
-  kind: "user" | "permission" | "thread";
+  kind: "user" | "permission" | "thread" | "experiment";
   text: string;
   review?: {
     resultRevision: number;

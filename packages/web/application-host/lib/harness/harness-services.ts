@@ -34,6 +34,7 @@ import { selectNewZone2Material, zone2MaterialRevision } from "./zone2-material.
 import { formatZone2Thread } from "./zone2.js";
 import { ThreadRegistryError } from "./thread-registry.js";
 import { createExploreSearchService } from "./explore-service.js";
+import { isTerminalAttemptState, type ExperimentCaller } from "./experiments.js";
 import {
   createExploreQueryCancelService,
   createExploreQueryFinishService,
@@ -940,6 +941,100 @@ export function registerHarnessServices(
   router.register("explore.query.cancel", createExploreQueryCancelService(host));
   router.register("explore.query.release", createExploreQueryReleaseService(host));
   router.register("related.query", createRelatedQueryService(host));
+  // Phase 4 experiment/resource/source services (7C/7D, D-300)
+  const experimentCaller = async (ctx: HarnessServiceContext): Promise<ExperimentCaller> => {
+    const binding = await host.threadRegistry?.getSessionBinding(ctx.sessionId).catch(() => null);
+    const workspaceId = binding?.owningWorkspaceId ?? ctx.workspaceId;
+    if (!workspaceId) {
+      throw new HarnessServiceError("unavailable", "experiment operations require a workspace");
+    }
+    return {
+      workspaceId,
+      executionWorkspaceId: ctx.workspaceId ?? workspaceId,
+      sessionId: ctx.sessionId,
+      ...(binding?.threadId ? { threadId: binding.threadId } : {}),
+      ...(binding?.runId ? { runId: binding.runId } : {}),
+      ...(ctx.workspaceScope?.length ? { workspaceScope: ctx.workspaceScope } : {}),
+    };
+  };
+  if (host.experimentService) {
+    const experiments = host.experimentService;
+    router.register("experiment.submit", {
+      handle: async (params, ctx) => experiments.submit(await experimentCaller(ctx), params),
+    });
+    router.register("experiment.list", {
+      handle: async (params, ctx) => experiments.list(await experimentCaller(ctx), params),
+    });
+    router.register("experiment.get", {
+      handle: async (params, ctx) => experiments.get(await experimentCaller(ctx), params.attemptId),
+    });
+    router.register("experiment.logs", {
+      handle: async (params, ctx) => experiments.logs(await experimentCaller(ctx), params),
+    });
+    router.register("experiment.cancel", {
+      handle: async (params, ctx) => ({ attempt: await experiments.cancel(await experimentCaller(ctx), params.attemptId) }),
+    });
+    router.register("experiment.wait", {
+      handle: async (params, ctx) => {
+        const caller = await experimentCaller(ctx);
+        const current = await experiments.get(caller, params.attemptId);
+        if (isTerminalAttemptState(current.attempt.state)) {
+          return { attempt: current.attempt, timedOut: false };
+        }
+        // A real blocking wait yields the caller's model slot — the attempt
+        // keeps its own compute reservation either way (D-300).
+        const registry = host.threadRegistry;
+        const boundRun = caller.threadId !== undefined && caller.runId !== undefined
+          ? { threadId: caller.threadId, runId: caller.runId }
+          : null;
+        let yielded = false;
+        if (boundRun && registry) {
+          const marked = await registry.yieldExecutionSlot(caller.workspaceId, boundRun.threadId, boundRun.runId, {
+            kind: "experiment",
+            text: `Waiting on experiment attempt ${params.attemptId}`,
+          });
+          if (!marked) throw new HarnessServiceError("unavailable", "The waiting Run could not yield its execution slot");
+          yielded = true;
+        }
+        try {
+          return await experiments.wait(caller, params.attemptId, params.timeoutMs, ctx.signal);
+        } finally {
+          // Returning a tool result permits the next model request; it must
+          // not bypass root admission while the Run's slot is yielded.
+          if (yielded && boundRun && registry) {
+            await registry.awaitExecutionSlot(caller.workspaceId, boundRun.threadId, boundRun.runId, ctx.signal);
+          }
+        }
+      },
+    });
+    router.register("experiment.collect", {
+      handle: async (params, ctx) => experiments.collect(await experimentCaller(ctx), params.attemptId),
+    });
+  }
+  if (host.resourceService) {
+    const resources = host.resourceService;
+    router.register("resource.list", {
+      handle: async (_params, ctx) => resources.list((await experimentCaller(ctx)).workspaceId),
+    });
+  }
+  if (host.sourceService) {
+    const sources = host.sourceService;
+    router.register("source.register", {
+      handle: async (params, ctx) => {
+        const caller = await experimentCaller(ctx);
+        return {
+          source: await sources.register(caller.workspaceId, params, {
+            ...(caller.sessionId ? { sessionId: caller.sessionId } : {}),
+            ...(caller.threadId ? { threadId: caller.threadId } : {}),
+            ...(caller.runId ? { runId: caller.runId } : {}),
+          }),
+        };
+      },
+    });
+    router.register("source.list", {
+      handle: async (params, ctx) => sources.list((await experimentCaller(ctx)).workspaceId, params),
+    });
+  }
   router.register("surface.snapshot.commit", {
     handle: async (params, ctx) => host.commitAgentInputContext(ctx.sessionId, params.context),
   });

@@ -666,6 +666,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessThreads", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessExperimentsEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessExperiments", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessLspNavigationEnabled(
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessLspNavigation", { optional: true }) === true,

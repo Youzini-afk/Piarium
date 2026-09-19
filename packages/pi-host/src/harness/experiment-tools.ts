@@ -1,0 +1,362 @@
+import { Type } from "typebox";
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import type { HostServicesBridge } from "./host-services-bridge.js";
+import { HarnessRequestError } from "./host-services-bridge.js";
+import type {
+  ExperimentCollectResult,
+  ExperimentGetResult,
+  ExperimentListResult,
+  ExperimentLogsResult,
+  ExperimentSubmitResult,
+  ExperimentWaitResult,
+  ResourceListResult,
+  SourceListResult,
+  SourceRegisterResult,
+} from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@piarium/protocol";
+
+/**
+ * Experiment/resource/source tools (7C/7D, D-300).
+ *
+ * The tool surface stays small on purpose: one `experiment` tool covers
+ * submit/list/get/logs/wait/cancel/collect, `resources` shows the machine
+ * overview, and `research_source` registers provenance-carrying inputs.
+ * Detail expands by identity — an attemptId opens the full record, paged
+ * logs, and collected artifacts — instead of separate synonyms per verb.
+ * These tools are not a second shell: an attempt has durable identity,
+ * admission, and a backend binding that survives this session.
+ */
+
+function experimentErrorResult(toolName: string, error: unknown): { content: Array<{ type: "text"; text: string }>; isError: true; details: Record<string, unknown> } {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = (error instanceof HarnessRequestError || (error as { code?: string }).code !== undefined)
+    ? (error as { code: string }).code
+    : "failed";
+  return {
+    content: [{ type: "text", text: `${toolName} failed (${code}): ${message}` }],
+    isError: true,
+    details: { code },
+  };
+}
+
+const invalidParams = (toolName: string, message: string) => ({
+  content: [{ type: "text" as const, text: `${toolName} failed (invalid-params): ${message}` }],
+  isError: true as const,
+  details: { code: "invalid-params" },
+});
+
+const ExperimentResourcesParams = Type.Object({
+  cpuCores: Type.Optional(Type.Number({ minimum: 0 })),
+  memoryMb: Type.Optional(Type.Number({ minimum: 0 })),
+  gpuCount: Type.Optional(Type.Integer({ minimum: 0 })),
+  gpuMemoryMb: Type.Optional(Type.Number({ minimum: 0 })),
+  longRunning: Type.Optional(Type.Boolean({ description: "Scheduling preference only — not a resource dimension" })),
+});
+
+const ExperimentParams = Type.Object({
+  action: Type.Union([
+    Type.Literal("submit"),
+    Type.Literal("list"),
+    Type.Literal("get"),
+    Type.Literal("logs"),
+    Type.Literal("wait"),
+    Type.Literal("cancel"),
+    Type.Literal("collect"),
+  ], { description: "submit starts a durable attempt; get/logs/collect expand by attemptId; wait blocks until terminal or timeout; cancel requests backend stop" }),
+  attemptId: Type.Optional(Type.String({ description: "Required for get, logs, wait, cancel, collect" })),
+  // submit
+  requestId: Type.Optional(Type.String({ description: "submit: idempotency key — a retry with the same id returns the recorded attempt instead of starting a second job" })),
+  title: Type.Optional(Type.String({ description: "submit: short human-readable label for this experiment" })),
+  specId: Type.Optional(Type.String({ description: "submit: reuse a previously recorded spec (cannot combine with inline fields); list: filter attempts by spec" })),
+  command: Type.Optional(Type.String({ description: "submit: executable to run — required unless specId is given" })),
+  args: Type.Optional(Type.Array(Type.String())),
+  cwd: Type.Optional(Type.String({ description: "submit: absolute directory inside the workspace; defaults to the workspace root" })),
+  env: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "submit: environment overrides merged over the inherited environment" })),
+  inputs: Type.Optional(Type.Array(Type.Object({
+    sourceId: Type.Optional(Type.String({ description: "A registered research_source id" })),
+    path: Type.Optional(Type.String({ description: "Workspace-relative input path" })),
+    objectHash: Type.Optional(Type.String({ description: "sha256-… object in the workspace store" })),
+    role: Type.Optional(Type.String({ description: "What this input is for" })),
+  }))),
+  resources: Type.Optional(ExperimentResourcesParams),
+  outputPaths: Type.Optional(Type.Array(Type.String({ description: "submit: workspace-relative output paths collected as artifacts after exit" }))),
+  machineId: Type.Optional(Type.String({ description: "submit: target machine; defaults to local" })),
+  // list
+  state: Type.Optional(Type.Union([
+    Type.Literal("submitted"),
+    Type.Literal("queued"),
+    Type.Literal("running"),
+    Type.Literal("stopping"),
+    Type.Literal("completed"),
+    Type.Literal("failed"),
+    Type.Literal("cancelled"),
+    Type.Literal("lost"),
+  ], { description: "list: filter attempts by state" })),
+  limit: Type.Optional(Type.Integer({ minimum: 1, description: "list: max attempts returned" })),
+  // logs
+  stream: Type.Optional(Type.Union([Type.Literal("stdout"), Type.Literal("stderr")], { description: "logs: stream to read (default stdout)" })),
+  offset: Type.Optional(Type.Integer({ minimum: 0, description: "logs: byte offset into the stream — pass the previous nextOffset to page" })),
+  maxBytes: Type.Optional(Type.Integer({ minimum: 1 })),
+  // wait
+  timeout_ms: Type.Optional(Type.Integer({ minimum: 1, description: "wait: deadline in milliseconds; timeout ends only this wait, never the job" })),
+});
+
+const SourceParams = Type.Object({
+  action: Type.Union([Type.Literal("register"), Type.Literal("list")]),
+  kind: Type.Optional(Type.Union([
+    Type.Literal("dataset"),
+    Type.Literal("paper"),
+    Type.Literal("code"),
+    Type.Literal("artifact"),
+    Type.Literal("collection"),
+    Type.Literal("other"),
+  ], { description: "register: required source kind; list: optional filter" })),
+  label: Type.Optional(Type.String()),
+  uri: Type.Optional(Type.String({ description: "register: external locator" })),
+  path: Type.Optional(Type.String({ description: "register: workspace-relative locator" })),
+  objectHash: Type.Optional(Type.String({ description: "register: sha256-… object locator" })),
+  note: Type.Optional(Type.String({ description: "register: provenance note" })),
+});
+
+export function createExperimentTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+  return defineTool({
+    name: "experiment",
+    label: "Experiment",
+    description: "Run and manage durable experiments. submit pins a spec and starts an attempt on a machine (local backend now); list shows concise attempt rows; get/logs/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
+    promptSnippet: "experiment: submit/list/get/logs/wait/cancel/collect durable experiment attempts",
+    promptGuidelines: [
+      "An attempt keeps running when your Run ends or the session disconnects — use list/get to reattach by attemptId, not a fresh submit.",
+      "wait only ends when the attempt reaches a terminal state or its deadline passes; a timeout never cancels the job.",
+      "experiment is not a shell — it records specs, jobs, and collected artifacts durably. Use bash for interactive troubleshooting.",
+      "Check resources before demanding CPU/GPU; an attempt queues when its request cannot be confirmed.",
+    ],
+    parameters: ExperimentParams,
+    executionMode: "sequential",
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      const needAttempt = (): string => {
+        if (params.attemptId === undefined || params.attemptId.trim() === "") {
+          throw new HarnessRequestError("invalid-params", `action "${params.action}" requires attemptId`);
+        }
+        return params.attemptId;
+      };
+      try {
+        switch (params.action) {
+          case "submit": {
+            if (params.specId !== undefined && (params.command !== undefined || params.args !== undefined
+              || params.cwd !== undefined || params.env !== undefined || params.inputs !== undefined
+              || params.resources !== undefined || params.outputPaths !== undefined)) {
+              return invalidParams("experiment", "specId cannot be combined with inline spec fields");
+            }
+            if (params.specId === undefined && (params.command === undefined || params.command.trim() === "")) {
+              return invalidParams("experiment", "submit requires command (or a specId to reuse a recorded spec)");
+            }
+            const result = await bridge.request<"experiment.submit">("experiment.submit", {
+              ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+              ...(params.title !== undefined ? { title: params.title } : {}),
+              ...(params.specId !== undefined ? { specId: params.specId } : {}),
+              ...(params.command !== undefined ? { command: params.command } : {}),
+              ...(params.args !== undefined ? { args: params.args } : {}),
+              ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
+              ...(params.env !== undefined ? { env: params.env } : {}),
+              ...(params.inputs !== undefined ? { inputs: params.inputs } : {}),
+              ...(params.resources !== undefined ? { resources: params.resources } : {}),
+              ...(params.outputPaths !== undefined ? { outputPaths: params.outputPaths } : {}),
+              ...(params.machineId !== undefined ? { machineId: params.machineId } : {}),
+            }, signal ? { signal } : undefined);
+            const typed = result as ExperimentSubmitResult;
+            return {
+              content: [{ type: "text", text: typed.text }],
+              details: {
+                specId: typed.spec.specId,
+                attemptId: typed.attempt.attemptId,
+                state: typed.attempt.state,
+                backend: typed.attempt.backend,
+                ...(typed.attempt.machineId !== undefined ? { machineId: typed.attempt.machineId } : {}),
+                ...(typed.attempt.queueReason !== undefined ? { queueReason: typed.attempt.queueReason } : {}),
+              },
+            };
+          }
+          case "list": {
+            const result = await bridge.request<"experiment.list">("experiment.list", {
+              ...(params.state !== undefined ? { state: params.state } : {}),
+              ...(params.specId !== undefined ? { specId: params.specId } : {}),
+              ...(params.limit !== undefined ? { limit: params.limit } : {}),
+            }, signal ? { signal } : undefined);
+            const typed = result as ExperimentListResult;
+            return {
+              content: [{ type: "text", text: typed.text }],
+              details: { count: typed.attempts.length },
+            };
+          }
+          case "get": {
+            const result = await bridge.request<"experiment.get">("experiment.get", {
+              attemptId: needAttempt(),
+            }, signal ? { signal } : undefined);
+            const typed = result as ExperimentGetResult;
+            const attempt = typed.attempt;
+            const lines = [
+              `attempt ${attempt.attemptId} — ${attempt.state} on ${attempt.backend}${attempt.machineId ? `/${attempt.machineId}` : ""}`,
+              `spec ${attempt.specId}${typed.spec?.title ? ` (${typed.spec.title})` : ""} — ${typed.spec ? `${typed.spec.command} ${typed.spec.args.join(" ")}`.trim() : "spec record unavailable"}`,
+              ...(typed.job ? [`job ${typed.job.jobId} — ${typed.job.state}${typed.job.backendJobId ? ` (backend ${typed.job.backendJobId})` : ""}${typed.job.exitCode !== undefined && typed.job.exitCode !== null ? ` exit ${typed.job.exitCode}` : ""}`] : []),
+              `collection: ${attempt.collection}${attempt.error ? ` · error: ${attempt.error}` : ""}`,
+              ...(typed.artifacts.length > 0
+                ? [`artifacts:\n${typed.artifacts.map((artifact) => `  ${artifact.name} — ${artifact.state}${artifact.byteLength !== undefined ? `, ${artifact.byteLength}B` : ""}${artifact.truncated ? ", truncated" : ""}${artifact.objectHash ? `, ${artifact.objectHash}` : ""}`).join("\n")}`]
+                : []),
+            ];
+            return {
+              content: [{ type: "text", text: lines.join("\n") }],
+              details: { attempt, job: typed.job ?? null, artifacts: typed.artifacts, spec: typed.spec ?? null },
+            };
+          }
+          case "logs": {
+            const result = await bridge.request<"experiment.logs">("experiment.logs", {
+              attemptId: needAttempt(),
+              ...(params.stream !== undefined ? { stream: params.stream } : {}),
+              ...(params.offset !== undefined ? { offset: params.offset } : {}),
+              ...(params.maxBytes !== undefined ? { maxBytes: params.maxBytes } : {}),
+            }, signal ? { signal } : undefined);
+            const typed = result as ExperimentLogsResult;
+            return {
+              content: [{ type: "text", text: typed.text || `(${typed.stream} empty at offset ${typed.offset})` }],
+              details: {
+                attemptId: typed.attemptId,
+                stream: typed.stream,
+                offset: typed.offset,
+                nextOffset: typed.nextOffset,
+                eof: typed.eof,
+                origin: typed.origin,
+              },
+            };
+          }
+          case "wait": {
+            const timeoutMs = Math.min(
+              params.timeout_ms ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000),
+              HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000,
+            );
+            // The service owns the wait deadline and the execution-slot yield;
+            // no second fixed timer may abort it (same rule as thread.wait).
+            const result = await bridge.request<"experiment.wait">("experiment.wait", {
+              attemptId: needAttempt(),
+              timeoutMs,
+            }, { timeoutMs: 0, ...(signal ? { signal } : {}) });
+            const typed = result as ExperimentWaitResult;
+            const attempt = typed.attempt;
+            return {
+              content: [{
+                type: "text",
+                text: `attempt ${attempt.attemptId} — ${attempt.state}${attempt.exitCode !== undefined && attempt.exitCode !== null ? ` (exit ${attempt.exitCode})` : ""}${typed.timedOut ? " — timed out; the job keeps running, wait again or use action:\"cancel\"" : ""}`,
+              }],
+              details: { attempt, timedOut: typed.timedOut },
+            };
+          }
+          case "cancel": {
+            const result = await bridge.request<"experiment.cancel">("experiment.cancel", {
+              attemptId: needAttempt(),
+            }, signal ? { signal } : undefined);
+            const typed = result as { attempt: { attemptId: string; state: string } };
+            return {
+              content: [{ type: "text", text: `attempt ${typed.attempt.attemptId} — ${typed.attempt.state}` }],
+              details: { attempt: typed.attempt },
+            };
+          }
+          case "collect": {
+            const result = await bridge.request<"experiment.collect">("experiment.collect", {
+              attemptId: needAttempt(),
+            }, signal ? { signal } : undefined);
+            const typed = result as ExperimentCollectResult;
+            const lines = typed.artifacts.map((artifact) =>
+              `  ${artifact.name} — ${artifact.state}${artifact.byteLength !== undefined ? `, ${artifact.byteLength}B` : ""}${artifact.error ? `, ${artifact.error}` : ""}`);
+            return {
+              content: [{
+                type: "text",
+                text: `attempt ${typed.attempt.attemptId} — collection ${typed.attempt.collection}${lines.length > 0 ? `\nartifacts:\n${lines.join("\n")}` : ""}`,
+              }],
+              details: { attempt: typed.attempt, artifacts: typed.artifacts },
+            };
+          }
+        }
+      } catch (error) {
+        return experimentErrorResult("experiment", error);
+      }
+    },
+  });
+}
+
+export function createResourcesTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+  return defineTool({
+    name: "resources",
+    label: "Resources",
+    description: "Show the machine resource overview: capacity, confirmed commitments, observed usage with its source and age, and connection state. Unknown usage is unknown, not idle.",
+    promptSnippet: "resources: machine capacity, commitments, and observed usage",
+    promptGuidelines: [
+      "Unknown or stale usage is not idle — a quiet GPU can still be committed.",
+    ],
+    parameters: Type.Object({}),
+    executionMode: "parallel",
+    execute: async (_toolCallId, _params, signal, _onUpdate, _ctx) => {
+      try {
+        const result = await bridge.request<"resource.list">("resource.list", {}, signal ? { signal } : undefined);
+        const typed = result as ResourceListResult;
+        return {
+          content: [{ type: "text", text: typed.text }],
+          details: { machines: typed.machines, generatedAt: typed.generatedAt },
+        };
+      } catch (error) {
+        return experimentErrorResult("resources", error);
+      }
+    },
+  });
+}
+
+export function createResearchSourceTool(bridge: HostServicesBridge, _sessionId: string): ToolDefinition {
+  return defineTool({
+    name: "research_source",
+    label: "Research Source",
+    description: "Register or list provenance-carrying research inputs (dataset, paper, code, artifact, collection, other). Registration records the locator only — it does not fetch or copy content. A registered sourceId can feed experiment inputs.",
+    promptSnippet: "research_source: register/list research inputs with provenance",
+    promptGuidelines: [
+      "Register a source once and reuse its sourceId in experiment inputs — do not re-register duplicates.",
+    ],
+    parameters: SourceParams,
+    executionMode: "parallel",
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      try {
+        switch (params.action) {
+          case "register": {
+            if (params.kind === undefined) {
+              return invalidParams("research_source", "register requires kind");
+            }
+            if (params.uri === undefined && params.path === undefined && params.objectHash === undefined) {
+              return invalidParams("research_source", "register requires at least one locator: uri, path, or objectHash");
+            }
+            const result = await bridge.request<"source.register">("source.register", {
+              kind: params.kind,
+              ...(params.label !== undefined ? { label: params.label } : {}),
+              ...(params.uri !== undefined ? { uri: params.uri } : {}),
+              ...(params.path !== undefined ? { path: params.path } : {}),
+              ...(params.objectHash !== undefined ? { objectHash: params.objectHash } : {}),
+              ...(params.note !== undefined ? { note: params.note } : {}),
+            }, signal ? { signal } : undefined);
+            const typed = result as SourceRegisterResult;
+            return {
+              content: [{ type: "text", text: `source ${typed.source.sourceId} registered (${typed.source.kind}${typed.source.label ? `, ${typed.source.label}` : ""})` }],
+              details: { source: typed.source },
+            };
+          }
+          case "list": {
+            const result = await bridge.request<"source.list">("source.list", {
+              ...(params.kind !== undefined ? { kind: params.kind } : {}),
+            }, signal ? { signal } : undefined);
+            const typed = result as SourceListResult;
+            return {
+              content: [{ type: "text", text: typed.text }],
+              details: { count: typed.sources.length, sources: typed.sources },
+            };
+          }
+        }
+      } catch (error) {
+        return experimentErrorResult("research_source", error);
+      }
+    },
+  });
+}

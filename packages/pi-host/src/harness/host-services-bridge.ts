@@ -80,9 +80,10 @@ export class HostServicesBridge {
       rejectResponse = reject;
     });
     // A thread wait owns its dependency deadline; a send with a correlated
-    // wait owns its reply deadline the same way. Reacquiring a root slot
-    // afterwards is cancellation/lifecycle-bound, not a second fixed timeout.
-    const timer = (method === "thread.wait" || method === "thread.send") && timeoutMs === 0 ? undefined : setTimeout(() => {
+    // wait owns its reply deadline; an experiment wait owns its attempt
+    // deadline the same way. Reacquiring a root slot afterwards is
+    // cancellation/lifecycle-bound, not a second fixed timeout.
+    const timer = (method === "thread.wait" || method === "thread.send" || method === "experiment.wait") && timeoutMs === 0 ? undefined : setTimeout(() => {
       const pending = this.#pending.get(requestId);
       if (!pending) return;
       this.#emitCancel({ requestId });

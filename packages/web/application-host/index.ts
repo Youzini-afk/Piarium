@@ -1,5 +1,8 @@
 import 'reflect-metadata';
 import { createKernelComputeService } from './lib/kernel/compute-service.js';
+import { createExperimentService } from './lib/harness/experiments.js';
+import { createResourceService } from './lib/harness/resources.js';
+import { createSourceService } from './lib/harness/sources.js';
 import compression from 'compression';
 import crypto from 'crypto';
 import express, { type Request, type Response } from 'express';
@@ -1293,6 +1296,21 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       admitManaged: (directory, owner) => managedRootAdmission.materialization(directory, owner),
     })(cwd),
   });
+  // Experiment/resource/source authority (7C/7D, D-300). The service grant is
+  // Host-internal — the same trust level as the native process host — so a
+  // detached reconciler can inspect, stop and collect jobs after restarts.
+  const resourceService = createResourceService({
+    client: kernelClient,
+    onError: (error) => console.error("[PiariumResource]", error.message),
+  });
+  const sourceService = createSourceService({ client: kernelClient });
+  const experimentService = createExperimentService({
+    client: kernelClient,
+    resources: resourceService,
+    sources: sourceService,
+    resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
+    onError: (error) => console.error("[PiariumExperiment]", error.message),
+  });
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
@@ -2241,6 +2259,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     discoveredShells,
     pathLockService: kernelPathLockService,
     verification: verificationCoordinator,
+    experimentService,
+    resourceService,
+    sourceService,
     readExploreFile: createExploreFileReader(
       documentsAuthority,
       harnessPathAuthority,
@@ -2705,6 +2726,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
               documentRead: true,
               documentPathOverlay: true,
               threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
+              experiments: Boolean(harnessServiceHost.experimentService),
             }),
           }).catch((error) => {
             console.error('[Harness] Failed to register session shell:', errorMessage(error));

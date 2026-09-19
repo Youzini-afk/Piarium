@@ -114,6 +114,32 @@ impl Storage {
             }
             Ok(())
         };
+        let required = |field: &str| -> Result<&str, KernelError> {
+            object
+                .get(field)
+                .and_then(Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    KernelError::Operation(format!("typed record {field} is required"))
+                })
+        };
+        let derived = |prefix: &str| -> Result<(), KernelError> {
+            let id = required("id")?;
+            if record_id != format!("{prefix}:{id}") {
+                return Err(KernelError::Operation(format!(
+                    "typed record recordId is not derived from its {prefix} id"
+                )));
+            }
+            Ok(())
+        };
+        let state_in = |states: &[&str]| -> Result<(), KernelError> {
+            if !states.contains(&state) {
+                return Err(KernelError::Operation(format!(
+                    "typed record state is invalid: {state}"
+                )));
+            }
+            Ok(())
+        };
         match record_type {
             "recovery.checkpoint" => {
                 same("id", record_id)?;
@@ -178,6 +204,103 @@ impl Storage {
                         "operation kind is required".to_string(),
                     ));
                 }
+            }
+            "research.source" => {
+                derived("research.source")?;
+                same("workspaceId", workspace_id)?;
+                required("kind")?;
+                if object.get("uri").and_then(Value::as_str).is_none()
+                    && object.get("path").and_then(Value::as_str).is_none()
+                    && object.get("objectHash").and_then(Value::as_str).is_none()
+                {
+                    return Err(KernelError::Operation(
+                        "research source requires a uri, path or objectHash locator".to_string(),
+                    ));
+                }
+                state_in(&["available", "retired"])?;
+            }
+            "experiment.spec" => {
+                derived("experiment.spec")?;
+                same("workspaceId", workspace_id)?;
+                required("command")?;
+                if let Some(args) = object.get("args") {
+                    if !args.is_array()
+                        || !args
+                            .as_array()
+                            .is_some_and(|items| items.iter().all(|item| item.is_string()))
+                    {
+                        return Err(KernelError::Operation(
+                            "experiment spec args must be a string array".to_string(),
+                        ));
+                    }
+                }
+                state_in(&["active", "retired"])?;
+            }
+            "experiment.attempt" => {
+                derived("experiment.attempt")?;
+                required("specId")?;
+                required("backend")?;
+                state_in(&[
+                    "submitted",
+                    "queued",
+                    "running",
+                    "stopping",
+                    "completed",
+                    "failed",
+                    "cancelled",
+                    "lost",
+                ])?;
+            }
+            "experiment.job" => {
+                derived("experiment.job")?;
+                required("attemptId")?;
+                required("backend")?;
+                state_in(&[
+                    "starting",
+                    "running",
+                    "exited",
+                    "failed",
+                    "cancelled",
+                    "unknown",
+                    "released",
+                ])?;
+            }
+            "experiment.artifact" => {
+                derived("experiment.artifact")?;
+                required("attemptId")?;
+                required("name")?;
+                state_in(&["pending", "available", "failed", "expired"])?;
+            }
+            "resource.machine" => {
+                derived("resource.machine")?;
+                required("kind")?;
+                state_in(&["available", "degraded", "offline", "retired"])?;
+            }
+            "resource.commitment" => {
+                derived("resource.commitment")?;
+                required("machineId")?;
+                if !object.get("resources").is_some_and(Value::is_object) {
+                    return Err(KernelError::Operation(
+                        "resource commitment requires a resources object".to_string(),
+                    ));
+                }
+                state_in(&["requested", "confirmed", "released", "revoked", "failed"])?;
+            }
+            "resource.sample" => {
+                let machine = required("machineId")?;
+                if record_id != format!("resource.sample:{machine}") {
+                    return Err(KernelError::Operation(
+                        "typed record recordId is not derived from its resource.sample machineId"
+                            .to_string(),
+                    ));
+                }
+                if object.get("observedAt").and_then(Value::as_i64).is_none() {
+                    return Err(KernelError::Operation(
+                        "resource sample observedAt is required".to_string(),
+                    ));
+                }
+                required("source")?;
+                state_in(&["observed", "stale"])?;
             }
             "recovery.operation-file" => {
                 if object.get("operationId").and_then(Value::as_str).is_none()
@@ -374,6 +497,14 @@ impl Storage {
             "recovery.turn",
             "recovery.operation",
             "recovery.operation-file",
+            "research.source",
+            "experiment.spec",
+            "experiment.attempt",
+            "experiment.job",
+            "experiment.artifact",
+            "resource.machine",
+            "resource.commitment",
+            "resource.sample",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")
