@@ -24,7 +24,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
-| Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-294); locally verified |
+| Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows Q |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
@@ -67,8 +67,8 @@ Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i1
 suites, quoted-glob discovery, retargeted recovery evidence on the production journal engine,
 artifact-driven CI with docs-only gating, and the cloud daemon boot failure fixed at its product
 root cause (a production dependency declaration). The dormant VS Code adapter is deprecated
-(D-294) and excluded from formal evidence; its removal is a later dedicated stage. Locally
-verified; awaiting primary-agent acceptance before AI4S implementation begins.
+(D-294/D-295) and excluded from formal evidence; its removal is a later dedicated stage. Q is
+accepted and AI4S implementation may begin.
 
 ## Phase 0 — Foundation (complete)
 

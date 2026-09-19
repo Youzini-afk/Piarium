@@ -165,7 +165,7 @@ Exécutez les vérifications suivantes lorsque la frontière concernée s'appliq
 | Runtime cloud, Docker ou déploiement SSH | `bun run test:cloud` et une build de runtime canonique |
 | Cycle de vie, architecture ou mise à jour Electron | `bun run --cwd packages/electron test:architecture` et/ou `test:updater` |
 | Empaquetage Windows ou modules natifs | `bun run electron:build:win` puis `bun run electron:smoke:win` |
-| Runtime VS Code | `bun run --cwd packages/vscode verify:pi-runtime` ainsi que la commande de build/package concernée |
+| Runtime VS Code (déprécié, manuel uniquement) | Hors CI obligatoire ; uniquement si l’adaptateur historique est explicitement maintenu, exécuter `bun run --cwd packages/vscode verify:pi-runtime` et la commande de build/package concernée |
 | Imports, exports ou suppression | `bun run dead-code` et une build de production de chaque surface concernée |
 | Site de documentation | `bun run docs:validate` et vérification manuelle des liens locaux modifiés |
 | `package.json` de l'espace de travail ou lockfile racine | `bun run update:cloud-runtime-lock` afin que `scripts/cloud-runtime.bun.lock` reste gelé |

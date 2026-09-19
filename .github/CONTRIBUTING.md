@@ -160,7 +160,7 @@ Run these when the affected boundary applies:
 | Cloud runtime, Docker, or SSH deployment | `bun run test:cloud` and a canonical runtime build |
 | Electron lifecycle, architecture, or updater | `bun run --cwd packages/electron test:architecture` and/or `test:updater` |
 | Windows packaging or native modules | `bun run electron:build:win` followed by `bun run electron:smoke:win` |
-| VS Code runtime | `bun run --cwd packages/vscode verify:pi-runtime` plus the relevant build/package command |
+| VS Code runtime (deprecated/manual only) | Not a required CI path; if the historical adapter is explicitly maintained, run `bun run --cwd packages/vscode verify:pi-runtime` plus the relevant build/package command |
 | Imports, exports, or deletion | `bun run dead-code` and a production build of each affected surface |
 | Documentation site | `bun run docs:validate` and manual checking of changed local links |
 | Workspace `package.json` or root lockfile | `bun run update:cloud-runtime-lock` so `scripts/cloud-runtime.bun.lock` stays frozen |

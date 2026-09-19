@@ -18,7 +18,7 @@ Last updated: 2026-09-19
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-292/D-294 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
+**D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。
 
 已交付：kernel/native 验收集由 `packages/web/vitest.kernel.config.ts` 唯一归属（主 Web 套件 271 文件/2334 用例全绿且不再依赖
@@ -33,8 +33,9 @@ layout 测试中断言；deploy rollback 现输出 daemon 日志尾部。`thread
 **D-294 VS Code 适配层不计入正式产品证据。** `packages/vscode` 是历史适配层，长期荒废，当前 deprecated / unsupported：
 其 `bun test` 全套件实测 57–58 pass、1–2 fail——`src/webviewHtml.test.ts` 单独运行通过，全套件内被跨文件
 `mock.module('vscode')` 污染而失败，worktree bootstrap fixture 另有抖动；均为测试装配问题而非产品故障。Q 阶段曾短暂把
-该套件接入 windows-runtime，现按 D-294 移除：它不算 Q 的 required CI 证据，不宣称已接入且全绿，本轮也不修测试、不删
-代码。VS Code 完整删除、构建入口、专属文档与发布链清理列为后续独立阶段。
+该套件接入 windows-runtime，现按 D-294 移除；D-295 进一步移除根聚合 `build`/`type-check`/`lint` 与 production-build 中的
+VS Code runtime 门禁。它不算 Q 的 required CI 证据，不宣称已接入且全绿，本轮也不修测试、不删代码；需要时仍可手动运行其
+脚本。VS Code 完整删除、构建入口、专属文档与发布链清理列为后续独立阶段。
 
 **D-290 编程语言支持开箱即用（2026-09-18）。** 在 TS/JS/JSON 之外，内置 Python、Go、Rust、Java、C/C++、C#、Kotlin、Ruby、PHP、Bash、CSS、HTML、YAML、TOML 的结构包和提取查询。发行构建校验 15 份新增 wasm 的大小/SHA-256 并实际编译查询，运行时仍由 Rust kernel 提取；查询缺失报告 unavailable。不可变语法摘要和 kernel recipe 按身份复用，避免每个源文件重复读取、散列和注册同一个 wasm。
 

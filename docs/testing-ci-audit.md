@@ -351,7 +351,7 @@ was never the CI cause.
   `desktop-release.yml`; the UI suite inside `test:pi` already covers the
   same files, so the dedicated step was a second execution of the same
   environment.
-- **vscode suite boundary correction (D-294)** — `bun run --cwd
+- **vscode suite boundary correction (D-294/D-295)** — `bun run --cwd
   packages/vscode test` was briefly added to `windows-runtime`, then
   removed: `packages/vscode` is a deprecated/unsupported historical
   adapter outside the formal product surface, so its suite is not Q
@@ -360,9 +360,10 @@ was never the CI cause.
   but fails in the full suite from cross-file `mock.module('vscode')`
   pollution (`vscode.Uri.joinPath` undefined), plus a flaky worktree
   bootstrap fixture; both are test-assembly issues, not product faults.
-  The suite was not fixed and the code/tests stay in the repo; full
-  removal, build-entry, and doc cleanup belong to a later dedicated
-  stage.
+  The suite was not fixed and the code/tests stay in the repo; D-295 also
+  removes the package from root aggregate build/type-check/lint and the
+  production-build VS Code runtime gates. Full removal, build-entry, and
+  doc cleanup belong to a later dedicated stage.
 - **node-smoke** — moved out of `source-quality`; `production-build` runs
   `node --test .../store.smoke.test.ts` against the artifact `bun run
   build` already produced, instead of rebuilding the host a second time.

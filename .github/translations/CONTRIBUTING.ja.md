@@ -156,7 +156,7 @@ bun run build
 | クラウドランタイム、Docker、SSH デプロイ | `bun run test:cloud` と正規ランタイムビルド |
 | Electron のライフサイクル、アーキテクチャ、アップデーター | `bun run --cwd packages/electron test:architecture` および/または `test:updater` |
 | Windows パッケージ化またはネイティブモジュール | `bun run electron:build:win` の後に `bun run electron:smoke:win` |
-| VS Code ランタイム | `bun run --cwd packages/vscode verify:pi-runtime` と関連する build/package コマンド |
+| VS Code ランタイム（非推奨・手動のみ） | 必須 CI の対象外。履歴アダプターを明示的に保守する場合だけ `bun run --cwd packages/vscode verify:pi-runtime` と関連する build/package コマンドを実行 |
 | インポート、エクスポート、削除 | `bun run dead-code` と影響を受ける各サーフェスのプロダクションビルド |
 | ドキュメントサイト | `bun run docs:validate` と変更したローカルリンクの手動確認 |
 | ワークスペースの `package.json` またはルート lockfile | `scripts/cloud-runtime.bun.lock` を凍結状態に保つための `bun run update:cloud-runtime-lock` |

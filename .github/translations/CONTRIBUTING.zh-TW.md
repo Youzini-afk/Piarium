@@ -137,7 +137,7 @@ bun run build
 | 雲端執行環境、Docker 或 SSH 部署 | `bun run test:cloud` 和標準執行環境建置 |
 | Electron 生命週期、架構或更新器 | `bun run --cwd packages/electron test:architecture` 和/或 `test:updater` |
 | Windows 封裝或原生模組 | `bun run electron:build:win`，接著執行 `bun run electron:smoke:win` |
-| VS Code 執行環境 | `bun run --cwd packages/vscode verify:pi-runtime` 加上相關的建置/封裝命令 |
+| VS Code 執行環境（已棄用，僅手動） | 不屬於必要 CI；只有明確維護這個歷史介面層時，才執行 `bun run --cwd packages/vscode verify:pi-runtime` 與相關建置/封裝命令 |
 | 匯入、匯出或刪除 | `bun run dead-code` 和每個受影響介面的正式建置 |
 | 文件網站 | `bun run docs:validate` 和手動檢查變更的本機連結 |
 | 工作區 `package.json` 或根目錄 lockfile | `bun run update:cloud-runtime-lock`，讓 `scripts/cloud-runtime.bun.lock` 保持凍結 |
