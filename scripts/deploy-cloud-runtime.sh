@@ -340,7 +340,10 @@ else
       if (!hostEntry) throw new Error("Pi host entry could not be resolved");
       const require = createRequire(new URL("./packages/web/package.json", import.meta.url));
       require.resolve("sherpa-onnx-node");
-      require.resolve("@piarium/extension-builtins");
+      const builtins = await import("./packages/web/node_modules/@piarium/extension-builtins/dist/index.js");
+      if (!Array.isArray(builtins.PIARIUM_BUNDLED_LANGUAGE_SERVERS)) {
+        throw new Error("Piarium extension builtins are unavailable");
+      }
       console.log(`Verified Pi host: ${hostEntry}`);
     '
     node verify-kernel.mjs packages/web

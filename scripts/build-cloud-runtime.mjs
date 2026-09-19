@@ -355,7 +355,7 @@ export const installCloudRuntimeDependencies = (
   run('node', [
     '--input-type=module',
     '-e',
-    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
+    "import { createRequire } from 'node:module'; const broker = await import('./packages/web/node_modules/@piarium/runtime-broker/dist/index.js'); const extensions = await import('./packages/web/node_modules/@piarium/extension-host/dist/index.js'); const builtins = await import('./packages/web/node_modules/@piarium/extension-builtins/dist/index.js'); if (typeof extensions.ApplicationExtensionCatalog !== 'function') throw new Error('Piarium extension host is unavailable'); if (!Array.isArray(builtins.PIARIUM_BUNDLED_LANGUAGE_SERVERS)) throw new Error('Piarium extension builtins are unavailable'); const entry = broker.resolveBundledPiHostEntry(); if (!entry) throw new Error('Pi host entry was not resolved'); const require = createRequire(new URL('./packages/web/package.json', import.meta.url)); require.resolve('sherpa-onnx-node'); require.resolve('web-tree-sitter'); console.log(entry);",
   ], {
     cwd: resolvedOutput,
     json,
