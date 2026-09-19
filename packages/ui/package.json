@@ -76,7 +76,7 @@
     "react-dom": "^19.1.1",
     "react-drawio": "1.0.7",
     "remend": "^1.3.0",
-    "shiki": "^3.23.0",
+    "shiki": "^4.4.3",
     "sonner": "^2.0.7",
     "tailwind-merge": "^3.3.1",
     "yaml": "^2.8.1",
