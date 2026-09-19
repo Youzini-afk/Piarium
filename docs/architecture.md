@@ -326,6 +326,16 @@ active context; Zone 2 then emits changed material instead of rebuilding a dashb
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
+D-301 schedules a separate follow-up, 7G, after acceptance of the currently executing D-300 task.
+It unifies preparation before every actual model request: new environment facts become replayable
+history, followed by a complete compact team roster that exists only in that request. Prior rosters
+never enter the growing conversation prefix; the full current scoped view is supplied even when
+unchanged. Fixed collaboration guidance stays in the system prompt; dynamic observations and the
+snapshot use source-labelled user content through the provider adapter. Request capacity includes
+both materials. Environment delivery receipts remain distinct from transient snapshot visibility,
+and neither UI reads nor a snapshot marker consumes a directed message or result body. This is a
+planned change to the existing Pi context owner, not an implemented second context service.
+
 D-286 makes the full context scope explicit: sufficient first presentation of tool material, stable
 history, actual request capacity, retained original messages, one continuation summary, history rereads,
 and independent plans/knowledge. A task can also start a fresh input view when its prior background is
@@ -505,8 +515,10 @@ The planned collaboration layer extends the existing Thread message ledger and t
 research and future office work. Natural-language sends can return immediately or wait for a correlated
 reply. A compact roster projects actual task/state and roughly 20 visible characters from the latest
 completed visible assistant paragraph, with stable source references. Existing output events maintain
-it; no status-report task or summarizer model is introduced. Initial state and later changed rows enter
-Zone 2 before actual model requests, including tool continuations. Explicit messages and established
+it; no status-report task or summarizer model is introduced. The current D-300 execution targets initial
+state plus changed rows before actual model requests; queued D-301 / 7G replaces that presentation with
+a full current request-only tail snapshot for every authorized Agent, while environment deltas remain
+in history. The current task is accepted against its original scope before this follow-up. Explicit messages and established
 waits drive continuation; Host does not classify scientific significance to launch stronger models.
 These contracts and the local/remote acceptance sequence are specified in
 [plan stage 7](agent-harness-plan.md), not claimed as current runtime behavior.

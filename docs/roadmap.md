@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending |
+| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending acceptance; D-301 / 7G queued after the current task |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -63,6 +63,15 @@ or event classifier that automatically invokes a frontier model. Resource coordi
 optional; actual resource enforcement remains in the execution backend. 7D and 7E can progress from
 their respective 7C seams and converge in 7F's real research slice and comparison. This is accepted
 design, not a delivery claim; implementation details belong to the harness plan and research design.
+
+D-301 adds a separate **7G follow-up after the current execution task and its acceptance**. Each Agent
+receives a complete current scoped roster as a transient request-tail snapshot, with stable collaboration
+guidance in the system prompt. Traditional environment facts are checked before every model request
+and appended to replayable history when delivered. The two use one preparation boundary but different
+retention rules; old rosters do not accumulate in history or invalidate the growing history prefix.
+The snapshot's input cost is included in capacity planning. This does not interrupt or retroactively
+expand the task already given to the executing Agent; acceptance will identify the seams to reuse and
+hand off 7G. The design is accepted, with no implementation or cache-benefit claim in this update.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
