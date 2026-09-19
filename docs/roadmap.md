@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending acceptance; D-301 / 7G context and D-302 / 7H tool execution follow-ups queued |
+| 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; follow-ups 7G → 7H → 7I queued; managed remote execution and optional operations threads planned at D-304; Slurm deferred |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -52,17 +52,18 @@ separation. Research execution builds on the existing Pi runtime, Thread/Run, Ho
 context, permissions and Rust kernel, and remains available in the IDE. The first vertical slice is an
 open research question explored by heterogeneous model branches, fast execution workers and deliberate
 discussion and synthesis. The 7A entry, focus and real principal-run attachment, plus the first 7B
-capability-routing slice, are implemented. Dynamic upgrades and the remaining cluster work are planned.
+capability-routing slice, are implemented. D-303 closes local execution, dynamic upgrades, collaboration
+and research facts access; managed remote and multi-machine work follows in 7I.
 Verification boundaries are recorded in harness status.
 
-D-300 revises 7C–7E before implementation: 7C provides shared message/source and resource facts; 7D
-delivers durable local/remote experiments, multi-machine allocation and a first native scheduler adapter;
+D-300 defined shared message/source and resource facts, durable experiments and multi-machine allocation;
+D-303 accepted the local slice, while D-304 moves managed remote follow-up to 7I and defers native scheduler adapters.
 7E extends general Agent communication with optional reply waits and a continuously refreshed compact
 roster derived from existing visible output. No mandatory research handoff schema, extra status reports
-or event classifier that automatically invokes a frontier model. Resource coordination by an Agent is
-optional; actual resource enforcement remains in the execution backend. 7D and 7E can progress from
-their respective 7C seams and converge in 7F's real research slice and comparison. This is accepted
-design, not a delivery claim; implementation details belong to the harness plan and research design.
+or event classifier that automatically invokes a frontier model. Operations Agents are optional and may
+divide responsibility as scale grows; actual resource confirmation remains in the execution backend.
+Research evaluation remains a follow-up observation, not a prerequisite to shipping complete functionality.
+Implementation and delivery boundaries belong to the harness plan, research design and status.
 
 D-301 adds a separate **7G follow-up after the current execution task and its acceptance**. Each Agent
 receives a complete current scoped roster as a transient request-tail snapshot, with stable collaboration
@@ -81,6 +82,16 @@ continuations can resume an idle Agent, while ordinary output growth cannot. Sha
 permission checks and actual process/writer release remain authoritative. The current 30-second bridge
 deadline versus 60-second shell yield default is a concrete repair target. This is accepted design only;
 ordinary shell execution does not acquire the durable recovery guarantees of research experiments.
+
+D-304 adds **7I after 7G and 7H**: managed remote execution, multi-machine resource confirmation,
+code/data/environment reuse and convenient operations on several existing experiments. Research branches
+and experiments grow through ordinary discussion and execution; there is no required matrix object,
+parameter grid, search language or research workflow. Existing connections and Rust execution services
+provide the remote worksite, with explicit coordinator location and continued supervision of accepted jobs.
+Operations work can stay with current threads at small scale or be divided among several ordinary threads
+responsible for machine groups, environments or data. They use existing tools, messages and current-state
+context, without a mandatory hierarchy or model call for every sample. Slurm and other native cluster
+adapters are deferred until there is an actual deployment need. This is accepted design, not shipped code.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

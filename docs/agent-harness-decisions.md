@@ -36,7 +36,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
-| [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301/D-303 科研集群、工作台与侧重、真实根主线、能力路由、实验执行、通用协作与请求上下文及验收返工。 | 7 |
+| [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301/D-303–D-304 科研集群、工作台与侧重、能力路由、实验执行、通用协作、请求上下文、验收及受管远程/运维。 | 8 |
 
 ## 决策索引
 
@@ -338,7 +338,8 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-297 | 2026-09-19 | 工作台 UIUX 与 Agent 工作侧重独立，科研/办公入口复用整体切换与动画 | 7A implemented at D-298; later work planned | 补齐 D-291 产品形态；项目默认只供新对话捕获，对话可覆盖；D-298 明确新 Run 应用与追问冻结 | research-cluster-design 10；agent-harness 10；plan 7A–7F；composable-workbench；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-298 | 2026-09-19 | AI4S 7A：科研工作台、独立工作侧重和同一用户 Pi 会话的真实根 Thread/Run | implemented / wired; validation boundary in status | 落地 D-297 7A；配置在新 Run 前应用，当前 Run 与追问队列冻结；研究集群其余部分仍计划中 | research-cluster-design；plan 7A；status；architecture；composable-workbench；UI/Host 模块文档 | [research-cluster](decisions/research-cluster.md) |
 | D-299 | 2026-09-19 | AI4S 7B 第一段：研究能力、专用模型槽位、工具集合和资源请求随分支 Run 冻结 | implemented / wired; 7B partial | 没有配置的能力明确 unavailable，不借用主模型；完整动态升级、调度和实验执行仍待后续阶段 | research-cluster-design；plan 7B；status；protocol；pi-host；Host harness | [research-cluster](decisions/research-cluster.md) |
-| D-300 | 2026-09-19 | 实验执行与远程资源、自然语言 Agent 交流、可选等待及自动原文现状 | accepted design / 当前执行待验收；现状注入目标 superseded in part | D-301 后续调整第 9 项；当前执行基线保留；本条部分取代 D-291 强制交接/机械综合并调整 D-285 后续消息交互 | research-cluster-design 6/7；plan 7C–7F；harness 9.2.5a/9.3.7/10.3；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
+| D-300 | 2026-09-19 | 实验执行与远程资源、自然语言 Agent 交流、可选等待及自动原文现状 | local slice accepted at D-303; superseded in part | D-301 调整现状；D-304 延期 Slurm、明确自然生长实验与运维线程，远程排入 7I；原文保留 | research-cluster-design 6/7；plan 7C–7I；harness；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-301 | 2026-09-19 | 环境增量留史、每请求完整团队快照附尾、固定协作说明与 user 来源边界 | accepted design / queued after current execution / not implemented or accepted | 部分取代 D-300 现状增量目标；不扩大当前执行任务，验收时接续 7G | harness 8.1.1/9.3.7；research-cluster-design 7.4；plan 7.8/7G；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-302 | 2026-09-20 | 工具按资源/依赖并行，后台启动、事件等待与完成事实接入 7G | accepted design / queued / not implemented or accepted | 纠正 apply_patch 并行现状，替代整批串行目标；保留真实权限/退出/写者与 D-300 实验合同 | harness 5.0/5.2/5.5/5.9/8.1.1；plan 7H；architecture；roadmap；status | [tool-environment](decisions/tool-environment.md) |
 | D-303 | 2026-09-20 | D-300 本机实验与协作纵切验收返工；完整 7D/7F 保持 Partial | implementation / focused acceptance in status | 纠正规格、资源、恢复、原文与 UI 消费边界；不追溯扩大到 7G/7H | plan 7B/7F；status；Host/Pi harness module docs | [research-cluster](decisions/research-cluster.md) |
+| D-304 | 2026-09-20 | 7I 受管远程、多机器执行、自然生长实验与按规模运维；Slurm 延期 | accepted design / queued after 7G and 7H / not implemented | 部分调整 D-300 原生集群、矩阵和管理角色目标；D-303 本机事实保留 | research-cluster-design 5.1/6/11/13；plan 7I；harness 10.3；status；architecture；roadmap | [research-cluster](decisions/research-cluster.md) |
