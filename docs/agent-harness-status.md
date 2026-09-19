@@ -18,7 +18,7 @@ Last updated: 2026-09-19
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-292/D-293 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，待主代理验收后收口。** 现状审计与处置见
+**D-292/D-294 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。
 
 已交付：kernel/native 验收集由 `packages/web/vitest.kernel.config.ts` 唯一归属（主 Web 套件 271 文件/2334 用例全绿且不再依赖

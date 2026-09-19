@@ -24,7 +24,7 @@ authoritative record of delivery, and each phase names the design document that 
 | 9 | Piarium extension platform | Complete |
 | 10 | Composable workbench, IDE Workbench, and unified editor | Complete |
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
-| Q | Repository-wide testing and CI redesign | Implemented (D-292/D-293); locally verified, awaiting acceptance |
+| Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-294); locally verified |
 | 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows Q |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
