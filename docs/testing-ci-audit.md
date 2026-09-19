@@ -361,8 +361,9 @@ was never the CI cause.
   pollution (`vscode.Uri.joinPath` undefined), plus a flaky worktree
   bootstrap fixture; both are test-assembly issues, not product faults.
   The suite was not fixed and the code/tests stay in the repo; D-295 also
-  removes the package from root aggregate build/type-check/lint and the
-  production-build VS Code runtime gates. Full removal, build-entry, and
+  removes the package from root aggregate type-check/lint and the
+  production-build VS Code runtime gates; the aggregate build entry remains
+  until the dedicated cleanup stage. Full removal, build-entry, and
   doc cleanup belong to a later dedicated stage.
 - **node-smoke** — moved out of `source-quality`; `production-build` runs
   `node --test .../store.smoke.test.ts` against the artifact `bun run

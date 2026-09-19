@@ -88,7 +88,8 @@ checks. Do not turn its one-time cleanup plan into a checklist for every change.
   them and stays deterministic without Rust artifacts.
 - The VS Code adapter is deprecated/unsupported (D-294/D-295): `bun run --cwd packages/vscode test`
   and its runtime checks stay runnable manually, but the `piarium` workspace is excluded from the
-  root aggregate `build`/`type-check`/`lint` commands and required CI. Full-suite runs show
+  root aggregate `type-check`/`lint` commands and required CI; the existing aggregate build entry
+  remains until the dedicated cleanup stage. Full-suite runs show
   test-assembly failures (cross-file `mock.module('vscode')` pollution, a flaky worktree fixture),
   not product faults.
   Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
