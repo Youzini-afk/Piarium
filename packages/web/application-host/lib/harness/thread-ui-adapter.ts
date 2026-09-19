@@ -29,6 +29,7 @@ export function createUserThreadSendAdapter(
       ...(input.capability === undefined ? {} : { capability: input.capability as NonNullable<ThreadSendParams["capability"]> }),
       ...(input.resources === undefined ? {} : { resources: input.resources as NonNullable<ThreadSendParams["resources"]> }),
       ...(input.model === undefined ? {} : { model: input.model }),
+      ...(input.wait === undefined ? {} : { wait: input.wait }),
     }, {
       actor: {
         authorityInstanceId: "ui-thread-routes",

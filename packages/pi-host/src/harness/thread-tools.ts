@@ -95,6 +95,7 @@ const ThreadSendParams = Type.Object({
     network: Type.Optional(Type.Boolean()),
     longRunning: Type.Optional(Type.Boolean()),
   }, { description: "Resource manifest merged over the capability defaults" })),
+  wait: Type.Optional(Type.Number({ description: "Seconds to wait for this request's correlated reply after acceptance (default 0). A timeout ends only this wait — the message and the target's work continue; retry with the same requestId to keep waiting without re-sending" })),
 });
 
 const ThreadReadParams = Type.Object({
@@ -355,7 +356,7 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
     promptGuidelines: [],
     parameters: ThreadSendParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
         let model: { providerId: string; modelId: string } | "inherit" | undefined;
@@ -393,12 +394,21 @@ export function createSendTool(bridge: HostServicesBridge, _sessionId: string, o
           ...(params.capability !== undefined ? { capability: params.capability } : {}),
           ...(research !== undefined ? { resources: research.resources } : {}),
           ...(model !== undefined ? { model } : {}),
-        });
+          ...(params.wait !== undefined ? { wait: params.wait } : {}),
+        }, params.wait !== undefined && params.wait > 0
+          ? { timeoutMs: 0, ...(signal ? { signal } : {}) }
+          : undefined);
         const typed = result as ThreadSendResult;
         const state = `${typed.lifecycle}/${typed.attention}`;
-        return { content: [{ type: "text", text: typed.accepted
-          ? `message ${typed.messageId ?? ""} to ${params.to === "parent" ? "parent" : params.threadId}: ${typed.delivery ?? "accepted"} (${state})${typed.runId ? `; Run ${typed.runId}` : ""}. Delivery is not execution completion.`
-          : "not accepted" }], details: typed };
+        const receipt = typed.accepted
+          ? `message ${typed.messageId ?? ""} to ${params.to === "parent" ? "parent" : params.threadId}: ${typed.delivery ?? "accepted"} (${state})${typed.runId ? `; Run ${typed.runId}` : ""}`
+          : "not accepted";
+        const outcome = typed.reply
+          ? `reply ${typed.reply.messageId} from ${typed.reply.from.kind} ${typed.reply.from.id} at ${typed.reply.at}:\n${typed.reply.text}`
+          : typed.timedOut
+            ? `timed out waiting for a reply — the message ${typed.messageId ?? ""} stays recorded; retry with the same requestId to keep waiting without re-sending`
+            : "Delivery is not execution completion.";
+        return { content: [{ type: "text", text: `${receipt}. ${outcome}` }], details: typed };
       } catch (error) {
         return threadErrorResult("send", error);
       }

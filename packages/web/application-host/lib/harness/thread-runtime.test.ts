@@ -3996,7 +3996,7 @@ describe("thread runtime", () => {
     const override = {
       model: { providerId: "research-provider", modelId: "design-model" },
       tools: ["read", "websearch"],
-      permissions: {},
+      permissions: { mode: "normal" as const, rules: [] },
       scope: ["src"],
       worktree: "isolated" as const,
       systemPromptFragment: "Design distinguishing checks.",

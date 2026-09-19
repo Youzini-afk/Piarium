@@ -1260,6 +1260,118 @@ describe("thread services", () => {
     }
   });
 
+  // --- send(wait): correlated reply waiting (7E/D-300) ---
+
+  it("send with wait returns the correlated reply and reclaims the yielded slot", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-wait-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    try {
+      const asker = await runningThread(registry, { kind: "session", id: "root-1" }, "asker");
+      const answerer = await runningThread(registry, { kind: "session", id: "root-1" }, "answerer");
+      const pending = service.handle(
+        { threadId: answerer.thread.id, message: "what is the count?", from: "parent-agent", kind: "request", requestId: "req-w1", wait: 30 },
+        threadCtx(asker.sessionId),
+      );
+      // The waiting requester yields its execution slot.
+      await vi.waitFor(async () => {
+        expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor?.kind).toBe("thread");
+      });
+      const reply = await service.handle(
+        { threadId: asker.thread.id, message: "count is 3", from: "parent-agent", replyTo: "req-w1" },
+        threadCtx(answerer.sessionId),
+      );
+      expect(reply).toMatchObject({ accepted: true, delivery: "delivered" });
+      const result = await pending;
+      expect(result).toMatchObject({ accepted: true, delivery: "delivered", messageId: "req-w1" });
+      expect(result.reply).toMatchObject({ messageId: reply.messageId, text: "count is 3" });
+      expect(result.timedOut).toBeUndefined();
+      // The slot is reacquired on return.
+      expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor).toBeNull();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("an unrelated message does not impersonate the awaited reply", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-wait-imposter-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+    } as never);
+    try {
+      const asker = await runningThread(registry, { kind: "session", id: "root-1" }, "asker", 4);
+      const answerer = await runningThread(registry, { kind: "session", id: "root-1" }, "answerer", 4);
+      const bystander = await runningThread(registry, { kind: "session", id: "root-1" }, "bystander", 4);
+      const pending = service.handle(
+        { threadId: answerer.thread.id, message: "report when done", from: "parent-agent", kind: "request", requestId: "req-w2", wait: 1 },
+        threadCtx(asker.sessionId),
+      );
+      await vi.waitFor(async () => {
+        expect((await registry.getThreadById("workspace-1", asker.thread.id))?.waitingFor?.kind).toBe("thread");
+      });
+      // An unrelated inform lands on the waiter — it is held, and it must not
+      // complete the correlated wait.
+      const noise = await service.handle(
+        { threadId: asker.thread.id, message: "unrelated note", from: "parent-agent" },
+        threadCtx(bystander.sessionId),
+      );
+      expect(noise.delivery).toBe("held");
+      const result = await pending;
+      expect(result.timedOut).toBe(true);
+      expect(result.reply).toBeUndefined();
+      // The message itself stays recorded for later retrieval — the timeout
+      // ended only this wait.
+      const askerNow = await registry.getThreadById("workspace-1", asker.thread.id);
+      expect(askerNow?.messages?.find((m) => m.id === "req-w2")?.status).toBe("delivered");
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("a retry with the same requestId keeps waiting without re-delivering", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-wait-retry-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const sendToSession = vi.fn(async () => {});
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: sendToSession,
+    } as never);
+    try {
+      const asker = await runningThread(registry, { kind: "session", id: "root-1" }, "asker");
+      const answerer = await runningThread(registry, { kind: "session", id: "root-1" }, "answerer");
+      // First wait attempt times out; the request stays delivered.
+      const first = await service.handle(
+        { threadId: answerer.thread.id, message: "still there?", from: "parent-agent", kind: "request", requestId: "req-w3", wait: 0.2 },
+        threadCtx(asker.sessionId),
+      );
+      expect(first).toMatchObject({ accepted: true, messageId: "req-w3", timedOut: true });
+      // The answer lands between attempts; a retry under the same requestId
+      // observes it instead of re-sending.
+      await service.handle(
+        { threadId: asker.thread.id, message: "yes, still here", from: "parent-agent", replyTo: "req-w3" },
+        threadCtx(answerer.sessionId),
+      );
+      const second = await service.handle(
+        { threadId: answerer.thread.id, message: "still there?", from: "parent-agent", kind: "request", requestId: "req-w3", wait: 5 },
+        threadCtx(asker.sessionId),
+      );
+      expect(second).toMatchObject({ accepted: true, messageId: "req-w3" });
+      expect(second.reply?.text).toBe("yes, still here");
+      // Exactly one delivery to the target session across both attempts.
+      expect(sendToSession.mock.calls.filter((call) => call[0] === answerer.sessionId)).toHaveLength(1);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("returns the recorded outcome for a duplicate requestId instead of re-delivering", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-send-dedupe-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

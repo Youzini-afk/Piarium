@@ -828,6 +828,13 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       if (params.to !== "parent" && params.threadId === undefined) {
         throw new HarnessServiceError("invalid-params", "send requires a threadId or to: \"parent\"");
       }
+      const waitSeconds = params.wait ?? 0;
+      if (!Number.isFinite(waitSeconds) || waitSeconds < 0) {
+        throw new HarnessServiceError("invalid-params", "wait must be a non-negative number of seconds");
+      }
+      if (waitSeconds > 0 && kind !== "request") {
+        throw new HarnessServiceError("invalid-params", "wait applies to an execution request (kind: \"request\")");
+      }
       // Sender identity is Host-derived from the session binding — a caller
       // can never claim to be the user or another Thread (3.18C).
       const fromPeer: ThreadMessagePeer = owner
@@ -879,7 +886,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         target = candidate;
       }
 
-      return registry.withMessageDelivery(workspaceId, target ? "thread:" + target.id : "session:" + targetSessionId,
+      const sent = await registry.withMessageDelivery(workspaceId, target ? "thread:" + target.id : "session:" + targetSessionId,
         async (): Promise<Awaited<ReturnType<HarnessService<"thread.send">["handle"]>>> => {
       ctx.signal.throwIfAborted();
       // Refresh after waiting for another input operation; its Run and ledger
@@ -1126,6 +1133,88 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         delivery: "delivered",
       };
       });
+
+      // Correlated wait (7E/D-300): only a message whose replyTo names this
+      // request satisfies it — unrelated arrivals never impersonate the
+      // answer. The wait runs outside the delivery lock and yields the
+      // caller's execution slot like thread.wait does.
+      if (waitSeconds <= 0 || !sent.accepted) return sent;
+      // A Thread caller watches its own ledger for the inbound reply; a
+      // session caller watches the target's ledger for the outbound copy.
+      const observedId = owner ? owner.id : target?.id;
+      if (!observedId) return sent;
+      const observedScope = owner ? owner.parent : target!.parent;
+      const awaitedId = sent.messageId ?? params.requestId;
+      if (!awaitedId) return sent;
+      const replyOf = (record: { messages?: ThreadMessageRecord[] } | null | undefined): ThreadMessageRecord | undefined => (
+        record?.messages?.find((message) => (
+          message.direction === (owner ? "in" : "out")
+          && message.replyTo === awaitedId
+          && (message.status === "delivered" || message.status === "resolved")
+        ))
+      );
+      const currentReply = async (): Promise<ThreadMessageRecord | undefined> => (
+        replyOf(await registry.getThreadById(workspaceId, observedId) ?? undefined)
+      );
+      let reply = await currentReply();
+      let timedOut = false;
+      if (!reply) {
+        if (owner?.activeRunId) {
+          const marked = await registry.yieldExecutionSlot(workspaceId, owner.id, owner.activeRunId, {
+            kind: "thread",
+            text: `Waiting for a reply to ${awaitedId}`,
+          });
+          if (!marked) throw new HarnessServiceError("unavailable", "The waiting Run could not yield its execution slot");
+        }
+        const deadline = Date.now() + Math.min(waitSeconds * 1000, HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000);
+        while (true) {
+          ctx.signal.throwIfAborted();
+          let wake!: (reason: "change" | "timeout" | "abort") => void;
+          const notification = new Promise<"change" | "timeout" | "abort">((resolve) => { wake = resolve; });
+          const unsubscribe = registry.subscribeToChanges(workspaceId, observedScope, () => wake("change"));
+          const abort = () => wake("abort");
+          ctx.signal.addEventListener("abort", abort, { once: true });
+          const timer = setTimeout(() => wake("timeout"), Math.max(0, deadline - Date.now()));
+          try {
+            reply = await currentReply();
+            if (reply) break;
+            if (Date.now() >= deadline) { timedOut = true; break; }
+            const reason = await notification;
+            if (reason === "abort") ctx.signal.throwIfAborted();
+            if (reason === "timeout") {
+              reply = await currentReply();
+              timedOut = !reply;
+              break;
+            }
+          } finally {
+            clearTimeout(timer);
+            ctx.signal.removeEventListener("abort", abort);
+            unsubscribe();
+          }
+        }
+      }
+      if (owner?.activeRunId) {
+        await registry.awaitExecutionSlot(workspaceId, owner.id, owner.activeRunId, ctx.signal);
+      }
+      // Messages held while the caller waited flush at this boundary.
+      if (owner) {
+        const held = await registry.listPendingThreadMessages(workspaceId, owner.id);
+        for (const heldMessage of held) {
+          await host.threadSendToSession(ctx.sessionId, heldMessage.text, {
+            from: messagePeerLabel(heldMessage.from),
+            messageId: heldMessage.id,
+            ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
+          });
+          await registry.acknowledgeThreadMessages(workspaceId, owner.id, [heldMessage.id], owner.activeRunId ?? undefined);
+        }
+      }
+      return {
+        ...sent,
+        ...(reply ? {
+          reply: { messageId: reply.id, text: reply.text, from: reply.from, at: reply.at },
+        } : {}),
+        ...(timedOut ? { timedOut: true } : {}),
+      };
     },
   };
 }

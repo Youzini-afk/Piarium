@@ -836,6 +836,15 @@ export interface ThreadSendParams {
    * capability's dedicated slot is not configured.
    */
   model?: import("./harness-settings.js").ModelSelection | "inherit";
+  /**
+   * Seconds to wait for the target's correlated reply after the send is
+   * durably accepted (7E/D-300). 0 or absent returns the receipt at once.
+   * A timeout only ends this wait — the message and the target's work are
+   * unaffected, and a retry with the same requestId keeps waiting without
+   * re-delivering. Only a message whose replyTo names this request counts
+   * as its answer.
+   */
+  wait?: number;
 }
 
 export interface ThreadSendResult {
@@ -852,6 +861,15 @@ export interface ThreadSendResult {
    * the shared root budget.
    */
   delivery?: "delivered" | "held" | "scheduled";
+  /** The reply that satisfied a wait, when one arrived in time. */
+  reply?: {
+    messageId: string;
+    text: string;
+    from: ThreadMessagePeer;
+    at: string;
+  };
+  /** True when wait elapsed without a correlated reply. */
+  timedOut?: boolean;
 }
 
 export type ThreadReadWhat = "blocks" | "report" | "steps";

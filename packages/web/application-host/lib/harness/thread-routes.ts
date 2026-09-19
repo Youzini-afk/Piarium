@@ -24,6 +24,7 @@ export interface HarnessThreadRoutesOptions {
     capability?: string;
     resources?: Record<string, boolean>;
     model?: { providerId: string; modelId: string } | "inherit";
+    wait?: number;
     signal: AbortSignal;
   }) => Promise<unknown>;
   requireAuth?: RequestHandler;
@@ -138,10 +139,11 @@ const parseSendBody = (value: unknown): {
   capability?: string;
   resources?: Record<string, boolean>;
   model?: { providerId: string; modelId: string } | "inherit";
+  wait?: number;
 } => {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new ThreadRuntimeError("invalid-request", "Send request body is malformed");
   const body = value as Record<string, unknown>;
-  const allowed = new Set(["message", "kind", "context", "requestId", "replyTo", "capability", "resources", "model"]);
+  const allowed = new Set(["message", "kind", "context", "requestId", "replyTo", "capability", "resources", "model", "wait"]);
   if (Object.keys(body).some((key) => !allowed.has(key))) throw new ThreadRuntimeError("invalid-request", "Send request contains unsupported fields");
   if (typeof body.message !== "string" || !body.message.trim()) throw new ThreadRuntimeError("invalid-request", "message is required");
   if (body.kind !== undefined && body.kind !== "inform" && body.kind !== "request") throw new ThreadRuntimeError("invalid-request", "kind must be inform or request");
@@ -151,6 +153,7 @@ const parseSendBody = (value: unknown): {
   if (body.capability !== undefined && (typeof body.capability !== "string" || !body.capability.trim())) throw new ThreadRuntimeError("invalid-request", "capability must be a non-empty string");
   if (body.resources !== undefined && (typeof body.resources !== "object" || body.resources === null || Array.isArray(body.resources))) throw new ThreadRuntimeError("invalid-request", "resources must be an object");
   if (body.model !== undefined && body.model !== "inherit" && (typeof body.model !== "object" || body.model === null)) throw new ThreadRuntimeError("invalid-request", "model must be a selection object or \"inherit\"");
+  if (body.wait !== undefined && (typeof body.wait !== "number" || !Number.isFinite(body.wait) || body.wait < 0)) throw new ThreadRuntimeError("invalid-request", "wait must be a non-negative number of seconds");
   return {
     message: body.message,
     ...(body.kind === undefined ? {} : { kind: body.kind as "inform" | "request" }),
@@ -160,6 +163,7 @@ const parseSendBody = (value: unknown): {
     ...(body.capability === undefined ? {} : { capability: body.capability as string }),
     ...(body.resources === undefined ? {} : { resources: body.resources as Record<string, boolean> }),
     ...(body.model === undefined ? {} : { model: body.model as { providerId: string; modelId: string } | "inherit" }),
+    ...(body.wait === undefined ? {} : { wait: body.wait as number }),
   };
 };
 
