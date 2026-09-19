@@ -213,6 +213,28 @@ export const verifyCloudRuntimeIdentity = (outputDir) => {
   }
 };
 
+export const findUndeclaredWorkspaceImports = (serverDir, manifest) => {
+  const productionDependencies = new Set(Object.keys(manifest.dependencies || {}));
+  const offenders = [];
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory() && entry.name !== 'node_modules') {
+        walk(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith('.js')) {
+        const source = readFileSync(entryPath, 'utf8');
+        for (const match of source.matchAll(/(?:from|import)\s*['"](@piarium\/[^'"]+)['"]/g)) {
+          if (!productionDependencies.has(match[1])) {
+            offenders.push(`${path.relative(serverDir, entryPath)} -> ${match[1]}`);
+          }
+        }
+      }
+    }
+  };
+  walk(serverDir);
+  return offenders;
+};
+
 export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requireInstall = false } = {}) => {
   const rootManifestPath = path.join(outputDir, 'package.json');
   const runtimeManifestPath = path.join(outputDir, 'cloud-runtime.json');
@@ -271,6 +293,15 @@ export const verifyCloudRuntimeLayout = (outputDir, { requireLock = true, requir
         throw new Error(`Unresolved workspace dependency ${dependencyName} in ${manifest.name}.`);
       }
     }
+  }
+
+  const webServerDir = path.join(outputDir, 'packages', 'web', 'server');
+  const undeclaredWorkspaceImports = findUndeclaredWorkspaceImports(
+    webServerDir,
+    readJson(path.join(outputDir, 'packages', 'web', 'package.json')),
+  );
+  if (undeclaredWorkspaceImports.length > 0) {
+    throw new Error(`Shipped web server imports undeclared production dependencies: ${undeclaredWorkspaceImports.join(', ')}`);
   }
 
   if (requireInstall) {

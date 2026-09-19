@@ -6,6 +6,7 @@ import {
   CLOUD_RUNTIME_PACKAGE_DIRS,
   CLOUD_RUNTIME_SCHEMA_VERSION,
   CLOUD_RUNTIME_TRUSTED_DEPENDENCIES,
+  findUndeclaredWorkspaceImports,
   verifyCloudRuntimeLayout,
   verifyCloudRuntimeIdentity,
 } from './build-cloud-runtime.mjs';
@@ -85,6 +86,10 @@ const createFixture = () => {
       fs.mkdirSync(path.join(packageRoot, 'bin'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'server'), { recursive: true });
       fs.mkdirSync(path.join(packageRoot, 'kernel'), { recursive: true });
+      fs.writeFileSync(
+        path.join(packageRoot, 'server', 'index.js'),
+        "import '@piarium/extension-host';\n",
+      );
     }
     if (directory === 'settings-store') fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
   }
@@ -133,28 +138,19 @@ describe('Piarium cloud runtime layout', () => {
     }
   });
 
-  it('declares every workspace import in shipped web code as a production dependency', () => {
-    // server/ is the checked-in artifact the cloud daemon actually runs; a
-    // workspace import landing in devDependencies is invisible to
-    // `bun install --production` and crashes the daemon at boot.
-    const manifest = readJson(path.join(repoRoot, 'packages', 'web', 'package.json'));
-    const prodDeps = new Set(Object.keys(manifest.dependencies ?? {}));
-    const serverDir = path.join(repoRoot, 'packages', 'web', 'server');
-    const offenders = [];
-    const walk = (dir) => {
-      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory() && entry.name !== 'node_modules') walk(full);
-        else if (entry.isFile() && entry.name.endsWith('.js')) {
-          const source = fs.readFileSync(full, 'utf8');
-          for (const match of source.matchAll(/(?:from|import)\s*['"](@piarium\/[^'"]+)['"]/g)) {
-            if (!prodDeps.has(match[1])) offenders.push(`${path.relative(serverDir, full)} -> ${match[1]}`);
-          }
-        }
-      }
-    };
-    walk(serverDir);
-    expect(offenders).toEqual([]);
+  it('declares every workspace import in the shipped web server as a production dependency', () => {
+    const fixture = createFixture();
+    const serverDir = path.join(fixture, 'packages', 'web', 'server');
+    const manifest = readJson(path.join(fixture, 'packages', 'web', 'package.json'));
+    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([]);
+
+    fs.writeFileSync(
+      path.join(serverDir, 'missing.js'),
+      "import '@piarium/missing-runtime';\n",
+    );
+    expect(findUndeclaredWorkspaceImports(serverDir, manifest)).toEqual([
+      'missing.js -> @piarium/missing-runtime',
+    ]);
   });
 
   it('ships the same pinned Pi SDK in the production dependency graph for every distribution', () => {
