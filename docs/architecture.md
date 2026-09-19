@@ -494,6 +494,23 @@ sessions. D-299 adds the first capability-routing slice: dedicated research mode
 branch manifests; scheduling, dynamic upgrades and research synthesis remain planned in 7B–7F. The product
 design is [research-cluster-design.md](research-cluster-design.md).
 
+D-300 revises the **planned**, not yet implemented, execution and collaboration slices. Experiment
+specifications and attempts use the existing Rust typed catalog and object domain; Host coordinates
+authorization, placement and presentation. Local and managed remote executors reuse the Rust process
+core, while native cluster schedulers remain authoritative for their jobs and allocations. SSH is an
+access/transport mechanism, not proof that a job is alive or stopped. Agent Runs, compute attempts,
+connection state and artifact collection have separate lifecycles.
+
+The planned collaboration layer extends the existing Thread message ledger and tools across code,
+research and future office work. Natural-language sends can return immediately or wait for a correlated
+reply. A compact roster projects actual task/state and roughly 20 visible characters from the latest
+completed visible assistant paragraph, with stable source references. Existing output events maintain
+it; no status-report task or summarizer model is introduced. Initial state and later changed rows enter
+Zone 2 before actual model requests, including tool continuations. Explicit messages and established
+waits drive continuation; Host does not classify scientific significance to launch stronger models.
+These contracts and the local/remote acceptance sequence are specified in
+[plan stage 7](agent-harness-plan.md), not claimed as current runtime behavior.
+
 Text content has one authority. The application host owns a revisioned document service with
 workspace resolve, read, write, move, delete, an SSE watch, and crash-recovery journals, exposed
 through authenticated routes and a resource-scoped `workspace.documents` capability. Revisions are

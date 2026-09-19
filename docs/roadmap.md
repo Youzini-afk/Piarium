@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S 7A implemented, 7B–7F pending
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S 7A and first 7B slice implemented; remaining work includes the accepted D-300 execution/collaboration design
 
 Last updated: 2026-09-19
 
@@ -50,9 +50,19 @@ conversation defaults, and conversations can override their focus without switch
 projects or conversations keeps the user's chosen workbench. The later office experience uses the same
 separation. Research execution builds on the existing Pi runtime, Thread/Run, Host scheduler, retrieval,
 context, permissions and Rust kernel, and remains available in the IDE. The first vertical slice is an
-open research question explored by heterogeneous model branches, fast execution workers and event-triggered
-synthesis. The 7A entry, focus and real principal-run attachment are implemented; heterogeneous capability
-routing, scheduling and synthesis remain planned. Verification boundaries are recorded in harness status.
+open research question explored by heterogeneous model branches, fast execution workers and deliberate
+discussion and synthesis. The 7A entry, focus and real principal-run attachment, plus the first 7B
+capability-routing slice, are implemented. Dynamic upgrades and the remaining cluster work are planned.
+Verification boundaries are recorded in harness status.
+
+D-300 revises 7C–7E before implementation: 7C provides shared message/source and resource facts; 7D
+delivers durable local/remote experiments, multi-machine allocation and a first native scheduler adapter;
+7E extends general Agent communication with optional reply waits and a continuously refreshed compact
+roster derived from existing visible output. No mandatory research handoff schema, extra status reports
+or event classifier that automatically invokes a frontier model. Resource coordination by an Agent is
+optional; actual resource enforcement remains in the execution backend. 7D and 7E can progress from
+their respective 7C seams and converge in 7F's real research slice and comparison. This is accepted
+design, not a delivery claim; implementation details belong to the harness plan and research design.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

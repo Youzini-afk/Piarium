@@ -36,7 +36,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
-| [research-cluster](decisions/research-cluster.md) | D-291/D-297/D-298/D-299 科研集群、工作台与侧重、真实根主线、能力路由。 | 4 |
+| [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-300 科研集群、工作台与侧重、真实根主线、能力路由、实验执行与通用协作。 | 5 |
 
 ## 决策索引
 
@@ -323,13 +323,13 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-282 | 2026-09-15 | R0/R6 收口：有回执的传输窗口、真实发行面、遗留清理与受控资源证据 | accepted / implemented / R0+R6+Stage R complete | — | plan/status 阶段 R；architecture；rust-kernel-design；roadmap；kernel/process/recovery/Harness/Web/Electron/VS Code documentation；release/native acceptance | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-283 | 2026-09-15 | 现有 Harness 优先收口：原生权限唯一权威与 Web 配置闭环 | accepted / implemented / Harness closure complete | — | plan 0.4/0.7/1b.7/3b；status 1b.3–1b.7 / 3b.1–3b.3；architecture/code | [stage-r-kernel](decisions/stage-r-kernel.md) |
 | D-284 | 2026-09-16 | 上下文无感续接：固定摘要后台准备、容量按需切换与较长原文 | implemented / wired；consumer acceptance corrected by D-287 | D-287 | 设计 8.4 及关联消费者；plan 2.4A/B、2.6A/B；status；architecture 4.4 | [context-knowledge](decisions/context-knowledge.md) |
-| D-285 | 2026-09-16 | 任务线程、可选预设、定向消息、共享执行准入与连续交付 | implemented / wired；state-machine acceptance corrected by D-287 | D-287 | 设计9.2/9.3及关联策略；plan3.18A–E；status；architecture4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
+| D-285 | 2026-09-16 | 任务线程、可选预设、定向消息、共享执行准入与连续交付 | implemented / wired；D-300 部分修订后续公开消息交互，待实施 | D-287 验收更正；D-300 自然交流/可选等待设计，不撤回现有账本和生命周期交付 | 设计9.2/9.3及关联策略；plan3.18A–E/7E；status；architecture4.4 | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-286 | 2026-09-16 | 完整上下文取舍与过期背景fresh：工作身份/成果独立于活跃输入 | implemented / wired；retained-source acceptance corrected by D-287 | D-287 | 设计8.0/8.4.7/8.4.8；plan2.4/2.6/3.18B；status；architecture4.4 | [context-knowledge](decisions/context-knowledge.md) |
 | D-287 | 2026-09-16 | D-284–D-286 验收收口：原文收据、消息提交边界、Run 准入与物化 baseline handoff | implementation correction / accepted | — | status 2.4A/B、2.6A/B、3.18A–E；Harness/Kernel/Recovery documentation | [workingstate-threads](decisions/workingstate-threads.md) |
 | D-288 | 2026-09-18 | 本地语义推理独立组件，用户主动安装，主包不携带模型与专用运行库 | accepted | — | 设计 6.1/8.5；plan/status 3.16；architecture；Electron/semantic documentation | [retrieval](decisions/retrieval.md) |
 | D-289 | 2026-09-18 | 默认免密钥网页搜索与原文查找/续读；不复用模型账户 | accepted | D-050/D-067/D-283 的搜索默认行为 | 设计 5.8；plan 1b.8；status 1b.3；Web 工具与设置 | [tool-environment](decisions/tool-environment.md) |
 | D-290 | 2026-09-18 | 常用结构包内置、语言服务器按需自动准备与能力设置页 | accepted | D-124/D-128 的默认交付方式 | plan 3.11；status；language-support | [structure-symbol-graph](decisions/structure-symbol-graph.md) |
-| D-291 | 2026-09-19 | AI4S 以异构模型科研集群为中心，动态并行研究分支与事件触发综合 | accepted design / pending implementation | — | research-cluster-design；agent-harness 10.3；plan/roadmap/status | [research-cluster](decisions/research-cluster.md) |
+| D-291 | 2026-09-19 | AI4S 以异构模型科研集群为中心，动态并行研究分支与事件触发综合 | superseded in part（强制交接格式、研究板与机械事件综合）；产品中心保留 | D-300 | research-cluster-design；agent-harness 10.3；plan/roadmap/status | [research-cluster](decisions/research-cluster.md) |
 | D-292 | 2026-09-19 | 阶段 Q：AI4S 前全面重整测试责任、装配、执行入口、构建与 CI | accepted design / pending implementation | 调整 D-291 实施顺序；历史测试卫生条目不代表当前全仓已收口 | testing-ci-design；plan Q0–Q3；roadmap/status；development；research-cluster-design | [foundation-governance](decisions/foundation-governance.md) |
 | D-293 | 2026-09-19 | 阶段 Q 实施：测试单属、发现统一、产物驱动 CI、云部署生产依赖修复 | implemented / locally verified, awaiting primary-agent acceptance | implements D-292；云 daemon 失败确认为产品缺陷而非测试噪声 | testing-ci-audit；testing-ci-design；plan Q；status；development；ci/docker/desktop-release workflows | [foundation-governance](decisions/foundation-governance.md) |
 | D-294 | 2026-09-19 | deprecate the dormant VS Code adapter outside the formal harness product surface | accepted / implemented in CI boundary | narrows D-293 CI evidence scope；不改 D-292/D-293 正文 | testing-ci-audit §10；status；development；ci.yml | [foundation-governance](decisions/foundation-governance.md) |
@@ -338,3 +338,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-297 | 2026-09-19 | 工作台 UIUX 与 Agent 工作侧重独立，科研/办公入口复用整体切换与动画 | 7A implemented at D-298; later work planned | 补齐 D-291 产品形态；项目默认只供新对话捕获，对话可覆盖；D-298 明确新 Run 应用与追问冻结 | research-cluster-design 10；agent-harness 10；plan 7A–7F；composable-workbench；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-298 | 2026-09-19 | AI4S 7A：科研工作台、独立工作侧重和同一用户 Pi 会话的真实根 Thread/Run | implemented / wired; validation boundary in status | 落地 D-297 7A；配置在新 Run 前应用，当前 Run 与追问队列冻结；研究集群其余部分仍计划中 | research-cluster-design；plan 7A；status；architecture；composable-workbench；UI/Host 模块文档 | [research-cluster](decisions/research-cluster.md) |
 | D-299 | 2026-09-19 | AI4S 7B 第一段：研究能力、专用模型槽位、工具集合和资源请求随分支 Run 冻结 | implemented / wired; 7B partial | 没有配置的能力明确 unavailable，不借用主模型；完整动态升级、调度和实验执行仍待后续阶段 | research-cluster-design；plan 7B；status；protocol；pi-host；Host harness | [research-cluster](decisions/research-cluster.md) |
+| D-300 | 2026-09-19 | 实验执行与远程资源、自然语言 Agent 交流、可选等待及自动原文现状 | accepted design / pending implementation | 部分取代 D-291 强制交接/机械综合；调整 D-285 后续公开消息交互，现有实现事实保留 | research-cluster-design 6/7；plan 7C–7F；harness 9.2.5a/9.3.7/10.3；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
