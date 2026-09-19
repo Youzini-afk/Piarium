@@ -18,8 +18,8 @@ Piarium protocol types, schemas, and event/method definitions.
 
 | Method | Params | Result | Description |
 |--------|--------|--------|-------------|
-| `shell.exec` | `{ command, cwd?, waitMs?, runMs? }` | `ShellExecResult` | Execute a shell command |
-| `shell.read` | `{ id, offset?, length? }` | `OutputSlice & { running, exitCode? }` | Read background shell output |
+| `shell.exec` | `{ command, cwd?, waitMs?, toolCallId? }` | `ShellExecResult` | Start/idempotently recover a shell command; the wait window only decides foreground vs background |
+| `shell.read` | `{ id, offset?, length?, waitMs? }` | `OutputSlice & { running, exitCode? }` | Read immediately, page history, or wait for new background output/exit without stopping the process |
 | `shell.write` | `{ id, text }` | `{ accepted }` | Write to background shell stdin |
 | `shell.kill` | `{ id }` | `{ killed }` | Kill a background shell |
 | `output.store` | `{ text, label? }` | `{ ref: OutputRef, total }` | Store large output for the current Host generation |
@@ -128,7 +128,7 @@ interface HarnessSettings {
   tools: Partial<Record<string, boolean>>;   // per-tool switch, default true
   shell: "auto" | "git-bash" | "powershell" | "wsl";
   output: { visibleBytes: number };          // default 32768
-  bash: { waitMs: number };                  // default 60000
+  bash: { waitMs: number };                  // configurable foreground wait; default 10000
   models: Partial<Record<HarnessModelRole, ModelSelection>>;
   dispatch: { concurrency: number; askBefore: Partial<Record<string, boolean>> };
   knowledge: {

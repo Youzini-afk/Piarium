@@ -38,6 +38,7 @@ import {
 } from "./experiment-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
+import { withToolExecutionResources } from "./tool-execution-resources.js";
 
 export interface SelectHarnessToolsDeps {
   bridge: HostServicesBridge;
@@ -117,7 +118,7 @@ export function selectHarnessTools(
   const result: ToolDefinition[] = [];
 
   if (tools.bash !== false) {
-    result.push(createBashTool(bridge, sessionId, cwd));
+    result.push(createBashTool(bridge, sessionId, cwd, settings.bash.waitMs));
   }
   if (documentReadAvailable && tools.read !== false) {
     result.push(createSurfaceAwareReadTool(
@@ -236,5 +237,5 @@ export function selectHarnessTools(
     result.push(createSubmitFactsTool(bridge));
   }
 
-  return result;
+  return result.map((tool) => withToolExecutionResources(tool, cwd));
 }

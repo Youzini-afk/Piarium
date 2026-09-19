@@ -65,6 +65,7 @@ void (null as unknown as ToolResultEvent satisfies {
 void (null as unknown as ToolCallEventResult satisfies {
   block?: boolean;
   reason?: string;
+  executionPlan?: unknown;
 });
 
 void (null as unknown as TurnEndEvent satisfies {
@@ -84,7 +85,7 @@ void (null as unknown as BeforeProviderRequestEvent satisfies {
 // contravariance issues with the `execute` function signature.
 type ToolDefinitionShape = Pick<
   ToolDefinition,
-  "name" | "label" | "description" | "promptSnippet" | "promptGuidelines" | "parameters" | "executionMode" | "execute"
+  "name" | "label" | "description" | "promptSnippet" | "promptGuidelines" | "parameters" | "prepareExecution" | "executionMode" | "execute"
 >;
 void (null as unknown as ToolDefinitionShape satisfies {
   name: string;
@@ -93,6 +94,7 @@ void (null as unknown as ToolDefinitionShape satisfies {
   promptSnippet?: string;
   promptGuidelines?: string[];
   parameters: unknown;
+  prepareExecution?: unknown;
   executionMode?: "parallel" | "sequential";
   execute: unknown;
 });

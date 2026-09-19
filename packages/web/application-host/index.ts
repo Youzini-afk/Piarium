@@ -3,6 +3,9 @@ import { createKernelComputeService } from './lib/kernel/compute-service.js';
 import { createExperimentService } from './lib/harness/experiments.js';
 import { createResourceService } from './lib/harness/resources.js';
 import { createSourceService } from './lib/harness/sources.js';
+import { createManagedRemoteExecutionService } from './lib/harness/managed-remote-service.js';
+import { createManagedRemoteTargetRegistry, type ManagedRemoteTargetRegistry } from './lib/harness/managed-remote-client.js';
+import { registerManagedRemoteRoutes } from './lib/harness/managed-remote-routes.js';
 import compression from 'compression';
 import crypto from 'crypto';
 import express, { type Request, type Response } from 'express';
@@ -1312,11 +1315,27 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     }
   };
+  let managedRemoteTargets: ManagedRemoteTargetRegistry | null = null;
   const resourceService = createResourceService({
     client: kernelClient,
     onError: (error) => console.error("[PiariumResource]", error.message),
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'machine'),
     onCapacityAvailable: (workspaceId) => experimentService.refreshQueue(workspaceId),
+    refreshTargets: (workspaceId) => managedRemoteTargets?.refresh(workspaceId),
+    resolveExternalAuthority: (machineId, machine) => managedRemoteTargets?.externalAuthority(machineId, machine) ?? null,
+  });
+  const managedRemoteExecution = createManagedRemoteExecutionService({
+    client: kernelClient,
+    hostId: extensionRuntime.services.hostId,
+    resources: resourceService,
+    onError: (error) => console.error("[PiariumManagedRemote]", error.message),
+  });
+  managedRemoteTargets = createManagedRemoteTargetRegistry({
+    coordinatorHostId: extensionRuntime.services.hostId,
+    kernel: kernelClient,
+    resources: resourceService,
+    readSettings: async () => await readSettingsFromDisk() as unknown as Record<string, unknown>,
+    onError: (error) => console.error("[PiariumManagedTarget]", error.message),
   });
   const sourceService = createSourceService({
     client: kernelClient,
@@ -1329,7 +1348,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     onError: (error) => console.error("[PiariumExperiment]", error.message),
     onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
+    resolveBackend: (ctx, machineId, machine, caller) => managedRemoteTargets!.resolveBackend(ctx, machineId, machine, caller),
   });
+  void managedRemoteExecution.reconcile().catch((error) => console.error("[PiariumManagedRemote]", error.message));
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus
@@ -1933,6 +1954,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sources: sourceService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
+  registerManagedRemoteRoutes(app, {
+    service: managedRemoteExecution,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+    ...(uiAuthController?.resolveAuthContext ? { resolveAuthContext: uiAuthController.resolveAuthContext } : {}),
+  });
   registerHarnessContextRoutes(app, {
     getStore: getKnowledgeStoreForSession,
     getBranchEntryIds: branchEntryIdsForSession,
@@ -2075,6 +2101,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
 
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     getStore: getKnowledgeStoreForWorkspace,
+    getUserStore: getUserKnowledgeStore,
     recall: async (workspaceId, store, query, signal) => {
       if (!knowledgeVectors) return store.recall(query, 5);
       const { results } = await recallWorkspaceAndUser({
@@ -2290,6 +2317,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     experimentService,
     resourceService,
     sourceService,
+    managedRemoteTargets,
     readExploreFile: createExploreFileReader(
       documentsAuthority,
       harnessPathAuthority,
@@ -2486,6 +2514,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(webSearchService ? { webSearchService } : {}),
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
+    onShellCompleted: (sessionId, event) => knowledgeContextRuntime.observeShellCompletion(sessionId, event),
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
     todoDepsProvider,
     recallDepsProvider,

@@ -8,7 +8,7 @@ import {
   type CompactionSettings,
 } from "@earendil-works/pi-coding-agent";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Context, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 
 /** A logical model request after Pi's context hooks and convertToLlm. */
 export interface ContextModelRequest {
@@ -105,16 +105,12 @@ export interface ContextRequestBoundaryOptions {
   observe(request: ContextModelRequest): void;
   /** Return one fixed, validated compaction. Failure must not fall through. */
   compact(request: ContextModelRequest, signal: AbortSignal): Promise<CompactionResult>;
-  /**
-   * Per-request injection seam (D-300): runs once per dispatched request,
-   * after the capacity loop, and may replace the request context (e.g. a
-   * request-scoped status trailer). `confirm` fires only after the provider
-   * request was actually dispatched — a failed or superseded request never
-   * claims delivery.
-   */
-  inject?(request: ContextModelRequest): Promise<{
+  /** Prepare candidate input before capacity admission; refresh after compaction. */
+  inject?(request: ContextModelRequest, session: AgentSession): Promise<{
     request?: ContextModelRequest;
-    confirm?(): void;
+    /** Only environment facts enter native history; the team snapshot remains transient. */
+    retained?: { content: string; details: Record<string, unknown> };
+    confirm?(): void | Promise<void>;
   } | undefined>;
   onEvent?(event: AgentSessionEvent): void;
   onStatus?(): void;
@@ -176,8 +172,16 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
     const signal = rawOptions?.signal ?? agent.signal ?? new AbortController().signal;
     signal.throwIfAborted();
     let next = request(model, context, rawOptions);
-    options.observe(next);
+    let injection: Awaited<ReturnType<NonNullable<ContextRequestBoundaryOptions["inject"]>>>;
+    const prepare = async (): Promise<void> => {
+      injection = await options.inject?.(next, session);
+      signal.throwIfAborted();
+      // Input estimates are recomputed here, never trusted from an injector.
+      if (injection?.request) next = request(next.model, injection.request.context, next.options);
+      options.observe(next);
+    };
     try {
+      await prepare();
       while (next.needsSpace) {
         if (!options.getCompactionSettings().enabled) {
           throw new ContextCapacityError(`Model input needs approximately ${next.inputTokens} tokens plus ${next.reserveTokens} reserved output tokens, beyond the ${model.contextWindow}-token context window; automatic compaction is disabled. History was not changed.`);
@@ -217,7 +221,7 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         await session.extensionRunner?.emit({ type: "session_compact", compactionEntry: entry,
           fromExtension: true, reason: "threshold", willRetry: false });
         next = await currentRequest(signal);
-        options.observe(next);
+        await prepare();
         options.onEvent?.({ type: "compaction_end", reason: "threshold", aborted: false, willRetry: false,
           result: { ...result, tokensBefore: before, estimatedTokensAfter: next.inputTokens } });
         committing = false;
@@ -227,20 +231,55 @@ export function attachContextRequestBoundary(session: AgentSession, options: Con
         }
       }
       signal.throwIfAborted();
-      const injection = await options.inject?.(next);
-      signal.throwIfAborted();
-      if (injection?.request) next = injection.request;
       // Calling the original SDK stream preserves ModelRuntime auth, provider
       // headers, retries, payload hooks, and all applicable main-request options.
       const outgoing = structuredClone(next.context);
       const key = contextRequestKey(next.model, outgoing, next.options);
       const sentGeneration = generation;
       const result = await stream(next.model, next.context, { ...rawOptions, ...next.options, signal });
-      injection?.confirm?.();
       void result.result().then((response) => {
         if (!disposed && generation === sentGeneration) budget.record(key, outgoing, response);
       }).catch(() => undefined);
-      return result;
+      if (!injection?.retained && !injection?.confirm) return result;
+      const delivery = injection;
+      const forwarded = createAssistantMessageEventStream();
+      // Creating a provider stream is not proof of sending: credential and HTTP
+      // failures can arrive as its first event. Retain only after a real response.
+      void (async () => {
+        let delivered = false;
+        try {
+          for await (const event of result) {
+            if (!delivered && event.type !== "error") {
+              delivered = true;
+              if (delivery.retained) {
+                const id = session.sessionManager.appendCustomMessageEntry(
+                  "piarium-context", delivery.retained.content, false, delivery.retained.details,
+                );
+                const entry = session.sessionManager.getEntry(id);
+                if (!entry) throw new Error("Pi did not retain the delivered environment observations");
+                agent.state.messages = session.sessionManager.buildSessionContext().messages;
+                generation += 1;
+                options.onEvent?.({ type: "entry_appended", entry });
+              }
+              // History already carries the receipt; an unavailable Host must
+              // not hold up the provider's first token while acknowledging it.
+              void Promise.resolve().then(() => delivery.confirm?.()).catch(() => undefined);
+            }
+            forwarded.push(event);
+          }
+          forwarded.end(await result.result());
+        } catch (error) {
+          const reason = signal.aborted ? "aborted" : "error";
+          forwarded.push({ type: "error", reason, error: {
+            role: "assistant", content: [], api: next.model.api, provider: next.model.provider,
+            model: next.model.id, stopReason: reason, timestamp: Date.now(),
+            errorMessage: error instanceof Error ? error.message : String(error),
+            usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+              cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          } });
+        }
+      })();
+      return forwarded;
     } catch (error) {
       if (committing) options.onEvent?.({ type: "compaction_end", reason: "threshold", aborted: signal.aborted,
         result: undefined, willRetry: false, errorMessage: error instanceof Error ? error.message : String(error) });

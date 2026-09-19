@@ -1,6 +1,6 @@
 import type { Express, Request, RequestHandler, Response } from "express";
 import { once } from "node:events";
-import type { ExperimentAttemptState, ExperimentLogsResult } from "@piarium/protocol";
+import type { ExperimentAttemptState, ExperimentLogsResult, ExperimentSubmitParams } from "@piarium/protocol";
 import type { ExperimentService } from "./experiments.js";
 import type { ResourceService } from "./resources.js";
 import type { SourceService } from "./sources.js";
@@ -103,6 +103,78 @@ export function registerHarnessExperimentRoutes(
     } catch (error) {
       sendError(response, error, "Unable to list experiments");
     }
+  });
+
+  app.post("/api/harness/sessions/:sessionId/experiments/submit-many", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const caller = await callerFor(sessionIdOf(request));
+      const items = request.body?.items;
+      if (!Array.isArray(items) || items.length === 0) throw new HarnessServiceError("invalid-params", "items must be a non-empty array");
+      if (!items.every((item) => item && typeof item === "object" && typeof item.requestId === "string" && item.requestId.trim())) {
+        throw new HarnessServiceError("invalid-params", "every batch item requires a stable requestId");
+      }
+      const submitted = await Promise.allSettled(items.map((item) => experiments.submit(caller, item as ExperimentSubmitParams)));
+      response.json({
+        items: submitted.map((result, index) => result.status === "fulfilled"
+          ? { index, requestId: items[index].requestId, accepted: true, ...result.value }
+          : { index, requestId: items[index].requestId, accepted: false, error: result.reason instanceof Error ? result.reason.message : String(result.reason) }),
+      });
+    } catch (error) { sendError(response, error, "Unable to submit experiment batch"); }
+  });
+
+  app.post("/api/harness/sessions/:sessionId/experiments/wait-many", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const controller = new AbortController();
+    const disconnected = () => controller.abort();
+    response.once("close", disconnected);
+    try {
+      const caller = await callerFor(sessionIdOf(request));
+      const attemptIds = request.body?.attemptIds;
+      if (!Array.isArray(attemptIds) || attemptIds.length === 0 || !attemptIds.every((id) => typeof id === "string" && id.trim())) {
+        throw new HarnessServiceError("invalid-params", "attemptIds must be a non-empty string array");
+      }
+      const timeoutMs = request.body?.timeoutMs === undefined ? 30_000 : Number(request.body.timeoutMs);
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 0) throw new HarnessServiceError("invalid-params", "timeoutMs must be a non-negative integer");
+      const waited = await Promise.allSettled(attemptIds.map((attemptId) => experiments.wait(caller, attemptId, timeoutMs, controller.signal)));
+      response.json({ items: waited.map((result, index) => result.status === "fulfilled"
+        ? { attemptId: attemptIds[index], ok: true, ...result.value }
+        : { attemptId: attemptIds[index], ok: false, error: result.reason instanceof Error ? result.reason.message : String(result.reason) }) });
+    } catch (error) { if (!controller.signal.aborted) sendError(response, error, "Unable to wait for experiment batch"); }
+    finally { response.off("close", disconnected); }
+  });
+
+  app.post("/api/harness/sessions/:sessionId/experiments/cancel-many", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const caller = await callerFor(sessionIdOf(request));
+      const attemptIds = request.body?.attemptIds;
+      if (!Array.isArray(attemptIds) || attemptIds.length === 0 || !attemptIds.every((id) => typeof id === "string" && id.trim())) {
+        throw new HarnessServiceError("invalid-params", "attemptIds must be a non-empty string array");
+      }
+      const cancelled = await Promise.allSettled(attemptIds.map((attemptId) => experiments.cancel(caller, attemptId)));
+      response.json({ items: cancelled.map((result, index) => result.status === "fulfilled"
+        ? { attemptId: attemptIds[index], ok: true, attempt: result.value }
+        : { attemptId: attemptIds[index], ok: false, error: result.reason instanceof Error ? result.reason.message : String(result.reason) }) });
+    } catch (error) { sendError(response, error, "Unable to cancel experiment batch"); }
+  });
+
+  app.post("/api/harness/sessions/:sessionId/experiments/:attemptId/rerun", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const caller = await callerFor(sessionIdOf(request));
+      const priorId = attemptIdOf(request);
+      const prior = await experiments.get(caller, priorId);
+      const result = await experiments.submit(caller, {
+        specId: prior.attempt.specId,
+        retryOfAttemptId: priorId,
+        ...(typeof request.body?.requestId === "string" && request.body.requestId.trim() ? { requestId: request.body.requestId.trim() } : {}),
+        ...(typeof request.body?.machineId === "string" && request.body.machineId.trim()
+          ? { machineId: request.body.machineId.trim() }
+          : prior.attempt.machineId ? { machineId: prior.attempt.machineId } : {}),
+      });
+      response.json(result);
+    } catch (error) { sendError(response, error, "Unable to rerun experiment attempt"); }
   });
 
   app.get("/api/harness/sessions/:sessionId/experiments/:attemptId", requireAuth, async (request: Request, response: Response) => {

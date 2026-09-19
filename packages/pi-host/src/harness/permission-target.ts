@@ -33,6 +33,18 @@ const PROCESS_TOOLS = new Set(["bash", "write_to_process", "kill_shell"]);
 const THREAD_TOOLS = new Set(["dispatch", "send", "kill", "submit_facts", "todo"]);
 const NETWORK_TOOLS = new Set(["webfetch", "websearch"]);
 
+function routedExecutionTarget(params: Record<string, unknown>): string {
+  const explicit = typeof params.target === "string" ? params.target.trim() : "";
+  if (explicit) return explicit;
+  const handle = [params.handle, params.shellId]
+    .find((value): value is string => typeof value === "string" && value.startsWith("mrsh:"));
+  if (!handle) return "";
+  try {
+    const route = JSON.parse(Buffer.from(handle.slice(5), "base64url").toString("utf8")) as Record<string, unknown>;
+    return typeof route.machineId === "string" ? route.machineId.trim() : "";
+  } catch { return ""; }
+}
+
 const packageish = (sourceInfo: PiToolSourceInfo): boolean => (
   sourceInfo.origin === "package" || sourceInfo.source.startsWith("npm:")
   || sourceInfo.source.startsWith("git:") || sourceInfo.source.startsWith("github:")
@@ -135,6 +147,10 @@ function networkOrigins(toolName: string, params: Record<string, unknown>): stri
 }
 
 function threadScopes(toolName: string, params: Record<string, unknown>): string[] {
+  if (PROCESS_TOOLS.has(toolName) || toolName === "get_output") {
+    const target = routedExecutionTarget(params);
+    return target ? [`execution-target:${target}`] : [];
+  }
   if (toolName === "experiment") {
     return ["action", "attemptId", "machineId", "specId"].flatMap((key) => (
       typeof params[key] === "string" ? [`experiment:${key}:${params[key]}`] : []
@@ -166,7 +182,8 @@ export function buildPermissionInspection(input: {
     : input.toolName === "write_to_process"
       ? shellEvidence(input.params.text)
       : { paths: [] as string[], complete: true };
-  const paths = [...new Set([...directPaths(input.toolName, input.params), ...shell.paths])]
+  const remoteTarget = Boolean(routedExecutionTarget(input.params));
+  const paths = (remoteTarget ? [] : [...new Set([...directPaths(input.toolName, input.params), ...shell.paths])])
     .map((path) => path.startsWith("~/") ? path : resolve(input.cwd, path));
   const networkTargets = networkOrigins(input.toolName, input.params);
   const scopes = threadScopes(input.toolName, input.params);

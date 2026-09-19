@@ -1,4 +1,5 @@
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
+import type { ToolExecutionPlan } from "@earendil-works/pi-agent-core";
 import {
   defaultDecisionForAction,
   defaultRules,
@@ -51,6 +52,27 @@ const fallbackInspection = (
   // A failed Host inspection is deliberately non-memorable and Smart-ineligible.
   evidenceComplete: false,
 });
+
+const permissionExecutionPlan = (target: PermissionInspectResult): ToolExecutionPlan => {
+  const access = target.action === "read" ? "read" as const : "write" as const;
+  const resources = target.paths.map((entry) => ({
+    id: `host-path:${entry.workspaceId}:${entry.canonicalResourceId}`,
+    access,
+    scope: "exact" as const,
+  }));
+  for (const scope of target.threadScopes) {
+    resources.push({ id: `host-thread:${target.owningWorkspaceId ?? "unknown"}:${scope}`, access, scope: "exact" });
+  }
+  return {
+    // An incomplete/unknown inspection cannot prove independence. Harness-owned
+    // process tools add their concrete shell plan; arbitrary process tools stay
+    // barriers because command text is not an effect declaration.
+    barrier: !target.evidenceComplete
+      || target.action === "unknown"
+      || (target.action === "process" && target.source.kind !== "harness"),
+    resources,
+  };
+};
 
 const summarizeTarget = (target: PermissionInspectResult): string => {
   if (target.paths.length > 0) {
@@ -172,7 +194,7 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
           target,
           reason: "session-scoped grant",
         }, ctx.signal);
-        return undefined;
+        return { executionPlan: permissionExecutionPlan(target) };
       }
 
       const finish = async (
@@ -192,7 +214,7 @@ export function createPermissionGateExtension(options: PermissionGateOptions): E
         if (decision === "deny") {
           return { block: true, reason: reason ?? `denied: ${toolName}` };
         }
-        return undefined;
+        return { executionPlan: permissionExecutionPlan(target) };
       };
 
       if (result.decision === "deny") return finish("deny", false, false, result.reason);

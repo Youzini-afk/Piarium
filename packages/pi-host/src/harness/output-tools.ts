@@ -1,13 +1,14 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { OutputSlice, DiagnosticsResult, ShellReadResult } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type OutputSlice, type DiagnosticsResult, type ShellReadResult } from "@piarium/protocol";
 
 // ── get_output ──────────────────────────────────────────────────────
 const GetOutputParams = Type.Object({
   handle: Type.String(),
   offset: Type.Optional(Type.Integer({ minimum: 0 })),
   length: Type.Optional(Type.Integer({ minimum: 1 })),
+  waitMs: Type.Optional(Type.Integer({ minimum: 0 })),
 });
 
 const formatElapsed = (milliseconds: number | undefined): string => {
@@ -23,8 +24,8 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
   return defineTool({
     name: "get_output",
     label: "Get Output",
-    description: "Retrieve stored output or new background shell output. Use offset/length for an explicit historical slice.",
-    promptSnippet: "get_output: retrieve stored/shell output by handle, paginate with offset/length",
+    description: "Retrieve stored output or new background shell output. Use offset/length for an explicit historical slice; waitMs waits for new shell output or exit without stopping the process.",
+    promptSnippet: "get_output: retrieve stored/shell output, optionally wait for new bytes/exit, paginate with offset/length",
     promptGuidelines: [
       "Use get_output to retrieve large outputs that were truncated or backgrounded.",
       "The handle is shown in the original tool result as out_XXX (stored) or sh_N (background shell).",
@@ -32,10 +33,10 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
     ],
     parameters: GetOutputParams,
     executionMode: "parallel",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
         // Try output.read first (for out_ handles), fall back to shell.read (for sh_ IDs)
-        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "observation" | "display" | "organized">>;
+        let result: OutputSlice & Partial<Pick<ShellReadResult, "running" | "exitCode" | "cancelled" | "executionId" | "observation" | "display" | "organized" | "shellId">>;
         if (params.handle.startsWith("out_")) {
           const slice = await bridge.request("output.read", {
             handle: params.handle,
@@ -48,12 +49,25 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             id: params.handle,
             ...(params.offset !== undefined ? { offset: params.offset } : {}),
             ...(params.length !== undefined ? { length: params.length } : {}),
-          });
+            ...(params.waitMs !== undefined ? { waitMs: params.waitMs } : {}),
+          }, params.waitMs === undefined
+            ? (signal === undefined ? {} : { signal })
+            : {
+                ...(signal === undefined ? {} : { signal }),
+                timeoutMs: Math.min(
+                  HARNESS_MAX_REQUEST_TIMEOUT_MS,
+                  Math.max(30_000, params.waitMs + 30_000),
+                ),
+              });
         }
+        const shellCompletion = result.running === false && result.executionId
+          ? { shellCompletion: { executionId: result.executionId } }
+          : {};
         if (result.observation) {
           const state = result.running
             ? "still running"
-            : result.exitCode === undefined ? "exited" : `exited ${result.exitCode}`;
+            : result.cancelled ? "cancelled"
+              : result.exitCode === undefined ? "exited" : `exited ${result.exitCode}`;
           const observation = result.observation;
           if (!observation.first && result.length === 0) {
             const lastOutput = observation.lastOutputAgoMs === undefined
@@ -62,13 +76,16 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             const text = `[shell ${params.handle} · no new output since last read (${formatElapsed(observation.sinceMs)} ago); ${state}; ${lastOutput}]`;
             return {
               content: [{ type: "text", text }],
-              details: { handle: params.handle, ...result },
+              details: { handle: params.handle, ...result, ...shellCompletion },
             };
           }
           const change = observation.first
             ? `initial read · ${result.length} bytes`
             : `+${result.length} bytes since last read (${formatElapsed(observation.sinceMs)} ago)`;
           const lines = [`[shell ${params.handle} · ${change} · ${state}]`];
+          if (result.shellId && result.shellId !== params.handle) {
+            lines.push(`[recovered runtime shell: ${result.shellId} — use this id for input or termination]`);
+          }
           if (result.organized?.partial) {
             lines.push(result.running
               ? "[current observation — output still growing; not a final summary]"
@@ -79,10 +96,13 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
           lines.push(`[${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}]`);
           return {
             content: [{ type: "text", text: lines.join("\n") }],
-            details: { handle: params.handle, ...result },
+            details: { handle: params.handle, ...result, ...shellCompletion },
           };
         }
         const lines: string[] = [result.display ?? result.text];
+        if (result.shellId && result.shellId !== params.handle) {
+          lines.push(`\n[recovered runtime shell: ${result.shellId} — use this id for input or termination]`);
+        }
         if (result.running) lines.push("\n[still running]");
         if (result.exitCode !== undefined) lines.push(`\n[exit ${result.exitCode}]`);
         const shown = `${result.nextOffset}/${result.total} bytes${result.eof ? " · eof" : ""}`;
@@ -97,6 +117,11 @@ export function createGetOutputTool(bridge: HostServicesBridge, _sessionId: stri
             total: result.total,
             eof: result.eof,
             running: result.running ?? false,
+            ...(result.cancelled === undefined ? {} : { cancelled: result.cancelled }),
+            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            ...(result.executionId === undefined ? {} : { executionId: result.executionId }),
+            ...(result.shellId === undefined ? {} : { shellId: result.shellId }),
+            ...shellCompletion,
           },
         };
       } catch (error) {

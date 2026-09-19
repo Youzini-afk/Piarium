@@ -79,6 +79,8 @@ interface CreateClientInput {
   label?: unknown;
   pairingId?: unknown;
   profile?: unknown;
+  /** Trusted issuer already authenticated the old subject and is rotating its token. */
+  reuseDedupeIdentity?: boolean;
   usesRelay?: unknown;
 }
 
@@ -350,16 +352,20 @@ export const createRemoteClientAuthRuntime = ({
     profile,
     capabilities,
     allowedDirectories,
+    reuseDedupeIdentity = false,
   }: CreateClientInput = {}) => {
     return mutateStore(async (store) => {
       const normalizedDedupeKey = normalizeOptionalString(dedupeKey);
       const normalizedProfile = normalizeProfile(profile);
       const token = generateToken();
+      const priorDedupeClient = reuseDedupeIdentity && normalizedDedupeKey
+        ? store.clients.find((entry) => entry.dedupeKey === normalizedDedupeKey)
+        : null;
       const client = {
-        id: generateId(),
+        id: priorDedupeClient?.id || generateId(),
         label: normalizeLabel(label),
         tokenHash: hashToken(token),
-        createdAt: nowIso(),
+        createdAt: priorDedupeClient?.createdAt || nowIso(),
         lastUsedAt: null,
         revokedAt: null,
         expiresAt: normalizeTimestamp(expiresAt),

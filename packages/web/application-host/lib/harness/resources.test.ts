@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { createResourceService, type LocalMachineProbe } from "./resources.js";
+import type { GpuProbeResult } from "./gpu-resources.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
@@ -38,6 +39,7 @@ const probe = (overrides: Partial<LocalMachineProbe> = {}): LocalMachineProbe =>
 async function fixture(
   machineProbe: () => LocalMachineProbe = () => probe(),
   onCapacityAvailable?: (workspaceId: string) => void | Promise<void>,
+  gpuProbe?: () => Promise<GpuProbeResult>,
 ) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-resource-"));
   roots.push(root);
@@ -59,6 +61,7 @@ async function fixture(
     resources: createResourceService({
       client,
       probeLocal: machineProbe,
+      ...(gpuProbe === undefined ? {} : { probeLocalGpu: gpuProbe }),
       ...(onCapacityAvailable === undefined ? {} : { onCapacityAvailable }),
     }),
   };
@@ -181,5 +184,43 @@ describe("resource facts on the real kernel", () => {
     assert.deepEqual(empty, { status: "confirmed" });
     const machine = await f.resources.getMachine("workspace-a", "local");
     assert.equal(machine?.commitments.length, 0);
+  });
+
+  it("allocates distinct real GPU UUIDs across concurrent workspaces", async () => {
+    const f = await fixture(
+      () => probe(),
+      undefined,
+      async () => ({ status: "available", devices: [
+        { index: 0, uuid: "GPU-test-a", name: "Test A", memoryMb: 8_192, usedMemoryMb: 100, utilizationPercent: 2 },
+        { index: 1, uuid: "GPU-test-b", name: "Test B", memoryMb: 8_192, usedMemoryMb: 200, utilizationPercent: 3 },
+      ] }),
+    );
+    const first = await f.resources.admit("workspace-a", "local", { gpuCount: 1 }, "attempt-a");
+    const second = await f.resources.admit("workspace-b", "local", { gpuCount: 1 }, "attempt-b");
+    assert.equal(first.status, "confirmed");
+    assert.equal(second.status, "confirmed");
+    assert.equal(first.gpuAllocation?.devices[0]?.uuid, "GPU-test-a");
+    assert.equal(second.gpuAllocation?.devices[0]?.uuid, "GPU-test-b");
+    assert.equal(first.gpuAllocation?.environment.value, "GPU-test-a");
+    assert.equal(second.gpuAllocation?.environment.value, "GPU-test-b");
+    const sharedView = await f.resources.getMachine("workspace-c", "local");
+    assert.equal(sharedView?.commitments.find((entry) => entry.resources.gpuCount === 1)?.gpuAllocation?.devices[0]?.uuid, "GPU-test-a");
+    if (second.status !== "confirmed" || !second.commitmentId) throw new Error("expected second commitment");
+    const rebuilt = createResourceService({
+      client: f.client,
+      probeLocal: f.machineProbe,
+      probeLocalGpu: async () => ({ status: "available", devices: [
+        { index: 0, uuid: "GPU-test-a", name: "Test A", memoryMb: 8_192 },
+        { index: 1, uuid: "GPU-test-b", name: "Test B", memoryMb: 8_192 },
+      ] }),
+    });
+    assert.equal((await rebuilt.getCommitmentAllocation("workspace-b", second.commitmentId))?.environment.value, "GPU-test-b");
+    const blocked = await f.resources.admit("workspace-c", "local", { gpuCount: 1 }, "attempt-c");
+    assert.equal(blocked.status, "insufficient");
+    if (first.status !== "confirmed" || !first.commitmentId) throw new Error("expected first commitment");
+    await f.resources.release("workspace-a", first.commitmentId, "done");
+    const afterRelease = await f.resources.admit("workspace-c", "local", { gpuCount: 1 }, "attempt-c");
+    assert.equal(afterRelease.status, "confirmed");
+    assert.equal(afterRelease.gpuAllocation?.devices[0]?.uuid, "GPU-test-a");
   });
 });

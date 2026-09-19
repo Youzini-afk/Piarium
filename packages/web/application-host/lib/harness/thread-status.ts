@@ -10,15 +10,15 @@
  * only after the rows were actually delivered.
  */
 
-import type {
-  PiSessionEntry,
-  SessionEntriesResult,
-  Thread,
-  ThreadMessagePeer,
-  ThreadParent,
-  ThreadRun,
+import {
+  encodeHarnessObservationText,
+  type PiSessionEntry,
+  type SessionEntriesResult,
+  type Thread,
+  type ThreadMessagePeer,
+  type ThreadParent,
+  type ThreadRun,
 } from "@piarium/protocol";
-import type { ObservationCursorStore, PendingObservation } from "./observation-cursors.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 
 /** ~20 visible characters is a preview budget, not a content limit. */
@@ -52,7 +52,7 @@ export interface ThreadStatusRow {
   task: string;
   state: string;
   progress: ThreadStatusProgress | null;
-  /** Source-marked arrivals merged into the progress column. */
+  /** Kept for callers which render their own markers; status snapshots leave it empty. */
   markers: ThreadStatusMarker[];
 }
 
@@ -77,7 +77,8 @@ const latestVisibleText = (entry: PiSessionEntry): string => {
   if (entry.type !== "message" || entry.message.role !== "assistant") return "";
   return entry.message.content
     .filter((part) => part.type === "text")
-    .map((part) => part.text.trim())
+    .flatMap((part) => part.text.trim().split(/\r?\n\s*\r?\n/u))
+    .map((paragraph) => paragraph.trim())
     .filter(Boolean)
     .at(-1) ?? "";
 };
@@ -91,7 +92,7 @@ export const lastVisibleOutput = (
   entries: readonly PiSessionEntry[],
   afterEntryId?: string | null,
 ): { text: string; entryId: string; at: string } | null => {
-  let start = entries.length - 1;
+  const start = entries.length - 1;
   if (afterEntryId) {
     const boundary = entries.findIndex((entry) => entry.id === afterEntryId);
     if (boundary < 0) return null;
@@ -215,48 +216,26 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
           fromEarlierRun: activeRun !== null && candidate.id !== activeRun.id,
         };
       }
-      const report = candidate.report
-        ?? (thread.lifecycle === "settled" && candidate.id === thread.activeRunId ? thread.report : null);
-      if (report?.conclusion && report.resultRevision !== undefined) {
-        return {
-          text: excerptText(report.conclusion),
-          runId: candidate.id,
-          entryId: "",
-          reportRevision: report.resultRevision,
-          at: thread.updatedAt,
-          fromEarlierRun: activeRun !== null && candidate.id !== activeRun.id,
-        };
-      }
+      // A durable report is historical result material. If there is no
+      // transcript excerpt available, leave progress empty rather than copying
+      // the result body into this transient status table.
     }
     return null;
   };
 
-  const markersFor = (thread: Thread, seenInbound: readonly string[], seenResult: number | undefined): ThreadStatusMarker[] => {
-    const seen = new Set(seenInbound);
-    const markers: ThreadStatusMarker[] = [];
-    for (const message of thread.messages ?? []) {
-      if (message.direction !== "in" || seen.has(message.id)) continue;
-      if (message.status !== "delivered" && message.status !== "resolved") continue;
-      markers.push({
-        kind: "message",
-        id: message.id,
-        at: message.at,
-        text: `message ${message.id} from ${statusPeerLabel(message.from)}: "${excerptText(message.text)}"`,
-      });
-    }
-    if (thread.resultRevision !== undefined && thread.resultRevision !== seenResult) {
-      markers.push({ kind: "result", at: thread.updatedAt, text: `result r${thread.resultRevision}` });
-    }
-    return markers;
-  };
+  // Message/result bodies are delivered by zone2.assemble. The status table
+  // only keeps the mechanical progress excerpt above and never acknowledges
+  // or consumes directed message/result records.
+  const markersFor = (_thread: Thread, _seenInbound: readonly string[], _seenResult: number | undefined): ThreadStatusMarker[] => [];
 
   const renderCell = (progress: ThreadStatusProgress | null, markers: readonly ThreadStatusMarker[]): string => {
-    // Every excerpt carries its locate reference: read_thread entry expands
-    // the original passage even after the thread keeps writing.
+    // The progress excerpt is a real retained transcript entry. Keep its
+    // run/entry locator so read_thread can expand it; status markers stay
+    // empty because messages/results are delivered by zone2.assemble.
     const base = progress
-      ? `${progress.text} [${progress.runId}:${progress.reportRevision !== undefined ? `report:r${progress.reportRevision}` : progress.entryId}]${progress.fromEarlierRun ? ` (earlier run · ${progress.at})` : ""}`
+      ? `${encodeHarnessObservationText(progress.text)} [${encodeHarnessObservationText(progress.runId)}:${encodeHarnessObservationText(progress.reportRevision !== undefined ? `report:r${progress.reportRevision}` : progress.entryId)}]${progress.fromEarlierRun ? ` (earlier run · ${encodeHarnessObservationText(progress.at)})` : ""}`
       : "—";
-    const suffix = markers.map((marker) => marker.text).join(" · ");
+    const suffix = markers.map((marker) => encodeHarnessObservationText(marker.text)).join(" · ");
     return suffix ? `${base} · ${suffix}` : base;
   };
 
@@ -308,37 +287,9 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
 
     /** One row of the four-column table: thread · task · state · progress. */
     formatRow(row: ThreadStatusRow): string {
-      return `${row.threadId}${row.preset ? ` [${row.preset}]` : ""} · ${row.task} · ${row.state} · ${renderCell(row.progress, row.markers)}`;
+      return `${encodeHarnessObservationText(row.threadId)}${row.preset ? ` [${encodeHarnessObservationText(row.preset)}]` : ""} · ${encodeHarnessObservationText(row.task)} · ${encodeHarnessObservationText(row.state)} · ${renderCell(row.progress, row.markers)}`;
     },
   };
 }
 
 export type ThreadStatusProjector = ReturnType<typeof createThreadStatusProjector>;
-
-export const THREAD_STATUS_OBJECT_KIND = "thread-status" as const;
-
-/**
- * Per-request status delivery bookkeeping. `prepare` leaves the cursor
- * uncommitted; `confirm` advances it only after the request that carried the
- * rows was actually dispatched. A pending prepare is superseded by the next
- * one — a failed request never claims delivery.
- */
-export function createThreadStatusDelivery(cursors: ObservationCursorStore) {
-  const pending = new Map<string, PendingObservation<unknown>>();
-  return {
-    setPending(observerSessionId: string, observation: PendingObservation<unknown>): void {
-      pending.get(observerSessionId)?.abort();
-      pending.set(observerSessionId, observation);
-    },
-    confirm(observerSessionId: string, observationRef: string): boolean {
-      const current = pending.get(observerSessionId);
-      if (!current || current.observationRef !== observationRef) return false;
-      pending.delete(observerSessionId);
-      return current.commit();
-    },
-    drop(observerSessionId: string): void {
-      pending.get(observerSessionId)?.abort();
-      pending.delete(observerSessionId);
-    },
-  };
-}

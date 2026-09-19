@@ -79,7 +79,8 @@ Normal Run settlement and archive do not terminate an experiment. Host shutdown 
 the backend owns execution and reconnection facts. Backend uncertainty is not observed termination.
 The local backend is implemented; registering another machine or testing an injected backend does
 not provide a managed remote or Slurm implementation. Full desktop restart and real-model research
-quality require their own evidence. D-301/7G and D-302/7H remain follow-up work.
+quality require their own evidence. D-301/7G request preparation and D-302/7H tool execution
+use the shared context and shell paths described below.
 
 ### HarnessServiceHost (`service-host.ts`)
 
@@ -156,6 +157,19 @@ process manager.
 - Background completion is emitted once by PTY exit even when no caller reads
   output. A failed writer release keeps directory protection and is retried by
   disposal instead of being treated as a completed cleanup.
+- `waitMs: 0` detaches only after the terminal runtime has accepted the command,
+  so the returned `sh_N` is the real runtime identity. The foreground wait has no
+  process-kill meaning. The default is the session-resolved 10-second soft setting,
+  chosen from focused-check versus package-typecheck timings observed during 7H and
+  still configurable per workspace.
+- `shell.read(waitMs)` waits on output/exit events only when an incremental read
+  has no unread bytes. Explicit byte slices and static outputs remain immediate.
+  Request cancellation removes the observer without terminating the process;
+  `shell.write` and `shell.kill` do not share the observation wait and remain usable.
+- `shell.exec.toolCallId` is an idempotent acceptance/recovery alias inside the
+  current Host session. Repeating the same identity and command returns the existing
+  promise/result, and `shell.read` can resolve that alias to the real `sh_N`. A command
+  mismatch is rejected. This in-memory map deliberately does not claim restart durability.
 
 ### OutputStore (`output-store.ts`)
 
@@ -400,13 +414,15 @@ separate planned sources.
 
 ### Knowledge context runtime (`../knowledge/context-runtime.ts`)
 
-The context runtime fans committed user-originated Documents changes, version-bound diagnostics, existing Git refreshes, and generation-tagged user-terminal commands to the Pi sessions that own that workspace. Harness/agent writes stay out of this observation channel. Terminal events remain idempotent per target Pi session and command identity; the runtime does not invent shell history after restart.
+The context runtime fans committed user-originated Documents changes, version-bound diagnostics, existing Git refreshes, and generation-tagged user-terminal commands to the Pi sessions that own that workspace. Harness writes do not masquerade as user edits. Agent shell completion is a separate source keyed by execution identity, projected as a short terminal fact and output reference. It is distinct from user-terminal history and from the shell output byte cursor; raw retained tool-result receipts suppress duplicate completion notices.
 
-Zone 2 is an incremental delivery channel rather than a repeated dashboard. Shell, diagnostics and Thread projections prepare a cursor update and commit it only after their bytes are accepted into the response. The hidden Pi message stores receipt IDs plus material revisions. After a real compaction, pi-host derives the retained receipts from Pi's active context and Host keeps only cursor baselines whose complete source chain remains present. A ready background summary does not alter cursors.
+Before every model request, `zone2.assemble` prepares environment changes and new message/result material. `zone2.delivered` confirms their pending observation only after Pi has received a provider response start and retained the actual material in native history. A failed prepare or provider stream that fails before starting does not acknowledge delivery; retained receipts recover a lost ACK. Tool reads retain their own response-delivery cursors. Compaction and branch navigation derive retained receipts from native raw input, never from a ready summary candidate.
 
-Plans, user notes and accepted knowledge keep their existing authorities. `zone2-material.ts` compares their current revisions with revisions present in retained Pi messages, emits only changed or explicitly removed material, and acknowledges only sections fully represented in the final budgeted response. Context usage remains in the normal UI and is not appended as model input every turn. There is no keeper nudge, coverage takeover, `memory_edit`, decisions-block suggestion loop, or second context store.
+`zone2.status` separately returns the complete current authorized team on every request, including unchanged rows. Each progress excerpt cites its real completed visible paragraph and Run. The snapshot has no delivery cursor, does not consume directed messages or result bodies, and is never appended to Pi history. Empty scope and unavailable facts remain distinct. Pi accounts for both additions before capacity admission and rebuilds them after compaction.
 
-Active, queued and settled Thread projections use the same receipt-bound observer cursor and appear only after their event sequence or overlap fact changes. Nested child sessions resolve their owning Thread from the
+Plans, user notes and accepted knowledge keep their existing authorities. `zone2-material.ts` compares revisions with retained Pi messages and only acknowledges fully represented sections. Knowledge identities include user/workspace scope; actual retirement/deletion is distinguished from a different retrieval ranking. Store-owned knowledge revisions invalidate query caches without scanning the whole catalogue on every request. Context usage stays in the normal UI. There is no keeper nudge, coverage takeover, `memory_edit`, decisions-block suggestion loop, or second context store.
+
+Thread message and result material is deduplicated by actual message/body identity, so a step or lifecycle update cannot re-emit old bodies. Nested child sessions resolve their owning Thread from the
 Host session binding (`sessionId → owning workspace / thread / run`) after
 catalog/run reconciliation, not from the execution workspace Documents assigns
 to scratch or materialized cwd. A missing or mismatched owner is denied; it

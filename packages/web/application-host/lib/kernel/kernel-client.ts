@@ -176,6 +176,14 @@ export class KernelScopedClient {
     return this.owner.putBlob(bytes, operationId, this.grant, signal);
   }
 
+  putBlobStream(
+    chunks: AsyncIterable<Uint8Array>,
+    input: { operationId: string; byteLength: number; expectedHash: string },
+    signal?: AbortSignal,
+  ): Promise<KernelPutBlobResult> {
+    return this.owner.putBlobStream(chunks, input, this.grant, signal);
+  }
+
   getBlob(hash: string, source: KernelBlobReadSource, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
@@ -843,6 +851,74 @@ export class KernelClient {
     } catch (error) {
       await this.requestRaw<Record<string, unknown>>("storage.putBlob.abort", {
         operationId,
+        streamId,
+        ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
+      }, { grant: scoped }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async putBlobStream(
+    chunks: AsyncIterable<Uint8Array>,
+    input: { operationId: string; byteLength: number; expectedHash: string },
+    grant: KernelGrantHandle,
+    signal?: AbortSignal,
+  ): Promise<KernelPutBlobResult> {
+    const scoped = this.assertGrant(grant);
+    if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0) {
+      throw new Error("Blob stream byteLength must be a non-negative safe integer");
+    }
+    if (!/^sha256-[0-9a-f]{64}$/.test(input.expectedHash)) {
+      throw new Error("Blob stream expectedHash must be a sha256 object identity");
+    }
+    const existing = await this.getOperation(input.operationId, scoped, signal).catch(() => null);
+    if (existing?.state === "committed" && existing.result && typeof existing.result === "object") {
+      const result = existing.result as Partial<KernelPutBlobResult>;
+      if (result.hash === input.expectedHash && result.byteLength === input.byteLength && typeof result.ownerId === "string") {
+        return result as KernelPutBlobResult;
+      }
+    }
+    const streamId = `blob-${randomUUID()}`;
+    const digest = createHash("sha256");
+    let received = 0;
+    let sequence = 0;
+    try {
+      const begin = await this.requestRaw<Record<string, unknown>>("storage.putBlob.begin", {
+        operationId: input.operationId,
+        streamId,
+        byteLength: input.byteLength,
+        expectedHash: input.expectedHash,
+        ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
+      }, { signal, grant: scoped });
+      if (begin.streamId !== streamId) throw new KernelClientError({ code: "kernel-stream-invalid", message: "Rust kernel returned a different upload stream identity", retryable: false });
+      for await (const value of chunks) {
+        signal?.throwIfAborted();
+        const source = Buffer.from(value);
+        digest.update(source);
+        received += source.byteLength;
+        if (received > input.byteLength) throw new Error("Blob stream exceeded its declared byteLength");
+        for (let offset = 0; offset < source.byteLength; offset += 64 * 1024) {
+          const chunk = source.subarray(offset, Math.min(offset + 64 * 1024, source.byteLength));
+          const receipt = await this.requestRaw<{ sequence: number }>("storage.putBlob.chunk", {
+            streamId, sequence, bytesBase64: chunk.toString("base64"),
+          }, { signal, grant: scoped });
+          if (receipt.sequence !== sequence) throw new Error("Kernel acknowledged a different upload sequence");
+          sequence += 1;
+        }
+      }
+      const actualHash = `sha256-${digest.digest("hex")}`;
+      if (received !== input.byteLength || actualHash !== input.expectedHash) {
+        throw new Error("Blob stream content did not match its declared identity");
+      }
+      return await this.requestRaw<KernelPutBlobResult>("storage.putBlob.finish", {
+        operationId: input.operationId,
+        streamId,
+        expectedHash: input.expectedHash,
+        ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
+      }, { signal, grant: scoped });
+    } catch (error) {
+      await this.requestRaw<Record<string, unknown>>("storage.putBlob.abort", {
+        operationId: input.operationId,
         streamId,
         ...(scoped.owningWorkspace ? { workspaceId: scoped.owningWorkspace } : {}),
       }, { grant: scoped }).catch(() => undefined);

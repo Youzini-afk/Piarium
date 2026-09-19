@@ -326,17 +326,17 @@ active context; Zone 2 then emits changed material instead of rebuilding a dashb
 compaction; a retired `harness.memory.mode: "off"` value still disables preparation as a migration
 read, not a running mode. See harness section 8.4 and plan 2.4/2.6.
 
-D-301 schedules a separate follow-up, 7G, after acceptance of the currently executing D-300 task.
-It unifies preparation before every actual model request: new environment facts become replayable
+D-301's 7G request preparation is implemented at D-305. It runs before every actual Agent model request:
+new environment facts become replayable
 history, followed by a complete compact team roster that exists only in that request. Prior rosters
 never enter the growing conversation prefix; the full current scoped view is supplied even when
 unchanged. Fixed collaboration guidance stays in the system prompt; dynamic observations and the
 snapshot use source-labelled user content through the provider adapter. Request capacity includes
 both materials. Environment delivery receipts remain distinct from transient snapshot visibility,
-and neither UI reads nor a snapshot marker consumes a directed message or result body. This is a
-planned change to the existing Pi context owner, not an implemented second context service.
+and neither UI reads nor a snapshot marker consumes a directed message or result body. Pi's existing
+session manager remains the only conversation authority; there is no second context service.
 
-D-302 / 7H is a further general Harness follow-up. Resource-aware tool scheduling belongs at the real
+D-302 / 7H is implemented at D-305. Resource-aware tool scheduling runs at the real
 Pi execution boundary, while Host authority and Rust file/process owners retain permission, mutation
 and lifecycle enforcement. Independent calls can overlap; shared resources and unresolved sequential
 barriers preserve order without forcing every independent group to execute one call at a time.
@@ -344,7 +344,7 @@ Long shell calls return execution handles promptly; output reads may wait on rea
 facts join 7G's environment deltas without copying logs or updating old history. Observation timeout
 does not terminate execution. Idle Agent continuation requires an explicit wait or continuation intent;
 output growth alone starts no model call. Ordinary session shells remain distinct from durable research
-attempts. This design is queued after the current task, not a runtime delivery claim.
+attempts.
 
 D-286 makes the full context scope explicit: sufficient first presentation of tool material, stable
 history, actual request capacity, retained original messages, one continuation summary, history rereads,
@@ -512,13 +512,13 @@ child sessions. Settling detaches the live binding while retaining results and b
 session or parallel research catalog exists. Shell changes do not apply focus, call a model or recreate
 sessions. D-299 adds the first capability-routing slice: dedicated research model slots and frozen
 branch manifests; D-303 closes local experiments, continuation upgrades and collaboration consumers.
-Managed remote and multi-machine work remains planned in 7I. The product
+Managed remote and multi-machine execution is delivered by D-305. The product
 design is [research-cluster-design.md](research-cluster-design.md).
 
 D-300 defines execution and collaboration, with local production slices accepted at D-303. Experiment
 specifications and attempts use the existing Rust typed catalog and object domain; Host coordinates
 authorization, placement and presentation. Local and managed remote executors reuse the Rust process
-core; managed remote implementation follows in D-304 / 7I, and native scheduler adapters are deferred. SSH is an
+core; D-305 implements the D-304 / 7I managed-remote path, while native scheduler adapters are deferred. SSH is an
 access/transport mechanism, not proof that a job is alive or stopped. Agent Runs, compute attempts,
 connection state and artifact collection have separate lifecycles.
 
@@ -526,15 +526,14 @@ The collaboration layer extends the existing Thread message ledger and tools acr
 research and future office work. Natural-language sends can return immediately or wait for a correlated
 reply. A compact roster projects actual task/state and roughly 20 visible characters from the latest
 completed visible assistant paragraph, with stable source references. Existing output events maintain
-it; no status-report task or summarizer model is introduced. The current D-300 execution targets initial
-state plus changed rows before actual model requests; queued D-301 / 7G replaces that presentation with
+it; no status-report task or summarizer model is introduced. D-305 replaces D-300's changed-row presentation with
 a full current request-only tail snapshot for every authorized Agent, while environment deltas remain
-in history. The current task is accepted against its original scope before this follow-up. Explicit messages and established
+in history. Explicit messages and established
 waits drive continuation; Host does not classify scientific significance to launch stronger models.
 These contracts and the local/remote acceptance sequence are specified in
 [plan stage 7](agent-harness-plan.md); current implementation is distinguished from follow-up design in status.
 
-D-304 / 7I follows 7G and 7H. Existing connection management reaches a remote Rust executor or Piarium
+D-304 / 7I is implemented at D-305. Existing connection management reaches a remote Rust executor or Piarium
 Host; the coordinator owns research intent and placement, while the target owns actual jobs, output and
 resource confirmation across clients. Stable target identity prevents separate SSH aliases from becoming
 independent allocators. The UI exposes the coordinator location: accepted remote jobs survive disconnection,
@@ -543,7 +542,7 @@ copy of local kernel grants is introduced. Code/data/environment reuse and optio
 support experiments that grow naturally from threads; no mandatory matrix or scientific workflow is added.
 Operations Agents reuse ordinary threads and authorized tools for environment preparation and fault handling,
 optionally dividing responsibility among several threads as scale grows. Programmatic allocation works
-without them. Slurm remains outside current scope; these changes are planned, not implemented.
+without them. Slurm remains outside current scope; the managed-remote, resource and batch paths are implemented.
 
 Text content has one authority. The application host owns a revisioned document service with
 workspace resolve, read, write, move, delete, an SSE watch, and crash-recovery journals, exposed

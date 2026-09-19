@@ -1,0 +1,239 @@
+diff --git a/dist/agent-loop.js b/dist/agent-loop.js
+index ca1186cb920c1da692381694538b388af0c5261c..148a58c5aae7efb652c8a91a461d724cb321c3bb 100644
+--- a/dist/agent-loop.js
++++ b/dist/agent-loop.js
+@@ -284,11 +284,10 @@ async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
+  */
+ async function executeToolCalls(currentContext, assistantMessage, config, signal, emit) {
+     const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
+-    const hasSequentialToolCall = toolCalls.some((tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential");
+-    if (config.toolExecution === "sequential" || hasSequentialToolCall) {
++    if (config.toolExecution === "sequential") {
+         return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
+     }
+-    return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
++    return executeToolCallsPlanned(currentContext, assistantMessage, toolCalls, config, signal, emit);
+ }
+ async function executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit) {
+     const finalizedCalls = [];
+@@ -327,8 +326,8 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
+         terminate: shouldTerminateToolBatch(finalizedCalls),
+     };
+ }
+-async function executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit) {
+-    const finalizedCalls = [];
++async function executeToolCallsPlanned(currentContext, assistantMessage, toolCalls, config, signal, emit) {
++    const entries = [];
+     for (const toolCall of toolCalls) {
+         await emit({
+             type: "tool_execution_start",
+@@ -338,38 +337,70 @@ async function executeToolCallsParallel(currentContext, assistantMessage, toolCa
+         });
+         const preparation = await prepareToolCall(currentContext, assistantMessage, toolCall, config, signal);
+         if (preparation.kind === "immediate") {
+-            const finalized = {
++            const tool = currentContext.tools?.find((candidate) => candidate.name === toolCall.name);
++            entries.push({
+                 toolCall,
+-                result: preparation.result,
+-                isError: preparation.isError,
+-            };
+-            await emitToolExecutionEnd(finalized, emit);
+-            finalizedCalls.push(finalized);
+-            if (signal?.aborted) {
+-                break;
+-            }
++                preparation,
++                plan: { barrier: tool?.executionMode === "sequential", resources: [] },
++            });
+             continue;
+         }
+-        finalizedCalls.push(async () => {
++        let plan;
++        try {
++            plan = await prepareToolExecution(preparation);
++        }
++        catch (error) {
++            entries.push({
++                toolCall,
++                preparation: {
++                    kind: "immediate",
++                    result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
++                    isError: true,
++                },
++                plan: { barrier: preparation.tool.executionMode === "sequential", resources: [] },
++            });
++            continue;
++        }
++        entries.push({ toolCall, preparation, plan });
++    }
++    const executions = [];
++    for (let index = 0; index < entries.length; index++) {
++        const entry = entries[index];
++        const dependencies = [];
++        for (let prior = 0; prior < index; prior++) {
++            if (executionPlansConflict(entries[prior].plan, entry.plan)) dependencies.push(executions[prior]);
++        }
++        const execution = (async () => {
++            // Resource dependencies establish settle order only. The assistant
++            // message contains static call arguments, not success-conditioned
++            // output references, so one tool error must not poison later calls.
++            await Promise.all(dependencies);
++            if (entry.preparation.kind === "immediate") {
++                const finalized = {
++                    toolCall: entry.toolCall,
++                    result: entry.preparation.result,
++                    isError: entry.preparation.isError,
++                };
++                await emitToolExecutionEnd(finalized, emit);
++                return finalized;
++            }
+             if (signal?.aborted) {
+                 const finalized = {
+-                    toolCall,
++                    toolCall: entry.toolCall,
+                     result: createErrorToolResult("Operation aborted"),
+                     isError: true,
+                 };
+                 await emitToolExecutionEnd(finalized, emit);
+                 return finalized;
+             }
+-            const executed = await executePreparedToolCall(preparation, signal, emit);
+-            const finalized = await finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
++            const executed = await executePreparedToolCall(entry.preparation, signal, emit);
++            const finalized = await finalizeExecutedToolCall(currentContext, assistantMessage, entry.preparation, executed, config, signal);
+             await emitToolExecutionEnd(finalized, emit);
+             return finalized;
+-        });
+-        if (signal?.aborted) {
+-            break;
+-        }
++        })();
++        executions.push(execution);
+     }
+-    const orderedFinalizedCalls = await Promise.all(finalizedCalls.map((entry) => (typeof entry === "function" ? entry() : Promise.resolve(entry))));
++    const orderedFinalizedCalls = await Promise.all(executions);
+     const messages = [];
+     for (const finalized of orderedFinalizedCalls) {
+         const toolResultMessage = createToolResultMessage(finalized);
+@@ -381,6 +412,45 @@ async function executeToolCallsParallel(currentContext, assistantMessage, toolCa
+         terminate: shouldTerminateToolBatch(orderedFinalizedCalls),
+     };
+ }
++async function prepareToolExecution(prepared) {
++    const candidates = [];
++    if (prepared.hookExecutionPlan) candidates.push(prepared.hookExecutionPlan);
++    if (prepared.tool.prepareExecution) candidates.push(await prepared.tool.prepareExecution(prepared.args));
++    if (candidates.length === 0) return { barrier: prepared.tool.executionMode === "sequential", resources: [] };
++    const normalized = candidates.map((candidate) => validateExecutionPlan(prepared.tool.name, candidate));
++    return {
++        barrier: (!prepared.tool.prepareExecution && prepared.tool.executionMode === "sequential")
++            || normalized.some((candidate) => candidate.barrier),
++        resources: normalized.flatMap((candidate) => candidate.resources),
++    };
++}
++function validateExecutionPlan(toolName, candidate) {
++    if (!candidate || typeof candidate !== "object") throw new Error(`Tool ${toolName} returned an invalid execution plan`);
++    const resources = candidate.resources ?? [];
++    if (!Array.isArray(resources)) throw new Error(`Tool ${toolName} returned invalid execution resources`);
++    for (const resource of resources) {
++        if (!resource || typeof resource.id !== "string" || resource.id.length === 0
++            || (resource.access !== "read" && resource.access !== "write")
++            || (resource.scope !== undefined && resource.scope !== "exact" && resource.scope !== "subtree")
++            || (resource.ancestors !== undefined && (!Array.isArray(resource.ancestors)
++                || resource.ancestors.some((ancestor) => typeof ancestor !== "string" || ancestor.length === 0)))) {
++            throw new Error(`Tool ${toolName} returned an invalid execution resource`);
++        }
++    }
++    return { barrier: candidate.barrier === true, resources };
++}
++function executionPlansConflict(left, right) {
++    if (left.barrier || right.barrier) return true;
++    for (const a of left.resources) {
++        for (const b of right.resources) {
++            if (a.access === "read" && b.access === "read") continue;
++            if (a.id === b.id
++                || (a.scope === "subtree" && b.ancestors?.includes(a.id))
++                || (b.scope === "subtree" && a.ancestors?.includes(b.id))) return true;
++        }
++    }
++    return false;
++}
+ function shouldTerminateToolBatch(finalizedCalls) {
+     return finalizedCalls.length > 0 && finalizedCalls.every((finalized) => finalized.result.terminate === true);
+ }
+@@ -409,6 +479,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
+     try {
+         const preparedToolCall = prepareToolCallArguments(tool, toolCall);
+         const validatedArgs = validateToolArguments(tool, preparedToolCall);
++        let hookExecutionPlan;
+         if (config.beforeToolCall) {
+             const beforeResult = await config.beforeToolCall({
+                 assistantMessage,
+@@ -434,6 +505,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
+                     isError: true,
+                 };
+             }
++            hookExecutionPlan = beforeResult?.executionPlan;
+         }
+         if (signal?.aborted) {
+             return {
+@@ -447,6 +519,7 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
+             toolCall,
+             tool,
+             args: validatedArgs,
++            ...(hookExecutionPlan ? { hookExecutionPlan } : {}),
+         };
+     }
+     catch (error) {
+diff --git a/dist/types.d.ts b/dist/types.d.ts
+index 49420017d597de879b54e33b93daf36ff028f43e..b20068dd7053e8e98f327690d85d74728630a8c3 100644
+--- a/dist/types.d.ts
++++ b/dist/types.d.ts
+@@ -20,6 +20,23 @@ export type StreamFn = (model: Model<Api>, context: Context, options?: SimpleStr
+  *   while tool-result message artifacts are emitted later in assistant source order.
+  */
+ export type ToolExecutionMode = "sequential" | "parallel";
++/** One mutable or observable resource used to order tool calls from one assistant message. */
++export interface ToolExecutionResource {
++    /** Stable, canonical resource identity supplied by the application that owns the tool. */
++    id: string;
++    /** Reads may overlap other reads; every access involving a write is ordered. */
++    access: "read" | "write";
++    /** A subtree resource also overlaps descendants whose `ancestors` contain this id. */
++    scope?: "exact" | "subtree";
++    /** Canonical ancestor identities, nearest or farthest first. */
++    ancestors?: readonly string[];
++}
++/** Runtime scheduling effects resolved from already validated and approved tool arguments. */
++export interface ToolExecutionPlan {
++    /** An unknown ordered effect. Calls before and after it remain parallel within their side. */
++    barrier?: boolean;
++    resources?: readonly ToolExecutionResource[];
++}
+ /**
+  * Controls how many queued user messages are injected when the agent loop reaches a queue drain point.
+  *
+@@ -45,6 +62,8 @@ export interface BeforeToolCallResult {
+      * Early termination only happens when every finalized tool result in the batch sets this to true.
+      */
+     terminate?: boolean;
++    /** Host/application-authoritative effects resolved while approving this call. */
++    executionPlan?: ToolExecutionPlan;
+ }
+ /**
+  * Partial override returned from `afterToolCall`.
+@@ -345,6 +364,13 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
+      * Must return an object that matches `TParameters`.
+      */
+     prepareArguments?: (args: unknown) => Static<TParameters>;
++    /**
++     * Resolve resource effects after argument validation and `beforeToolCall` approval.
++     * Applications use this to preserve read/write dependencies without turning a
++     * whole assistant tool batch sequential. If omitted, `executionMode:
++     * "sequential"` remains an unknown ordered barrier.
++     */
++    prepareExecution?: (args: Static<TParameters>) => ToolExecutionPlan | Promise<ToolExecutionPlan>;
+     /** Execute the tool call. Throw on failure instead of encoding errors in `content`. */
+     execute: (toolCallId: string, params: Static<TParameters>, signal?: AbortSignal, onUpdate?: AgentToolUpdateCallback<TDetails>) => Promise<AgentToolResult<TDetails>>;
+     /** Recovery policy for an effect whose durable intent exists but whose outcome is unknown. */

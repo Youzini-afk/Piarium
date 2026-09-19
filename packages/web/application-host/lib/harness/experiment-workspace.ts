@@ -72,6 +72,13 @@ export interface MaterializedExperimentAttempt {
   materialized: true;
 }
 
+export interface ExperimentInputTransfer {
+  materialId: string;
+  cwd?: string;
+  entries: Array<{ path: string; state: KernelBranchState }>;
+  readObject(objectHash: string, byteLength: number, signal?: AbortSignal): AsyncIterable<Uint8Array>;
+}
+
 interface CapturedEntry {
   path: string;
   state: KernelBranchState;
@@ -488,6 +495,68 @@ export async function materializeExperimentAttempt(
     containerRootId,
     managedRoot,
     materialized: true,
+  };
+}
+
+/**
+ * Read an immutable experiment snapshot for a managed execution target. File
+ * bodies remain paged from the local Rust object store and are transferred only
+ * when the target reports that their content hash is absent.
+ */
+export async function openExperimentInputTransfer(
+  client: KernelClient,
+  caller: ExperimentWorkspaceCaller,
+  input: ExperimentInputSnapshot,
+  options: { signal?: AbortSignal } = {},
+): Promise<ExperimentInputTransfer> {
+  assertCaller(caller);
+  if (caller.workspaceId !== input.workspaceId || caller.executionWorkspaceId !== input.executionWorkspaceId) {
+    throw new Error("Experiment transfer identity does not match the input snapshot");
+  }
+  const scoped = await issueExperimentGrant(client, caller, "prepare");
+  const entries: Array<{ path: string; state: KernelBranchState }> = [];
+  let cursor: number | undefined;
+  do {
+    const page = await scoped.readBranch({
+      branchId: input.branchId,
+      includeEntries: true,
+      pageSize: 1024,
+      ...(cursor === undefined ? {} : { cursor }),
+    }, options.signal);
+    if (page.workspaceId !== caller.workspaceId || page.root !== input.root || page.currentRoot !== input.root) {
+      throw new Error("Experiment input branch no longer matches the persisted immutable root");
+    }
+    entries.push(...page.entries.map((entry) => ({ path: entry.path, state: entry.state })));
+    cursor = page.nextCursor === null || page.nextCursor === undefined ? undefined : page.nextCursor;
+  } while (cursor !== undefined);
+  const objectPaths = new Map<string, string>();
+  for (const entry of entries) {
+    if (entry.state.kind === "regular-file" && !objectPaths.has(entry.state.objectHash)) {
+      objectPaths.set(entry.state.objectHash, entry.path);
+    }
+  }
+  return {
+    materialId: input.root,
+    ...(input.cwd ? { cwd: input.cwd } : {}),
+    entries,
+    readObject: (objectHash, byteLength, signal) => (async function* () {
+      const sourcePath = objectPaths.get(objectHash);
+      if (!sourcePath) throw new Error(`Experiment snapshot does not contain object ${objectHash}`);
+      let offset = 0;
+      while (offset < byteLength) {
+        signal?.throwIfAborted();
+        const page = await scoped.getBlob(
+          objectHash,
+          { branchId: input.branchId, path: sourcePath },
+          { offset, length: Math.min(256 * 1024, byteLength - offset), ...(signal ? { signal } : {}) },
+        );
+        const bytes = Buffer.from(page.bytesBase64, "base64");
+        if (bytes.byteLength === 0 || page.nextOffset <= offset) throw new Error(`Experiment object ${objectHash} stopped at byte ${offset}`);
+        offset = page.nextOffset;
+        yield bytes;
+      }
+      if (offset !== byteLength) throw new Error(`Experiment object ${objectHash} length changed during transfer`);
+    })(),
   };
 }
 

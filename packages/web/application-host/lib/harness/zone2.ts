@@ -63,6 +63,12 @@ export interface Zone2Knowledge {
   id: number;
   title: string;
   trigger: string;
+  scope?: "workspace" | "user";
+}
+
+export interface Zone2KnowledgeInvalidation {
+  id: number;
+  scope: "workspace" | "user";
 }
 
 export interface Zone2Block {
@@ -73,6 +79,17 @@ export interface Zone2Block {
 export interface Zone2ContextUsage {
   used: number;
   window: number;
+}
+
+/** Concise completed shell fact; full output remains on the tool/output path. */
+export interface Zone2ShellCompletion {
+  executionId: string;
+  command: string;
+  cwd: string;
+  exitCode: number | null;
+  cancelled: boolean;
+  endedAt: number;
+  outputHandle?: string;
 }
 
 export interface Zone2Thread {
@@ -95,6 +112,19 @@ export interface Zone2Thread {
   overlapWarning?: string | null | undefined;
   mergeReady?: boolean | null;
   verification?: ThreadVerificationProjection | null;
+  /** Inbound message bodies which must remain in the conversation history. */
+  messages?: Array<{
+    id: string;
+    from: string;
+    kind: "inform" | "request";
+    text: string;
+    at: string;
+  }>;
+  /** A published result body is historical material, unlike transient state. */
+  resultRevision?: number;
+  /** Internal assemble projection controls; never shown in the status table. */
+  materialMessageIds?: string[];
+  includeResult?: boolean;
 }
 
 export type Zone2Threads =
@@ -107,10 +137,12 @@ export interface Zone2Material {
   newDiagnostics: Zone2Diagnostic[];
   git: Zone2Git | null;
   knowledge: Zone2Knowledge[];
+  knowledgeInvalidations?: Zone2KnowledgeInvalidation[];
   blocks: Zone2Block[];
   /** Only a successful complete block read can establish a deletion. */
   blocksComplete?: boolean;
   contextUsage: Zone2ContextUsage | null;
+  shellCompletions?: Zone2ShellCompletion[];
   threads?: Zone2Threads | null;
   reviews?: Array<{
     threadId: string;
@@ -208,6 +240,49 @@ export function formatZone2Thread(thread: Zone2Thread, now: number): string {
 }
 
 /**
+ * Render only thread material which belongs in append-only model history.
+ * State such as lifecycle, steps and last tool call is supplied by the
+ * per-request status snapshot and must not be replayed as Zone 2 history.
+ */
+export function formatZone2ThreadMaterial(thread: Zone2Thread): string | null {
+  const sections: string[] = [];
+  const messageIds = thread.materialMessageIds ? new Set(thread.materialMessageIds) : null;
+  for (const message of thread.messages ?? []) {
+    if (messageIds && !messageIds.has(message.id)) continue;
+    sections.push(
+      `<thread-message id="${encodeHarnessObservationText(message.id)}" from="${encodeHarnessObservationText(message.from)}" kind="${message.kind}" at="${encodeHarnessObservationText(message.at)}">${encodeHarnessObservationText(message.text)}</thread-message>`,
+    );
+  }
+  const hasResult = thread.includeResult !== false && (thread.resultRevision !== undefined
+    || thread.conclusion !== null
+    || (thread.evidenceSummary !== undefined && thread.evidenceSummary !== null)
+    || thread.deviations.length > 0
+    || (thread.verification?.review?.status !== undefined && thread.verification.review.status !== "none"));
+  if (hasResult) {
+    const result: string[] = [];
+    if (thread.resultRevision !== undefined) result.push(`revision ${thread.resultRevision}`);
+    if (thread.conclusion) result.push(`conclusion: ${encodeHarnessObservationText(thread.conclusion)}`);
+    if (thread.evidenceSummary) result.push(`evidence: ${encodeHarnessObservationText(thread.evidenceSummary)}`);
+    if (thread.deviations.length > 0) {
+      result.push(`deviations: ${thread.deviations.map(encodeHarnessObservationText).join("; ")}`);
+    }
+    const review = thread.verification?.review;
+    if (review && review.status !== "none") {
+      result.push(`review r${review.resultRevision}: ${review.status}`);
+      if (review.conclusion) result.push(`review conclusion: ${encodeHarnessObservationText(review.conclusion)}`);
+      if (review.error) result.push(`review error: ${encodeHarnessObservationText(review.error)}`);
+    }
+    sections.push(`<thread-result id="${encodeHarnessObservationText(thread.id)}">${result.join(" · ")}</thread-result>`);
+  }
+  return sections.length > 0 ? sections.join("\n") : null;
+}
+
+export function formatZone2Knowledge(item: Zone2Knowledge): string {
+  const scope = item.scope ? ` (scope:${item.scope})` : "";
+  return `#${item.id} ${item.title} — trigger: ${item.trigger}${scope}`;
+}
+
+/**
  * Assemble the piarium-context message content from Zone 2 material.
  * Returns null if all sections are empty (no message should be sent).
  */
@@ -222,11 +297,16 @@ export function assembleZone2Content(
   let userCommands = material.userCommands;
   let newDiagnostics = material.newDiagnostics;
   let knowledge = material.knowledge;
+  const knowledgeInvalidations = material.knowledgeInvalidations ?? [];
   const blocks = material.blocks;
   const git = material.git;
   const threads = material.threads ?? null;
   const reviews = material.reviews ?? [];
   const contextUsage = material.contextUsage;
+  const shellCompletions = material.shellCompletions ?? [];
+  const threadMaterial = threads?.status === "ready"
+    ? threads.items.map(formatZone2ThreadMaterial).filter((line): line is string => line !== null)
+    : [];
 
   // Check if everything is empty
   const allEmpty =
@@ -235,8 +315,10 @@ export function assembleZone2Content(
     newDiagnostics.length === 0 &&
     (!git || (!git.branch && !git.changed && !git.note)) &&
     knowledge.length === 0 &&
+    knowledgeInvalidations.length === 0 &&
     blocks.length === 0 &&
-    (!threads || (threads.status === "ready" && threads.items.length === 0 && !threads.overlapWarning)) &&
+    threadMaterial.length === 0 &&
+    shellCompletions.length === 0 &&
     reviews.length === 0 &&
     (!contextUsage || contextUsage.used === 0);
 
@@ -294,14 +376,20 @@ export function assembleZone2Content(
   }
 
   let threadLines: string[] = [];
-  if (threads?.status === "unavailable") {
-    sections.push(`<threads status="unavailable">thread state unavailable (${threads.reason})</threads>`);
-  } else if (threads && (threads.items.length > 0 || threads.overlapWarning)) {
-    threadLines = threads.items.map((thread) => formatZone2Thread(thread, now));
-    if (threads.overlapWarning) {
-      threadLines.push(`overlap warning: ${threads.overlapWarning}`);
-    }
+  if (threads?.status === "ready") {
+    // Only message/result bodies are durable Zone 2 material. The complete
+    // state table is appended separately as a transient zone2.status tail.
+    threadLines = threadMaterial;
+    if (threadLines.length > 0) {
     sections.push(`<threads>\n${threadLines.join("\n")}\n</threads>`);
+    }
+  }
+
+  if (shellCompletions.length > 0) {
+    const lines = shellCompletions.map((completion) => (
+      `${completion.executionId} · exit ${completion.exitCode ?? "unknown"}${completion.cancelled ? " · cancelled" : ""} · ${encodeHarnessObservationText(completion.command)} (${encodeHarnessObservationText(completion.cwd)})${completion.outputHandle ? ` · output ${encodeHarnessObservationText(completion.outputHandle)}` : ""}`
+    ));
+    sections.push(`<shell-completions>\n${lines.join("\n")}\n</shell-completions>`);
   }
 
   for (const review of reviews) {
@@ -313,8 +401,12 @@ export function assembleZone2Content(
     if (knowledge.length > MAX_KNOWLEDGE) {
       knowledge = knowledge.slice(0, MAX_KNOWLEDGE);
     }
-    const lines = knowledge.map((k) => `#${k.id} ${k.title} — trigger: ${k.trigger}`);
+    const lines = knowledge.map(formatZone2Knowledge);
     sections.push(`<knowledge>\n${lines.join("\n")}\n</knowledge>`);
+  }
+  if (knowledgeInvalidations.length > 0) {
+    const lines = knowledgeInvalidations.map((item) => `#${item.id} (scope:${item.scope}) is no longer available`);
+    sections.push(`<knowledge-invalidations>\n${lines.join("\n")}\n</knowledge-invalidations>`);
   }
 
   // Plan (blocks)
@@ -346,7 +438,7 @@ export function assembleZone2Content(
       knowledge = knowledge.slice(0, MIN_KNOWLEDGE);
       const idx = sections.findIndex((s) => s.startsWith("<knowledge>"));
       if (idx >= 0) {
-        const lines = knowledge.map((k) => `#${k.id} ${k.title} — trigger: ${k.trigger}`);
+        const lines = knowledge.map(formatZone2Knowledge);
         sections[idx] = `<knowledge>\n${lines.join("\n")}\n</knowledge>`;
       }
     }

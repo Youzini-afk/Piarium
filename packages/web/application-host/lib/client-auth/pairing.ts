@@ -38,6 +38,7 @@ interface RemoteClientCreateInput extends Record<string, unknown> {
   clientKind: ClientKind;
   dedupeKey: string;
   label: string;
+  profile?: string;
   pairingId: string;
   usesRelay: boolean;
 }
@@ -343,6 +344,7 @@ export const createClientPairingRuntime = ({
         deviceModel,
         appVersion,
         usesRelay: session.usesRelay === true,
+        ...(normalizedKind === 'desktop' ? { profile: 'full-control' } : {}),
       });
       session.usedAt = nowIso();
       session.clientId = result.client?.id || null;

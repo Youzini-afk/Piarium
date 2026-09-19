@@ -302,6 +302,75 @@ impl Storage {
                 required("source")?;
                 state_in(&["observed", "stale"])?;
             }
+            "managed.remote.object" => {
+                derived("managed.remote.object")?;
+                required("objectHash")?;
+                if object.get("byteLength").and_then(Value::as_i64).is_none_or(|value| value < 0) {
+                    return Err(KernelError::Operation(
+                        "managed remote object byteLength is invalid".to_string(),
+                    ));
+                }
+                state_in(&["available", "expired"])?;
+            }
+            "managed.remote.admission" => {
+                derived("managed.remote.admission")?;
+                required("principalId")?;
+                required("coordinatorHostId")?;
+                required("sourceWorkspaceId")?;
+                required("machineId")?;
+                required("attemptId")?;
+                required("commitmentId")?;
+                state_in(&["confirmed", "released", "revoked", "failed"])?;
+            }
+            "managed.remote.material" => {
+                derived("managed.remote.material")?;
+                required("materialId")?;
+                required("root")?;
+                required("rootId")?;
+                required("canonicalRoot")?;
+                state_in(&["ready", "expired"])?;
+            }
+            "managed.remote.job" => {
+                derived("managed.remote.job")?;
+                required("principalId")?;
+                required("coordinatorHostId")?;
+                required("attemptId")?;
+                required("backendJobId")?;
+                required("processId")?;
+                state_in(&[
+                    "accepted",
+                    "running",
+                    "stopping",
+                    "exited",
+                    "failed",
+                    "cancelled",
+                    "unknown",
+                    "released",
+                ])?;
+            }
+            "managed.remote.output" => {
+                derived("managed.remote.output")?;
+                required("principalId")?;
+                required("jobId")?;
+                required("path")?;
+                required("objectHash")?;
+                if object.get("byteLength").and_then(Value::as_i64).is_none_or(|value| value < 0) {
+                    return Err(KernelError::Operation(
+                        "managed remote output byteLength is invalid".to_string(),
+                    ));
+                }
+                state_in(&["available", "expired"])?;
+            }
+            "managed.remote.shell" => {
+                derived("managed.remote.shell")?;
+                required("principalId")?;
+                required("coordinatorHostId")?;
+                required("toolCallId")?;
+                required("processId")?;
+                required("command")?;
+                required("canonicalCwd")?;
+                state_in(&["accepted", "released"])?;
+            }
             "recovery.operation-file" => {
                 if object.get("operationId").and_then(Value::as_str).is_none()
                     || object.get("path").and_then(Value::as_str).is_none()

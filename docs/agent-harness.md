@@ -83,7 +83,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
 | embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程且用户已安装本地组件时代码语义走 MiniLM，否则语义来源不可用，词法与结构/图检索继续（D-288）；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
-| 工具并发 | 现有 Pi 默认并行，任一 sequential 工具使整批串行；写入仍经过 Host 资源协调。D-302 / 7H 后续按资源与依赖细化调度，不做 apply model（5.9） |
+| 工具并发 | D-305 已把 D-302 / 7H 接入真实 Pi 执行入口：按权限确认后的资源读写关系排序，独立工具并行，未知副作用保留屏障；写入仍经过 Host authority，不做 apply model（5.9） |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索默认走 Exa/Parallel 免密钥服务，用户自配 API provider 优先，不复用模型账户（D-289）；桌面端 Electron 离屏渲染 JS。provider / render / domain policy 按 worker generation 冻结，credential 每次调用实时解析；第三方包存在不会自动替换原生工具（D-283） |
 | 模型与预设 | 普通线程明确继承当前模型，不要求 role。专用能力/预设沿现有独立槽位或明示的 inherit 解析，未配置不冒充可用；hardImplement/review 的当前模型继承明确展示。续接摘要沿活动请求派生，不新增凭据栈或费用面板（D-284/D-285） |
@@ -173,7 +173,7 @@ pi-host 已经通过 `customTools` 同名覆盖了 Pi 的 `write` / `edit`（恢
 | harness 机制 | Pi 事件 / API | 用法 |
 | --- | --- | --- |
 | 工具覆盖 | `customTools` on session create | 同名 `ToolDefinition` 覆盖 `read` / `bash` / `edit` / `write` / `grep`；`read` 只在 Host 声明固定来源服务时覆盖，否则保留 Pi 原生实现；新增 `apply_patch`、`get_output`、`write_to_process`、`kill_shell`、`diagnostics`、`todo`、`dispatch`、`wait`、`webfetch`、`websearch`；`executionMode` 按第 5.9 节声明 |
-| Zone 2 尾部追加（既有路径） | `before_agent_start` → 返回 `message` | 轨迹增量、知识指针、计划变化作为自定义消息追加；D-301 / 7G 后续统一到每次请求前准备，环境增量留史、团队快照临时附尾；不动态改写 `systemPrompt` |
+| 请求前上下文尾部 | `ContextRequestBoundary` → provider request | D-301 / 7G 已统一到每次 Agent 模型请求前准备：环境增量实际送达后留史，完整团队快照只临时附在本次尾部；不动态改写 `systemPrompt` |
 | post-tool 反馈注入 | `tool_result` → 替换 `content` / `details` | 把诊断附加到 edit/write 结果；验证器的统一通道 |
 | 工具门控 | `tool_call` → `block` | profile 的权限默认值；等价于"mask 不删" |
 | 提交压缩 | `session_before_compact` → 返回 `compaction` | 提交已准备的摘要与固定 firstKeptEntryId，保留准备期间新增的原文；尚未准备好时沿同一摘要路径等待或生成 |
@@ -224,7 +224,7 @@ D-282 完成 R0/R6：传输用 acknowledgement-backed request credits，取消�
 | `bash` | 覆盖 Pi | 独占（`executionMode: sequential`） | PTY、持久会话 shell、超时转后台不杀 |
 | `grep` | 覆盖 Pi | 并行 | rg 搜索、固定 surface 叠加、分组排序与有界结果 |
 | `edit` / `write` | 覆盖 Pi | 工具层允许并发；实际提交受资源 gate 与修订检查约束 | 附加新引入的诊断；资源粒度调度目标见 5.9 |
-| `apply_patch` | 新增 | 当前 sequential，使同批调用串行 | Codex 语法多文件编辑，按模型家族启用；后续 7H 按完整路径集协调 |
+| `apply_patch` | 新增 | 从同一 patch 解析完整路径集，按资源冲突调度 | Codex 语法多文件编辑，按模型家族启用；底层仍由同一 mutation authority 原子/补偿处理 |
 | `read` / `find` / `ls` | 同名适配 | 并行 | `read` 保留 Pi 原生分页、截断与图片；find/ls 取得 Host 的固定 dirty path/虚拟祖先并经 Pi 原生定义合并磁盘结果，过期相关来源不可回退 |
 | `get_output` / `write_to_process` / `kill_shell` | 新增 | 读并行，写与杀独占 | 后台 shell 与输出句柄；对运行中 shell 默认返回上次读取之后的增量（第 5.5 节） |
 | `diagnostics` | 新增 | 并行 | `pending` 后按需查 |
@@ -296,8 +296,8 @@ research 与 knowledge-work profile 再评估）。
 禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Piarium 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
 
-当前公开工具参数包括 `command`、`waitMs?`；Host `shell.exec` 另支持 `cwd?`，普通调用沿用会话目录。
-Host 当前等待默认 60 s；Pi→Host bridge 默认 30 s，`bash` 未协调两者，是 D-302 / 7H 必须修正的接缝，不能据此宣称长命令默认路径可靠。
+当前公开工具参数包括 `command`、`waitMs?`、可选受管 `target` 与目标 `cwd`；普通本机调用沿用会话目录。
+Pi 工具等待默认 10 s，bridge 请求期限覆盖所选观察窗口并受协议上界约束；该期限只控制本次观察，不终止进程。
 **等待期限不等于进程期限**：命令在 `waitMs` 内结束则同步返回；否则**自动转后台**，返回"已等待 N 秒，仍在运行，shell id X"与截至此刻的输出，
 模型继续工作，稍后用 `get_output(X)` 取结果、`write_to_process(X, text)` 喂 stdin、`kill_shell(X)` 终止。这是
 Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `exec_command(yield_time_ms)` /
@@ -331,7 +331,7 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
   PTY 提供真实 `TERM`，不设 `TERM=dumb`。整套默认环境在设置中可见、可按工作区修改。
 - `kill_shell` 与会话结束时终止整个进程树；复用 host 已有的 process-tree termination。没有超时杀死。
 - 后台命令的完成由 PTY exit 事件产生，不以模型调用 `get_output` 为前提；start/end 各记录一次，重复观察只读已有事实。
-- 当前声明 `executionMode: "sequential"`，同批有 `bash` 时整批串行；这是现有 Pi 的批次语义。D-302 / 7H 将共享 shell 的顺序、文件影响范围与工具批次分开处理（5.9），不直接把 bash 改成无条件并行。
+- `bash` 的命令正文是不透明副作用，因此保持资源屏障；其他工具按已验证参数提供资源计划，不再因一个已知 sequential 工具把所有独立调用逐条执行（5.9）。
 - 执行期间向 mutation authority 注册为 `process` writer（`WRITER_MODES` 中已存在的模式），使恢复系统知道本轮
   文件覆盖不完整。这是恢复设计已预留的语义。
 - 会话关闭等待 PTY 实际退出，再释放写者；中断请求不等于命令已经结束。失败保留活动状态与可重试关闭，已从会话表移除的
@@ -437,7 +437,7 @@ Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，�
 消失的条目。游标由 host 按（会话，对象）保存，不占模型的上下文，压缩后第一次读取回到全量。已完成的输出句柄是静态的，
 没有增量语义，仍按 `offset` / `length` 分页。
 
-D-302 / 7H 将在同一工具上增加可取消的事件等待，保留默认立即读取和显式历史分页；后台完成事实接入 7G 环境增量。
+D-302 / 7H 已在同一工具上增加可取消的事件等待，保留默认立即读取和显式历史分页；后台完成事实接入 7G 环境增量。
 当前 `get_output` 尚不提供这项等待，Agent 后台 shell 的完成也没有通用 Zone 2 通知链；不能把用户终端事件或验证记录当成已接通的替代。
 具体启动、等待、通知和生命周期设计见 5.9.2。
 
@@ -511,15 +511,10 @@ Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空
 
 ### 5.9 并发
 
-**实现现状（2026-09-20 代码核对）。** 内置 Pi 0.85.1 默认并行执行同一 assistant 消息中的多个工具调用，
-任一工具声明 `executionMode: "sequential"` 则整批串行；并行批次也要等工具结果全部返回才继续请求模型。
-`read`/搜索/Web/线程查询与派发等可并行，派发本身有副作用，不能把“允许并行”当作“只读/免审批”。
-`edit`/`write` 工具层允许并发，生产正文提交仍经过 Host gate、固定视图和修订检查；`apply_patch`、`bash`、
-进程输入/终止及部分线程生命周期工具显式串行。既有文档的“apply_patch 已按路径并行”是目标误写为现状，本节纠正。
-
-**后续目标（D-302 / 7H，尚未实施/验收）。** 独立工作可以重叠执行，有因果关系或共享可变资源的工作保持顺序；
+**实现现状（D-305）。** Pi 0.85.1 的 tracked dependency patch 在真实工具入口消费 `prepareExecution` 和权限门返回的资源计划。
+独立工作可以重叠执行，有因果关系或共享可变资源的工作保持顺序；
 长操作尽快交回控制权，之后按需读取或等待。适用于普通 coding 和科研线程，不需要为一次工具并行额外创建 Agent。
-当前 D-300 执行任务先按原范围交付验收；7H 与 7G 衔接，不追溯扩大原任务。
+并行批次仍在工具结果全部配对后继续请求模型；调度许可不替代权限、Documents/WorkingState 提交或 Rust 进程权威。
 
 #### 5.9.1 按资源和依赖调度工具
 
@@ -1135,7 +1130,7 @@ Zone 2  本轮新增事实，沿现有呈现预算；以 before_agent_start → 
 ```
 
 上述是传统环境增量路径：上一轮送达的 Zone 2 自然成为 Zone 1 的一部分并被冻结。新模型输出、工具结果、用户输入和环境增量
-都可能成为下一请求的新输入，不能说只有 Zone 2 产生新 token。D-301 的后续双层尾部见 8.1.1，尚未作为当前实现交付。
+都可能成为下一请求的新输入，不能说只有 Zone 2 产生新 token。D-301 的双层尾部已由 D-305 按 8.1.1 接入。
 
 Zone 2 的精确定义：**agent 不在场时发生的事**。agent 自己执行的命令与编辑已在历史中，不重复。进入 Zone 2 的是用户在
 编辑器中的改动、用户在终端执行的命令与退出码、LSP 在 agent 未触碰文件上的新诊断、Git 状态变化（分支、pull、stash）。
@@ -1146,10 +1141,7 @@ Zone 2 的精确定义：**agent 不在场时发生的事**。agent 自己执行
 D-301 的简短团队现状表是每次提供当前快照的独立附页，不套用环境增量的去重规则。
 正常文件读取按请求返回原文，不因过去读过而拒绝；用量留在现有 UI，不单独制造每轮变化的尾部消息。
 
-#### 8.1.1 D-301：环境增量留史，团队现状作为请求尾部快照（后续 7G）
-
-实施顺序：当前执行 Agent 继续完成原 D-300 / 7B–7F 任务；本节在其交付验收时一并提出，作为独立 7G 接续实施。
-本次仅修改设计/计划，不将新契约追溯为当前任务未完成的证明，也不把在途代码视为已验收实现。
+#### 8.1.1 D-301：环境增量留史，团队现状作为请求尾部快照（D-305 已实施）
 
 每个 Agent 都应持续看见授权范围内的协作现场，以便主动查看、提问和交换信息，不只给主 Agent 提供子线程汇报。
 现状表仍由程序取已有可见输出，约 20 字进展预览和原文引用，不要求状态汇报或总结模型，不改成仅在完成/失败时通知。
@@ -1189,9 +1181,9 @@ Host 投影可在段落完成、工具边界和结果事件后更新；只在既
 恢复必要基线，团队表直接重建当前视图；临时快照不伪造 Pi entry 或原文保留收据，也不因未落历史反复清理环境事件游标。
 知识召回仍按任务/条目变化工作，不因为每次准备输入就重新检索；程序只能合并明确重复事实，不能代替模型判断科学意义。
 
-D-302 / 7H 将后台命令的新完成事实接到这里的环境增量：执行身份、退出码、简述与正文入口，已由工具交付的同一终态不重复。
+D-302 / 7H 已将后台命令的新完成事实接到这里的环境增量：执行身份、退出码、简述与正文入口，已由工具交付的同一终态不重复。
 日志字节游标与事实送达分开；通知不消耗未读日志，不添加另一张每请求完整进程表。活跃模型在自然请求中消费，
-空闲恢复只沿明确等待/完成后续做关系；输出增长不额外调用模型。该来源尚未接线，具体契约见 5.9.2。
+空闲恢复只沿明确等待/完成后续做关系；输出增长不额外调用模型。具体契约见 5.9.2。
 
 尾部位置有利于持续发现协作入口，但“U 型”位置效应不是对所有模型的固定保证。采用简短表、明确来源和稳定使用说明，
 用实际连续工作中的读取/通信与请求结构验证设计；不靠每轮重述任务或额外总结调用抵消可能的干扰。
@@ -2054,7 +2046,7 @@ D-301 / 7G 的简短团队快照按 8.1.1 每次附尾，不属于此处的历�
 新消息/结果在进展列标记来源，不能冒充该 Agent 的文字；没有新输出就保留时间和旧引用或显示暂无。
 每条预览可由 `read_thread` 展开到显示时对应的原文修订，再逐层读邻近上下文、消息、成果。
 
-Host 从现有事件维护投影。当前在执行的 D-300 任务采用首次短表/后续变化行；验收后独立 7G 按 D-301 改为每次模型请求
+Host 从现有事件维护投影。D-300 当时采用首次短表/后续变化行；D-305 的独立 7G 按 D-301 改为每次模型请求
 末尾的完整当前短表，覆盖同回合工具续接与等待返回，历次表不进入对话历史，环境增量仍按送达留史。
 不能只依赖初始化/`before_agent_start`，也不逐 token 更新输入；固定协作说明与请求角色见 8.1.1。
 环境观察确认只覆盖实际送入模型的内容，UI 游标独立；临时表不依赖旧表收据，压缩/fresh 后直接重建当前视图。
@@ -2110,11 +2102,11 @@ AI4S 科研工作侧重的产品中心是 [科研集群设计](research-cluster-
 Thread 树负责执行责任，父子和同组分支可授权直连交流。现状取已有输出短摘录，经 Zone 2 持续增量提供，按需展开原文，
 不新增交接表、状态汇报或总结模型。这些是通用多 Agent 能力，科研与普通编程、未来办公共同使用。
 
-D-303 已收口本机实验与事实消费者；D-304 将受管远程、真实进程/job 控制、多机器资源和材料复用排入 7G/7H 之后的 7I，Slurm 暂缓。
+D-303 收口本机实验与事实消费者；D-305 已实施 D-304 的受管远程、真实进程/job 控制、多机器资源和材料复用，Slurm 暂缓。
 Agent Run 与计算 attempt 独立；SSH 连接状态不冒充作业状态，资源请求不冒充 allocation。
 Host 负责研究编排，目标 Rust 执行服务拥有实际作业和资源确认；运维角色使用普通 Thread，可按规模由零个发展为多个分管线程，
 负责环境准备、故障诊断和授权修复，不替代程序准入、不固定管理层级。研究矩阵自然生长，系统只提供批量便利操作与来源关联，
-不要求矩阵对象或参数表。后续范围见 [实验执行设计](research-cluster-design.md#6-实验执行与资源协作) 和 plan 7I。
+不要求矩阵对象或参数表。实现边界见 [实验执行设计](research-cluster-design.md#6-实验执行与资源协作) 和 plan 7I。
 
 文献、PDF、代码、数据、Shell、notebook 和领域工具作为工作侧重的材料与执行能力接入。证据、版本、运行和产物自动保留为内部事实基础；证据表、实验协议、Research Diff 和文章结构按需生成，不是研究者的前置表单。写作线从研究中途参与，发现论证缺口后回流检索或实验任务。第一阶段从代码、数据和计算实验开始，后续领域通过 Agent Profile/Adapter 扩展，不把产品固定成论文复现工具。
 

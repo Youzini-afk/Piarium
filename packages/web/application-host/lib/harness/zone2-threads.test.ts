@@ -6,7 +6,7 @@ import type { ThreadReport } from "@piarium/protocol";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createThreadRegistry, ThreadRegistryError, type CreateThreadInput } from "./thread-registry.js";
 import { projectZone2Threads } from "./zone2-threads.js";
-import { createZone2AssembleService } from "./harness-services.js";
+import { createZone2StatusService } from "./harness-services.js";
 import type { HarnessServiceHost } from "./service-host.js";
 
 const WORKSPACE = "workspace-1";
@@ -107,7 +107,7 @@ describe("Zone 2 thread projection", () => {
         },
       }),
     } as unknown as HarnessServiceHost;
-    const result = await createZone2AssembleService(host).handle({ sinceTurn: 0, branchEntryIds: [] }, {
+    const result = await createZone2StatusService(host).handle({}, {
       actor: {
         authorityInstanceId: "authority",
         sessionId: PARENT.id,
@@ -121,7 +121,9 @@ describe("Zone 2 thread projection", () => {
       workspaceId: WORKSPACE,
       signal: new AbortController().signal,
     });
-    expect(result.content).toContain('<threads status="unavailable">thread state unavailable (corrupt)</threads>');
+    expect(result.status).toBe("unavailable");
+    expect(result.content).toBeNull();
+    expect(result.reason).toBeTruthy();
   });
 
   it("calculates overlapWarning when multiple active threads touch overlapping paths", async () => {

@@ -157,8 +157,8 @@ import {
 } from "./harness/counter-tracker.js";
 import { selectHarnessTools } from "./harness/select-tools.js";
 import { createToolResultTruncationExtension } from "./harness/tool-result-truncation.js";
-import { createZone2Extension } from "./harness/zone2-extension.js";
-import { createThreadStatusInjector } from "./harness/thread-status-injector.js";
+import { createContextGuidanceExtension } from "./harness/context-guidance.js";
+import { createRequestContextInjector } from "./harness/request-context.js";
 import {
   createContextPreparationExtension,
   type ContextPreparationExtension,
@@ -3202,16 +3202,14 @@ export class SessionHost {
               name: "piarium-thread-input",
             },
             {
-              factory: createZone2Extension({
-                bridge: hostServicesBridge,
-              }),
+              factory: createContextGuidanceExtension(),
               hidden: true,
-              name: "piarium-zone2",
+              name: "piarium-context-guidance",
             },
             {
               factory: (() => {
                 const contextPreparation = createContextPreparationExtension({
-                  inject: createThreadStatusInjector(hostServicesBridge),
+                  inject: createRequestContextInjector(hostServicesBridge),
                   completeSimple: (model, context, requestOptions) => {
                     const modelRuntime = serviceRef.current?.modelRuntime;
                     if (!modelRuntime) {

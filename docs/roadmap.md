@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; follow-ups 7G → 7H → 7I queued; managed remote execution and optional operations threads planned at D-304; Slurm deferred |
+| 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -53,7 +53,7 @@ context, permissions and Rust kernel, and remains available in the IDE. The firs
 open research question explored by heterogeneous model branches, fast execution workers and deliberate
 discussion and synthesis. The 7A entry, focus and real principal-run attachment, plus the first 7B
 capability-routing slice, are implemented. D-303 closes local execution, dynamic upgrades, collaboration
-and research facts access; managed remote and multi-machine work follows in 7I.
+and research facts access; D-305 adds managed remote and multi-machine execution.
 Verification boundaries are recorded in harness status.
 
 D-300 defined shared message/source and resource facts, durable experiments and multi-machine allocation;
@@ -65,22 +65,21 @@ divide responsibility as scale grows; actual resource confirmation remains in th
 Research evaluation remains a follow-up observation, not a prerequisite to shipping complete functionality.
 Implementation and delivery boundaries belong to the harness plan, research design and status.
 
-D-301 adds a separate **7G follow-up after the current execution task and its acceptance**. Each Agent
+D-301 defined **7G**, delivered at D-305. Each Agent
 receives a complete current scoped roster as a transient request-tail snapshot, with stable collaboration
 guidance in the system prompt. Traditional environment facts are checked before every model request
 and appended to replayable history when delivered. The two use one preparation boundary but different
 retention rules; old rosters do not accumulate in history or invalidate the growing history prefix.
 The snapshot's input cost is included in capacity planning. This does not interrupt or retroactively
-expand the task already given to the executing Agent; acceptance will identify the seams to reuse and
-hand off 7G. The design is accepted, with no implementation or cache-benefit claim in this update.
+expand the task already given to the executing Agent. No cache-benefit claim is made without provider evidence.
 
-D-302 adds **7H: general Harness tool concurrency and background command delivery** after the current
-task. It replaces whole-batch serialization with resource/dependency coordination, makes long commands
+D-302 defined **7H: general Harness tool concurrency and background command delivery**, delivered at D-305.
+It replaces whole-batch serialization with resource/dependency coordination, makes long commands
 yield a usable execution handle promptly, and extends output retrieval with cancellable event waits.
 Completion facts join 7G's environment deltas; logs stay available on demand. Explicit waits or chosen
 continuations can resume an idle Agent, while ordinary output growth cannot. Shared shell state,
-permission checks and actual process/writer release remain authoritative. The current 30-second bridge
-deadline versus 60-second shell yield default is a concrete repair target. This is accepted design only;
+permission checks and actual process/writer release remain authoritative. RPC observation and process lifetime
+are now separate, removing the former 30-second bridge versus 60-second shell-yield mismatch;
 ordinary shell execution does not acquire the durable recovery guarantees of research experiments.
 
 D-304 adds **7I after 7G and 7H**: managed remote execution, multi-machine resource confirmation,
@@ -91,7 +90,7 @@ provide the remote worksite, with explicit coordinator location and continued su
 Operations work can stay with current threads at small scale or be divided among several ordinary threads
 responsible for machine groups, environments or data. They use existing tools, messages and current-state
 context, without a mandatory hierarchy or model call for every sample. Slurm and other native cluster
-adapters are deferred until there is an actual deployment need. This is accepted design, not shipped code.
+adapters are deferred until there is an actual deployment need. The managed-remote production slice shipped at D-305.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

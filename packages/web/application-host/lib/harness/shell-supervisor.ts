@@ -250,6 +250,7 @@ export interface ShellCommandStartedEvent {
   executionId: string;
   cwd: string;
   startedAt: number;
+  toolCallId?: string;
 }
 
 export interface ShellCommandCompletedEvent extends ShellCommandStartedEvent {
@@ -283,6 +284,7 @@ interface BackgroundShell {
   writer: { close: () => Promise<void> } | null;
   writerClosePromise?: Promise<void>;
   handle: TerminalHandle;
+  toolCallId?: string;
 }
 
 export type ShellSupervisor = ReturnType<typeof createShellSupervisor>;
@@ -304,6 +306,13 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   if (process.platform === "linux") baseEnv.DEBIAN_FRONTEND = "noninteractive";
 
   const backgroundShells = new Map<string, BackgroundShell>();
+  const shellChangeWaiters = new Map<string, Set<() => void>>();
+  const acceptedExecutions = new Map<string, {
+    command: string;
+    cwd: string | undefined;
+    promise: Promise<ShellExecResult>;
+    result?: ShellExecResult;
+  }>();
   let activeBackground: BackgroundShell | null = null;
   let disposed = false;
   let sessionHandle: TerminalHandle | null = null;
@@ -345,6 +354,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     cwd: string;
     writer: ShellWriter | null;
     startedAt: number;
+    toolCallId?: string;
+    abortCleanup?: () => void;
   }
   let pendingCommand: PendingCommand | null = null;
   // A command can be between ensureShell()/registerWriter() and assigning
@@ -368,6 +379,13 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       () => commandLifecyclePromises.delete(work),
     );
     return work;
+  };
+
+  const notifyShellChanged = (id: string): void => {
+    const waiters = shellChangeWaiters.get(id);
+    if (!waiters) return;
+    shellChangeWaiters.delete(id);
+    for (const wake of waiters) wake();
   };
 
   const closeCommandWriter = async (writer: ShellWriter | null, cwd: string): Promise<void> => {
@@ -421,6 +439,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       exitCode,
       cancelled: background.cancelRequested,
       outputPreview: stripControlSequences(background.output),
+      ...(background.toolCallId === undefined ? {} : { toolCallId: background.toolCallId }),
     });
     const lifecycle = trackCommandLifecycle(completed.then(() => closeBackgroundWriter(background)));
     background.lifecyclePromise = lifecycle;
@@ -542,6 +561,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         background.output += data;
         parseBackgroundOutput(background);
         background.lastOutputAt = Date.now();
+        notifyShellChanged(background.id);
         return;
       }
       if (isCurrentSession() && !shellReady) {
@@ -594,6 +614,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         const background = backgroundShells.get(handle.id);
         if (background) {
           void completeBackgroundCommand(background, event.exitCode).catch(() => undefined);
+          notifyShellChanged(background.id);
         }
         if (liveHandles.size === 0) void finalizeStoppedResources();
         return;
@@ -605,6 +626,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const background = backgroundShells.get(handle.id);
       if (background) {
         void completeBackgroundCommand(background, event.exitCode).catch(() => undefined);
+        notifyShellChanged(background.id);
         if (activeBackground === background) activeBackground = null;
       }
     }));
@@ -719,6 +741,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   const completeCommand = (exitCode: number | null, cancelled: boolean, disposedResult = false): void => {
     if (!pendingCommand) return;
     clearTimeout(pendingCommand.timeout);
+    pendingCommand.abortCleanup?.();
     const cmd = pendingCommand;
     pendingCommand = null;
 
@@ -751,6 +774,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         stderr: "",
         handle,
         shown,
+        ...(cmd.toolCallId === undefined ? {} : { toolCallId: cmd.toolCallId }),
+        executionId: cmd.executionId,
       };
     const completion = notifyCommandCompleted({
       command: cmd.command,
@@ -763,6 +788,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       cancelled,
       ...(handle ? { outputHandle: handle } : {}),
       outputPreview: cleanedOutput,
+      ...(cmd.toolCallId === undefined ? {} : { toolCallId: cmd.toolCallId }),
     }).then(async () => {
       try { await closeCommandWriter(cmd.writer, cmd.cwd); } catch { /* retained for disposal retry */ }
       cmd.resolve(result);
@@ -778,6 +804,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     startedAt,
     writer,
     outputPreview = "",
+    toolCallId,
   }: {
     command: string;
     commandRunId: string;
@@ -786,6 +813,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     startedAt: number;
     writer: ShellWriter | null;
     outputPreview?: string;
+    toolCallId?: string;
   }): void => {
     const completion = notifyCommandCompleted({
       command,
@@ -797,13 +825,14 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       exitCode: -1,
       cancelled: true,
       outputPreview,
+      ...(toolCallId === undefined ? {} : { toolCallId }),
     }).then(async () => {
       try { await closeCommandWriter(writer, cwd); } catch { /* retained for disposal retry */ }
     });
     trackCommandLifecycle(completion);
   };
 
-  const exec = async (command: string, options: { cwd?: string; waitMs: number }): Promise<ShellExecResult> => {
+  const execCommand = async (command: string, options: { cwd?: string; waitMs: number; toolCallId?: string; signal?: AbortSignal }): Promise<ShellExecResult> => {
     if (disposed) return { kind: "spawn-failed", reason: "disposed", interpreter: interpreter.command, hint: "Shell supervisor has been disposed" };
     if (pendingCommand || commandStarting) throw new Error("Another command is already running");
 
@@ -859,13 +888,15 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         executionId: token,
         cwd,
         startedAt,
+        ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
       });
       if (disposed) {
         commandStarting = false;
         if (writer && stopped) {
           try { await writer.close(); startingWriters.delete(writer); } catch { /* disposal retries the close */ }
         }
-        cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer: writer && !stopped ? writer : null });
+        cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer: writer && !stopped ? writer : null,
+          ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }) });
         finishStart();
         startFinished = true;
         return {
@@ -878,7 +909,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
       return new Promise<ShellExecResult>((resolvePromise, rejectPromise) => {
         outputBuffer = "";
-        const timeout = setTimeout(() => {
+        let timeout: ReturnType<typeof setTimeout>;
+        const detachToBackground = (): void => {
+          if (pendingCommand?.token !== token) return;
+          clearTimeout(timeout);
+          pendingCommand.abortCleanup?.();
           const handle = sessionHandle;
           if (!handle) {
             pendingCommand = null;
@@ -907,6 +942,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
             writer,
             handle,
+            ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
           };
           backgroundShells.set(id, bgShell);
           activeBackground = bgShell;
@@ -921,12 +957,16 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           resolvePromise({
             kind: "background",
             id,
-            waitedMs: options.waitMs,
+            waitedMs: Math.max(0, Date.now() - startedAt),
             cwd: bgShell.cwd,
             outputSoFar: cleanedOutput,
             command,
+            ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
+            executionId: token,
           });
-        }, options.waitMs);
+        };
+        timeout = setTimeout(detachToBackground, options.waitMs);
+        const onAbort = (): void => detachToBackground();
 
         pendingCommand = {
           token,
@@ -939,7 +979,13 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           cwd,
           writer,
           startedAt,
+          ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
+          ...(options.signal === undefined ? {} : {
+            abortCleanup: () => options.signal?.removeEventListener("abort", onAbort),
+          }),
         };
+        options.signal?.addEventListener("abort", onAbort, { once: true });
+        if (options.signal?.aborted) queueMicrotask(detachToBackground);
         if (writer) startingWriters.delete(writer);
         finishStart();
         startFinished = true;
@@ -949,9 +995,11 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         const shell = sessionHandle;
         if (!shell) {
           clearTimeout(timeout);
+          pendingCommand?.abortCleanup?.();
           pendingCommand = null;
           commandStarting = false;
-          cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer });
+          cancelUnwrittenCommand({ command, commandRunId, executionId: token, cwd, startedAt, writer,
+            ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }) });
           resolvePromise({ kind: "spawn-failed", reason: "no-shell", interpreter: interpreter.command, hint: "Shell not initialized" });
           return;
         }
@@ -965,6 +1013,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           }
         } catch (error) {
           clearTimeout(timeout);
+          pendingCommand?.abortCleanup?.();
           pendingCommand = null;
           commandStarting = false;
           cancelUnwrittenCommand({
@@ -975,6 +1024,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             startedAt,
             writer,
             outputPreview: stripControlSequences(outputBuffer),
+            ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
           });
           resolvePromise({
             kind: "spawn-failed",
@@ -993,7 +1043,43 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     }
   };
 
-  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number; lastOutputAt?: number; command?: string }> => {
+  const exec = async (
+    command: string,
+    options: { cwd?: string; waitMs: number; toolCallId?: string; signal?: AbortSignal },
+  ): Promise<ShellExecResult> => {
+    const toolCallId = options.toolCallId;
+    if (toolCallId) {
+      const accepted = acceptedExecutions.get(toolCallId);
+      if (accepted) {
+        if (accepted.command !== command || accepted.cwd !== options.cwd) {
+          throw new Error(`Tool call ${toolCallId} is already bound to another command or working directory`);
+        }
+        return accepted.promise;
+      }
+    }
+    const promise = execCommand(command, options);
+    if (toolCallId) {
+      const accepted: { command: string; cwd: string | undefined; promise: Promise<ShellExecResult>; result?: ShellExecResult } = {
+        command, cwd: options.cwd, promise,
+      };
+      acceptedExecutions.set(toolCallId, accepted);
+      void promise.then((result) => { accepted.result = result; }, () => undefined);
+    }
+    return promise;
+  };
+
+  const read = async (id: string, offset: number = 0, length: number = 32768): Promise<OutputSlice & { running: boolean; exitCode?: number; executionId?: string; lastOutputAt?: number; command?: string; shellId?: string }> => {
+    const recovered = acceptedExecutions.get(id)?.result;
+    if (recovered?.kind === "background" && recovered.id !== id) {
+      const result = await read(recovered.id, offset, length);
+      return { ...result, shellId: recovered.id };
+    }
+    if (recovered?.kind === "completed") {
+      const text = `${recovered.stdout}${recovered.stderr ? `\n[stderr]\n${recovered.stderr}` : ""}`;
+      return { ...sliceUtf8ByBytes(text, offset, length), running: false,
+        ...(recovered.executionId === undefined ? {} : { executionId: recovered.executionId }),
+        ...(recovered.exitCode === null ? {} : { exitCode: recovered.exitCode }) };
+    }
     // Check background shells
     const bg = backgroundShells.get(id);
     if (bg) {
@@ -1003,6 +1089,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
         ...slice,
         running: !bg.exited,
         command: bg.command,
+        executionId: bg.executionId,
         ...(bg.exitCode !== null ? { exitCode: bg.exitCode } : {}),
         ...(bg.lastOutputAt !== null ? { lastOutputAt: bg.lastOutputAt } : {}),
       };
@@ -1014,8 +1101,57 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     throw new Error(`Shell not found: ${id}`);
   };
 
+  const waitForOutput = async (
+    id: string,
+    offset: number,
+    waitMs: number,
+    signal?: AbortSignal,
+  ): Promise<void> => {
+    const recovered = acceptedExecutions.get(id)?.result;
+    const shellId = recovered?.kind === "background" ? recovered.id : id;
+    const hasChange = (): boolean => {
+      const background = backgroundShells.get(shellId);
+      if (!background) return true;
+      if (unavailableHandles.has(background.handle) || background.exited) return true;
+      return Buffer.byteLength(stripControlSequences(background.output), "utf8") > offset;
+    };
+    if (waitMs <= 0 || hasChange()) return;
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const waiters = shellChangeWaiters.get(shellId) ?? new Set<() => void>();
+      shellChangeWaiters.set(shellId, waiters);
+      const cleanup = (): void => {
+        if (timer) clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+        waiters.delete(wake);
+        if (waiters.size === 0 && shellChangeWaiters.get(shellId) === waiters) shellChangeWaiters.delete(shellId);
+      };
+      const finish = (error?: Error): void => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (error) reject(error);
+        else resolve();
+      };
+      const wake = (): void => finish();
+      const onAbort = (): void => finish(new Error("Shell output wait aborted"));
+      waiters.add(wake);
+      if (signal?.aborted) {
+        onAbort();
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
+      timer = setTimeout(wake, waitMs);
+      // Close the event-subscription race: output may have arrived between the
+      // first check and registering this waiter.
+      if (hasChange()) wake();
+    });
+  };
+
   const write = async (id: string, text: string): Promise<boolean> => {
-    const bg = backgroundShells.get(id);
+    const recovered = acceptedExecutions.get(id)?.result;
+    const bg = backgroundShells.get(recovered?.kind === "background" ? recovered.id : id);
     if (!bg || bg.exited) return false;
     try {
       bg.handle.write(text);
@@ -1026,7 +1162,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
   };
 
   const kill = async (id: string): Promise<boolean> => {
-    const bg = backgroundShells.get(id);
+    const recovered = acceptedExecutions.get(id)?.result;
+    const bg = backgroundShells.get(recovered?.kind === "background" ? recovered.id : id);
     if (!bg) return false;
     if (bg.exited) {
       try { await completeBackgroundCommand(bg, bg.exitCode); } catch { return false; }
@@ -1060,13 +1197,17 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     stoppingDirectory = deps.cwd ?? process.cwd();
     const commandStart = commandStartPromise;
     const work = (async (): Promise<void> => {
+      for (const id of [...shellChangeWaiters.keys()]) notifyShellChanged(id);
       const rejectReady = shellReadyReject;
       shellReadyResolve = null;
       shellReadyReject = null;
       shellReadyPromise = null;
       shellReady = false;
       rejectReady?.(new Error("Shell supervisor has been disposed"));
-      if (pendingCommand) clearTimeout(pendingCommand.timeout);
+      if (pendingCommand) {
+        clearTimeout(pendingCommand.timeout);
+        pendingCommand.abortCleanup?.();
+      }
 
       const handles = [
         ...(sessionHandle ? [sessionHandle] : []),
@@ -1159,5 +1300,5 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return false;
   };
 
-  return { exec, read, write, kill, dispose, hasActiveCommandAt };
+  return { exec, read, waitForOutput, write, kill, dispose, hasActiveCommandAt };
 }

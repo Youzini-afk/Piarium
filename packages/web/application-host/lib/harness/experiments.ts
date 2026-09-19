@@ -29,6 +29,7 @@ import type {
   ExperimentListResult,
   ExperimentLogsResult,
   ExperimentResourceRequest,
+  ResourceMachineView,
   ExperimentSpecView,
   ExperimentSubmitParams,
 } from "@piarium/protocol";
@@ -148,6 +149,7 @@ interface ExperimentServiceDeps {
     ctx: ExperimentContext,
     machineId: string,
     machine: KernelRecordResult | null,
+    caller: ExperimentCaller,
   ) => Promise<ResolvedExperimentBackend | null> | ResolvedExperimentBackend | null;
   /** Durable attempt fact changed (state, exit facts, collection) — drives UI refresh. */
   onAttemptChanged?: (workspaceId: string) => void;
@@ -255,6 +257,10 @@ const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null =
   const error = str(payload.error);
   const queueReason = str(payload.queueReason);
   const requestId = str(payload.requestId);
+  const retryOfAttemptId = str(payload.retryOfAttemptId);
+  const executionRootId = str(payload.executionRootId);
+  const executionCanonicalRoot = str(payload.executionCanonicalRoot);
+  const executionCwd = typeof payload.executionCwd === "string" ? payload.executionCwd : undefined;
   const exitCode = num(payload.exitCode);
   const startedAt = num(payload.startedAt);
   const endedAt = num(payload.endedAt);
@@ -273,6 +279,10 @@ const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null =
     ...(error ? { error } : {}),
     ...(queueReason ? { queueReason } : {}),
     ...(requestId ? { requestId } : {}),
+    ...(retryOfAttemptId ? { retryOfAttemptId } : {}),
+    ...(executionRootId && executionCanonicalRoot && executionCwd !== undefined ? {
+      execution: { rootId: executionRootId, canonicalRoot: executionCanonicalRoot, cwd: executionCwd },
+    } : {}),
     ...(record.threadId ? { threadId: record.threadId } : {}),
     ...(record.runId ? { runId: record.runId } : {}),
     createdAt: record.createdAt,
@@ -327,6 +337,14 @@ const artifactView = (record: KernelRecordResult): ExperimentArtifactView | null
   const artifactPath = str(payload.path);
   const collectedAt = num(payload.collectedAt);
   const error = str(payload.error);
+  const remote = payload.remote && typeof payload.remote === "object"
+    ? payload.remote as Record<string, unknown>
+    : null;
+  const remoteMachineId = str(remote?.machineId);
+  const remoteOutputId = str(remote?.outputId);
+  const remotePath = str(remote?.path);
+  const remoteAccessible = remote?.accessible === "unreachable" || remote?.accessible === "expired"
+    ? remote.accessible : "available";
   return {
     artifactId,
     attemptId,
@@ -336,6 +354,15 @@ const artifactView = (record: KernelRecordResult): ExperimentArtifactView | null
     ...(byteLength !== undefined ? { byteLength } : {}),
     ...(payload.truncated === true ? { truncated: true } : {}),
     ...(content ? { objectHash: content.objectHash } : {}),
+    ...(remoteMachineId && remoteOutputId && remotePath ? {
+      remote: {
+        machineId: remoteMachineId,
+        outputId: remoteOutputId,
+        path: remotePath,
+        retainedBy: "execution-target",
+        accessible: remoteAccessible,
+      },
+    } : {}),
     ...(artifactPath ? { path: artifactPath } : {}),
     ...(collectedAt !== undefined ? { collectedAt } : {}),
     ...(error ? { error } : {}),
@@ -533,7 +560,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const machine = machineId === LOCAL_MACHINE_ID
       ? null
       : await deps.resources.getMachineRecord(caller.workspaceId, machineId).catch(() => null);
-    if (deps.resolveBackend) return deps.resolveBackend(ctx, machineId, machine);
+    if (deps.resolveBackend) {
+      const resolved = await deps.resolveBackend(ctx, machineId, machine, caller);
+      if (resolved || machineId !== LOCAL_MACHINE_ID) return resolved;
+    }
     if (machineId !== LOCAL_MACHINE_ID) return null;
     return {
       backend: createLocalExperimentBackend(ctx.scoped),
@@ -543,7 +573,73 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         canonicalRoot: ctx.canonicalRoot,
         transport: ctx.scoped,
       },
+      prepare: async ({ attemptId, input }) => {
+        const materialized = await materializeExperimentAttempt(deps.client, caller, attemptId, input);
+        return {
+          backend: createLocalExperimentBackend(materialized.scoped),
+          site: {
+            workspaceId: caller.workspaceId,
+            rootId: materialized.rootId,
+            canonicalRoot: materialized.canonicalRoot,
+            transport: materialized.scoped,
+          },
+          cwd: materialized.cwd,
+          inputRoot: materialized.snapshotRoot,
+        };
+      },
     };
+  };
+
+  const machineCanConfirm = (machine: ResourceMachineView, request: ExperimentResourceRequest): boolean => {
+    if (machine.state !== "available" || machine.connection.status !== "connected") return false;
+    const active = machine.commitments.filter((item) => item.state === "confirmed" || item.state === "requested");
+    const reserved = (key: "cpuCores" | "memoryMb" | "gpuCount" | "gpuMemoryMb") => (
+      active.reduce((total, item) => total + (item.resources[key] ?? 0), 0)
+    );
+    if ((request.cpuCores ?? 0) > 0
+      && (machine.capacity?.cpuCores === undefined
+        || machine.capacity.cpuCores - reserved("cpuCores") < request.cpuCores!)) return false;
+    if ((request.memoryMb ?? 0) > 0
+      && (machine.capacity?.memoryMb === undefined
+        || machine.capacity.memoryMb - reserved("memoryMb") < request.memoryMb!)) return false;
+    const gpuRequested = (request.gpuCount ?? 0) > 0 || (request.gpuMemoryMb ?? 0) > 0;
+    if (gpuRequested) {
+      if (machine.gpuProbe?.status !== "available" || !machine.capacity?.gpus?.length) return false;
+      const held = new Set(active.flatMap((item) => item.gpuAllocation?.devices.map((device) => device.uuid) ?? []));
+      const available = machine.capacity.gpus.filter((device) => device.uuid && !held.has(device.uuid));
+      if (available.length < Math.max(1, request.gpuCount ?? 0)) return false;
+      if ((request.gpuMemoryMb ?? 0) > 0) {
+        const usageByUuid = new Map(
+          (machine.usage?.gpus ?? []).flatMap((device) => device.uuid
+            ? [[device.uuid, device.usedMemoryMb] as const]
+            : []),
+        );
+        if (!available.some((device) => {
+          const used = device.uuid ? usageByUuid.get(device.uuid) : undefined;
+          return device.memoryMb !== undefined && used !== undefined
+            && device.memoryMb - used >= request.gpuMemoryMb!;
+        })) return false;
+      }
+    }
+    return true;
+  };
+
+  const selectMachine = async (
+    workspaceId: string,
+    request: ExperimentResourceRequest,
+    explicit?: string,
+    recorded?: string,
+  ): Promise<string> => {
+    if (explicit) return explicit;
+    if (recorded) return recorded;
+    const candidates = (await deps.resources.listMachines(workspaceId))
+      .filter((machine) => machineCanConfirm(machine, request))
+      .sort((left, right) => {
+        const leftLocal = left.machineId === LOCAL_MACHINE_ID ? 0 : 1;
+        const rightLocal = right.machineId === LOCAL_MACHINE_ID ? 0 : 1;
+        return leftLocal - rightLocal || left.machineId.localeCompare(right.machineId);
+      });
+    return candidates[0]?.machineId ?? LOCAL_MACHINE_ID;
   };
 
   const putRecord = async (
@@ -847,7 +943,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptId: string,
     spec: ExperimentSpecView,
-    resolved: ResolvedExperimentBackend,
+    resolved: Pick<ResolvedExperimentBackend, "backend" | "site">,
     running: RunningJob | null,
   ): Promise<ExperimentArtifactView[]> => {
     const artifacts: ExperimentArtifactView[] = [];
@@ -943,6 +1039,47 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         throw error;
       }
     };
+    const persistRemoteObject = async (
+      name: string,
+      kind: ExperimentArtifactView["kind"],
+      object: { outputId: string; path: string; objectHash: string; byteLength: number },
+    ) => {
+      const machineId = resolved.site.machineId;
+      if (!machineId) throw new Error("Remote output has no stable target identity");
+      const artifactId = artifactIdFor(attemptId, name);
+      const recordId = recordIdFor.artifact(artifactId);
+      const prior = await ctx.scoped.getRecord(workspaceId, recordId);
+      if (prior?.state === "available") {
+        const existing = artifactView(prior);
+        if (existing) artifacts.push(existing);
+        return;
+      }
+      const record = await putRecord(ctx, workspaceId, caller, {
+        recordId,
+        recordType: "experiment.artifact",
+        state: "available",
+        ...(prior ? { expectedRecordRevision: prior.recordRevision } : {}),
+        payload: {
+          id: artifactId,
+          attemptId,
+          name,
+          kind,
+          path: object.path,
+          byteLength: object.byteLength,
+          retainedObjectHash: object.objectHash,
+          remote: {
+            machineId,
+            outputId: object.outputId,
+            path: object.path,
+            retainedBy: "execution-target",
+            accessible: "available",
+          },
+          collectedAt: now(),
+        },
+      });
+      const view = artifactView(record);
+      if (view) artifacts.push(view);
+    };
     if (running) {
       for (const stream of ["stdout", "stderr"] as const) {
         const manifest = await persistLogManifest(
@@ -966,9 +1103,15 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           if (existing) artifacts.push(existing);
           continue;
         }
-        const collected = await resolved.backend.collectFile(resolved.site, relativePath);
+        const collected = await resolved.backend.collectFile(
+          resolved.site,
+          relativePath,
+          running?.handle.backendJobId ?? processIdFor(workspaceId, attemptId),
+        );
         if (Buffer.isBuffer(collected)) {
           await persistBlob(relativePath, "file", collected, { path: relativePath });
+        } else if ("outputId" in collected) {
+          await persistRemoteObject(relativePath, "file", collected);
         } else {
           await persistObject(relativePath, "file", collected, { path: relativePath });
         }
@@ -1292,37 +1435,32 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       }).catch(report);
       return;
     }
-    let executionBackend = resolved;
-    let executionCwd = spec.cwd ?? "";
-    if ((attempt.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID) {
-      try {
-        const materialized = await materializeExperimentAttempt(deps.client, caller, attempt.attemptId, inputSnapshot);
-        executionBackend = {
-          backend: createLocalExperimentBackend(materialized.scoped),
-          site: {
-            ...resolved.site,
-            rootId: materialized.rootId,
-            canonicalRoot: materialized.canonicalRoot,
-            transport: materialized.scoped,
-          },
-        };
-        executionCwd = materialized.cwd;
-        await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
-          ...p,
-          executionRootId: materialized.rootId,
-          executionCanonicalRoot: materialized.canonicalRoot,
-          executionCwd: materialized.cwd,
-          inputRoot: materialized.snapshotRoot,
-          materializedAt: num(p.materializedAt) ?? now(),
-          materializationError: undefined,
-        }), (current) => current.state === "submitted");
-      } catch (error) {
-        await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
-          ...p, materializationError: errorMessage(error),
-        }), (current) => current.state === "submitted").catch(report);
-        report(error);
-        return;
-      }
+    let executionBackend: ResolvedExperimentBackend;
+    let executionCwd: string;
+    try {
+      const prepared = await resolved.prepare({ attemptId: attempt.attemptId, input: inputSnapshot });
+      executionBackend = {
+        backend: prepared.backend ?? resolved.backend,
+        site: prepared.site,
+        prepare: resolved.prepare,
+      };
+      executionCwd = prepared.cwd;
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
+        ...p,
+        executionRootId: prepared.site.rootId,
+        executionCanonicalRoot: prepared.site.canonicalRoot,
+        executionCwd: prepared.cwd,
+        inputRoot: prepared.inputRoot,
+        materializedAt: num(p.materializedAt) ?? now(),
+        materializationReused: prepared.reused === true,
+        materializationError: undefined,
+      }), (current) => current.state === "submitted");
+    } catch (error) {
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "submitted", (p) => ({
+        ...p, materializationError: errorMessage(error),
+      }), (current) => current.state === "submitted").catch(report);
+      report(error);
+      return;
     }
     await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "starting", {
       backend: executionBackend.backend.backend,
@@ -1331,7 +1469,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       startedAt: num(payload.startedAt) ?? now(),
     });
     const specEnv = payloadOf(specRecord!).env;
-    const mergedEnv: Record<string, string> = { ...process.env } as Record<string, string>;
+    const commitmentId = str(payload.commitmentId);
+    const gpuAllocation = commitmentId
+      ? await deps.resources.getCommitmentAllocation(workspaceId, commitmentId)
+      : null;
+    const mergedEnv: Record<string, string> = {};
     if (specEnv && typeof specEnv === "object") {
       for (const [name, value] of Object.entries(specEnv)) {
         if (typeof value === "string") mergedEnv[name] = value;
@@ -1345,26 +1487,44 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         command: spec.command,
         args: spec.args,
         env: Object.entries(mergedEnv)
-          .filter(([name, value]) => name !== "NODE_CHANNEL_FD" && typeof value === "string")
+          .filter(([, value]) => typeof value === "string")
           .map(([name, value]) => ({ name, value })),
+        resources,
+        ...(gpuAllocation ? { gpuAllocation } : {}),
       });
+      const actualSite = handle.executionRootId && handle.executionCanonicalRoot
+        ? {
+            ...executionBackend.site,
+            rootId: handle.executionRootId,
+            canonicalRoot: handle.executionCanonicalRoot,
+          }
+        : executionBackend.site;
       await upsertJob(ctx, workspaceId, caller, attempt.attemptId, jobStateFor(observation), {
         backend: executionBackend.backend.backend,
         machineId: attempt.machineId ?? LOCAL_MACHINE_ID,
         backendJobId: handle.backendJobId,
         kernelEpoch: handle.kernelEpoch,
         pid: handle.pid,
+        executionRootId: handle.executionRootId,
+        executionCanonicalRoot: handle.executionCanonicalRoot,
+        executionCwd: handle.executionCwd,
         startedAt: num(payload.startedAt) ?? now(),
         reason: observation.reason,
       });
       await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "running", (p) => ({
-        ...p, backend: executionBackend.backend.backend, startedAt: num(p.startedAt) ?? now(), error: undefined,
+        ...p,
+        backend: executionBackend.backend.backend,
+        ...(handle.executionRootId ? { executionRootId: handle.executionRootId } : {}),
+        ...(handle.executionCanonicalRoot ? { executionCanonicalRoot: handle.executionCanonicalRoot } : {}),
+        ...(handle.executionCwd !== undefined ? { executionCwd: handle.executionCwd } : {}),
+        startedAt: num(p.startedAt) ?? now(),
+        error: undefined,
       }), (current) => current.state === "submitted");
       const refreshed = await getAttemptRecord(ctx, workspaceId, attempt.attemptId);
       const refreshedView = refreshed ? attemptView(refreshed) : null;
       const running: RunningJob = {
         backend: executionBackend.backend,
-        site: executionBackend.site,
+        site: actualSite,
         handle,
         cursor: 0,
         totals: { stdout: 0, stderr: 0 },
@@ -1701,8 +1861,33 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (!inputSnapshotOf(specRecord)) {
       throw new HarnessServiceError("unavailable", `Experiment spec has no durable input snapshot: ${spec.specId}`);
     }
+    let retryOfAttemptId: string | undefined;
+    if (params.retryOfAttemptId !== undefined) {
+      retryOfAttemptId = params.retryOfAttemptId.trim();
+      if (!retryOfAttemptId) throw new HarnessServiceError("invalid-params", "retryOfAttemptId cannot be empty");
+      const priorRecord = await getAttemptRecord(ctx, caller.workspaceId, retryOfAttemptId);
+      const prior = priorRecord ? attemptView(priorRecord) : null;
+      if (!priorRecord || !prior) throw new HarnessServiceError("not-found", `Unknown retry source attempt: ${retryOfAttemptId}`);
+      assertRecordAllowed(caller, priorRecord, `experiment attempt: ${retryOfAttemptId}`);
+      if (prior.specId !== spec.specId) {
+        throw new HarnessServiceError("invalid-params", `Retry source ${retryOfAttemptId} uses a different experiment spec`);
+      }
+    }
     const attemptId = params.requestId ? attemptIdForRequest(caller, params.requestId) : `attempt-${randomUUID()}`;
-    const machineId = params.machineId ?? LOCAL_MACHINE_ID;
+    // A retried submit response must keep the target already recorded for this
+    // request. New implicit placement uses only currently confirmable capacity,
+    // prefers local when equally suitable, and is persisted on the attempt so
+    // queue reconciliation never reselects a different Host.
+    const recordedAttempt = params.requestId
+      ? await getAttemptRecord(ctx, caller.workspaceId, attemptId).catch(() => null)
+      : null;
+    const recordedMachineId = recordedAttempt ? attemptView(recordedAttempt)?.machineId : undefined;
+    const machineId = await selectMachine(
+      caller.workspaceId,
+      spec.resources ?? {},
+      params.machineId?.trim() || undefined,
+      recordedMachineId,
+    );
     const machineRecord = machineId === LOCAL_MACHINE_ID
       ? null
       : await deps.resources.getMachineRecord(caller.workspaceId, machineId).catch(() => null);
@@ -1721,7 +1906,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         const prior = attemptView(existing);
         if (!prior) throw new HarnessServiceError("failed", `Experiment attempt is unreadable: ${attemptId}`);
         if (prior.specId !== spec!.specId || (prior.machineId ?? LOCAL_MACHINE_ID) !== machineId
-          || (params.requestId !== undefined && prior.requestId !== params.requestId)) {
+          || (params.requestId !== undefined && prior.requestId !== params.requestId)
+          || prior.retryOfAttemptId !== retryOfAttemptId) {
           throw new HarnessServiceError("invalid-params", `requestId ${params.requestId ?? attemptId} is already bound to a different experiment submission`);
         }
         return existing;
@@ -1741,6 +1927,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             executionWorkspaceId: caller.executionWorkspaceId,
             rootSessionId: callerNamespace(caller),
             ...(params.requestId ? { requestId: params.requestId } : {}),
+            ...(retryOfAttemptId ? { retryOfAttemptId } : {}),
             resources: requestedResources,
             admissionState: needsAdmission ? "pending" : "not-required",
             createdAt: now(),
@@ -1839,11 +2026,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       if (!resolved) return;
       const executionRootId = str(payload.executionRootId);
       const executionCanonicalRoot = str(payload.executionCanonicalRoot);
-      const executionResolved = (attempt.machineId ?? LOCAL_MACHINE_ID) === LOCAL_MACHINE_ID
-        && executionRootId && executionCanonicalRoot
+      const executionResolved = executionRootId && executionCanonicalRoot
         ? {
             backend: resolved.backend,
             site: { ...resolved.site, rootId: executionRootId, canonicalRoot: executionCanonicalRoot },
+            prepare: resolved.prepare,
           }
         : resolved;
       const backendJobId = str(jobRecord ? payloadOf(jobRecord).backendJobId : null)
@@ -1870,6 +2057,20 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       }
       try {
         const observation = await executionResolved.backend.inspect(executionResolved.site, backendJobId);
+        if (observation.executionRootId && observation.executionCanonicalRoot) {
+          const reconciled = await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, attempt.state, (current) => ({
+            ...current,
+            executionRootId: observation.executionRootId,
+            executionCanonicalRoot: observation.executionCanonicalRoot,
+            ...(observation.executionCwd !== undefined ? { executionCwd: observation.executionCwd } : {}),
+          }));
+          running.site = {
+            ...running.site,
+            rootId: observation.executionRootId,
+            canonicalRoot: observation.executionCanonicalRoot,
+          };
+          record = reconciled;
+        }
         if (observation.status === "unknown") {
           await upsertJob(ctx, workspaceId, caller, attempt.attemptId, "unknown", {
             reason: observation.reason ?? "backend state is not currently observable", lastObservedAt: now(),
@@ -2229,6 +2430,30 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return { ctx, record, artifact };
   };
 
+  const readRemoteArtifactRange = async (
+    caller: ExperimentCaller,
+    attemptId: string,
+    artifact: ExperimentArtifactView,
+    offset: number,
+    length: number,
+  ): Promise<{ bytes: Buffer; total: number; nextOffset: number; eof: boolean }> => {
+    if (!artifact.remote) throw new HarnessServiceError("unavailable", `Artifact ${artifact.artifactId} has no remote reference`);
+    const attempt = await requireAttempt(caller, attemptId);
+    const owner = recordCaller(caller.workspaceId, attempt.record);
+    const attemptCtx = await contextForAttempt(owner, attempt.record);
+    const resolved = await resolveBackend(attemptCtx, owner, attempt.view.machineId ?? LOCAL_MACHINE_ID);
+    if (!resolved?.backend.readCollectedObject) {
+      throw new HarnessServiceError("unavailable", `Backend cannot read retained artifact ${artifact.artifactId}`);
+    }
+    const page = await resolved.backend.readCollectedObject(resolved.site, artifact.remote.outputId, offset, length);
+    return {
+      bytes: page.bytes,
+      total: artifact.byteLength ?? (page.eof ? page.nextOffset : Math.max(page.nextOffset, offset + page.bytes.byteLength)),
+      nextOffset: page.nextOffset,
+      eof: page.eof,
+    };
+  };
+
   const readArtifact = async (
     caller: ExperimentCaller,
     attemptId: string,
@@ -2240,9 +2465,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       let offset = 0;
       for (;;) {
         signal?.throwIfAborted();
-        const page = await readArtifactRange(
-          ctx, caller.workspaceId, record, artifact, offset, BLOB_PAGE_BYTES, signal,
-        );
+        const page = artifact.remote
+          ? await readRemoteArtifactRange(caller, attemptId, artifact, offset, BLOB_PAGE_BYTES)
+          : await readArtifactRange(ctx, caller.workspaceId, record, artifact, offset, BLOB_PAGE_BYTES, signal);
         if (page.bytes.byteLength > 0) yield page.bytes;
         if (page.eof) return;
         if (page.nextOffset <= offset) {
@@ -2275,14 +2500,19 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const requestedOffset = Math.max(0, Math.floor(params.offset ?? 0));
     const maxBytes = Math.max(1, Math.floor(params.maxBytes ?? 64 * 1024));
     const windowStart = Math.max(0, requestedOffset - 3);
-    const range = await readArtifactRange(
-      ctx,
-      caller.workspaceId,
-      record,
-      artifact,
-      windowStart,
-      maxBytes + (requestedOffset - windowStart) + 3,
-    );
+    const range = artifact.remote
+      ? await readRemoteArtifactRange(
+          caller, params.attemptId, artifact, windowStart,
+          maxBytes + (requestedOffset - windowStart) + 3,
+        )
+      : await readArtifactRange(
+          ctx,
+          caller.workspaceId,
+          record,
+          artifact,
+          windowStart,
+          maxBytes + (requestedOffset - windowStart) + 3,
+        );
     try {
       const slice = sliceUtf8ByBytes(range.bytes, requestedOffset - windowStart, maxBytes);
       if (slice.text.includes("\0")) throw new Error("binary content");

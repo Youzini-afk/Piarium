@@ -8,6 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { HostEventData } from "@piarium/protocol";
 import type { HostServicesBridge } from "./harness/host-services-bridge.js";
+import { withToolExecutionResources } from "./harness/tool-execution-resources.js";
 
 type WorkspaceMutationRequest = HostEventData<"workspace.mutation.request">;
 type WorkspaceMutationToolName = WorkspaceMutationRequest["toolName"];
@@ -331,5 +332,5 @@ export function createWorkspaceMutationJournalTools(
       });
     },
   });
-  return [journaledWrite, journaledEdit];
+  return [journaledWrite, journaledEdit].map((tool) => withToolExecutionResources(tool, cwd));
 }

@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
-import { createLocalExperimentBackend, type ExperimentBackend } from "./experiment-backend.js";
+import type { ExperimentBackend } from "./experiment-backend.js";
 import { createResourceService } from "./resources.js";
 import { createSourceService } from "./sources.js";
 
@@ -90,7 +90,7 @@ async function serviceWithBackend(
     resources: f.resources,
     sources: f.sources,
     resolveWorkspaceRoot: async () => f.workspace,
-    resolveBackend: async (ctx, target) => target === machineId
+    resolveBackend: async (_ctx, target) => target === machineId
       ? {
           backend,
           site: {
@@ -99,18 +99,18 @@ async function serviceWithBackend(
             canonicalRoot: f.workspace,
             transport: null,
           },
-        }
-      : target === "local"
-        ? {
-            backend: createLocalExperimentBackend(ctx.scoped),
+          prepare: async ({ input }) => ({
             site: {
               workspaceId: f.caller.workspaceId,
-              rootId: ctx.rootId,
-              canonicalRoot: ctx.canonicalRoot,
-              transport: ctx.scoped,
+              rootId: `${machineId}-root`,
+              canonicalRoot: f.workspace,
+              transport: null,
             },
-          }
-        : null,
+            cwd: input.cwd ?? "",
+            inputRoot: input.root,
+          }),
+        }
+      : null,
     onError: (error) => f.errors.push(error),
   });
 }
@@ -422,7 +422,7 @@ describe("experiment service on the real kernel", () => {
       resources: f.resources,
       sources: f.sources,
       resolveWorkspaceRoot: async () => f.workspace,
-      resolveBackend: async (ctx, machineId) => {
+      resolveBackend: async (_ctx, machineId) => {
         if (machineId === "sim-cluster") {
           return {
             backend: sim,
@@ -432,10 +432,17 @@ describe("experiment service on the real kernel", () => {
               canonicalRoot: f.workspace,
               transport: null,
             },
+            prepare: async ({ input }) => ({
+              site: {
+                workspaceId: f.caller.workspaceId,
+                rootId: "sim-root",
+                canonicalRoot: f.workspace,
+                transport: null,
+              },
+              cwd: input.cwd ?? "",
+              inputRoot: input.root,
+            }),
           };
-        }
-        if (machineId === "local") {
-          return { backend: createLocalExperimentBackend(ctx.scoped), site: { workspaceId: f.caller.workspaceId, rootId: ctx.rootId, canonicalRoot: ctx.canonicalRoot, transport: ctx.scoped } };
         }
         return null;
       },

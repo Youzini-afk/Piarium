@@ -1,5 +1,6 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
-import type { Zone2ContextUsage, Zone2Material } from "../harness/zone2.js";
+import type { Zone2ContextUsage, Zone2Material, Zone2ShellCompletion } from "../harness/zone2.js";
+import type { ShellCommandCompletedEvent } from "../harness/shell-supervisor.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
 import { terminalCommandDedupeKey, type KnowledgeStore, type RecallResult, type StoredEvent } from "./store.js";
 
@@ -11,10 +12,18 @@ interface SessionBinding {
   tail: Promise<void>;
   turnIndex: number;
   workspaceId: string;
+  recallCache: {
+    query: string;
+    workspaceRevision: string;
+    userRevision: string | null;
+    results: RecallResult[];
+  } | null;
 }
 
 export interface KnowledgeContextRuntimeOptions {
   getStore(workspaceId: string): Promise<KnowledgeStore | null>;
+  /** Optional user store used by cross-scope recall (workspace and user IDs overlap). */
+  getUserStore?: () => Promise<KnowledgeStore | null>;
   recall?: (workspaceId: string, store: KnowledgeStore, query: string, signal?: AbortSignal) => Promise<RecallResult[]>;
   onError?: (error: unknown) => void;
 }
@@ -23,6 +32,10 @@ export interface Zone2MaterialRequest {
   afterEventId?: number;
   contextUsage: Zone2ContextUsage | null;
   query?: string;
+  knownMaterial?: Record<string, string>;
+  observedShellExecutions?: string[];
+  /** Receipts still present in the Pi input after a delivery/compaction retry. */
+  retainedObservationRefs?: string[];
   signal?: AbortSignal;
   sessionId: string;
   sinceTurn: number;
@@ -33,6 +46,7 @@ export interface Zone2MaterialRequest {
 export interface Zone2MaterialResult {
   eventCursor: number;
   material: Zone2Material;
+  shellCompletions?: string[];
 }
 
 const emptyMaterial = (contextUsage: Zone2ContextUsage | null): Zone2Material => ({
@@ -77,6 +91,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       tail: current?.tail ?? Promise.resolve(),
       turnIndex: current?.turnIndex ?? 0,
       workspaceId,
+      recallCache: current?.recallCache ?? null,
     });
   };
 
@@ -161,6 +176,39 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     targetSessionId?: string,
   ): Promise<boolean> => persistTerminalObservation(event, targetSessionId);
 
+  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): void => {
+    if (disposed) return;
+    const binding = sessions.get(sessionId);
+    if (!binding) return;
+    const task = binding.tail.then(async () => {
+      const observers = await observersFor(binding);
+      const store = await options.getStore(binding.workspaceId);
+      if (!store || !observers) return;
+      await store.putEvent({
+        kind: "command",
+        at: event.endedAt,
+        sessionId,
+        turnIndex: binding.turnIndex,
+        text: event.command,
+        source: "agent",
+        dedupeKey: `shell-completion:${event.executionId}`,
+        data: {
+          type: "shell-completion",
+          executionId: event.executionId,
+          commandRunId: event.commandRunId,
+          command: event.command,
+          cwd: event.cwd,
+          exitCode: event.exitCode,
+          cancelled: event.cancelled,
+          endedAt: event.endedAt,
+          ...(event.outputHandle === undefined ? {} : { outputHandle: event.outputHandle }),
+        },
+      });
+    });
+    binding.tail = task.catch(() => undefined);
+    track(task);
+  };
+
   const observeDiagnostics = (event: DiagnosticEvent): void => {
     if (disposed) return;
     track(forWorkspace(event.workspaceId, async (observers, binding) => {
@@ -210,6 +258,8 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         : { afterId: request.afterEventId }),
     });
     const material = emptyMaterial(request.contextUsage);
+    const shellCompletions: string[] = [];
+    const observedShellExecutions = new Set(request.observedShellExecutions ?? []);
     let eventCursor = request.afterEventId ?? 0;
     for (const event of events) {
       eventCursor = Math.max(eventCursor, event.id);
@@ -219,6 +269,28 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
         const path = data.path ?? event.refs?.path;
         if ((kind === "modified" || kind === "created" || kind === "deleted") && typeof path === "string") {
           material.userEdits.push({ kind, path });
+        }
+      } else if (event.kind === "command" && data.type === "shell-completion") {
+        const executionId = data.executionId;
+        if (typeof executionId === "string" && !observedShellExecutions.has(executionId)) {
+          const command = data.command;
+          const cwd = data.cwd;
+          const exitCode = data.exitCode;
+          const cancelled = data.cancelled;
+          if (typeof command === "string" && typeof cwd === "string"
+            && (typeof exitCode === "number" || exitCode === null)
+            && typeof cancelled === "boolean") {
+            (material.shellCompletions ??= []).push({
+              executionId,
+              command,
+              cwd,
+              exitCode,
+              cancelled,
+              endedAt: typeof data.endedAt === "number" ? data.endedAt : event.at,
+              ...(typeof data.outputHandle === "string" ? { outputHandle: data.outputHandle } : {}),
+            } satisfies Zone2ShellCompletion);
+            shellCompletions.push(executionId);
+          }
         }
       } else if (event.kind === "command" && event.source !== "agent") {
         const command = data.command;
@@ -254,21 +326,88 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       content: block.content,
     }));
     material.blocksComplete = true;
-    if (request.query?.trim()) {
-      const recalled = options.recall
-        ? await options.recall(binding.workspaceId, store, request.query, request.signal)
-        : await store.recall(request.query, 5);
-      request.signal?.throwIfAborted();
+    const query = request.query?.trim();
+    const retainedKnowledge = Object.keys(request.knownMaterial ?? {}).flatMap((key) => {
+      const match = /^knowledge:(workspace|user):(\d+)$/.exec(key);
+      if (!match) return [];
+      return [{ scope: match[1] as "workspace" | "user", id: Number(match[2]) }];
+    });
+    const userStore = (query || retainedKnowledge.length > 0) && options.getUserStore
+      ? await options.getUserStore()
+      : null;
+    if (retainedKnowledge.length > 0) {
+      const invalidations = (await Promise.all(retainedKnowledge.map(async ({ scope, id }) => {
+        const source = scope === "user" ? userStore : store;
+        if (!source) return [];
+        const current = await source.getKnowledge(id);
+        return !current || current.invalidAt !== undefined || current.status !== "accepted"
+          ? [{ id, scope }]
+          : [];
+      }))).flat();
+      if (invalidations.length > 0) {
+        (material as Zone2Material & { knowledgeInvalidations: typeof invalidations }).knowledgeInvalidations = invalidations;
+      }
+    }
+    if (query) {
+      // Recall is a query operation, not a per-request poll. Store-owned
+      // knowledge revisions invalidate the cache in O(1), while the cached
+      // RecallResult retains its source scope/payload (workspace and user
+      // stores may legally reuse numeric node IDs).
+      const workspaceRevision = store.knowledgeRevision();
+      const userRevision = userStore ? userStore.knowledgeRevision() : null;
+      const cached = binding.recallCache;
+      const sameQuery = cached?.query === query;
+      const revisionsChanged = !cached
+        || cached.workspaceRevision !== workspaceRevision
+        || cached.userRevision !== userRevision;
+      if (sameQuery && revisionsChanged) {
+        const invalidations = (await Promise.all(cached.results.flatMap(async (result) => {
+          if (result.node.type !== "knowledge") return [];
+          const payload = result.node.payload;
+          const scope: "user" | "workspace" = payload.scope === "user" ? "user" : "workspace";
+          const source = scope === "user" ? userStore : store;
+          if (!source) return [];
+          const current = await source.getKnowledge(result.node.id);
+          return !current || current.invalidAt !== undefined || current.status !== "accepted"
+            ? [{ id: result.node.id, scope }]
+            : [];
+        }))).flat();
+        if (invalidations.length > 0) {
+          // Preserve this explicit fact on the material object until the
+          // formatter/receipt selector has represented it in history.
+          const prior = material.knowledgeInvalidations ?? [];
+          (material as Zone2Material & { knowledgeInvalidations: typeof invalidations }).knowledgeInvalidations = [...prior, ...invalidations];
+        }
+      }
+      let recalled: RecallResult[];
+      if (cached?.query === query
+        && cached.workspaceRevision === workspaceRevision
+        && cached.userRevision === userRevision) {
+        recalled = cached.results;
+      } else {
+        recalled = options.recall
+          ? await options.recall(binding.workspaceId, store, query, request.signal)
+          : await store.recall(query, 5);
+        request.signal?.throwIfAborted();
+        binding.recallCache = { query, workspaceRevision, userRevision, results: recalled };
+      }
       material.knowledge = recalled.flatMap((result) => {
         if (result.node.type !== "knowledge") return [];
         const content = result.node.payload.content;
         const trigger = result.node.payload.trigger;
         return typeof content === "string" && typeof trigger === "string"
-          ? [{ id: result.node.id, title: content, trigger }]
+          ? [{
+              id: result.node.id,
+              title: content,
+              trigger,
+              ...(result.node.payload.scope === "user" || result.node.payload.scope === "workspace"
+                ? { scope: result.node.payload.scope }
+                : {}),
+            }]
           : [];
       });
     }
-    return { eventCursor, material };
+    return { eventCursor, material, ...(shellCompletions.length > 0 ? { shellCompletions } : {}) };
   };
 
   const dropSession = (sessionId: string): void => {
@@ -307,6 +446,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     observeGitStatus,
     observeTerminalCommand,
     observeTerminalExit,
+    observeShellCompletion,
     resetSessionObservationBaselines,
     zone2Material,
   };

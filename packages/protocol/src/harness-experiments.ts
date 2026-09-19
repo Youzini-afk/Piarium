@@ -86,6 +86,14 @@ export interface ExperimentAttemptView {
   error?: string;
   queueReason?: string;
   requestId?: string;
+  /** Prior attempt whose unchanged spec was explicitly rerun. */
+  retryOfAttemptId?: string;
+  /** Actual attempt-private working tree on the selected execution target. */
+  execution?: {
+    rootId: string;
+    canonicalRoot: string;
+    cwd: string;
+  };
   threadId?: string;
   runId?: string;
   createdAt: number;
@@ -119,6 +127,18 @@ export interface ExperimentArtifactView {
   byteLength?: number;
   truncated?: boolean;
   objectHash?: string;
+  /**
+   * Durable content retained by the execution target instead of copied into
+   * the coordinator's object store. The reference never contains connection
+   * credentials; reads are routed through the recorded machine/backend.
+   */
+  remote?: {
+    machineId: string;
+    outputId: string;
+    path: string;
+    retainedBy: "execution-target";
+    accessible: "available" | "unreachable" | "expired";
+  };
   path?: string;
   collectedAt?: number;
   error?: string;
@@ -127,6 +147,8 @@ export interface ExperimentArtifactView {
 export interface ExperimentSubmitParams {
   /** Idempotent submission identity; a retry with the same id returns the recorded attempt. */
   requestId?: string;
+  /** Explicit rerun provenance; the referenced attempt must use the same spec. */
+  retryOfAttemptId?: string;
   title?: string;
   /** Reuse a previously recorded spec instead of pinning a new one. */
   specId?: string;
@@ -237,6 +259,8 @@ export interface ExperimentCollectResult {
 
 export interface ResourceGpuView {
   index: number;
+  /** Stable NVIDIA UUID when the host exposes one. */
+  uuid?: string;
   name?: string;
   memoryMb?: number;
   utilizationPercent?: number;
@@ -248,6 +272,19 @@ export interface ResourceCommitmentView {
   machineId: string;
   attemptId?: string;
   resources: ExperimentResourceRequest;
+  /** Concrete target devices held by this commitment, when GPU resources were requested. */
+  gpuAllocation?: {
+    devices: Array<{
+      index: number;
+      uuid: string;
+      name?: string;
+      memoryMb?: number;
+    }>;
+    environment: {
+      name: "CUDA_VISIBLE_DEVICES";
+      value: string;
+    };
+  };
   state: "requested" | "confirmed" | "released" | "revoked" | "failed";
   confirmedAt?: number;
   releasedAt?: number;
@@ -262,6 +299,25 @@ export interface ResourceMachineView {
     status: "connected" | "degraded" | "offline" | "unknown";
     checkedAt: number;
     detail?: string;
+  };
+  /** Result of the last host GPU inventory probe. */
+  gpuProbe?: {
+    status: "available" | "tool-missing" | "no-device" | "error";
+    checkedAt: number;
+    detail?: string;
+  };
+  /** Stable execution-target facts resolved from trusted connection management. */
+  target?: {
+    hostId: string;
+    connectionId: string;
+    source: "desktop-host" | "ssh-instance" | "configured-host";
+    capabilities: string[];
+    /** Host that owns placement/queue decisions for work not yet submitted. */
+    coordinatorHostId?: string;
+    /** Accepted jobs are supervised by this target Host after the client disconnects. */
+    acceptedJobsSurviveClientDisconnect: boolean;
+    /** Work still waiting for placement needs the named coordinator to remain running. */
+    unassignedWorkRequiresCoordinator: boolean;
   };
   /** Total device capacity, last observed. */
   capacity?: {

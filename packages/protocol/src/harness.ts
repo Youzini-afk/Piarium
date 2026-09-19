@@ -71,6 +71,10 @@ export interface ShellExecResultCompleted {
   shown: { head: number; tail: number; total: number } | null;
   display?: string;
   organized?: ShellOutputOrganization;
+  /** Original Pi tool call identity used to recover an accepted execution. */
+  toolCallId?: string;
+  executionId?: string;
+  target?: string;
 }
 
 export interface ShellExecResultBackground {
@@ -83,6 +87,9 @@ export interface ShellExecResultBackground {
   command?: string;
   display?: string;
   organized?: ShellOutputOrganization;
+  toolCallId?: string;
+  executionId?: string;
+  target?: string;
 }
 
 export interface ShellExecResultSpawnFailed {
@@ -100,9 +107,15 @@ export type ShellExecResult =
 export interface ShellReadResult extends OutputSlice {
   running: boolean;
   exitCode?: number;
+  /** True when the supervised process reached its terminal state through cancellation. */
+  cancelled?: boolean;
+  executionId?: string;
   command?: string;
   display?: string;
   organized?: ShellOutputOrganization;
+  /** Actual runtime shell identity when `id` was a recovery alias. */
+  shellId?: string;
+  target?: string;
   observation?: {
     mode: "incremental";
     first: boolean;
@@ -389,6 +402,10 @@ export type WorkingBranchEnsureMaterializedResult =
 // ── Phase 2: Zone 2, compaction, todo, recall ──────────────────────
 
 export interface Zone2AssembleParams {
+  /** Delivered observations still represented by raw retained Pi input. */
+  retainedObservationRefs?: string[];
+  /** Terminal shell facts already present in retained native input (not log cursors). */
+  observedShellExecutions?: string[];
   /** Revisions still represented by raw retained Pi context, not by a summary. */
   knownMaterial?: Record<string, string>;
   afterEventId?: number;
@@ -403,6 +420,10 @@ export interface Zone2AssembleParams {
 }
 
 export interface Zone2AssembleResult {
+  /** Prepared environment delivery; confirm only after the model request starts. */
+  deliveryId?: string;
+  /** Shell terminal facts actually represented in this candidate content. */
+  shellCompletions?: string[];
   observationRefs?: string[];
   materialRevisions?: Record<string, string>;
   content: string | null;
@@ -415,29 +436,20 @@ export interface ContextRetentionParams {
   retainedGit: boolean;
 }
 
-/**
- * Per-request team status (7E/D-300). The Host prepares a delta against the
- * observer's committed cursor and returns it uncommitted; the caller confirms
- * with zone2.statusDelivered only after the request carrying the rows was
- * actually dispatched, so a failed request never claims delivery.
- */
-export interface Zone2StatusParams {
-  /** Full table instead of a delta (e.g. after a compaction rebuild). */
-  full?: boolean;
-}
+/** Complete current scoped team snapshot, transient for one model request. */
+export type Zone2StatusParams = Record<string, never>;
 
 export interface Zone2StatusResult {
-  /** Formatted status lines, or null when nothing changed since delivery. */
+  status: "ready" | "empty" | "unavailable";
   content: string | null;
-  /** Pending observation identity to pass to zone2.statusDelivered. */
-  observationRef?: string;
+  reason?: string;
 }
 
-export interface Zone2StatusDeliveredParams {
-  observationRef: string;
+export interface Zone2DeliveredParams {
+  deliveryId: string;
 }
 
-export interface Zone2StatusDeliveredResult {
+export interface Zone2DeliveredResult {
   committed: boolean;
 }
 
@@ -1136,8 +1148,8 @@ export interface ExploreSearchResult {
 export interface HarnessServiceMap {
   "permission.inspect": { params: PermissionInspectParams; result: PermissionInspectResult };
   "permission.audit": { params: PermissionAuditRecord; result: { accepted: boolean } };
-  "shell.exec": { params: { command: string; cwd?: string; waitMs?: number }; result: ShellExecResult };
-  "shell.read": { params: { id: string; offset?: number; length?: number }; result: ShellReadResult };
+  "shell.exec": { params: { command: string; cwd?: string; waitMs?: number; toolCallId?: string; target?: string }; result: ShellExecResult };
+  "shell.read": { params: { id: string; offset?: number; length?: number; waitMs?: number; target?: string }; result: ShellReadResult };
   "shell.write": { params: { id: string; text: string }; result: { accepted: boolean } };
   "shell.kill": { params: { id: string }; result: { killed: boolean } };
   "output.store": { params: { text: string; label?: string }; result: { ref: OutputRef; total: number } };
@@ -1154,7 +1166,7 @@ export interface HarnessServiceMap {
   "web.search": { params: { query: string; allowedDomains?: string[]; blockedDomains?: string[]; recency?: "day" | "week" | "month" | "year"; limit?: number }; result: { providerId: string; results: SearchResultItem[]; notices?: string[] } };
   "zone2.assemble": { params: Zone2AssembleParams; result: Zone2AssembleResult };
   "zone2.status": { params: Zone2StatusParams; result: Zone2StatusResult };
-  "zone2.statusDelivered": { params: Zone2StatusDeliveredParams; result: Zone2StatusDeliveredResult };
+  "zone2.delivered": { params: Zone2DeliveredParams; result: Zone2DeliveredResult };
   "context.retained": { params: ContextRetentionParams; result: ContextRetentionResult };
   "todo.upsert": { params: TodoUpsertParams; result: TodoUpsertResult };
   "recall.search": { params: RecallSearchParams; result: RecallSearchResult };
@@ -1274,7 +1286,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "web.search": "read.web",
   "zone2.assemble": "context.session",
   "zone2.status": "context.session",
-  "zone2.statusDelivered": "context.session",
+  "zone2.delivered": "context.session",
   "context.retained": "context.session",
   "todo.upsert": "context.session",
   "recall.search": "context.session",
@@ -1359,7 +1371,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "web.search",
   "zone2.assemble",
   "zone2.status",
-  "zone2.statusDelivered",
+  "zone2.delivered",
   "context.retained",
   "todo.upsert",
   "recall.search",

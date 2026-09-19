@@ -13,6 +13,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { KernelScopedClient } from "../kernel/kernel-client.js";
+import type { GpuAllocation } from "./gpu-resources.js";
 
 /** Execution site resolved by the backend: where the job actually runs. */
 export interface ExperimentBackendSite {
@@ -24,6 +25,8 @@ export interface ExperimentBackendSite {
   canonicalRoot: string;
   /** Backend-private transport context (kernel grant, remote client, …). */
   transport: unknown;
+  /** Stable public target identity when execution is not local. */
+  machineId?: string;
 }
 
 export interface BackendJobHandle {
@@ -31,6 +34,9 @@ export interface BackendJobHandle {
   backendJobId: string;
   kernelEpoch?: string;
   pid?: number;
+  executionRootId?: string;
+  executionCanonicalRoot?: string;
+  executionCwd?: string;
 }
 
 export interface BackendObservation {
@@ -40,6 +46,9 @@ export interface BackendObservation {
   exitCode?: number | null;
   signal?: string | null;
   reason?: string;
+  executionRootId?: string;
+  executionCanonicalRoot?: string;
+  executionCwd?: string;
 }
 
 export interface BackendReadResult {
@@ -54,6 +63,13 @@ export interface BackendCollectedObject {
   objectHash: string;
   byteLength: number;
   ownerId: string;
+}
+
+export interface BackendRemoteObject {
+  outputId: string;
+  path: string;
+  objectHash: string;
+  byteLength: number;
 }
 
 export interface ExperimentBackend {
@@ -81,6 +97,8 @@ export interface ExperimentBackend {
     command: string;
     args: string[];
     env: Array<{ name: string; value: string }>;
+    resources: import("@piarium/protocol").ExperimentResourceRequest;
+    gpuAllocation?: GpuAllocation;
   }): Promise<{ handle: BackendJobHandle; observation: BackendObservation }>;
   /**
    * Query the durable backend identity. Throws when the backend cannot
@@ -99,13 +117,31 @@ export interface ExperimentBackend {
    * validated at submit; the backend still rejects escapes as
    * defence-in-depth.
    */
-  collectFile(site: ExperimentBackendSite, relativePath: string): Promise<Buffer | BackendCollectedObject>;
+  collectFile(site: ExperimentBackendSite, relativePath: string, backendJobId: string): Promise<Buffer | BackendCollectedObject | BackendRemoteObject>;
+  /** Read an immutable target-retained output by byte range. */
+  readCollectedObject?(
+    site: ExperimentBackendSite,
+    outputId: string,
+    offset: number,
+    length: number,
+  ): Promise<{ bytes: Buffer; nextOffset: number; eof: boolean }>;
 }
 
 /** A backend bound to the resolved execution site for one attempt. */
 export interface ResolvedExperimentBackend {
   backend: ExperimentBackend;
   site: ExperimentBackendSite;
+  /** Prepare the immutable input on this execution target. */
+  prepare(request: {
+    attemptId: string;
+    input: import("./experiment-workspace.js").ExperimentInputSnapshot;
+  }): Promise<{
+    backend?: ExperimentBackend;
+    site: ExperimentBackendSite;
+    cwd: string;
+    inputRoot: string;
+    reused?: boolean;
+  }>;
 }
 
 /**
@@ -119,6 +155,12 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient): Experi
   backend: "local",
   controls: ["cancel", "attach", "collect"],
   async spawn(site, request) {
+    const environment = { ...process.env } as Record<string, string>;
+    for (const entry of request.env) environment[entry.name] = entry.value;
+    if (request.gpuAllocation) {
+      environment[request.gpuAllocation.environment.name] = request.gpuAllocation.environment.value;
+    }
+    delete environment.NODE_CHANNEL_FD;
     const snapshot = await scoped.processSpawn({
       workspaceId: site.workspaceId,
       processId: request.backendJobId,
@@ -126,7 +168,9 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient): Experi
       cwd: request.cwd,
       command: request.command,
       args: request.args,
-      env: request.env,
+      env: Object.entries(environment)
+        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+        .map(([name, value]) => ({ name, value })),
       mode: "pipe",
     });
     return {

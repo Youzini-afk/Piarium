@@ -8,6 +8,7 @@ import type {
   ExperimentListResult,
   ExperimentLogsResult,
   ExperimentSubmitResult,
+  ExperimentSubmitParams,
   ExperimentWaitResult,
   ResourceListResult,
   SourceListResult,
@@ -53,18 +54,43 @@ const ExperimentResourcesParams = Type.Object({
   longRunning: Type.Optional(Type.Boolean({ description: "Scheduling preference only — not a resource dimension" })),
 });
 
+const ExperimentSubmitItemParams = Type.Object({
+  requestId: Type.String({ description: "Stable per-item idempotency key" }),
+  title: Type.Optional(Type.String()),
+  specId: Type.Optional(Type.String()),
+  command: Type.Optional(Type.String()),
+  args: Type.Optional(Type.Array(Type.String())),
+  cwd: Type.Optional(Type.String()),
+  env: Type.Optional(Type.Record(Type.String(), Type.String())),
+  inputs: Type.Optional(Type.Array(Type.Object({
+    sourceId: Type.Optional(Type.String()),
+    path: Type.Optional(Type.String()),
+    objectHash: Type.Optional(Type.String()),
+    role: Type.Optional(Type.String()),
+  }))),
+  resources: Type.Optional(ExperimentResourcesParams),
+  outputPaths: Type.Optional(Type.Array(Type.String())),
+  machineId: Type.Optional(Type.String()),
+});
+
 const ExperimentParams = Type.Object({
   action: Type.Union([
     Type.Literal("submit"),
+    Type.Literal("submit_many"),
     Type.Literal("list"),
     Type.Literal("get"),
     Type.Literal("logs"),
     Type.Literal("artifact"),
     Type.Literal("wait"),
+    Type.Literal("wait_many"),
     Type.Literal("cancel"),
+    Type.Literal("cancel_many"),
     Type.Literal("collect"),
+    Type.Literal("rerun"),
   ], { description: "submit starts a durable attempt; get/logs/artifact/collect expand by attemptId; wait blocks until terminal or timeout; cancel requests backend stop" }),
   attemptId: Type.Optional(Type.String({ description: "Required for get, logs, wait, cancel, collect" })),
+  attemptIds: Type.Optional(Type.Array(Type.String(), { description: "wait_many/cancel_many: existing attempt identities" })),
+  items: Type.Optional(Type.Array(ExperimentSubmitItemParams, { description: "submit_many: independent existing experiment specifications" })),
   artifactId: Type.Optional(Type.String({ description: "artifact: collected result identity from get/collect; reads text by byte page" })),
   // submit
   requestId: Type.Optional(Type.String({ description: "submit: idempotency key — a retry with the same id returns the recorded attempt instead of starting a second job" })),
@@ -142,6 +168,17 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
         }
         return params.attemptId;
       };
+      const submitDraft = async (draft: ExperimentSubmitParams): Promise<ExperimentSubmitResult> => {
+        if (draft.specId !== undefined && (draft.command !== undefined || draft.args !== undefined
+          || draft.cwd !== undefined || draft.env !== undefined || draft.inputs !== undefined
+          || draft.resources !== undefined || draft.outputPaths !== undefined)) {
+          throw new HarnessRequestError("invalid-params", "specId cannot be combined with inline spec fields");
+        }
+        if (draft.specId === undefined && (draft.command === undefined || draft.command.trim() === "")) {
+          throw new HarnessRequestError("invalid-params", "submit requires command (or a specId to reuse a recorded spec)");
+        }
+        return bridge.request<"experiment.submit">("experiment.submit", draft, signal ? { signal } : undefined) as Promise<ExperimentSubmitResult>;
+      };
       try {
         switch (params.action) {
           case "artifact": {
@@ -161,15 +198,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
             };
           }
           case "submit": {
-            if (params.specId !== undefined && (params.command !== undefined || params.args !== undefined
-              || params.cwd !== undefined || params.env !== undefined || params.inputs !== undefined
-              || params.resources !== undefined || params.outputPaths !== undefined)) {
-              return invalidParams("experiment", "specId cannot be combined with inline spec fields");
-            }
-            if (params.specId === undefined && (params.command === undefined || params.command.trim() === "")) {
-              return invalidParams("experiment", "submit requires command (or a specId to reuse a recorded spec)");
-            }
-            const result = await bridge.request<"experiment.submit">("experiment.submit", {
+            const result = await submitDraft({
               ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
               ...(params.title !== undefined ? { title: params.title } : {}),
               ...(params.specId !== undefined ? { specId: params.specId } : {}),
@@ -181,8 +210,8 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
               ...(params.resources !== undefined ? { resources: params.resources } : {}),
               ...(params.outputPaths !== undefined ? { outputPaths: params.outputPaths } : {}),
               ...(params.machineId !== undefined ? { machineId: params.machineId } : {}),
-            }, signal ? { signal } : undefined);
-            const typed = result as ExperimentSubmitResult;
+            });
+            const typed = result;
             return {
               content: [{ type: "text", text: typed.text }],
               details: {
@@ -193,6 +222,47 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
                 ...(typed.attempt.machineId !== undefined ? { machineId: typed.attempt.machineId } : {}),
                 ...(typed.attempt.queueReason !== undefined ? { queueReason: typed.attempt.queueReason } : {}),
               },
+            };
+          }
+          case "submit_many": {
+            if (!params.items?.length) return invalidParams("experiment", "submit_many requires at least one item");
+            const submitted = await Promise.allSettled(params.items.map((item) => submitDraft(item)));
+            const items = submitted.map((result, index) => result.status === "fulfilled"
+              ? {
+                  index,
+                  requestId: params.items![index]!.requestId,
+                  accepted: true as const,
+                  attempt: result.value.attempt,
+                  spec: result.value.spec,
+                }
+              : {
+                  index,
+                  requestId: params.items![index]!.requestId,
+                  accepted: false as const,
+                  error: result.reason instanceof Error ? result.reason.message : String(result.reason),
+                });
+            const accepted = items.filter((item) => item.accepted).length;
+            return {
+              content: [{ type: "text", text: items.map((item) => item.accepted
+                ? `${item.requestId}: ${item.attempt.attemptId} — ${item.attempt.state}`
+                : `${item.requestId}: failed — ${item.error}`).join("\n") }],
+              details: { count: items.length, accepted, failed: items.length - accepted, items },
+              ...(accepted === 0 ? { isError: true as const } : {}),
+            };
+          }
+          case "rerun": {
+            const priorId = needAttempt();
+            const prior = await bridge.request<"experiment.get">("experiment.get", { attemptId: priorId }, signal ? { signal } : undefined) as ExperimentGetResult;
+            const result = await submitDraft({
+              specId: prior.attempt.specId,
+              retryOfAttemptId: priorId,
+              ...(params.requestId !== undefined ? { requestId: params.requestId } : {}),
+              ...(params.machineId !== undefined ? { machineId: params.machineId } : prior.attempt.machineId ? { machineId: prior.attempt.machineId } : {}),
+              ...(params.title !== undefined ? { title: params.title } : {}),
+            });
+            return {
+              content: [{ type: "text", text: `attempt ${result.attempt.attemptId} reruns ${priorId} — ${result.attempt.state}` }],
+              details: { attempt: result.attempt, spec: result.spec, retryOfAttemptId: priorId },
             };
           }
           case "list": {
@@ -268,6 +338,22 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
               details: { attempt, timedOut: typed.timedOut },
             };
           }
+          case "wait_many": {
+            if (!params.attemptIds?.length) return invalidParams("experiment", "wait_many requires attemptIds");
+            const timeoutMs = Math.min(params.timeout_ms ?? (HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000), HARNESS_MAX_REQUEST_TIMEOUT_MS - 5_000);
+            const waited = await Promise.allSettled(params.attemptIds.map((attemptId) => bridge.request<"experiment.wait">(
+              "experiment.wait", { attemptId, timeoutMs }, { timeoutMs: 0, ...(signal ? { signal } : {}) },
+            )));
+            const items = waited.map((result, index) => result.status === "fulfilled"
+              ? { attemptId: params.attemptIds![index]!, ok: true as const, attempt: result.value.attempt, timedOut: result.value.timedOut }
+              : { attemptId: params.attemptIds![index]!, ok: false as const, error: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+            return {
+              content: [{ type: "text", text: items.map((item) => item.ok
+                ? `${item.attemptId} — ${item.attempt.state}${item.timedOut ? " (wait timed out; still running)" : ""}`
+                : `${item.attemptId} — wait failed: ${item.error}`).join("\n") }],
+              details: { items },
+            };
+          }
           case "cancel": {
             const result = await bridge.request<"experiment.cancel">("experiment.cancel", {
               attemptId: needAttempt(),
@@ -276,6 +362,21 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
             return {
               content: [{ type: "text", text: `attempt ${typed.attempt.attemptId} — ${typed.attempt.state}` }],
               details: { attempt: typed.attempt },
+            };
+          }
+          case "cancel_many": {
+            if (!params.attemptIds?.length) return invalidParams("experiment", "cancel_many requires attemptIds");
+            const cancelled = await Promise.allSettled(params.attemptIds.map((attemptId) => bridge.request<"experiment.cancel">(
+              "experiment.cancel", { attemptId }, signal ? { signal } : undefined,
+            )));
+            const items = cancelled.map((result, index) => result.status === "fulfilled"
+              ? { attemptId: params.attemptIds![index]!, ok: true as const, attempt: result.value.attempt }
+              : { attemptId: params.attemptIds![index]!, ok: false as const, error: result.reason instanceof Error ? result.reason.message : String(result.reason) });
+            return {
+              content: [{ type: "text", text: items.map((item) => item.ok
+                ? `${item.attemptId} — ${item.attempt.state}`
+                : `${item.attemptId} — cancel failed: ${item.error}`).join("\n") }],
+              details: { items },
             };
           }
           case "collect": {

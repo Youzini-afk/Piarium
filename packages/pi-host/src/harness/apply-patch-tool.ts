@@ -107,6 +107,13 @@ function parseCodexPatch(patchText: string): { operations: PatchOperation[] } | 
   return { operations };
 }
 
+/** Resource preflight uses the exact parser that execution consumes. */
+export function parseCodexPatchPaths(patchText: string): { paths: string[] } | { error: string } {
+  const parsed = parseCodexPatch(patchText);
+  if ("error" in parsed) return parsed;
+  return { paths: parsed.operations.map((operation) => operation.path) };
+}
+
 // ── Apply a single update hunk ──────────────────────────────────────
 
 function applyCodexHunks(content: string, hunks: CodexHunk[]): { result: string; applied: number } | { error: string } {

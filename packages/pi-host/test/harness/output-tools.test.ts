@@ -20,6 +20,21 @@ async function executeTool(tool: ReturnType<typeof createGetOutputTool>, params:
 }
 
 describe("get_output tool", () => {
+  it("forwards an event wait and keeps it separate from historical slicing", async () => {
+    let observed: { params?: unknown; options?: unknown } = {};
+    const bridge = {
+      request: async (_method: string, params: unknown, options: unknown) => {
+        observed = { params, options };
+        return { text: "", offset: 0, length: 0, nextOffset: 0, total: 0, eof: true, running: true,
+          observation: { mode: "incremental", first: true } };
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createGetOutputTool(bridge, "s1");
+    await executeTool(tool, { handle: "sh_1", waitMs: 2_000 });
+    assert.deepEqual(observed.params, { id: "sh_1", waitMs: 2_000 });
+    assert.deepEqual(observed.options, { timeoutMs: 32_000 });
+  });
+
   it("reads stored output via output.read for out_ handles", async () => {
     const bridge = createFakeBridge((method) => {
       if (method === "output.read") return { text: "stored content", offset: 0, length: 14, nextOffset: 14, total: 14, eof: true };
@@ -71,15 +86,18 @@ describe("get_output tool", () => {
           eof: true,
           running: false,
           exitCode: 1,
+          executionId: "exec-1",
           observation: { mode: "incremental", first: false, sinceMs: 1000 },
         };
       }
       throw new Error(`unexpected: ${method}`);
     });
     const tool = createGetOutputTool(bridge as HostServicesBridge, "s1");
-    const text = await executeTool(tool, { handle: "sh_1" });
+    const result = await tool.execute("call-1", { handle: "sh_1" }, undefined, undefined, undefined as never);
+    const text = (result.content[0] as { type: "text"; text: string }).text;
     assert.match(text, /incremental slice; not a final summary/);
     assert.match(text, /exited 1/);
+    assert.deepEqual((result.details as { shellCompletion?: unknown }).shellCompletion, { executionId: "exec-1" });
   });
 
   it("reads background shell via shell.read for sh_ IDs", async () => {

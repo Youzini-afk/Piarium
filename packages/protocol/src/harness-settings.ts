@@ -202,7 +202,7 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   tools: {},
   shell: "auto",
   output: { visibleBytes: 32768 },
-  bash: { waitMs: 60000 },
+  bash: { waitMs: 10000 },
   models: {},
   dispatch: { concurrency: 12, askBefore: {} },
   knowledge: {

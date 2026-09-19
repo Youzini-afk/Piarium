@@ -17,6 +17,33 @@ async function executeBash(bridge: HostServicesBridge, command: string): Promise
 }
 
 describe("bash tool", () => {
+  it("forwards explicit zero wait with an RPC deadline beyond process detachment", async () => {
+    let observed: { params?: unknown; options?: unknown } = {};
+    const bridge = {
+      request: async (_method: string, params: unknown, options: unknown) => {
+        observed = { params, options };
+        return { kind: "background", id: "sh_1", waitedMs: 0, cwd: "/workspace", outputSoFar: "" };
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createBashTool(bridge, "s1", "/workspace", 10_000);
+    await tool.execute("call-1", { command: "long", waitMs: 0 }, undefined, undefined, undefined as never);
+    assert.deepEqual(observed.params, { command: "long", toolCallId: "call-1", waitMs: 0 });
+    assert.deepEqual(observed.options, { timeoutMs: 30_000 });
+  });
+
+  it("uses the configured session wait when the call omits waitMs", async () => {
+    let observedParams: unknown;
+    const bridge = {
+      request: async (_method: string, params: unknown) => {
+        observedParams = params;
+        return { kind: "background", id: "sh_1", waitedMs: 7_500, cwd: "/workspace", outputSoFar: "" };
+      },
+    } as unknown as HostServicesBridge;
+    const tool = createBashTool(bridge, "s1", "/workspace", 7_500);
+    await tool.execute("call-1", { command: "long" }, undefined, undefined, undefined as never);
+    assert.deepEqual(observedParams, { command: "long", toolCallId: "call-1", waitMs: 7_500 });
+  });
+
   it("formats completed result with exit code", async () => {
     const bridge = createFakeBridge({
       kind: "completed",
@@ -31,6 +58,24 @@ describe("bash tool", () => {
     const text = await executeBash(bridge, "echo hello world");
     assert.match(text, /hello world/);
     assert.match(text, /\[exit 0\]/);
+  });
+
+  it("marks a returned terminal fact with its completion receipt", async () => {
+    const bridge = createFakeBridge({
+      kind: "completed",
+      exitCode: 1,
+      durationMs: 100,
+      cwd: "/workspace",
+      stdout: "failed",
+      stderr: "",
+      handle: null,
+      shown: null,
+      executionId: "exec-1",
+    }) as HostServicesBridge;
+    const result = await createBashTool(bridge, "s1", "/workspace").execute(
+      "call-1", { command: "false" }, undefined, undefined, undefined as never,
+    );
+    assert.deepEqual((result.details as { shellCompletion?: unknown }).shellCompletion, { executionId: "exec-1" });
   });
 
   it("formats completed result with handle for large output", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { assembleZone2Content, type Zone2Material } from "./zone2.js";
+import { selectNewZone2Material } from "./zone2-material.js";
 
 const emptyMaterial: Zone2Material = {
   userEdits: [],
@@ -145,6 +146,24 @@ describe("assembleZone2Content", () => {
     expect(content).toContain("trigger: package management");
   });
 
+  it("keeps workspace and user knowledge receipts separate when IDs overlap", () => {
+    const material: Zone2Material = {
+      ...emptyMaterial,
+      knowledge: [
+        { id: 7, scope: "workspace", title: "workspace fact", trigger: "same" },
+        { id: 7, scope: "user", title: "user fact", trigger: "same" },
+      ],
+    };
+    const selected = selectNewZone2Material(material);
+    expect(Object.keys(selected.receiptsFor(assembleZone2Content(selected.material)))).toEqual([
+      "knowledge:workspace:7",
+      "knowledge:user:7",
+    ]);
+    const content = assembleZone2Content(selected.material);
+    expect(content).toContain("#7 workspace fact — trigger: same (scope:workspace)");
+    expect(content).toContain("#7 user fact — trigger: same (scope:user)");
+  });
+
   it("includes plan section from blocks", () => {
     const content = assembleZone2Content({
       ...emptyMaterial,
@@ -166,7 +185,7 @@ describe("assembleZone2Content", () => {
     expect(content).toContain("context: 41% of window used");
   });
 
-  it("includes actionable and completed thread state", () => {
+  it("keeps only result material in assemble and leaves transient state to status", () => {
     const now = Date.now();
     const content = assembleZone2Content({
       ...emptyMaterial,
@@ -208,14 +227,14 @@ describe("assembleZone2Content", () => {
       },
     }, { now });
     expect(content).toContain("<threads>");
-    expect(content).toContain("thread-1 [check]: waiting for user");
-    expect(content).toContain("waiting: Choose the target");
-    expect(content).toContain("thread-2 [hard_implement]: completed");
+    expect(content).not.toContain("thread-1 [check]: waiting for user");
+    expect(content).not.toContain("waiting: Choose the target");
+    expect(content).toContain("<thread-result id=\"thread-2\">");
     expect(content).toContain("conclusion: fixed the race");
     expect(content).toContain("deviations: kept the old API");
   });
 
-  it("folds thread rows against the existing Zone 2 budget instead of a fixed count", () => {
+  it("does not create historical material for pure thread state", () => {
     const now = Date.now();
     const items = Array.from({ length: 20 }, (_, index) => ({
       id: `thread-${index}`,
@@ -235,8 +254,7 @@ describe("assembleZone2Content", () => {
       deviations: [],
     }));
     const content = assembleZone2Content({ ...emptyMaterial, threads: { status: "ready", items } }, { now, budgetTokens: 180 });
-    expect(content).toContain("more thread updates; use threads for details");
-    expect(content!.length).toBeLessThanOrEqual(180 * 4 + 4);
+    expect(content).toBeNull();
   });
 
   it("wraps in piarium-context tag with note", () => {
@@ -305,10 +323,10 @@ describe("assembleZone2Content", () => {
         conclusion: "Looks good",
       }],
     }, { now });
-    expect(content).toContain("child checks r2");
-    expect(content).toContain("merge applicability: ready");
-    expect(content).toContain("parent checks r2: cannot-verify-unsaved-draft");
-    expect(content).toContain("review r2: completed");
+    expect(content).toContain("conclusion: done");
+    expect(content).not.toContain("child checks r2");
+    expect(content).not.toContain("merge applicability: ready");
+    expect(content).not.toContain("parent checks r2: cannot-verify-unsaved-draft");
     expect(content).toContain("<review>");
     expect(content).toContain("thread-1@2 completed");
     expect(content).not.toContain("verified");

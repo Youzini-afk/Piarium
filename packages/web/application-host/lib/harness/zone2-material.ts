@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Zone2Material } from "./zone2.js";
+import { formatZone2Knowledge, type Zone2Material } from "./zone2.js";
 
 export const zone2MaterialRevision = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
@@ -23,14 +23,21 @@ export function selectNewZone2Material(material: Zone2Material, known: Record<st
     receipts.push({ key, revision: removedRevision, text: `[${block.label}] ${block.content}` });
   }
   const knowledge = material.knowledge.filter((item) => {
-    const key = `knowledge:${item.id}`;
+    const key = `knowledge:${item.scope ?? "workspace"}:${item.id}`;
     const hash = zone2MaterialRevision(item);
     if (known[key] === hash) return false;
-    receipts.push({ key, revision: hash, text: `#${item.id} ${item.title} — trigger: ${item.trigger}` });
+    receipts.push({ key, revision: hash, text: formatZone2Knowledge(item) });
     return true;
   });
+  const invalidationRevision = zone2MaterialRevision({ invalid: true });
+  for (const invalidation of material.knowledgeInvalidations ?? []) {
+    const key = `knowledge:${invalidation.scope}:${invalidation.id}`;
+    const text = `#${invalidation.id} (scope:${invalidation.scope}) is no longer available`;
+    if (known[key] === invalidationRevision) continue;
+    receipts.push({ key, revision: invalidationRevision, text });
+  }
   return {
-    material: { ...material, blocks, knowledge, contextUsage: null },
+    material: { ...material, blocks, knowledge, contextUsage: null, knowledgeInvalidations: material.knowledgeInvalidations ?? [] },
     // Budget-folded material is not acknowledged as if it had been shown whole.
     // The next request can still select it; history owns already delivered bytes.
     receiptsFor(content: string | null): Record<string, string> {

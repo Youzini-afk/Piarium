@@ -1,16 +1,18 @@
 import { Type } from "typebox";
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { HostServicesBridge } from "./host-services-bridge.js";
-import type { ShellExecResult } from "@piarium/protocol";
+import { HARNESS_MAX_REQUEST_TIMEOUT_MS, type ShellExecResult } from "@piarium/protocol";
 
 const BashParams = Type.Object({
   command: Type.String(),
-  waitMs: Type.Optional(Type.Integer({ minimum: 1000 })),
-  runMs: Type.Optional(Type.Integer({ minimum: 1000 })),
+  waitMs: Type.Optional(Type.Integer({ minimum: 0 })),
   description: Type.Optional(Type.String()),
+  target: Type.Optional(Type.String({ description: "Stable managed execution target from resources; omit for this Host" })),
+  cwd: Type.Optional(Type.String({ description: "Absolute working directory on the selected target; remote targets never reuse the local workspace path" })),
 });
 
 function formatShellResult(result: ShellExecResult): string {
+  const location = result.kind !== "spawn-failed" && result.target ? `[target ${result.target} · cwd ${result.cwd}]\n` : "";
   switch (result.kind) {
     case "completed": {
       const lines: string[] = [];
@@ -24,14 +26,14 @@ function formatShellResult(result: ShellExecResult): string {
       if (result.handle) {
         lines.push(`[full output: get_output("${result.handle}")]`);
       }
-      return lines.join("\n");
+      return `${location}${lines.join("\n")}`;
     }
     case "background": {
       const body = result.display ?? result.outputSoFar;
       const observation = result.organized?.partial
         ? `[Command is still running. waited ${result.waitedMs}ms — current observation, not a final summary]`
         : `[Command is still running. waited ${result.waitedMs}ms]`;
-      return `${observation}\n${body}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
+      return `${location}${observation}\n${body}\n\n[Continue: get_output("${result.id}") or write_to_process("${result.id}", "...") or kill_shell("${result.id}")]`;
     }
     case "spawn-failed": {
       return `[spawn failed: ${result.reason}]\n${result.hint ?? ""}`;
@@ -41,7 +43,12 @@ function formatShellResult(result: ShellExecResult): string {
   }
 }
 
-export function createBashTool(bridge: HostServicesBridge, _sessionId: string, _cwd: string): ToolDefinition {
+export function createBashTool(
+  bridge: HostServicesBridge,
+  _sessionId: string,
+  _cwd: string,
+  defaultWaitMs = 10_000,
+): ToolDefinition {
   return defineTool({
     name: "bash",
     label: "Bash",
@@ -54,24 +61,39 @@ export function createBashTool(bridge: HostServicesBridge, _sessionId: string, _
     ],
     parameters: BashParams,
     executionMode: "sequential",
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (toolCallId, params, signal, _onUpdate, _ctx) => {
       try {
+        const waitMs = params.waitMs ?? defaultWaitMs;
+        // The observation request must outlive the requested foreground wait.
+        // This governs the RPC only; it never becomes a process execution limit.
+        const requestTimeoutMs = Math.min(
+          HARNESS_MAX_REQUEST_TIMEOUT_MS,
+          Math.max(30_000, waitMs + 30_000),
+        );
         const result = await bridge.request("shell.exec", {
           command: params.command,
+          toolCallId,
+          ...(params.target !== undefined ? { target: params.target } : {}),
+          ...(params.cwd !== undefined ? { cwd: params.cwd } : {}),
           // Don't pass cwd on every call — the persistent shell maintains its
           // own cwd across commands. Passing cwd would reset it each time.
-          ...(params.waitMs !== undefined ? { waitMs: params.waitMs } : {}),
-          ...(params.runMs !== undefined ? { runMs: params.runMs } : {}),
+          waitMs,
+        }, {
+          timeoutMs: requestTimeoutMs,
+          ...(signal === undefined ? {} : { signal }),
         });
         const text = formatShellResult(result);
+        const shellCompletion = result.kind === "completed" && result.executionId
+          ? { shellCompletion: { executionId: result.executionId } }
+          : {};
         return {
           content: [{ type: "text", text }],
-          details: result,
+          details: { ...result, ...shellCompletion, ...(params.target ? { target: params.target } : {}) },
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return {
-          content: [{ type: "text", text: `bash failed: ${message}` }],
+          content: [{ type: "text", text: `bash failed: ${message}\nThe Host may already have accepted this command. Check get_output("${toolCallId}") before retrying it.` }],
           details: { kind: "spawn-failed", reason: "bridge-error", interpreter: "", hint: message } as ShellExecResult,
         };
       }

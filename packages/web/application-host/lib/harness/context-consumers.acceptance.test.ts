@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createObservationCursorStore } from "./observation-cursors.js";
 import { createThreadRegistry } from "./thread-registry.js";
-import { prepareZone2Threads } from "./zone2-threads.js";
+import { createZone2DeliveryService, prepareZone2Threads } from "./zone2-threads.js";
 import { createContextRetainedService, createZone2AssembleService } from "./harness-services.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import type { HarnessServiceContext } from "./router.js";
@@ -40,7 +40,7 @@ describe("context consumers — presentation and retained-source authority", () 
     let material: Zone2Material = { userEdits: [], userCommands: [], newDiagnostics: [], git: null,
       blocks: [{ label: "plan", content: "ORIGINAL_PLAN" }], blocksComplete: true,
       knowledge: [{ id: 5, title: "KNOWN_FACT", trigger: "work" }], contextUsage: { used: 120, window: 300 } };
-    const service = createZone2AssembleService({ observationCursors: cursors,
+    const service = createZone2AssembleService({ observationCursors: cursors, zone2Delivery: createZone2DeliveryService(),
       zone2Provider: async () => ({ material, eventCursor: 0 }),
     } as unknown as HarnessServiceHost);
     const params = { sinceTurn: 0, branchEntryIds: [] };
@@ -64,7 +64,7 @@ describe("context consumers — presentation and retained-source authority", () 
     cursors.dispose();
   });
 
-  it("acknowledges only presented thread facts and keeps an omitted report pending", async () => {
+  it("acknowledges only presented message/result material and keeps omitted material pending", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "zone2-presentation-"));
     const registry = createThreadRegistry({ dataDir, hostId: "test" });
     const cursors = createObservationCursorStore();
@@ -74,6 +74,8 @@ describe("context consumers — presentation and retained-source authority", () 
         concurrency: 2, autoRun: true, worktree: "isolated" as const, tools: ["read"], permissions: {} };
       const first = await registry.createThread(common);
       const second = await registry.createThread(common);
+      await registry.setWorkingState("workspace", first.id, { branchId: "branch-first", resultRevision: 1 });
+      await registry.setWorkingState("workspace", second.id, { branchId: "branch-second", resultRevision: 1 });
       const pending = await prepareZone2Threads({ registry, cursors }, { sessionId: "parent", workspaceId: "workspace" });
       expect(pending.result.status === "ready" && pending.result.items.length).toBe(2);
       pending.commitPresented(new Set([first.id]), false);

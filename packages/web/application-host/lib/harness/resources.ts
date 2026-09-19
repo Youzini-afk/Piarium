@@ -18,6 +18,13 @@ import type {
   ResourceListResult,
   ResourceMachineView,
 } from "@piarium/protocol";
+import {
+  allocateGpuDevices,
+  probeNvidiaSmi,
+  type GpuAllocation,
+  type GpuDeviceFact,
+  type GpuProbeResult,
+} from "./gpu-resources.js";
 
 const MACHINE_PREFIX = "resource.machine:";
 const COMMITMENT_PREFIX = "resource.commitment:";
@@ -62,9 +69,29 @@ const createDefaultProbe = (): (() => LocalMachineProbe) => {
 export interface ResourceAdmission {
   status: "confirmed" | "insufficient";
   commitmentId?: string;
+  /** Concrete device binding. The spawn target must apply this environment. */
+  gpuAllocation?: GpuAllocation;
   /** Remaining capacity after confirmed commitments, when known. */
   remaining?: ExperimentResourceRequest;
   reason?: string;
+}
+
+/** Resource authority implemented by an execution target, not this coordinator. */
+export interface ExternalResourceAuthority {
+  readonly authorityId: string;
+  admit(input: {
+    workspaceId: string;
+    machineId: string;
+    attemptId: string;
+    resources: ExperimentResourceRequest;
+  }): Promise<ResourceAdmission>;
+  release(input: {
+    workspaceId: string;
+    machineId: string;
+    attemptId?: string;
+    commitmentId: string;
+    reason: string;
+  }): Promise<void>;
 }
 
 /**
@@ -84,9 +111,11 @@ export interface ResourceMachineRegistration {
   capacity?: {
     cpuCores?: number;
     memoryMb?: number;
-    gpus?: Array<{ index: number; name?: string; memoryMb?: number }>;
+    gpus?: Array<{ index: number; uuid?: string; name?: string; memoryMb?: number }>;
   };
   connection?: { status: "connected" | "degraded" | "offline" | "unknown"; detail?: string };
+  /** Credential-free target identity. Connection secrets remain in the trusted resolver. */
+  target?: ResourceMachineView["target"];
 }
 
 interface ResourceServiceDeps {
@@ -99,6 +128,15 @@ interface ResourceServiceDeps {
   onChange?: (workspaceId: string) => void;
   /** Capacity was returned; Host may reconcile queued attempts in each known workspace. */
   onCapacityAvailable?: (workspaceId: string) => void | Promise<void>;
+  /** On-demand host GPU facts; the default is a fixed nvidia-smi probe. */
+  probeLocalGpu?: () => Promise<GpuProbeResult>;
+  /** Resolve the target-side allocator for managed machines. */
+  resolveExternalAuthority?: (
+    machineId: string,
+    machine: KernelRecordResult,
+  ) => Promise<ExternalResourceAuthority | null> | ExternalResourceAuthority | null;
+  /** Refresh connection-managed target facts before presenting resources. */
+  refreshTargets?: (workspaceId: string) => Promise<void> | void;
 }
 
 export const resourceMachineRecordId = (machineId: string): string => `${MACHINE_PREFIX}${machineId}`;
@@ -138,6 +176,11 @@ const str = (value: unknown): string | undefined => (
   typeof value === "string" && value ? value : undefined
 );
 
+const gpuUuid = (value: unknown): string | undefined => {
+  const parsed = str(value);
+  return parsed && /^GPU-[^\s,]+$/i.test(parsed) ? parsed : undefined;
+};
+
 const asResources = (value: unknown): ExperimentResourceRequest => {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
   const cpuCores = nonNegative(raw.cpuCores);
@@ -169,6 +212,83 @@ const gpuCapacity = (capacity: Record<string, unknown>): { count?: number; memor
     ...(memoryMb === undefined ? {} : { memoryMb }),
   };
 };
+
+const gpuDevices = (capacity: Record<string, unknown>): GpuDeviceFact[] => {
+  if (!Array.isArray(capacity.gpus)) return [];
+  return capacity.gpus.flatMap((gpu): GpuDeviceFact[] => {
+    if (!gpu || typeof gpu !== "object") return [];
+    const entry = gpu as Record<string, unknown>;
+    const index = nonNegative(entry.index);
+    const uuid = gpuUuid(entry.uuid);
+    if (index === undefined || !Number.isInteger(index) || !uuid) return [];
+    const memoryMb = nonNegative(entry.memoryMb);
+    const name = str(entry.name);
+    return [{
+      index,
+      uuid,
+      ...(name ? { name } : {}),
+      ...(memoryMb === undefined ? {} : { memoryMb }),
+    }];
+  });
+};
+
+const asGpuAllocation = (value: unknown): GpuAllocation | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.devices)) return undefined;
+  const devices = raw.devices.flatMap((device): GpuAllocation["devices"] => {
+    if (!device || typeof device !== "object" || Array.isArray(device)) return [];
+    const entry = device as Record<string, unknown>;
+    const index = nonNegative(entry.index);
+    const uuid = gpuUuid(entry.uuid);
+    if (index === undefined || !Number.isInteger(index) || !uuid) return [];
+    const memoryMb = nonNegative(entry.memoryMb);
+    const name = str(entry.name);
+    return [{
+      index,
+      uuid,
+      ...(name ? { name } : {}),
+      ...(memoryMb === undefined ? {} : { memoryMb }),
+    }];
+  });
+  if (devices.length !== raw.devices.length || devices.length === 0) return undefined;
+  const environment = raw.environment && typeof raw.environment === "object" && !Array.isArray(raw.environment)
+    ? raw.environment as Record<string, unknown> : {};
+  if (environment.name !== "CUDA_VISIBLE_DEVICES" || typeof environment.value !== "string") return undefined;
+  if (environment.value !== devices.map((device) => device.uuid).join(",")) return undefined;
+  return { devices, environment: { name: "CUDA_VISIBLE_DEVICES", value: environment.value } };
+};
+
+const gpuProbeRecord = (result: GpuProbeResult, checkedAt: number): Record<string, unknown> => ({
+  status: result.status,
+  ...(result.status === "unavailable" ? { reason: result.reason } : {}),
+  ...(result.status === "unavailable" && result.detail ? { detail: result.detail } : {}),
+  checkedAt,
+});
+
+const gpuCapacityForProbe = (result: GpuProbeResult): Array<Record<string, unknown>> | undefined => (
+  result.status === "available"
+    ? result.devices.map((device) => ({
+        index: device.index,
+        uuid: device.uuid,
+        ...(device.name ? { name: device.name } : {}),
+        ...(device.memoryMb === undefined ? {} : { memoryMb: device.memoryMb }),
+      }))
+    : undefined
+);
+
+const gpuUsageForProbe = (result: GpuProbeResult): Array<Record<string, unknown>> | undefined => (
+  result.status === "available"
+    ? result.devices.map((device) => ({
+        index: device.index,
+        uuid: device.uuid,
+        ...(device.name ? { name: device.name } : {}),
+        ...(device.memoryMb === undefined ? {} : { memoryMb: device.memoryMb }),
+        ...(device.usedMemoryMb === undefined ? {} : { usedMemoryMb: device.usedMemoryMb }),
+        ...(device.utilizationPercent === undefined ? {} : { utilizationPercent: device.utilizationPercent }),
+      }))
+    : undefined
+);
 
 const resourceDimensions = ["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const;
 type ResourceDimension = typeof resourceDimensions[number];
@@ -231,6 +351,7 @@ const remainingCapacity = (
 interface CommitmentFact {
   view: ResourceCommitmentView;
   ownerWorkspaceId?: string;
+  gpuAllocation?: GpuAllocation;
 }
 
 const lockChains = new WeakMap<object, Map<string, Promise<void>>>();
@@ -254,10 +375,18 @@ const withMachineLock = async <Result>(client: KernelClient, machineId: string, 
 export function createResourceService(deps: ResourceServiceDeps) {
   const now = deps.now ?? (() => Date.now());
   const probe = deps.probeLocal ?? createDefaultProbe();
+  const probeGpu = deps.probeLocalGpu ?? probeNvidiaSmi;
   const contexts = new Map<string, Promise<KernelScopedClient>>();
   const knownWorkspaces = new Set<string>();
   const report = (error: unknown) => {
     if (deps.onError) deps.onError(error instanceof Error ? error : new Error(String(error)));
+  };
+  const observeGpu = async (): Promise<GpuProbeResult> => {
+    try {
+      return await probeGpu();
+    } catch (error) {
+      return { status: "unavailable", reason: "error", detail: error instanceof Error ? error.message : String(error) };
+    }
   };
   const rememberWorkspace = (workspaceId: string) => {
     if (workspaceId && workspaceId !== RESOURCE_WORKSPACE_ID) knownWorkspaces.add(workspaceId);
@@ -376,23 +505,38 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const scoped = await globalContext();
     const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
     const observed = probe();
+    const gpu = await observeGpu();
     const cpuCores = nonNegative(observed.cpuCores);
     const memoryMb = nonNegative(observed.memoryMb);
     if (cpuCores === undefined || memoryMb === undefined) {
       throw new Error("local machine probe returned invalid capacity");
     }
-    const capacity = { cpuCores, memoryMb };
+    const capacity = {
+      cpuCores,
+      memoryMb,
+      ...(gpuCapacityForProbe(gpu) ? { gpus: gpuCapacityForProbe(gpu) } : {}),
+    };
+    const checkedAt = now();
     if (existing) {
       const payload = payloadOf(existing);
       const prior = payload.capacity && typeof payload.capacity === "object"
         ? payload.capacity as Record<string, unknown>
         : {};
-      // Refresh capacity facts only when the probe actually observed a change.
       const priorConnection = payload.connection && typeof payload.connection === "object"
         ? payload.connection as Record<string, unknown>
         : {};
+      const priorGpuProbe = payload.gpuProbe && typeof payload.gpuProbe === "object"
+        ? payload.gpuProbe as Record<string, unknown>
+        : {};
+      const priorCapacity = JSON.stringify(prior);
+      const nextCapacity = JSON.stringify(capacity);
+      const nextGpuProbe = gpuProbeRecord(gpu, checkedAt);
       if (nonNegative(prior.cpuCores) === capacity.cpuCores
         && nonNegative(prior.memoryMb) === capacity.memoryMb
+        && priorCapacity === nextCapacity
+        && priorGpuProbe.status === nextGpuProbe.status
+        && priorGpuProbe.reason === nextGpuProbe.reason
+        && priorGpuProbe.detail === nextGpuProbe.detail
         && priorConnection.status === "connected") {
         return existing;
       }
@@ -403,8 +547,9 @@ export function createResourceService(deps: ResourceServiceDeps) {
         expectedRecordRevision: existing.recordRevision,
         payload: {
           ...payload,
-          capacity: { ...prior, ...capacity },
-          connection: { status: "connected", checkedAt: now() },
+          capacity,
+          gpuProbe: nextGpuProbe,
+          connection: { status: "connected", checkedAt: checkedAt },
         },
       });
     }
@@ -417,7 +562,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
         kind: "local",
         label: "Local machine",
         capacity,
-        connection: { status: "connected", checkedAt: now() },
+        gpuProbe: gpuProbeRecord(gpu, checkedAt),
+        connection: { status: "connected", checkedAt: checkedAt },
       },
     });
   };
@@ -432,6 +578,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const scoped = await globalContext();
     const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
     const observed = probe();
+    const gpu = await observeGpu();
     const usedMemoryMb = nonNegative(observed.usedMemoryMb);
     if (usedMemoryMb === undefined) throw new Error("local machine probe returned invalid memory usage");
     return putGlobalRecord({
@@ -446,7 +593,9 @@ export function createResourceService(deps: ResourceServiceDeps) {
         usage: {
           memoryMb: usedMemoryMb,
           ...(percent(observed.cpuPercent) === undefined ? {} : { cpuPercent: percent(observed.cpuPercent) }),
+          ...(gpuUsageForProbe(gpu) ? { gpus: gpuUsageForProbe(gpu) } : {}),
         },
+        gpuProbe: gpuProbeRecord(gpu, now()),
       },
     });
   };
@@ -464,13 +613,16 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const confirmedAt = num(payload.confirmedAt);
     const releasedAt = num(payload.releasedAt);
     const ownerWorkspaceId = str(payload.workspaceId);
+    const gpuAllocation = asGpuAllocation(payload.gpuAllocation);
     return {
       ...(ownerWorkspaceId === undefined ? {} : { ownerWorkspaceId }),
+      ...(gpuAllocation ? { gpuAllocation } : {}),
       view: {
         commitmentId: record.recordId.slice(COMMITMENT_PREFIX.length),
         machineId,
         ...(attemptId ? { attemptId } : {}),
         resources: asResources(payload.resources),
+        ...(gpuAllocation ? { gpuAllocation } : {}),
         state: record.state as ResourceCommitmentView["state"],
         ...(confirmedAt === undefined ? {} : { confirmedAt }),
         ...(releasedAt === undefined ? {} : { releasedAt }),
@@ -509,10 +661,12 @@ export function createResourceService(deps: ResourceServiceDeps) {
           const entry = gpu as Record<string, unknown>;
           const index = nonNegative(entry.index);
           if (index === undefined || !Number.isInteger(index)) return [];
+    const uuid = gpuUuid(entry.uuid);
           const name = str(entry.name);
           const memoryMb = nonNegative(entry.memoryMb);
           return [{
             index,
+            ...(uuid ? { uuid } : {}),
             ...(name ? { name } : {}),
             ...(memoryMb === undefined ? {} : { memoryMb }),
           }];
@@ -524,12 +678,14 @@ export function createResourceService(deps: ResourceServiceDeps) {
           const entry = gpu as Record<string, unknown>;
           const index = nonNegative(entry.index);
           if (index === undefined || !Number.isInteger(index)) return [];
+          const uuid = gpuUuid(entry.uuid);
           const name = str(entry.name);
           const memoryMb = nonNegative(entry.memoryMb);
           const utilizationPercent = percent(entry.utilizationPercent);
           const usedMemoryMb = nonNegative(entry.usedMemoryMb);
           return [{
             index,
+            ...(uuid ? { uuid } : {}),
             ...(name ? { name } : {}),
             ...(memoryMb === undefined ? {} : { memoryMb }),
             ...(utilizationPercent === undefined ? {} : { utilizationPercent }),
@@ -538,7 +694,29 @@ export function createResourceService(deps: ResourceServiceDeps) {
         })
       : undefined;
     const label = str(payload.label);
+    const rawTarget = payload.target && typeof payload.target === "object"
+      ? payload.target as Record<string, unknown>
+      : null;
+    const targetHostId = str(rawTarget?.hostId);
+    const targetConnectionId = str(rawTarget?.connectionId);
+    const targetSource = rawTarget?.source === "ssh-instance" || rawTarget?.source === "configured-host"
+      ? rawTarget.source
+      : rawTarget?.source === "desktop-host" ? "desktop-host" : undefined;
+    const targetCapabilities = Array.isArray(rawTarget?.capabilities)
+      ? rawTarget.capabilities.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : [];
+    const coordinatorHostId = str(rawTarget?.coordinatorHostId);
     const detail = str(connection.detail);
+    const rawGpuProbe = payload.gpuProbe && typeof payload.gpuProbe === "object"
+      ? payload.gpuProbe as Record<string, unknown>
+      : null;
+    const gpuProbeStatus = rawGpuProbe?.status === "available"
+      ? "available"
+      : rawGpuProbe?.status === "unavailable"
+        ? (rawGpuProbe.reason === "tool-missing" || rawGpuProbe.reason === "no-device" || rawGpuProbe.reason === "error"
+            ? rawGpuProbe.reason : "error")
+        : undefined;
+    const gpuProbeDetail = str(rawGpuProbe?.detail);
     const cpuCapacity = nonNegative(capacity?.cpuCores);
     const memoryCapacity = nonNegative(capacity?.memoryMb);
     const usedCpuPercent = percent(usage?.cpuPercent);
@@ -554,6 +732,24 @@ export function createResourceService(deps: ResourceServiceDeps) {
         checkedAt: num(connection.checkedAt) ?? record.updatedAt,
         ...(detail ? { detail } : {}),
       },
+      ...(targetHostId && targetConnectionId && targetSource ? {
+        target: {
+          hostId: targetHostId,
+          connectionId: targetConnectionId,
+          source: targetSource,
+          capabilities: targetCapabilities,
+          ...(coordinatorHostId ? { coordinatorHostId } : {}),
+          acceptedJobsSurviveClientDisconnect: rawTarget?.acceptedJobsSurviveClientDisconnect === true,
+          unassignedWorkRequiresCoordinator: rawTarget?.unassignedWorkRequiresCoordinator !== false,
+        },
+      } : {}),
+      ...(gpuProbeStatus ? {
+        gpuProbe: {
+          status: gpuProbeStatus,
+          checkedAt: num(rawGpuProbe?.checkedAt) ?? record.updatedAt,
+          ...(gpuProbeDetail ? { detail: gpuProbeDetail } : {}),
+        },
+      } : {}),
       ...(capacity ? {
         capacity: {
           ...(cpuCapacity === undefined ? {} : { cpuCores: cpuCapacity }),
@@ -616,13 +812,63 @@ export function createResourceService(deps: ResourceServiceDeps) {
             .filter((record) => record.state === "confirmed" || record.state === "requested")
             .map(commitmentFact)
             .filter((fact): fact is CommitmentFact => fact !== null && fact.view.machineId === machineId);
+          const gpuRequested = (normalized.gpuCount ?? 0) > 0 || (normalized.gpuMemoryMb ?? 0) > 0;
+          if (gpuRequested && !fact.gpuAllocation) {
+            return {
+              status: "insufficient",
+              commitmentId,
+              remaining: remainingCapacity(capacity, allCommitments.map((entry) => entry.view.resources)),
+              reason: "the existing GPU commitment has no confirmed device allocation; resource reconciliation is required",
+            };
+          }
           return {
             status: "confirmed",
             commitmentId,
+            ...(fact.gpuAllocation ? { gpuAllocation: fact.gpuAllocation } : {}),
             remaining: remainingCapacity(capacity, allCommitments.map((entry) => entry.view.resources)),
           };
         }
         return { status: "insufficient", reason: `attempt ${attemptId} has a ${fact.view.state} commitment` };
+      }
+      const external = deps.resolveExternalAuthority
+        ? await deps.resolveExternalAuthority(machineId, machine)
+        : null;
+      if (str(machinePayload.backend) === "managed-remote" && !external) {
+        return { status: "insufficient", reason: `resource authority for ${machineId} is unavailable` };
+      }
+      if (external) {
+        const remote = await external.admit({ workspaceId, machineId, attemptId, resources: normalized });
+        if (remote.status !== "confirmed") return remote;
+        const gpuRequested = (normalized.gpuCount ?? 0) > 0 || (normalized.gpuMemoryMb ?? 0) > 0;
+        if (gpuRequested && !remote.gpuAllocation) {
+          if (remote.commitmentId) {
+            await external.release({ workspaceId, machineId, attemptId, commitmentId: remote.commitmentId, reason: "managed target returned no GPU device allocation" }).catch(report);
+          }
+          return { status: "insufficient", reason: "managed target confirmed GPU resources without a device allocation" };
+        }
+        await putGlobalRecord({
+          recordId: recordIdFor.commitment(commitmentId),
+          recordType: "resource.commitment",
+          state: "confirmed",
+          payload: {
+            id: commitmentId,
+            workspaceId,
+            machineId,
+            attemptId,
+            resources: normalized,
+            confirmedBy: external.authorityId,
+            externalCommitmentId: remote.commitmentId,
+            ...(remote.gpuAllocation ? { gpuAllocation: remote.gpuAllocation } : {}),
+            confirmedAt: now(),
+          },
+        });
+        changed(workspaceId);
+        return {
+          status: "confirmed",
+          commitmentId,
+          ...(remote.gpuAllocation ? { gpuAllocation: remote.gpuAllocation } : {}),
+          ...(remote.remaining ? { remaining: remote.remaining } : {}),
+        };
       }
       const commitments = (await allRecords(scoped, RESOURCE_WORKSPACE_ID, "resource.commitment"))
         .filter((record) => record.state === "confirmed" || record.state === "requested")
@@ -644,6 +890,27 @@ export function createResourceService(deps: ResourceServiceDeps) {
         }
       }
       if (!hasResourceDimension(normalized)) return { status: "confirmed" };
+      const gpuRequested = (normalized.gpuCount ?? 0) > 0 || (normalized.gpuMemoryMb ?? 0) > 0;
+      let gpuAllocation: GpuAllocation | undefined;
+      if (gpuRequested) {
+        const freshGpu = machineId === LOCAL_MACHINE_ID ? await observeGpu() : null;
+        const inventory = freshGpu?.status === "available"
+          ? freshGpu.devices
+          : gpuDevices(capacity);
+        const allocation = allocateGpuDevices(
+          inventory,
+          commitments.map((fact) => ({
+            ...(fact.view.resources.gpuCount === undefined ? {} : { gpuCount: fact.view.resources.gpuCount }),
+            ...(fact.gpuAllocation ? { allocation: fact.gpuAllocation } : {}),
+          })),
+          {
+            ...(normalized.gpuCount === undefined ? {} : { gpuCount: normalized.gpuCount }),
+            ...(normalized.gpuMemoryMb === undefined ? {} : { gpuMemoryMb: normalized.gpuMemoryMb }),
+          },
+        );
+        if (allocation.status !== "confirmed") return { status: "insufficient", remaining, reason: allocation.reason };
+        gpuAllocation = allocation.allocation;
+      }
       await putGlobalRecord({
         recordId: recordIdFor.commitment(commitmentId),
         recordType: "resource.commitment",
@@ -655,6 +922,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
           attemptId,
           resources: normalized,
           confirmedBy: "local-admission",
+          ...(gpuAllocation ? { gpuAllocation } : {}),
           confirmedAt: now(),
         },
       });
@@ -662,6 +930,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
       return {
         status: "confirmed",
         commitmentId,
+        ...(gpuAllocation ? { gpuAllocation } : {}),
         remaining: remainingCapacity(capacity, [...commitments.map((fact) => fact.view.resources), normalized]),
       };
     });
@@ -680,6 +949,21 @@ export function createResourceService(deps: ResourceServiceDeps) {
       const fact = commitmentFact(current);
       if (!fact || fact.ownerWorkspaceId !== workspaceId) return;
       const payload = payloadOf(current);
+      const machine = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
+      const externalCommitmentId = str(payload.externalCommitmentId);
+      if (machine && externalCommitmentId) {
+        const external = deps.resolveExternalAuthority
+          ? await deps.resolveExternalAuthority(machineId, machine)
+          : null;
+        if (!external) throw new Error(`resource authority for ${machineId} is unavailable`);
+        await external.release({
+          workspaceId,
+          machineId,
+          ...(fact.view.attemptId ? { attemptId: fact.view.attemptId } : {}),
+          commitmentId: externalCommitmentId,
+          reason,
+        });
+      }
       await putGlobalRecord({
         recordId,
         recordType: "resource.commitment",
@@ -774,6 +1058,24 @@ export function createResourceService(deps: ResourceServiceDeps) {
     return scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
   };
 
+  /**
+   * Recover the durable GPU binding for a workspace-owned commitment after a
+   * service or Host restart. A commitment from another workspace is never
+   * disclosed through this lookup.
+   */
+  const getCommitmentAllocation = async (
+    workspaceId: string,
+    commitmentId: string,
+  ): Promise<GpuAllocation | null> => {
+    rememberWorkspace(workspaceId);
+    const scoped = await globalContext();
+    const record = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.commitment(commitmentId));
+    if (!record || (record.state !== "confirmed" && record.state !== "requested")) return null;
+    const fact = commitmentFact(record);
+    if (!fact || fact.ownerWorkspaceId !== workspaceId) return null;
+    return fact.gpuAllocation ?? null;
+  };
+
   const registerMachine = async (
     workspaceId: string,
     input: ResourceMachineRegistration,
@@ -801,10 +1103,13 @@ export function createResourceService(deps: ResourceServiceDeps) {
             gpus: input.capacity.gpus.map((gpu) => {
               const index = nonNegative(gpu?.index);
               if (index === undefined || !Number.isInteger(index)) throw new Error("machine GPU index is invalid");
+              const uuid = gpuUuid(gpu?.uuid);
+              if (gpu?.uuid !== undefined && !uuid) throw new Error("machine GPU UUID is invalid");
               const memoryMb = gpu?.memoryMb === undefined ? undefined : nonNegative(gpu.memoryMb);
               if (gpu?.memoryMb !== undefined && memoryMb === undefined) throw new Error("machine GPU memory is invalid");
               return {
                 index,
+                ...(uuid ? { uuid } : {}),
                 ...(gpu?.name?.trim() ? { name: gpu.name.trim() } : {}),
                 ...(memoryMb === undefined ? {} : { memoryMb }),
               };
@@ -843,6 +1148,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
           ...(input.label?.trim() ? { label: input.label.trim() } : prior.label ? { label: prior.label } : {}),
           ...(backend ? { backend } : {}),
           ...(capacity ? { capacity } : prior.capacity ? { capacity: prior.capacity } : {}),
+          ...(input.target ? { target: input.target } : prior.target ? { target: prior.target } : {}),
           connection,
         },
       });
@@ -854,6 +1160,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
   };
 
   const list = async (workspaceId: string): Promise<ResourceListResult> => {
+    await deps.refreshTargets?.(workspaceId);
     const machines = await listMachines(workspaceId);
     const text = machines.length === 0
       ? "No execution targets are registered."
@@ -883,6 +1190,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     listMachines,
     getMachine,
     getMachineRecord,
+    getCommitmentAllocation,
     registerMachine,
     list,
     admit,

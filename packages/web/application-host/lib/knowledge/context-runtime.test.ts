@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createKnowledgeContextRuntime } from "./context-runtime.js";
+import { zone2MaterialRevision } from "../harness/zone2-material.js";
 import { createGitStatusObserver } from "./git-status-runtime.js";
 import { openWorkspaceKnowledge, type KnowledgeStore } from "./store.js";
 import { createTerminalCommandObserveAdapter, createTerminalCommandProjector } from "./terminal-projection.js";
@@ -85,6 +86,100 @@ describe("knowledge context runtime", () => {
     expect(result.material.knowledge).toHaveLength(1);
     expect(result.material.knowledge[0]?.title).toContain("Vitest");
     await runtime.dispose();
+  });
+
+  it("reuses same-query recall until the store knowledge revision changes", async () => {
+    const id = await store.putKnowledge({
+      scope: "workspace",
+      status: "accepted",
+      content: "Use the cache-aware path",
+      trigger: "cache path",
+    });
+    let recalls = 0;
+    const runtime = createKnowledgeContextRuntime({
+      getStore: async () => store,
+      recall: async (_workspaceId, current, query) => {
+        recalls += 1;
+        return current.recall(query, 5);
+      },
+    });
+    runtime.bindSession("session-a", "workspace-1");
+    await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, query: "cache path", contextUsage: null });
+    await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, query: "cache path", contextUsage: null });
+    expect(recalls).toBe(1);
+    await store.updateAcceptedKnowledge(id, {
+      content: "Use the revised cache-aware path",
+      trigger: "cache path",
+    }, "workspace", {
+      content: "Use the cache-aware path",
+      trigger: "cache path",
+      status: "accepted",
+      invalidAt: null,
+    });
+    const changed = await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, query: "cache path", contextUsage: null });
+    expect(recalls).toBe(2);
+    expect(changed.material.knowledge[0]?.title).toContain("revised");
+    await runtime.dispose();
+  });
+
+  it("delivers shell completion facts once and respects retained execution receipts", async () => {
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    runtime.observeShellCompletion("session-a", {
+      command: "bun test",
+      commandRunId: "sh_1",
+      executionId: "exec-1",
+      cwd: "/workspace",
+      startedAt: 10,
+      endedAt: 20,
+      exitCode: 1,
+      cancelled: false,
+    });
+    await runtime.drain();
+    const first = await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, contextUsage: null });
+    expect(first.material.shellCompletions).toEqual([expect.objectContaining({ executionId: "exec-1", exitCode: 1 })]);
+    expect(first.shellCompletions).toEqual(["exec-1"]);
+    const retained = await runtime.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      afterEventId: first.eventCursor,
+      observedShellExecutions: ["exec-1"],
+      contextUsage: null,
+    });
+    expect(retained.material.shellCompletions).toBeUndefined();
+    await runtime.dispose();
+  });
+
+  it("emits an explicit invalidation when retained knowledge is retired", async () => {
+    const id = await store.putKnowledge({
+      scope: "workspace",
+      status: "accepted",
+      content: "Retire this fact",
+      trigger: "retire fact",
+    });
+    const runtime = createKnowledgeContextRuntime({ getStore: async () => store });
+    runtime.bindSession("session-a", "workspace-1");
+    await runtime.zone2Material({ sessionId: "session-a", sinceTurn: 0, query: "retire fact", contextUsage: null });
+    await store.retireKnowledge(id, "workspace", {
+      content: "Retire this fact",
+      trigger: "retire fact",
+      status: "accepted",
+      invalidAt: null,
+    });
+    await runtime.dispose();
+    const rebuilt = createKnowledgeContextRuntime({ getStore: async () => store });
+    rebuilt.bindSession("session-a", "workspace-1");
+    const retired = await rebuilt.zone2Material({
+      sessionId: "session-a",
+      sinceTurn: 0,
+      query: "retire fact",
+      knownMaterial: {
+        ["knowledge:workspace:" + id]: zone2MaterialRevision({ id, scope: "workspace", title: "Retire this fact", trigger: "retire fact" }),
+      },
+      contextUsage: null,
+    });
+    expect(retired.material.knowledgeInvalidations).toEqual([{ id, scope: "workspace" }]);
+    await rebuilt.dispose();
   });
 
   it("keeps agent-authored events out of Zone 2 while preserving current blocks", async () => {

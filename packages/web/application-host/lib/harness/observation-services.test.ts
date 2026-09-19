@@ -100,6 +100,44 @@ describe("incremental shell observation", () => {
     expect(afterCompaction).toMatchObject({ text: output, offset: 0, observation: { first: true } });
     cursors.dispose();
   });
+
+  it("waits from the committed byte cursor while explicit history remains immediate", async () => {
+    let output = "first";
+    let releaseWait: (() => void) | undefined;
+    const waits: Array<{ id: string; offset: number; waitMs: number; signal: AbortSignal }> = [];
+    const cursors = createObservationCursorStore();
+    const supervisor = {
+      read: async (_id: string, offset = 0, length = 32_768) => ({
+        ...sliceUtf8ByBytes(output, offset, length),
+        running: true,
+      }),
+      waitForOutput: async (id: string, offset: number, waitMs: number, signal: AbortSignal) => {
+        waits.push({ id, offset, waitMs, signal });
+        await new Promise<void>((resolve, reject) => {
+          releaseWait = resolve;
+          signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        });
+      },
+    };
+    const host = {
+      observationCursors: cursors,
+      getShellSupervisor: () => supervisor,
+    } as unknown as HarnessServiceHost;
+    const service = createShellReadService(host);
+    await service.handle({ id: "sh_1" }, context());
+
+    const pending = service.handle({ id: "sh_1", waitMs: 5_000 }, context());
+    await Promise.resolve();
+    expect(waits).toMatchObject([{ id: "sh_1", offset: 5, waitMs: 5_000 }]);
+    output += " next";
+    releaseWait?.();
+    await expect(pending).resolves.toMatchObject({ text: " next", offset: 5, running: true });
+
+    const historical = await service.handle({ id: "sh_1", offset: 0, length: 5, waitMs: 5_000 }, context());
+    expect(historical.text).toBe("first");
+    expect(waits).toHaveLength(1);
+    cursors.dispose();
+  });
 });
 
 describe("incremental diagnostics observation", () => {

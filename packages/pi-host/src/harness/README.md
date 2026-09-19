@@ -17,7 +17,7 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `find` / `ls` | Pi-native glob/list rendering with fixed dirty-only or exclusive working-branch paths | `document.pathOverlay` |
 | `grep` | Bounded rg plus fixed editor-draft overlay, or exclusive working-branch corpus | `search.content` |
 | `apply_patch` | Codex-format multi-file patch (OpenAI only); Piarium mutations go through Host branch/surface write authority | `document.branchWrite` + `document.surfaceWrite` |
-| `get_output` | Retrieve stored/shell output by handle | `output.read` / `shell.read` |
+| `get_output` | Retrieve stored/shell output by handle; optionally wait for new bytes or exit | `output.read` / `shell.read` |
 | `write_to_process` | Write stdin to background shell | `shell.write` |
 | `kill_shell` | Terminate a background shell | `shell.kill` |
 | `diagnostics` | Get LSP diagnostics for a file, bound to its disk revision | `lsp.diagnosticsSnapshot` |
@@ -80,30 +80,28 @@ const customTools = selectHarnessTools(settings, {
   `permission.audit`. Unknown or incomplete third-party actions ask; Smart mode
   can auto-allow only ordinary complete asks. `/piarium-permissions` revokes
   remembered session grants.
+  An allowed call also returns the Host-canonical path/thread effects discovered
+  by `permission.inspect`; Pi merges them with the owned tool's effect declaration
+  before scheduling. Denied calls never run the tool's resource-preparation hook.
 - `createKnowledgeSuggestionExtension` — when `models.suggestions` is configured,
   drafts a workspace knowledge proposal from the current user message and stores
-  it through Host `knowledge.suggest`. Unconfigured sessions keep user-mark and
-  keeper paths only and never borrow the main model.
-- `createMemoryAgentExtension` — background memory keeper. It captures the real
-  session context at Pi hooks, calls the active model, and submits only
-  `memory_edit` operations plus the active ancestor path and exact
-  context-producing entry IDs to Host validation. Its tool call and response
-  never enter the main conversation. The effective `off | assist | takeover`
-  mode is read at every hook boundary; `off` also excludes stored blocks from
-  Zone 2, while only `takeover` asks the Host for a compaction replacement.
-  Host `memory.nudge` accelerates the same keeper for user-terminal facts,
-  accepted steering, user plan edits and newly persisted child Run reports
-  (D-238). Bodies are encoded observations in the keeper `<material>` block.
-  External IDs deduplicate delivery; internal in-flight/cooldown requeue keeps
-  its body. Off is zero calls. Material received before a usable turn waits for
-  that context. `session_tree` discards old queued observations, invalidates the
-  previous context, and cancels/discards in-flight keeper output. Ordinary
-  same-branch entry growth does not invalidate that work. This is an ephemeral
-  acceleration queue, not a durable event replay log.
-- `createCompactionExtension` — derives Pi's actual removed context entries and
-  accepts a Host replacement only in `takeover` mode. Missing coverage, branch
-  drift, block-revision drift, or Host unavailability leaves that compaction to
-  Pi and reports the failure through the session memory runtime state.
+  it through Host `knowledge.suggest`. Unconfigured sessions retain user-marked
+  knowledge and never borrow the main model for suggestions.
+- `createContextGuidanceExtension` — adds stable source and collaboration guidance
+  to the system prompt. It does not fetch dynamic material at turn start.
+- `createRequestContextInjector` — prepares environment deltas and a complete
+  authorized teammate snapshot before every actual model request, including tool
+  continuations. Environment facts are appended to native Pi history only when
+  the provider starts responding, with receipts acknowledged to Host; a stream
+  that fails before starting does not claim delivery. The current teammate table
+  remains transient and unchanged teammates remain visible. Unavailable and empty
+  observations are distinct. No snapshot receipt or status-summary model is used.
+- `createContextPreparationExtension` and `attachContextRequestBoundary` — account
+  for the full candidate input (including both additions) before admission, reuse
+  a fixed background summary candidate and commit through Pi's SessionManager.
+  Compaction refreshes observations against retained raw-history receipts. History
+  grows without replacing old facts; native tool/message pairing and continuation
+  remain Pi's responsibility. The retired continuous keeper/takeover path is absent.
 
 ## HostServicesBridge
 
@@ -136,6 +134,36 @@ pi-host: bridge.request("shell.exec", { command, cwd, waitMs })
    → emit("harness.respond", { requestId, result/error })
    → pi-host: bridge resolves promise
 ```
+
+`bash(waitMs: 0)` still waits for Host acceptance and returns the real terminal-runtime
+identity; it does not synthesize an id or cancel the process. Omitted `waitMs` uses the
+session's resolved `harness.bash.waitMs` (10 seconds by default). The bridge deadline is
+derived from that observation window, while the process has no implicit execution deadline.
+The 10-second soft default was selected from this workspace's 7H runs: focused checks
+completed in roughly 1–9 seconds while package type-checks crossed the boundary and are
+better handed back as background work. It is configurable and is neither a hard limit nor
+a latency claim for other machines.
+`get_output(waitMs)` waits only when an incremental shell read has no unread bytes and no
+terminal fact yet. Cancelling that observation sends `harness.cancel` and leaves the shell
+running; `kill_shell` remains the process termination operation.
+The Pi `toolCallId` is carried to `shell.exec` as the acceptance identity. A lost
+response can be recovered with `get_output(toolCallId)` or an idempotent retry of that
+same call; Host never starts a second process for the same identity and command. This
+map is session-process state, so an ordinary shell still does not claim Host-restart
+reattachment or durable logs.
+
+Harness-owned tools also carry a `prepareExecution` contract into Pi's real batch executor.
+The hook runs after schema validation and the native permission gate. Canonical file effects
+order overlapping read/write calls, multi-file patches declare their complete path set, and
+shell/thread controls use their actual target identity. Independent resources overlap. An
+unknown third-party sequential tool stays an ordered barrier, with calls on either side still
+parallel inside their side. The Host Documents/WorkingState gates remain the final mutation
+and alias authority; scheduling does not replace revision checks or recovery.
+The upstream seams are tracked in `patches/@earendil-works%2Fpi-agent-core@0.85.1.patch`
+and `patches/@earendil-works%2Fpi-coding-agent@0.85.1.patch`: the core builds the
+resource dependency graph in the actual tool-call batch path, while coding-agent
+preserves effect declarations through `ToolDefinition` wrapping and carries the
+permission hook's Host-authoritative plan. There is no second Agent loop.
 
 ## Path Locking
 

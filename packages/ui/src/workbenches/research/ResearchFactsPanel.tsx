@@ -6,17 +6,21 @@ import { subscribePiariumEvents } from '@/lib/piariumEvents';
 import { useI18n } from '@/lib/i18n';
 import {
   cancelResearchAttempt,
+  cancelResearchAttempts,
   collectResearchAttempt,
   loadResearchArtifact,
   loadResearchAttemptDetails,
   loadResearchAttemptLogs,
   loadResearchFacts,
+  rerunResearchAttempt,
+  rerunResearchAttempts,
   type ResearchAttemptDetails,
   type ResearchFactsSnapshot,
 } from './researchFacts';
 
 const ACTIVE_STATES = new Set(['submitted', 'queued', 'running', 'stopping']);
 const COLLECTABLE = new Set(['completed', 'failed', 'cancelled']);
+const RERUNNABLE = new Set(['failed', 'cancelled', 'lost']);
 
 const formatResources = (resources: { cpuCores?: number; memoryMb?: number; gpus?: ResourceGpuView[] } | undefined): string => {
   if (!resources) return '';
@@ -53,53 +57,87 @@ const MachineRow: React.FC<{ machine: ResourceMachineView }> = ({ machine }) => 
     : '';
   const capacityGpus = formatGpuDetails(machine.capacity?.gpus);
   const usageGpus = formatGpuDetails(machine.usage?.gpus);
+  const target = machine.target;
+  const coordinator = target?.coordinatorHostId;
   return (
     <li className="py-1">
       <div className="flex items-center gap-2">
-        <span className="font-medium text-foreground">{machine.label ?? machine.machineId}</span>
-        <span className="text-muted-foreground">{machine.kind}</span>
+        <span className="font-medium text-foreground">{machine.label ?? machine.kind}</span>
+        {machine.label ? <span className="text-muted-foreground">{machine.kind}</span> : null}
         <span className="ml-auto shrink-0 text-muted-foreground">
           {t(`research-facts.machine.${machine.state}`)} · {t(`research-facts.connection.${machine.connection.status}`)}
         </span>
       </div>
       <div className="mt-0.5 text-muted-foreground">
-        {capacity ? `${t('research-facts.capacity')}: ${capacity}` : t('research-facts.capacityUnknown')}
-        {capacityGpus ? ` · ${capacityGpus}` : ''}
-        {' · '}
-        {usage ? `${t('research-facts.usage')}: ${usage}` : t('research-facts.usageUnread')}
-        {usageGpus ? ` · ${usageGpus}` : ''}
-        {machine.usage?.source ? ` · ${t('research-facts.source')}: ${machine.usage.source}` : ''}
-        {machine.usage?.observedAt !== undefined ? ` · ${t('research-facts.observedAt', { time: formatObservedAt(machine.usage.observedAt) })}` : ''}
-        {machine.usage?.stale ? ` · ${t('research-facts.stale')}` : ''}
-        {machine.connection.checkedAt !== undefined ? ` · ${t('research-facts.checkedAt', { time: formatObservedAt(machine.connection.checkedAt) })}` : ''}
-        {machine.commitments.length > 0 ? ` · ${t('research-facts.commitments', { count: machine.commitments.length })}` : ''}
+        {target && coordinator
+          ? `${t('research-facts.coordinator')}: ${coordinator}`
+          : target?.unassignedWorkRequiresCoordinator
+            ? t('research-facts.coordinatorUnavailable')
+            : ''}
+        {target && coordinator && machine.queued.length > 0 ? ' · ' : ''}
+        {machine.queued.length > 0 ? `${t('research-facts.queued')}: ${machine.queued.length}` : ''}
       </div>
-      {machine.queued.length > 0 ? (
-        <div className="mt-0.5 text-muted-foreground">
-          {t('research-facts.queued')}: {machine.queued.map((entry) => entry.attemptId).join(', ')}
-        </div>
+      {target ? (
+        <details className="mt-1 text-muted-foreground">
+          <summary className="cursor-pointer hover:text-foreground">{t('research-facts.targetDetails')}</summary>
+          <div className="mt-1 pl-3">
+            <div>{t('research-facts.target')}: {target.hostId} · {target.connectionId} · {t(`research-facts.targetSource.${target.source}`)}</div>
+            {target.capabilities.length > 0 ? <div>{t('research-facts.capabilities')}: {target.capabilities.join(', ')}</div> : null}
+            <div>{target.acceptedJobsSurviveClientDisconnect ? t('research-facts.remoteJobsSurviveDisconnect') : t('research-facts.remoteJobsMayStopWithClient')}</div>
+            <div>{target.unassignedWorkRequiresCoordinator ? t('research-facts.unassignedNeedsCoordinator') : t('research-facts.unassignedCoordinatorOptional')}</div>
+          </div>
+        </details>
       ) : null}
+      <details className="mt-1 text-muted-foreground">
+        <summary className="cursor-pointer hover:text-foreground">{t('research-facts.resourceDetails')}</summary>
+        <div className="mt-1 pl-3">
+          <div>{capacity ? `${t('research-facts.capacity')}: ${capacity}` : t('research-facts.capacityUnknown')}{capacityGpus ? ` · ${capacityGpus}` : ''}</div>
+          <div>{usage ? `${t('research-facts.usage')}: ${usage}` : t('research-facts.usageUnread')}{usageGpus ? ` · ${usageGpus}` : ''}</div>
+          {machine.usage?.source ? <div>{t('research-facts.source')}: {machine.usage.source}</div> : null}
+          {machine.usage?.observedAt !== undefined ? <div>{t('research-facts.observedAt', { time: formatObservedAt(machine.usage.observedAt) })}{machine.usage.stale ? ` · ${t('research-facts.stale')}` : ''}</div> : null}
+          <div>{t('research-facts.checkedAt', { time: formatObservedAt(machine.connection.checkedAt) })}{machine.connection.detail ? ` · ${machine.connection.detail}` : ''}</div>
+          {machine.gpuProbe ? <div>{t('research-facts.gpuProbe')}: {machine.gpuProbe.status}</div> : null}
+          {machine.commitments.length > 0 ? <div>{t('research-facts.commitments', { count: machine.commitments.length })}</div> : null}
+        </div>
+      </details>
     </li>
   );
 };
 
 const AttemptRow: React.FC<{
   attempt: ExperimentAttemptView;
+  machine?: ResourceMachineView;
   busy: boolean;
   selected: boolean;
-  onAction: (attemptId: string, action: 'cancel' | 'collect') => void;
+  checked: boolean;
+  onAction: (attemptId: string, action: 'cancel' | 'collect' | 'rerun') => void;
   onSelect: (attemptId: string) => void;
-}> = ({ attempt, busy, selected, onAction, onSelect }) => {
+  onToggleSelect: (attemptId: string) => void;
+}> = ({ attempt, machine, busy, selected, checked, onAction, onSelect, onToggleSelect }) => {
   const { t } = useI18n();
   const attemptState = attempt.state as string;
   const active = ACTIVE_STATES.has(attemptState);
   const collectable = COLLECTABLE.has(attemptState) && (attempt.collection === 'none' || attempt.collection === 'failed');
+  const target = machine?.target;
+  const waitingForDispatch = target?.unassignedWorkRequiresCoordinator === true
+    && (attemptState === 'submitted' || attemptState === 'queued');
+  const hasRemoteReceipt = target?.acceptedJobsSurviveClientDisconnect === true;
+  const acceptedRemotely = hasRemoteReceipt
+    && !waitingForDispatch
+    && attemptState !== 'unknown';
   const attemptLabel = attemptState === 'unknown'
     ? t('research-facts.attempt.unknown')
     : t(`research-facts.attempt.${attemptState as ExperimentAttemptView['state']}`);
   return (
     <li className="py-1">
       <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={checked}
+          aria-label={t('research-facts.selectAttempt', { attempt: attempt.attemptId })}
+          className="size-3.5 shrink-0 accent-primary"
+          onChange={() => onToggleSelect(attempt.attemptId)}
+        />
         <Icon
           name={active ? 'loader-4' : attemptState === 'completed' ? 'checkbox-circle' : attemptState === 'unknown' ? 'question' : 'alert'}
           className={`size-3.5 shrink-0 ${active ? 'animate-spin' : ''}`}
@@ -122,6 +160,13 @@ const AttemptRow: React.FC<{
             {t('research-facts.collect')}
           </button>
         ) : null}
+        {RERUNNABLE.has(attemptState) ? (
+          <button type="button" disabled={busy}
+            className="shrink-0 text-primary hover:underline disabled:opacity-50"
+            onClick={() => onAction(attempt.attemptId, 'rerun')}>
+            {t('research-facts.rerun')}
+          </button>
+        ) : null}
         <button type="button" className="shrink-0 text-primary hover:underline"
           aria-expanded={selected}
           onClick={() => onSelect(attempt.attemptId)}>
@@ -129,12 +174,26 @@ const AttemptRow: React.FC<{
         </button>
       </div>
       <div className="mt-0.5 text-muted-foreground">
-        {attempt.machineId ?? 'local'}
+        {t('research-facts.target')}: {machine?.label ?? machine?.kind ?? (attempt.machineId === 'local' ? 'local' : t('research-facts.unknownTarget'))}
+        {machine && machine.label ? ` (${machine.machineId})` : ''}
+        {attempt.execution?.cwd ? ` · ${t('research-facts.executionCwd')}: ${attempt.execution.cwd}` : ''}
         {attempt.exitCode !== undefined && attempt.exitCode !== null ? ` · exit ${attempt.exitCode}` : ''}
         {attempt.error ? ` · ${attempt.error}` : ''}
         {attempt.queueReason ? ` · ${attempt.queueReason}` : ''}
         {attempt.collection !== 'none' ? ` · ${t(`research-facts.collection.${attempt.collection}`)}` : ''}
       </div>
+      {attempt.retryOfAttemptId ? <div className="mt-0.5 text-muted-foreground">{t('research-facts.retryOf')}: {attempt.retryOfAttemptId}</div> : null}
+      {waitingForDispatch ? (
+        <div className="mt-0.5 text-muted-foreground">
+          {target?.coordinatorHostId && target.coordinatorHostId !== 'local'
+            ? `${t('research-facts.awaitingCoordinator')}: ${target.coordinatorHostId}`
+            : t('research-facts.coordinatorUnavailable')}
+        </div>
+      ) : acceptedRemotely ? (
+        <div className="mt-0.5 text-muted-foreground">
+          {t('research-facts.remoteAccepted')}
+        </div>
+      ) : null}
     </li>
   );
 };
@@ -160,6 +219,11 @@ const ArtifactRow: React.FC<{
   const { t } = useI18n();
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const remote = artifact.remote;
+  const remoteAccessible = remote?.accessible;
+  const downloadable = artifact.state === 'available'
+    && remoteAccessible !== 'unreachable'
+    && remoteAccessible !== 'expired';
 
   const download = async () => {
     setBusy(true);
@@ -184,11 +248,25 @@ const ArtifactRow: React.FC<{
       <span className="min-w-0 flex-1 truncate text-foreground" title={artifact.name}>{artifact.name}</span>
       <span className="text-muted-foreground">{artifact.kind} · {artifact.state}</span>
       {artifact.byteLength !== undefined ? <span className="text-muted-foreground">{artifact.byteLength} B</span> : null}
-      {artifact.state === 'available' ? (
+      {remote ? (
+        <span className="max-w-64 truncate text-muted-foreground" title={`${remote.machineId} · ${remote.outputId} · ${remote.path}`}>
+          {t('research-facts.remoteArtifact')}: {remote.machineId} · {remote.outputId} · {remote.path}
+        </span>
+      ) : null}
+      {downloadable ? (
         <button type="button" disabled={busy} className="shrink-0 text-primary hover:underline disabled:opacity-50" onClick={() => { void download(); }}>
           {t('research-facts.download')}
         </button>
-      ) : <span className="text-muted-foreground">{t('research-facts.artifactUnavailable')}</span>}
+      ) : (
+        <span className="text-muted-foreground">
+          {remoteAccessible === 'unreachable'
+            ? t('research-facts.remoteUnreachable')
+            : remoteAccessible === 'expired'
+              ? t('research-facts.remoteExpired')
+              : t('research-facts.artifactUnavailable')}
+        </span>
+      )}
+      {artifact.error ? <span className="text-muted-foreground">{artifact.error}</span> : null}
       {error ? <span role="alert" className="text-muted-foreground">{error}</span> : null}
     </li>
   );
@@ -278,6 +356,7 @@ const AttemptDetails: React.FC<{
   };
 
   const artifacts = initialArtifacts.length > 0 ? initialArtifacts : (details?.artifacts ?? []);
+  const detailAttempt = details?.attempt;
   return (
     <div className="mt-2 border-l border-border/60 pl-3" data-testid={`research-attempt-details-${attemptId}`}>
       {error ? <p role="alert" className="text-muted-foreground">
@@ -286,6 +365,30 @@ const AttemptDetails: React.FC<{
       {!error && !details ? <p className="text-muted-foreground">{t('research-facts.loadingDetails')}</p> : null}
       {details || initialArtifacts.length > 0 ? (
         <>
+          {detailAttempt ? (
+            <details className="mb-3 text-muted-foreground">
+              <summary className="cursor-pointer hover:text-foreground">{t('research-facts.technicalDetails')}</summary>
+              <div className="mt-1 pl-3">
+                <div>{t('research-facts.backend')}: {detailAttempt.backend}</div>
+                {detailAttempt.machineId ? <div>{t('research-facts.target')}: {detailAttempt.machineId}</div> : null}
+                {detailAttempt.execution ? (
+                  <div>
+                    {t('research-facts.executionRoot')}: {detailAttempt.execution.rootId} · {detailAttempt.execution.canonicalRoot}
+                    <br />{t('research-facts.executionCwd')}: {detailAttempt.execution.cwd}
+                  </div>
+                ) : null}
+                {detailAttempt.threadId || detailAttempt.runId ? (
+                  <div>
+                    {detailAttempt.threadId ? `${t('research-facts.sourceThread')}: ${detailAttempt.threadId}` : ''}
+                    {detailAttempt.threadId && detailAttempt.runId ? ' · ' : ''}
+                    {detailAttempt.runId ? `${t('research-facts.sourceRun')}: ${detailAttempt.runId}` : ''}
+                  </div>
+                ) : null}
+                {detailAttempt.retryOfAttemptId ? <div>{t('research-facts.retryOf')}: {detailAttempt.retryOfAttemptId}</div> : null}
+                {details.job ? <div>{t('research-facts.jobState')}: {details.job.state}</div> : null}
+              </div>
+            </details>
+          ) : null}
           <section aria-label={t('research-facts.logs')}>
             <h5 className="typography-ui-label text-foreground">{t('research-facts.logs')}</h5>
             {renderLog('stdout')}
@@ -318,6 +421,7 @@ export const ResearchFactsPanel: React.FC = () => {
   const [loadError, setLoadError] = React.useState<{ message: string; refresh: boolean } | null>(null);
   const [busy, setBusy] = React.useState(false);
   const [selectedAttemptId, setSelectedAttemptId] = React.useState<string | null>(null);
+  const [selectedAttemptIds, setSelectedAttemptIds] = React.useState<Set<string>>(() => new Set());
   const [collectedArtifacts, setCollectedArtifacts] = React.useState<Record<string, ExperimentArtifactView[]>>({});
   const activeSessionRef = React.useRef<string | null>(sessionId);
   const reloadRef = React.useRef<{ epoch: number; controller: AbortController | null }>({ epoch: 0, controller: null });
@@ -359,6 +463,7 @@ export const ResearchFactsPanel: React.FC = () => {
     setLoadError(null);
     setBusy(false);
     setSelectedAttemptId(null);
+    setSelectedAttemptIds(new Set());
     setCollectedArtifacts({});
     if (!sessionId || !workspaceId) return () => invalidateReload();
     void reload();
@@ -377,7 +482,7 @@ export const ResearchFactsPanel: React.FC = () => {
     };
   }, [invalidateReload, reload, sessionId, workspaceId]);
 
-  const onAction = React.useCallback((attemptId: string, action: 'cancel' | 'collect') => {
+  const onAction = React.useCallback((attemptId: string, action: 'cancel' | 'collect' | 'rerun') => {
     if (!sessionId) return;
     const actionSessionId = sessionId;
     setBusy(true);
@@ -387,6 +492,7 @@ export const ResearchFactsPanel: React.FC = () => {
           ? await collectResearchAttempt(actionSessionId, attemptId)
           : null;
         if (action === 'cancel') await cancelResearchAttempt(actionSessionId, attemptId);
+        if (action === 'rerun') await rerunResearchAttempt(actionSessionId, attemptId);
         if (activeSessionRef.current !== actionSessionId) return;
         if (result && result.artifacts.length > 0) {
           setCollectedArtifacts((previous) => ({ ...previous, [attemptId]: result.artifacts }));
@@ -402,12 +508,52 @@ export const ResearchFactsPanel: React.FC = () => {
     })();
   }, [reload, sessionId]);
 
+  const toggleAttemptSelection = React.useCallback((attemptId: string) => {
+    setSelectedAttemptIds((current) => {
+      const next = new Set(current);
+      if (next.has(attemptId)) next.delete(attemptId);
+      else next.add(attemptId);
+      return next;
+    });
+  }, []);
+
   if (!sessionId || !workspaceId) return null;
   if (!facts && !loadError) return null;
 
   const attempts = facts?.attempts ?? [];
   const machines = facts?.machines ?? [];
   const sources = facts?.sources ?? [];
+  const machinesById = new Map(machines.map((machine) => [machine.machineId, machine]));
+  const selectedAttempts = attempts.filter((attempt) => selectedAttemptIds.has(attempt.attemptId));
+  const cancellableSelected = selectedAttempts.filter((attempt) => ACTIVE_STATES.has(attempt.state));
+  const rerunnableSelected = selectedAttempts.filter((attempt) => RERUNNABLE.has(attempt.state));
+
+  const onBulkAction = (action: 'cancel' | 'rerun') => {
+    if (!sessionId || busy) return;
+    const actionSessionId = sessionId;
+    const targets = action === 'cancel' ? cancellableSelected : rerunnableSelected;
+    if (targets.length === 0) return;
+    setBusy(true);
+    void (async () => {
+      try {
+        if (action === 'cancel') {
+          const results = await cancelResearchAttempts(actionSessionId, targets.map((attempt) => attempt.attemptId));
+          const failed = results.filter((result) => !result.ok);
+          if (failed.length > 0) throw new Error(failed.map((result) => `${result.attemptId}: ${result.error ?? t('research-facts.actionFailed')}`).join('; '));
+        } else {
+          const results = await rerunResearchAttempts(actionSessionId, targets);
+          const failed = results.filter((result) => !result.accepted);
+          if (failed.length > 0) throw new Error(failed.map((result) => result.error ?? t('research-facts.actionFailed')).join('; '));
+        }
+        if (activeSessionRef.current === actionSessionId) setSelectedAttemptIds(new Set());
+        await reload();
+      } catch (error) {
+        if (activeSessionRef.current === actionSessionId) setLoadError({ message: error instanceof Error ? error.message : String(error), refresh: false });
+      } finally {
+        if (activeSessionRef.current === actionSessionId) setBusy(false);
+      }
+    })();
+  };
 
   return (
     <details className="mt-2 typography-meta" data-testid="research-facts-panel">
@@ -429,6 +575,21 @@ export const ResearchFactsPanel: React.FC = () => {
           </button>
         </div>
       ) : null}
+      {selectedAttemptIds.size > 0 ? (
+        <div className="mt-2 flex items-center gap-3 border-y border-border/40 py-2">
+          <span className="text-muted-foreground">{t('research-facts.selectedCount', { count: selectedAttemptIds.size })}</span>
+          <button type="button" disabled={busy || cancellableSelected.length === 0}
+            className="text-primary hover:underline disabled:opacity-50"
+            onClick={() => onBulkAction('cancel')}>
+            {t('research-facts.cancelSelected')}
+          </button>
+          <button type="button" disabled={busy || rerunnableSelected.length === 0}
+            className="text-primary hover:underline disabled:opacity-50"
+            onClick={() => onBulkAction('rerun')}>
+            {t('research-facts.rerunSelected')}
+          </button>
+        </div>
+      ) : null}
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <section aria-label={t('research-facts.attempts')}>
           <h4 className="typography-ui-label text-foreground">{t('research-facts.attempts')}</h4>
@@ -440,10 +601,13 @@ export const ResearchFactsPanel: React.FC = () => {
                 <React.Fragment key={attempt.attemptId}>
                   <AttemptRow
                     attempt={attempt}
+                    machine={attempt.machineId ? machinesById.get(attempt.machineId) : undefined}
                     busy={busy}
                     selected={selectedAttemptId === attempt.attemptId}
+                    checked={selectedAttemptIds.has(attempt.attemptId)}
                     onAction={onAction}
                     onSelect={(attemptId) => setSelectedAttemptId((current) => current === attemptId ? null : attemptId)}
+                    onToggleSelect={toggleAttemptSelection}
                   />
                   {selectedAttemptId === attempt.attemptId ? (
                     <AttemptDetails

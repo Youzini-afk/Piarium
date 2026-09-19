@@ -130,11 +130,58 @@ describe('ResearchFactsPanel', () => {
     expect(text).toContain('attempt-1');
     expect(text).toContain('local');
     expect(text).toContain('queued');
-    expect(text).toContain('attempt-2');
+    expect(text).toContain('research-facts.queued');
     expect(text).toContain('fixtures');
     expect(text).toContain('RTX 4090');
     expect(text).toContain('local-probe');
     expect(text).toContain('research-facts.stale');
+  });
+
+  it('shows managed target identity and coordinator ownership for queued remote work', async () => {
+    const remoteAttempt = { ...attempt, backend: 'managed-remote', machineId: 'managed:host-1', state: 'queued' };
+    const remoteMachine = {
+      ...machine,
+      machineId: 'managed:host-1',
+      kind: 'managed-remote',
+      target: {
+        hostId: 'host-1',
+        connectionId: 'connection-1',
+        source: 'configured-host',
+        capabilities: ['experiment', 'artifact-read'],
+        coordinatorHostId: 'coordinator-1',
+        acceptedJobsSurviveClientDisconnect: false,
+        unassignedWorkRequiresCoordinator: true,
+      },
+    };
+    factsResponse(remoteAttempt, remoteMachine);
+    await render();
+    const text = container.textContent ?? '';
+    expect(text).toContain('host-1');
+    expect(text).toContain('connection-1');
+    expect(text).toContain('coordinator-1');
+    expect(text).toContain('research-facts.awaitingCoordinator');
+    expect(text).toContain('research-facts.targetSource.configured-host');
+  });
+
+  it('keeps an accepted remote run independent from the coordinator host location', async () => {
+    const remoteAttempt = { ...attempt, backend: 'managed-remote', machineId: 'managed:host-1', state: 'running' };
+    const remoteMachine = {
+      ...machine,
+      machineId: 'managed:host-1',
+      kind: 'managed-remote',
+      target: {
+        hostId: 'host-1',
+        connectionId: 'connection-1',
+        source: 'configured-host',
+        capabilities: ['experiment'],
+        coordinatorHostId: 'local',
+        acceptedJobsSurviveClientDisconnect: true,
+        unassignedWorkRequiresCoordinator: false,
+      },
+    };
+    factsResponse(remoteAttempt, remoteMachine);
+    await render();
+    expect(container.textContent ?? '').toContain('research-facts.remoteAccepted');
   });
 
   it('reloads when a harness-experiment-changed event matches the workspace', async () => {
@@ -160,6 +207,52 @@ describe('ResearchFactsPanel', () => {
     expect(cancelCall).toBeTruthy();
     expect(String(cancelCall![0])).toBe('/api/harness/sessions/session-1/experiments/attempt-1/cancel');
     expect((cancelCall![1] as RequestInit).method).toBe('POST');
+  });
+
+  it('reruns a failed attempt through the real rerun route', async () => {
+    const failed = { ...attempt, state: 'failed' };
+    factsResponse(failed);
+    await render();
+    vi.mocked(runtimeFetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/rerun')) {
+        return new Response(JSON.stringify({ spec: { specId: 'spec-1' }, attempt: { ...failed, attemptId: 'attempt-2', state: 'submitted', retryOfAttemptId: 'attempt-1' }, text: 'rerun' }));
+      }
+      if (url.endsWith('/experiments')) return new Response(JSON.stringify({ attempts: [failed] }));
+      if (url.endsWith('/resources')) return new Response(JSON.stringify({ machines: [], generatedAt: 6 }));
+      if (url.endsWith('/sources')) return new Response(JSON.stringify({ sources: [] }));
+      return new Response('not found', { status: 404 });
+    });
+    const rerunButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'research-facts.rerun');
+    expect(rerunButton).toBeTruthy();
+    await act(async () => rerunButton!.click());
+    const rerunCall = vi.mocked(runtimeFetch).mock.calls.find(([input]) => String(input).endsWith('/rerun'));
+    expect(rerunCall).toBeTruthy();
+    expect((rerunCall![1] as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((rerunCall![1] as RequestInit).body))).toEqual(expect.objectContaining({ requestId: expect.any(String) }));
+  });
+
+  it('cancels selected attempts through the batch route', async () => {
+    factsResponse();
+    await render();
+    vi.mocked(runtimeFetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/cancel-many')) return new Response(JSON.stringify({ items: [{ attemptId: 'attempt-1', ok: true, attempt: { ...attempt, state: 'stopping' } }] }));
+      if (url.endsWith('/experiments')) return new Response(JSON.stringify({ attempts: [attempt] }));
+      if (url.endsWith('/resources')) return new Response(JSON.stringify({ machines: [], generatedAt: 6 }));
+      if (url.endsWith('/sources')) return new Response(JSON.stringify({ sources: [] }));
+      return new Response('not found', { status: 404 });
+    });
+    const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement;
+    await act(async () => checkbox.click());
+    const cancelSelected = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'research-facts.cancelSelected');
+    expect(cancelSelected).toBeTruthy();
+    await act(async () => cancelSelected!.click());
+    const cancelCall = vi.mocked(runtimeFetch).mock.calls.find(([input]) => String(input).endsWith('/cancel-many'));
+    expect(cancelCall).toBeTruthy();
+    expect(JSON.parse(String((cancelCall![1] as RequestInit).body))).toEqual({ attemptIds: ['attempt-1'] });
   });
 
   it('ignores an older reload after switching sessions', async () => {
@@ -221,6 +314,41 @@ describe('ResearchFactsPanel', () => {
     expect(loadButton).toBeTruthy();
     await act(async () => loadButton!.click());
     expect(vi.mocked(runtimeFetch).mock.calls.some(([input]) => String(input).includes('/experiments/attempt-1/logs?'))).toBe(true);
+  });
+
+  it('does not offer download for an unavailable remote artifact', async () => {
+    factsResponse();
+    await render();
+    vi.mocked(runtimeFetch).mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/experiments/attempt-1')) {
+        return new Response(JSON.stringify({
+          attempt,
+          artifacts: [{
+            artifactId: 'remote-artifact',
+            attemptId: 'attempt-1',
+            name: 'remote.bin',
+            kind: 'file',
+            state: 'available',
+            remote: {
+              machineId: 'managed:host-1',
+              outputId: 'output-1',
+              path: '/srv/piarium/output/remote.bin',
+              retainedBy: 'execution-target',
+              accessible: 'unreachable',
+            },
+          }],
+        }));
+      }
+      return new Response('not found', { status: 404 });
+    });
+    const detailsButton = [...container.querySelectorAll('button')]
+      .find((button) => button.textContent === 'research-facts.viewDetails');
+    await act(async () => detailsButton!.click());
+    const text = container.textContent ?? '';
+    expect(text).toContain('/srv/piarium/output/remote.bin');
+    expect(text).toContain('research-facts.remoteUnreachable');
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'research-facts.download')).toBe(false);
   });
 
   it('ignores a log response from a details controller replaced by an attempt refresh', async () => {

@@ -450,11 +450,12 @@ describe("shell-supervisor disposal protection", () => {
     failSecondExitRegistration?: boolean;
     killThrows?: boolean;
     killEmitsExit?: boolean;
-  } = {}): PtyProcess & { emitExit: () => void } => {
+  } = {}): PtyProcess & { emitData: (data: string) => void; emitExit: () => void } => {
     const dataHandlers = new Set<(data: string) => void>();
     const exitHandlers = new Set<(event: { exitCode: number; signal: number }) => void>();
     let exitRegistrations = 0;
     return {
+      emitData: (data) => { for (const handler of [...dataHandlers]) handler(data); },
       emitExit: () => { for (const handler of [...exitHandlers]) handler({ exitCode: 0, signal: 0 }); },
       kill: () => {
         if (options.killThrows) throw new Error("kill failed");
@@ -476,6 +477,76 @@ describe("shell-supervisor disposal protection", () => {
       },
     };
   };
+
+  it("returns a real identity for waitMs zero and waits for output without locking controls", async () => {
+    const outputStore = createOutputStore();
+    const process = controlledProcess();
+    let starts = 0;
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "output-wait",
+      ptyProvider: { backend: "fake", spawn: () => process },
+      commandLifecycle: { started: () => { starts += 1; } },
+    });
+    try {
+      const started = await supervisor.exec("long command", { waitMs: 0, toolCallId: "call-1" });
+      expect(started).toMatchObject({ kind: "background", id: "sh_1", waitedMs: expect.any(Number), toolCallId: "call-1" });
+      if (started.kind !== "background") throw new Error("expected background shell");
+      await expect(supervisor.exec("long command", { waitMs: 0, toolCallId: "call-1" })).resolves.toEqual(started);
+      expect(starts).toBe(1);
+
+      const newOutput = supervisor.waitForOutput(started.id, 0, 1_000);
+      await expect(supervisor.write(started.id, "input\n")).resolves.toBe(true);
+      process.emitData("new output\n");
+      await expect(newOutput).resolves.toBeUndefined();
+      const first = await supervisor.read(started.id);
+      expect(first).toMatchObject({ running: true });
+      expect(first.text).toContain("new output");
+      await expect(supervisor.read("call-1")).resolves.toMatchObject({ shellId: "sh_1", text: expect.stringContaining("new output") });
+
+      const controller = new AbortController();
+      const cancelledWait = supervisor.waitForOutput(started.id, first.nextOffset, 1_000, controller.signal);
+      controller.abort();
+      await expect(cancelledWait).rejects.toThrow("Shell output wait aborted");
+      await expect(supervisor.read(started.id)).resolves.toMatchObject({ running: true });
+
+      const exited = supervisor.waitForOutput(started.id, first.nextOffset, 1_000);
+      process.emitExit();
+      await expect(exited).resolves.toBeUndefined();
+      await expect(supervisor.read(started.id)).resolves.toMatchObject({ running: false, exitCode: 0 });
+    } finally {
+      await supervisor.dispose().catch(() => undefined);
+      outputStore.dispose();
+    }
+  });
+
+  it("turns a cancelled startup observation into a recoverable background command", async () => {
+    const outputStore = createOutputStore();
+    const process = controlledProcess();
+    const supervisor = createShellSupervisor({
+      interpreter: { kind: "bash", command: "bash", args: [], env: {} },
+      outputStore,
+      sessionId: "exec-cancel",
+      ptyProvider: { backend: "fake", spawn: () => process },
+    });
+    try {
+      const controller = new AbortController();
+      const execution = supervisor.exec("long command", {
+        waitMs: 10_000,
+        toolCallId: "call-cancel",
+        signal: controller.signal,
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      controller.abort();
+      await expect(execution).resolves.toMatchObject({ kind: "background", id: "sh_1" });
+      await expect(supervisor.read("call-cancel")).resolves.toMatchObject({ running: true, shellId: "sh_1" });
+      process.emitExit();
+    } finally {
+      await supervisor.dispose().catch(() => undefined);
+      outputStore.dispose();
+    }
+  });
 
   const setup = async (options: {
     failSecondExitRegistration?: boolean;

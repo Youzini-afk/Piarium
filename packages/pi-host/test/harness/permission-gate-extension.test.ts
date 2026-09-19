@@ -116,7 +116,16 @@ describe("native permission gate integration", () => {
     const { bridge, audits } = makeBridge();
     const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("read")]);
     const result = ui();
-    assert.equal(await call({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), undefined);
+    assert.deepEqual(await call({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), {
+      executionPlan: {
+        barrier: false,
+        resources: [{
+          id: "host-path:execution-ws:workspace:/src/a.ts",
+          access: "read",
+          scope: "exact",
+        }],
+      },
+    });
     assert.equal(result.state.selectCalls, 0);
     assert.equal(audits.at(-1)?.decision, "allow");
     assert.equal(audits.at(-1)?.target.source.kind, "builtin");
@@ -171,7 +180,8 @@ describe("native permission gate integration", () => {
       bridge,
       smartJudge: async () => { judged += 1; return "allow"; },
     }, [builtin("edit")]);
-    assert.equal(await edit({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never), undefined);
+    const editResult = await edit({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never);
+    assert.equal((editResult as { executionPlan?: { resources?: unknown[] } }).executionPlan?.resources?.length, 1);
     assert.equal(judged, 1);
 
     const unknown = harness({

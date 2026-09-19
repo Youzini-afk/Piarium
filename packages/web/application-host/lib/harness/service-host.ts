@@ -3,7 +3,7 @@ import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
 import type { HarnessShellSetting } from "./harness-shell-settings.js";
 import type { HarnessWebBinding } from "./harness-web-settings.js";
-import { createShellSupervisor, selectInterpreter, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
+import { createShellSupervisor, selectInterpreter, type ShellCommandCompletedEvent, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import type { TerminalSessionApi } from "../terminal/session-api.js";
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
@@ -21,6 +21,8 @@ import type { ThreadTranscriptReader } from "./thread-transcript.js";
 import { createVerificationCoordinator, type VerificationCoordinator } from "./verification-coordinator.js";
 import type { CapturedThreadDraftBaseline, PrepareIsolatedBranchInput } from "./thread-runtime.js";
 import { createObservationCursorStore, type ObservationCursorStore } from "./observation-cursors.js";
+import { createZone2DeliveryService } from "./zone2-threads.js";
+import { clearManagedShellCompletionWatches } from "./harness-services.js";
 import type {
   HarnessActorContext,
   HarnessActorIdentity,
@@ -243,6 +245,7 @@ export interface HarnessServiceHost {
   knowledgeStore: KnowledgeStore | null;
   userKnowledgeStore: KnowledgeStore | null;
   zone2Provider: ((request: Zone2MaterialRequest) => Promise<Zone2MaterialResult>) | null;
+  zone2Delivery: ReturnType<typeof createZone2DeliveryService>;
   onSessionCompacted: ((sessionId: string) => void) | null;
   recallDepsProvider: ((sessionId: string, workspaceId: string | null) => Promise<RecallToolDeps>) | null;
   knowledgeSuggestDepsProvider: ((
@@ -388,6 +391,9 @@ export interface HarnessServiceHost {
   experimentService: import("./experiments.js").ExperimentService | null;
   resourceService: import("./resources.js").ResourceService | null;
   sourceService: import("./sources.js").SourceService | null;
+  managedRemoteTargets: import("./managed-remote-client.js").ManagedRemoteTargetRegistry | null;
+  /** Deliver one terminal shell fact into the same 7G observer used by local PTY commands. */
+  observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): void;
   dispose(): Promise<void>;
 }
 
@@ -431,6 +437,8 @@ export interface HarnessServiceHostOptions {
    */
   registerWriter?: (sessionId: string, workspaceRoot: string) => Promise<{ close: () => Promise<void> } | null>;
   createTerminalSession?: TerminalSessionApi["createTerminalSession"];
+  /** Receives the single PTY-confirmed completion fact for 7G context delivery. */
+  onShellCompleted?: (sessionId: string, event: ShellCommandCompletedEvent) => void | Promise<void>;
   /** Web fetch service (null on cloud/web hosts without fetch capability) */
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
@@ -479,6 +487,7 @@ export interface HarnessServiceHostOptions {
   experimentService?: HarnessServiceHost["experimentService"];
   resourceService?: HarnessServiceHost["resourceService"];
   sourceService?: HarnessServiceHost["sourceService"];
+  managedRemoteTargets?: HarnessServiceHost["managedRemoteTargets"];
 }
 
 export function createHarnessServiceHost(options: HarnessServiceHostOptions): HarnessServiceHost {
@@ -516,6 +525,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const knowledgeStore = options.knowledgeStore ?? null;
   const userKnowledgeStore = options.userKnowledgeStore ?? null;
   const zone2Provider = options.zone2Provider ?? null;
+  const zone2Delivery = createZone2DeliveryService();
   const onSessionCompacted = options.onSessionCompacted ?? null;
   const recallDepsProvider = options.recallDepsProvider ?? null;
   const knowledgeSuggestDepsProvider = options.knowledgeSuggestDepsProvider ?? null;
@@ -543,6 +553,15 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const releaseAgentInputContext = options.releaseAgentInputContext ?? (() => ({ released: false }));
 
   const sessions = new Map<string, SessionEntry>();
+  const observedShellCompletions = new Set<string>();
+  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): void => {
+    const key = `${sessionId}\0${event.executionId}`;
+    if (observedShellCompletions.has(key)) return;
+    observedShellCompletions.add(key);
+    void Promise.resolve(options.onShellCompleted?.(sessionId, event)).catch((error: unknown) => {
+      console.error('[HarnessShell] Completion observation failed:', sessionId, error);
+    });
+  };
   // A broker session can disappear before its PTY exits. Keep that writer visible
   // to worktree reclamation until disposal has actually completed.
   const retiringShells = new Map<ShellSupervisor, { sessionId: string; pending: Promise<void> | null }>();
@@ -596,7 +615,13 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         cwd: ctx.workspaceRoot ?? undefined,
         commandLifecycle: {
           started: (event) => verification.beginCommand({ ...event, actor: ctx.actor }),
-          completed: (event) => verification.completeCommand({ ...event, actor: ctx.actor }),
+          completed: (event) => {
+            void Promise.resolve(verification.completeCommand({ ...event, actor: ctx.actor }))
+              .then(() => observeShellCompletion(sessionId, event))
+              .catch((error: unknown) => {
+                console.error('[HarnessShell] Completion observation failed:', sessionId, error);
+              });
+          },
         },
         ...(options.registerWriter ? {
           registerWriter: () => options.registerWriter!(sessionId, ctx.workspaceRoot),
@@ -638,6 +663,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   const dropSession = (sessionId: string, actor?: HarnessActorIdentity): void => {
     const entry = sessions.get(sessionId);
     if (actor && (!entry || !hasActor(actor))) return;
+    clearManagedShellCompletionWatches(host, sessionId);
     if (entry) {
       void options.releaseWebFetchReceipts?.(sessionId, entry.workspaceId).catch((error: unknown) => {
         console.error('[HarnessWebFetch] Temporary receipt release failed:', error);
@@ -648,6 +674,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     outputStore.dropSession(sessionId);
     exploreQueryStore.dropSession(sessionId);
     observationCursors.clearObserver(sessionId);
+    zone2Delivery.abort(sessionId);
     threadRegistry?.clearCursorsForSession(sessionId);
     void Promise.resolve(pathLockService.dropSession(sessionId)).catch((error: unknown) => {
       console.error('[HarnessPathLock] Session lease release failed:', error);
@@ -708,6 +735,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
   };
 
   const dispose = async (): Promise<void> => {
+    clearManagedShellCompletionWatches(host);
     const disposes: Promise<void>[] = [];
     const sessionIds = new Set([...sessions.keys(), ...[...retiringShells.values()].map((entry) => entry.sessionId)]);
     await Promise.all([...sessionIds].map(closeSessionShell));
@@ -715,13 +743,14 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     exploreQueryStore.dispose();
     outputStore.dispose();
     observationCursors.dispose();
+    zone2Delivery.dispose();
     await pathLockService.dispose();
     if (knowledgeStore) disposes.push(knowledgeStore.close());
     if (userKnowledgeStore) disposes.push(userKnowledgeStore.close());
     await Promise.all(disposes);
   };
 
-  return {
+  const host: HarnessServiceHost = {
     outputStore,
     exploreQueryStore,
     observationCursors,
@@ -749,6 +778,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     knowledgeStore,
     userKnowledgeStore,
     zone2Provider,
+    zone2Delivery,
     onSessionCompacted,
     recallDepsProvider,
     knowledgeSuggestDepsProvider,
@@ -771,6 +801,8 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     experimentService: options.experimentService ?? null,
     resourceService: options.resourceService ?? null,
     sourceService: options.sourceService ?? null,
+    managedRemoteTargets: options.managedRemoteTargets ?? null,
+    observeShellCompletion,
     commitAgentInputContext,
     releaseAgentInputContext,
     registerSession,
@@ -794,4 +826,5 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     ...(options.agentInputDraftPaths ? { agentInputDraftPaths: options.agentInputDraftPaths } : {}),
     ...(options.agentInputSurfaceOwner ? { agentInputSurfaceOwner: options.agentInputSurfaceOwner } : {}),
   };
+  return host;
 }

@@ -273,6 +273,7 @@ describe('ElectronSshManager', () => {
       mainForwardDetached: false,
       localPort: null,
       sessionDir: '',
+      clientToken: '',
     });
 
     const commandState: { error: Error | null } = { error: null };

@@ -99,6 +99,7 @@ interface SshSession {
   remotePort: number | null;
   sessionDir: string;
   startedByUs: boolean;
+  clientToken: string;
 }
 
 interface SshAuthRecord {
@@ -983,34 +984,49 @@ export class ElectronSshManager {
     });
   }
 
-  async issueClientToken(localUrl: string, piariumPassword: string | null): Promise<string> {
+  async issueClientToken(localUrl: string, piariumPassword: string | null, instanceId = 'connection'): Promise<string> {
     const password = typeof piariumPassword === 'string' ? piariumPassword.trim() : '';
-    if (!password) return '';
-
-    const loginResponse = await fetch(new URL('/auth/session', `${localUrl}/`).toString(), {
-      method: 'POST',
-      signal: AbortSignal.timeout(10_000),
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        password,
-        trustDevice: true,
-        issueClientToken: true,
-        clientLabel: 'Piarium Desktop SSH',
-      }),
-    });
-    if (!loginResponse.ok) {
-      throw new Error(`Configured Piarium UI password was rejected by forwarded server (status ${loginResponse.status})`);
+    const dedupeKey = `desktop-ssh-managed:${instanceId}`;
+    const settings = this.settingsStore.readSync();
+    const retained = (Array.isArray(settings.desktopHosts) ? settings.desktopHosts : [])
+      .find((host) => host?.id === instanceId);
+    const retainedToken = typeof retained?.clientToken === 'string' ? retained.clientToken.trim() : '';
+    if (retainedToken) {
+      const retainedResponse = await fetch(new URL('/api/harness/managed-execution/v1/identity', `${localUrl}/`).toString(), {
+        signal: AbortSignal.timeout(5_000),
+        headers: { Accept: 'application/json', Authorization: `Bearer ${retainedToken}` },
+      }).catch(() => null);
+      if (retainedResponse?.ok) return retainedToken;
     }
+    let cookie = '';
+    if (password) {
+      const loginResponse = await fetch(new URL('/auth/session', `${localUrl}/`).toString(), {
+        method: 'POST',
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          password,
+          trustDevice: true,
+          issueClientToken: true,
+          clientLabel: 'Piarium Desktop SSH',
+          clientKind: 'desktop-ssh-coordinator',
+          clientProfile: 'full-control',
+          dedupeKey,
+        }),
+      });
+      if (!loginResponse.ok) {
+        throw new Error(`Configured Piarium UI password was rejected by forwarded server (status ${loginResponse.status})`);
+      }
 
-    const payload = await loginResponse.json().catch(() => null);
-    const token = typeof payload?.clientToken === 'string' ? payload.clientToken.trim() : '';
-    if (token) return token;
-
-    const cookie = this.extractCookieHeader(loginResponse);
-    if (!cookie) return '';
+      const payload = await loginResponse.json().catch(() => null);
+      const token = typeof payload?.clientToken === 'string' ? payload.clientToken.trim() : '';
+      if (token) return token;
+      cookie = this.extractCookieHeader(loginResponse);
+      if (!cookie) return '';
+    }
 
     const tokenResponse = await fetch(new URL('/api/client-auth/clients', `${localUrl}/`).toString(), {
       method: 'POST',
@@ -1018,13 +1034,36 @@ export class ElectronSshManager {
       headers: {
         Accept: 'application/json',
         'Content-Type': 'application/json',
-        Cookie: cookie,
+        ...(cookie ? { Cookie: cookie } : {}),
       },
-      body: JSON.stringify({ label: 'Piarium Desktop SSH' }),
+      body: JSON.stringify({
+        label: 'Piarium Desktop SSH',
+        clientKind: 'desktop-ssh-coordinator',
+        profile: 'full-control',
+        dedupeKey,
+      }),
     });
     if (!tokenResponse.ok) return '';
     const tokenPayload = await tokenResponse.json().catch(() => null);
     return typeof tokenPayload?.token === 'string' ? tokenPayload.token.trim() : '';
+  }
+
+  async managedExecutionLifecycle(localUrl: string, clientToken: string): Promise<{ activeJobs: number; keepAliveRequired: boolean } | null> {
+    try {
+      const response = await fetch(new URL('/api/harness/managed-execution/v1/lifecycle', `${localUrl}/`).toString(), {
+        signal: AbortSignal.timeout(5_000),
+        headers: {
+          Accept: 'application/json',
+          ...(clientToken ? { Authorization: `Bearer ${clientToken}` } : {}),
+        },
+      });
+      if (!response.ok) return null;
+      const body = await response.json().catch(() => null);
+      if (!body || typeof body !== 'object' || !Number.isSafeInteger(body.activeJobs) || body.activeJobs < 0) return null;
+      return { activeJobs: body.activeJobs, keepAliveRequired: body.keepAliveRequired === true };
+    } catch {
+      return null;
+    }
   }
 
   extractCookieHeader(response: Response): string {
@@ -1329,7 +1368,19 @@ export class ElectronSshManager {
 
     if (session) {
       if (session.startedByUs && session.remotePort && session.instance.remotePiarium.mode === 'managed' && !session.instance.remotePiarium.keepRunning) {
-        await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort);
+        const localUrl = session.localPort ? `http://127.0.0.1:${session.localPort}` : null;
+        const lifecycle = localUrl ? await this.managedExecutionLifecycle(localUrl, session.clientToken) : null;
+        if (lifecycle && !lifecycle.keepAliveRequired && lifecycle.activeJobs === 0) {
+          await this.stopRemoteServerBestEffort(session.parsed, session.controlPath, session.remotePort);
+        } else {
+          this.appendLogWithLevel(
+            id,
+            'INFO',
+            lifecycle
+              ? `Leaving remote Piarium running to supervise ${lifecycle.activeJobs} accepted managed job(s)`
+              : 'Leaving remote Piarium running because managed-job lifecycle could not be confirmed',
+          );
+        }
       }
       await this.stopControlMasterBestEffort(session.parsed, session.controlPath);
       const auth = this.sshAuth.get(session.parsed);
@@ -1389,6 +1440,7 @@ export class ElectronSshManager {
       localPort: null,
       remotePort: null,
       startedByUs: false,
+      clientToken: '',
       master: null,
       mainForward: null,
       mainForwardDetached: false,
@@ -1457,7 +1509,8 @@ export class ElectronSshManager {
 
     const localUrl = `http://127.0.0.1:${localPort}`;
     const label = instance.nickname?.trim() || parsed.destination || id;
-    const clientToken = await this.issueClientToken(localUrl, this.configuredPiariumPassword(instance));
+    const clientToken = await this.issueClientToken(localUrl, this.configuredPiariumPassword(instance), instance.id);
+    session.clientToken = clientToken;
     await this.updateHostRuntime(id, label, localUrl, clientToken);
     if (instance.localForward?.preferredLocalPort !== localPort) {
       await this.persistLocalPort(id, localPort);

@@ -377,6 +377,8 @@ export const terminalCommandDedupeKey = (sessionId: string, commandId: string): 
 
 export interface KnowledgeStore {
   readonly dim: number;
+  /** O(1) in-process revision for accepted/suggested knowledge mutations. */
+  knowledgeRevision(): string;
   putEvent(e: EventInput): Promise<PutEventResult>;
   listEvents(filter: { sessionId: string; afterId?: NodeId; minTurnIndex?: number }): Promise<StoredEvent[]>;
   putSession(s: SessionInput): Promise<NodeId>;
@@ -616,6 +618,10 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     // capacity, since 1024 MB was no better than 64 MB (D-141).
     payloadCacheMb: 0,
   });
+  const knowledgeInstanceId = randomUUID();
+  let knowledgeEpoch = 0;
+  const bumpKnowledgeEpoch = (): void => { knowledgeEpoch += 1; };
+  const knowledgeRevision = (): string => `${knowledgeInstanceId}:${knowledgeEpoch}`;
 
   // Property indexes. All are persistent and idempotent to create, and
   // creating one over existing rows backfills it, so an older database picks
@@ -1046,6 +1052,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
 
   const store: KnowledgeStore = {
     dim,
+    knowledgeRevision,
 
     async putEvent(e: EventInput): Promise<PutEventResult> {
       return enqueueWrite(() => {
@@ -1286,6 +1293,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, k.content);
         if (k.trigger) db.indexKeyword(id, k.trigger);
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
         return id;
       });
@@ -1327,6 +1335,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, k.content);
         if (k.trigger) db.indexKeyword(id, k.trigger);
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
         const knowledge = knowledgeFromPayload(id, payload);
         if (!knowledge) throw new KnowledgeMutationError("invalid", `Invalid knowledge row: ${id}`);
@@ -1379,6 +1388,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, patch.content);
         if (patch.trigger) db.indexKeyword(id, patch.trigger);
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
       });
     },
@@ -1406,6 +1416,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         db.indexText(id, patch.content);
         if (patch.trigger) db.indexKeyword(id, patch.trigger);
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
       });
     },
@@ -1430,6 +1441,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         if (payload["invalidAt"] !== undefined) return;
         db.patchPayload(id, { $set: { invalidAt: Date.now() } });
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
       });
     },
@@ -1542,6 +1554,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
           }
         }
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id, ...superseded]);
       });
     },
@@ -1567,6 +1580,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
         }
         db.patchPayload(id, { $set: { status: "dismissed" } });
         db.flush();
+        bumpKnowledgeEpoch();
         notifyKnowledge([id]);
       });
     },

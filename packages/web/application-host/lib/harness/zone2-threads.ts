@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type {
   Thread,
   ThreadParent,
@@ -10,12 +11,64 @@ import type { Zone2Thread, Zone2Threads } from "./zone2.js";
 
 interface Zone2ThreadCursor {
   eventSeqByThread: Record<string, number>;
+  materialByThread: Record<string, string | null>;
+  messageIdsByThread: Record<string, string[]>;
+  resultByThread: Record<string, string | null>;
   overlapWarning: string | null;
 }
 
 export interface Zone2ThreadProjectionOptions {
   cursors: ObservationCursorStore;
   registry: ThreadRegistry;
+}
+
+/**
+ * Explicit delivery acknowledgement for historical thread material. A
+ * session has at most one pending preparation; a newer preparation aborts the
+ * older one so a failed/replaced request cannot advance its cursor later.
+ */
+export function createZone2DeliveryService() {
+  const pending = new Map<string, PendingObservation<Zone2Threads>>();
+  const deliveryIds = new Map<string, string>();
+  return {
+    reconcile(sessionId: string, retainedRefs: ReadonlySet<string>): void {
+      const observation = pending.get(sessionId);
+      if (observation && retainedRefs.has(observation.observationRef)) {
+        // The response was persisted in Pi history but the explicit ACK was
+        // lost. Treat that retained receipt as delivery before replacing the
+        // pending preparation.
+        observation.commit();
+      } else {
+        observation?.abort();
+      }
+      pending.delete(sessionId);
+      deliveryIds.delete(sessionId);
+    },
+    setPending(sessionId: string, observation: PendingObservation<Zone2Threads>): string {
+      pending.get(sessionId)?.abort();
+      const deliveryId = randomUUID();
+      pending.set(sessionId, observation);
+      deliveryIds.set(sessionId, deliveryId);
+      return deliveryId;
+    },
+    confirm(sessionId: string, deliveryId: string): boolean {
+      if (deliveryIds.get(sessionId) !== deliveryId) return false;
+      const observation = pending.get(sessionId);
+      pending.delete(sessionId);
+      deliveryIds.delete(sessionId);
+      return observation?.commit() ?? false;
+    },
+    abort(sessionId: string): void {
+      pending.get(sessionId)?.abort();
+      pending.delete(sessionId);
+      deliveryIds.delete(sessionId);
+    },
+    dispose(): void {
+      for (const observation of pending.values()) observation.abort();
+      pending.clear();
+      deliveryIds.clear();
+    },
+  };
 }
 
 const priority = (thread: Thread): number => {
@@ -47,9 +100,49 @@ const projectThread = (thread: Thread, activeRun: ThreadRun | null): Zone2Thread
       ? summarizeRetrievalEvidence(thread.pendingEvidence)
       : null,
   deviations: [...(thread.report?.deviations ?? [])],
+  ...(thread.messages
+    ? {
+        messages: thread.messages
+          .filter((message) => message.direction === "in" && (message.status === "delivered" || message.status === "resolved"))
+          .map((message) => ({
+            id: message.id,
+            from: `${message.from.kind} ${message.from.id}`,
+            kind: message.kind,
+            text: message.text,
+            at: message.at,
+          })),
+      }
+    : {}),
+  ...(thread.resultRevision === undefined ? {} : { resultRevision: thread.resultRevision }),
   mergeReady: thread.integrationBinding?.valid === false ? false : thread.integrationBinding?.mergeReady ?? null,
   ...(thread.verification ? { verification: thread.verification } : {}),
 });
+
+/** Identity of durable message/result material, excluding transient state. */
+const materialParts = (thread: Thread): { messages: Array<[string, string]>; result: unknown | null } => {
+  const messages = (thread.messages ?? [])
+    .filter((message) => message.direction === "in" && (message.status === "delivered" || message.status === "resolved"))
+    .map((message) => [message.id, message.text] as [string, string]);
+  const review = thread.verification?.review;
+  const result = thread.resultRevision === undefined && !thread.report && (!review || review.status === "none")
+    ? null
+    : {
+        revision: thread.resultRevision ?? thread.report?.resultRevision ?? null,
+        conclusion: thread.report?.conclusion ?? null,
+        evidence: thread.report?.evidence ?? thread.pendingEvidence ?? null,
+        deviations: thread.report?.deviations ?? [],
+        review: review && review.status !== "none"
+          ? { revision: review.resultRevision, status: review.status, conclusion: review.conclusion ?? null, error: review.error ?? null }
+          : null,
+      };
+  return { messages, result };
+};
+
+const materialIdentity = (thread: Thread): string | null => {
+  const parts = materialParts(thread);
+  if (parts.messages.length === 0 && parts.result === null) return null;
+  return JSON.stringify(parts);
+};
 
 const computeOverlapWarning = (snapshots: Array<{ thread: Thread; activeRun: ThreadRun | null }>): string | null => {
   const threadPaths = new Map<string, string[]>();
@@ -101,26 +194,52 @@ const zone2ThreadTask = (
   workspaceId: string,
   parent: ThreadParent,
   prepared?: (cursor: Zone2ThreadCursor, previous: Zone2ThreadCursor | undefined) => void,
+  materialOnly = false,
 ) => async (previous: ObservationCursorEntry<Zone2ThreadCursor> | null): Promise<{ cursor: Zone2ThreadCursor; result: Zone2Threads }> => {
   const snapshots = await options.registry.listThreadSnapshots(workspaceId, parent);
   const eventSeqByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, thread.eventSeq]));
-  const selected = snapshots
-    .filter(({ thread }) => (
-      previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq
-    ))
+  const materialByThread = Object.fromEntries(snapshots.map(({ thread }) => [thread.id, materialIdentity(thread)]));
+  const messageIdsByThread = Object.fromEntries(snapshots.map(({ thread }) => [
+    thread.id,
+    materialParts(thread).messages.map(([id]) => id),
+  ]));
+  const resultByThread = Object.fromEntries(snapshots.map(({ thread }) => {
+    const result = materialParts(thread).result;
+    return [thread.id, result === null ? null : JSON.stringify(result)];
+  }));
+  const selected = snapshots.filter(({ thread }) => materialOnly
+    ? materialByThread[thread.id] !== null
+      && materialByThread[thread.id] !== (previous?.value.materialByThread?.[thread.id] ?? null)
+    : previous?.value.eventSeqByThread[thread.id] !== thread.eventSeq)
     .toSorted((left, right) => (
       priority(left.thread) - priority(right.thread)
       || right.thread.updatedAt.localeCompare(left.thread.updatedAt)
       || left.thread.id.localeCompare(right.thread.id)
     ));
   const overlapWarning = computeOverlapWarning(snapshots);
-  const cursor = { eventSeqByThread, overlapWarning };
+  const cursor: Zone2ThreadCursor = {
+    eventSeqByThread,
+    materialByThread,
+    messageIdsByThread,
+    resultByThread,
+    overlapWarning,
+  };
   prepared?.(cursor, previous?.value);
   return {
     cursor,
     result: {
       status: "ready",
-      items: selected.map(({ thread, activeRun }) => projectThread(thread, activeRun)),
+      items: selected.map(({ thread, activeRun }) => {
+        const item = projectThread(thread, activeRun);
+        if (!materialOnly) return item;
+        const previousMessages = new Set(previous?.value.messageIdsByThread?.[thread.id] ?? []);
+        const currentMessages = item.messages ?? [];
+        item.materialMessageIds = currentMessages
+          .map((message) => message.id)
+          .filter((id) => !previousMessages.has(id));
+        item.includeResult = resultByThread[thread.id] !== (previous?.value.resultByThread?.[thread.id] ?? null);
+        return item;
+      }),
       ...(overlapWarning !== (previous?.value.overlapWarning ?? null)
         ? { overlapWarning: overlapWarning ?? "previous path overlap cleared" } : {}),
     },
@@ -175,17 +294,23 @@ export async function prepareZone2Threads(
     zone2ThreadTask(options, scope.workspaceId, scope.parent, (cursor, baseline) => {
       next = cursor;
       previous = baseline;
-    }),
+    }, true),
   );
   return {
     ...pending,
     commitPresented(ids, overlapPresented) {
       // Budget omission is not delivery. Keep each unpresented fact pending.
-      for (const id of Object.keys(next.eventSeqByThread)) {
+      for (const id of Object.keys(next.materialByThread)) {
         if (ids.has(id)) continue;
-        const old = previous?.eventSeqByThread[id];
-        if (old === undefined) delete next.eventSeqByThread[id];
-        else next.eventSeqByThread[id] = old;
+        const old = previous?.materialByThread?.[id];
+        if (old === undefined) delete next.materialByThread[id];
+        else next.materialByThread[id] = old;
+        const oldMessages = previous?.messageIdsByThread?.[id];
+        if (oldMessages === undefined) delete next.messageIdsByThread[id];
+        else next.messageIdsByThread[id] = [...oldMessages];
+        const oldResult = previous?.resultByThread?.[id];
+        if (oldResult === undefined) delete next.resultByThread[id];
+        else next.resultByThread[id] = oldResult;
       }
       if (!overlapPresented) next.overlapWarning = previous?.overlapWarning ?? null;
       return pending.commit();
