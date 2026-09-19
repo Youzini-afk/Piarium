@@ -40,7 +40,7 @@ companion mobile client, so no surface moves extension execution into an untrust
 7. Produce signed-ready desktop installers with deterministic runtime diagnostics.
 8. Deliver the Rust workspace, recovery, process, and file/structure computation kernel as stage R,
    preserving one authority per resource and keeping product/model policy in TypeScript.
-9. Support a research profile in which heterogeneous Pi workers and managed compute resources explore a
+9. Support a research work focus in which heterogeneous Pi workers and managed compute resources explore a
    scientific problem in parallel, while reusing the same Thread/Run, Host, Rust kernel, context,
    permission, and artifact boundaries.
 
@@ -476,6 +476,17 @@ split/stack/editor-area document held by the `piarium.workbench.layout` v1 host 
 and workspace-scoped extension storage; missing and empty documents fall back to the distribution
 default without writing it, while malformed or failed reads keep the last valid in-memory document
 and raise a diagnostic rather than overwriting host state.
+
+D-297 is an accepted design change, pending phase 7A: workbench UIUX and Agent work focus have independent
+selection and consumers. Research and later office workbenches use the existing workbench-switching area
+and Motion transition scenes. The current workspace-based profile selection described above will change
+so that navigating projects or conversations keeps the user's chosen shell; workspace-specific editor
+and panel layouts may remain. Project settings supply the default focus captured by new conversations,
+and each conversation can override it. A focus configures prompts, enabled capabilities, tool organization
+and collaboration; changes apply to subsequent user turns at the existing Run/worker configuration boundary.
+In-flight work retains its frozen configuration. Shell changes do not apply Agent settings, launch tasks
+or recreate sessions. Research work remains usable in the IDE, and a research shell can display an ordinary
+coding conversation. The product behavior is specified in [research-cluster-design.md](research-cluster-design.md).
 
 Text content has one authority. The application host owns a revisioned document service with
 workspace resolve, read, write, move, delete, an SSE watch, and crash-recovery journals, exposed

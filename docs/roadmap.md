@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness delivered; testing and CI redesign planned before AI4S implementation
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S design accepted, implementation pending
 
 Last updated: 2026-09-19
 
@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | Design accepted (D-291); implementation follows D-296 |
+| 11 | AI4S heterogeneous research cluster | Design accepted (D-291/D-297); next: independent workbench UIUX and work focus, then research execution |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -43,11 +43,15 @@ The goal is trustworthy feedback with less maintenance, not a target test count 
 by hiding failures. Q is accepted and locally verified. Existing repairs and authorized releases
 continue on their own applicable evidence.
 
-Phase 11 follows D-296 and is specified in [research-cluster-design.md](research-cluster-design.md). It defines a
-research profile built on the existing Pi runtime, Thread/Run, Host scheduler, retrieval, context,
-permissions and Rust kernel. The first vertical slice is an open research question explored by
-heterogeneous model branches, fast execution workers and event-triggered synthesis. It is a design
-target only; no production research profile is claimed until the status matrix records a real consumer.
+Phase 11 follows D-296 and is specified in [research-cluster-design.md](research-cluster-design.md).
+D-297 separates the research workbench's complete UIUX from Agent work focus. The workbench entry sits
+alongside the existing Agent/IDE switching area and reuses the transition animation; projects supply new
+conversation defaults, and conversations can override their focus without switching the shell. Navigating
+projects or conversations keeps the user's chosen workbench. The later office experience uses the same
+separation. Research execution builds on the existing Pi runtime, Thread/Run, Host scheduler, retrieval,
+context, permissions and Rust kernel, and remains available in the IDE. The first vertical slice is an
+open research question explored by heterogeneous model branches, fast execution workers and event-triggered
+synthesis. These are design targets only; production delivery is recorded in the status matrix.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

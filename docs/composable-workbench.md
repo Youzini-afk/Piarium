@@ -1,12 +1,12 @@
 # Piarium 可组合工作台与 IDE 架构
 
-Status: current architecture and ownership contract
+Status: current architecture and ownership contract; D-297 selection changes accepted, pending implementation
 
 Current boundary (D-296): the former VS Code companion is retired from the supported product
 surface. References to that adapter in older delivery notes are historical and do not define a
 current surface contract.
 
-Last updated: 2026-09-02
+Last updated: 2026-09-19
 
 这份文档规定 Piarium 工作台已经交付的架构、固定产品决策，以及文档、编辑器、Profile、语言服务和
 调试各自的归属边界。实现进度与历史阶段不在这里保存；当前行为以代码、契约测试和模块文档为准。
@@ -21,7 +21,7 @@ Profile 或 Host ownership。
 
 ## 1. 目标
 
-Piarium 是一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，并提供两套官方工作形态：
+Piarium 是一套可由 Piarium 扩展重新组合乃至替换完整 UI/UX 的工作空间平台，当前已交付两套官方工作形态：
 
 - **Agent Workspace**：会话、任务、Fleet、上下文与恢复工作流居中；
 - **IDE Workbench**：项目、编辑器、搜索、Git、终端、诊断与调试居中，Agent 是可停靠的一等工作面板。
@@ -44,7 +44,7 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 | --- | --- |
 | 产品模型 | Profile + Piarium 扩展组合，不增加全局 `ideMode` 或 `agentMode` |
 | 官方形态 | Agent Workspace 和 IDE Workbench 都是第一方 Piarium 扩展 |
-| 默认形态 | 现有 `default` Profile 成为 Agent Profile 的稳定 ID，用户可按工作区选择其他 Profile |
+| 默认形态与选择 | `default` 是 Agent Workspace 的稳定 ID；当前实现可按工作区选择。D-297 的目标改为保持用户主动选定的工作台，导航项目/会话不自动换 Shell，见下节 |
 | IDE Profile ID | `piarium.ide` |
 | 编辑器引擎 | desktop/web 官方文件编辑统一使用 Monaco；mobile/embedded 使用 CodeMirror adapter；不 fork Code OSS，不维护 Agent/IDE 两套文件能力 |
 | 核心状态 | 文档、会话、终端、Git、Profile、Runtime 身份由共享内核拥有，Shell 只负责表现和布局 |
@@ -55,6 +55,25 @@ Pi Packages 与 Piarium Extensions 继续是两个系统。前者扩展 Pi Agent
 | 移动端 | 官方移动端继续以 Agent Profile 为主；完整官方 IDE 初始只声明 desktop/web 支持 |
 | Pi 插件 | Pi Packages、Plugin Settings 及其原生数据权威不并入 Piarium 扩展生命周期 |
 | 发布 | 代码交付与 GitHub Release、npm tag、公共 SDK 发布是分别授权的动作 |
+
+### 2.1 D-297：工作台 UIUX 与 Agent 工作侧重独立（待实施）
+
+科研工作台与未来办公工作台扩展完整 UIUX；入口设在现有 Agent/IDE 切换区域，复用 Workbench Profile、
+Shell contribution 和 [Motion 平台](piarium-motion-platform.md) 的切换动画。它们不属于项目选择菜单，
+也不另建“研究中心”会话库。IDE 仍是完整开发环境，科研任务可以在其中继续；工作台之间共享资源与执行事实。
+
+Agent Profile 在产品中称“工作侧重”，管理提示词、默认激活能力、工具组织、上下文和协作方式。
+项目默认侧重只供新对话捕获，对话可以显式覆盖；这些设置不选择 Shell。反向也成立：切换工作台不修改侧重、
+权限、模型或 Run，不派发任务、不调用模型；科研工作台可以展示普通对话，IDE 可以继续科研任务。
+
+7A 必须调整现有 `workspace → user → active` 所选 Profile 解析与导航消费者，使当前工作台由用户主动选择，
+不随打开项目、会话或其工作侧重切换。项目级 panel/editor 布局和资源现场仍可按 workspace 保存，
+不能再借项目布局覆盖所选 Shell。调整现有选择权威与持久化作用域，移除旧自动选择路径，不能并存两套科研 mode 状态。
+重新打开应用时恢复工作台选择，不从当前会话的 Agent Profile 推测界面。
+
+本节是 D-297 接受的目标，当前代码尚未实现这些新选择语义。交付顺序见
+[plan 7A](agent-harness-plan.md#711-分阶段交付)，产品行为以
+[科研集群设计第 10 节](research-cluster-design.md#10-产品入口工作台与工作侧重) 为准。办公只复用这一边界，不是科研实施前置。
 
 ## 3. 当前实现
 
@@ -216,9 +235,9 @@ Manifest schema、parser、JSON schema、CLI check/build/test 和 SDK 类型必�
 
 ### 6.3 Profile 语义
 
-- `default` 是官方 Agent Profile 的稳定 ID，不新增 alias。持久化 `label` 是稳定 fallback；官方 Surface 通过第一方 locale metadata 显示本地化名称；
+- `default` 是官方 Agent Workspace 的 Workbench Profile 稳定 ID，不新增 alias。持久化 `label` 是稳定 fallback；官方 Surface 通过第一方 locale metadata 显示本地化名称；
 - `piarium.ide` 与可用的 IDE 扩展、contributions 同时维护；
-- Profile selection 是 user/workspace layout choice；
+- 当前 Profile selection 是 user/workspace layout choice；D-297 在 7A 调整所选 Shell 的作用域，项目布局仍可保留，详见 2.1；
 - `extensionIds` 是显式 desired-set 模板，只有用户执行 Apply set 才改变 enablement；
 - 选择 Profile 时若其 Shell extension 未启用，显示“启用并切换”和“只检查配置”动作，不能静默启用；
 - built-in 可被 disabled。没有可用 Shell 时进入 Recovery Shell，不阻止用户操作；

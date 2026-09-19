@@ -10,7 +10,7 @@ Last updated: 2026-09-19
 全部交付后删除本计划，决策日志归档保留。
 
 当前已完成 **D-296：退役原 VS Code companion**，决策与范围见
-[foundation-governance.md](decisions/foundation-governance.md)。下一阶段进入 AI4S 阶段 7；Q
+[foundation-governance.md](decisions/foundation-governance.md)。下一阶段进入 AI4S 阶段 7（D-291/D-297）；Q
 已完成并作为 D-296 的验证基础，不阻塞既有版本按自身产物证据发行。
 
 ## 0. 执行者须知
@@ -108,7 +108,7 @@ foundational `pi-permission-system` 及其设置/让位双轨已删除；原生 
 
 **D-284–D-286 已实施，D-287 已完成消费者验收收口。** 容量驱动的后台摘要、按需续接与 history 回读，以及
 3.18A–E 的普通派发/可选预设、task/inherit/continue/fresh、定向通信、共享准入与连续交付均已进入生产链；当前事实见 status。
-**阶段 Q（D-292）与 D-296 均已完成；接下来进入 AI4S 阶段 7（D-291）。** 外部 runtime adapter 是独立后续能力，不是 AI4S 的隐含前置。
+**阶段 Q（D-292）与 D-296 均已完成；接下来进入 AI4S 阶段 7（D-291/D-297）。** 先分离工作台 UIUX 与项目/对话工作侧重，再沿真实科研任务逐步交付。外部 runtime adapter 是独立后续能力，不是 AI4S 的隐含前置。
 Q 整理全仓验证责任、测试装配与执行成本，不重开已完成的 Harness/Rust 迁移，也不把当前红灯一概当作测试问题。
 
 1. **工作状态与集成（3.4/3.5，核心已交付）**：固定结果读取、原生结果、可撤销集成、Git/非 Git 物化、安全回收以及 dispatch
@@ -1016,7 +1016,7 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 - 外部 runtime：排在 D-283 的原生权限与 web 收口之后；届时按实际 Host 服务接 MCP/ACP/能力协商，选定 adapter 的协议版本在实现中完成，不先预建全部未来兼容框架。
 - research/文件知识工作：以 [科研集群设计](research-cluster-design.md) 为准，沿共享工具、存储、文档、线程、调度和验证器实现
   异构模型并行研究。首个纵切从开放计算问题开始，包含问题发现、文献/代码调查、实验设计、快速执行、事件触发综合和写作回流；
-  论文复现只是场景，不先建设科研管理表单或第二套 Agent runtime。第二个 profile 发展公共接口，不是允许建接口的前置。
+  论文复现只是场景，不先建设科研管理表单或第二套 Agent runtime。工作台 UIUX 和 Agent 工作侧重独立；科研消费者发展公共接口，不要求先交付办公场景。
   SaaS 连接器与 Windows 沙箱保持范围之外。
 
 默认 bundled Pi 的已交付路径保持。阶段 R 已由 D-282 收口；外部 adapter 和新领域 profile 使用当前 Rust kernel/TS Host 边界，
@@ -1105,7 +1105,7 @@ Q1 与 Q2 可在责任明确后交错推进，但不得先隐藏未解决失败�
 诊断问题已收口。当前重大产品错误不得冒充测试噪声；无关外部服务短暂失败和可选优化不把本阶段变成无限验收。
 不要求固定次数全绿、付费模型实验、全量 mutation testing 或新增监控平台。
 
-Q 完成后已实施 D-296；AI4S 直接沿用整理后的职责与脚本，不为科研 Profile 重建一套验证体系。
+Q 完成后已实施 D-296；AI4S 直接沿用整理后的职责与脚本，不为科研另建一套验证体系。
 
 ## D-296：退役原 VS Code companion（AI4S 前）
 
@@ -1118,7 +1118,7 @@ D-296 紧接阶段 Q，完成 AI4S 7A–7F 之前的产品边界收口。实现�
 Host+Vite、Electron bundle、Mobile assets）与 built-server knowledge smoke 2/2 已本地通过。未把
 packaged、跨平台或远端 CI 结果外推为本地证据；D-296 已完成，下一阶段进入 AI4S。
 
-## 阶段 7：AI4S 科研集群（D-291，设计已接受）
+## 阶段 7：AI4S 科研集群（D-291/D-297，设计已接受）
 
 阶段 Q（D-292）与 D-296 已完成。科研设计与讨论可继续，7A–7F 的功能实施现在可以启动。
 
@@ -1128,6 +1128,10 @@ packaged、跨平台或远端 CI 结果外推为本地证据；D-296 已完成�
 首个交付纵切是“开放问题 → 多路调查/假设 → 低成本区分行动 → 快速执行 → 事件触发综合 → 下一轮分配”。实现复用已有
 Thread/Run、WorkingState、检索、上下文、权限、Rust kernel 和 Pi runtime。研究证据、版本、运行和产物是自动保留的内部事实，
 证据表、协议、Research Diff 和文章结构按需生成，不作为用户前置流程。
+
+产品交付同时包含独立的**科研工作台 UIUX**与**科研工作侧重**。在现有 Agent/IDE 切换区域增加工作台入口，
+沿用已有切换动画；项目设置提供新对话的默认侧重，对话可以手动覆盖。工作台切换不改 Agent 配置，
+浏览项目/对话或改变侧重不自动切 UIUX。未来办公采用同样的分离，本阶段不实现办公专属能力。
 
 本阶段尚未实现或接线；交付状态不写入 status 的 wired/proven/default-on，具体目标和边界见
 [research-cluster-design.md](research-cluster-design.md)。以下是执行顺序和不可改变的实现边界。
@@ -1146,18 +1150,38 @@ Thread/Run、WorkingState、检索、上下文、权限、Rust kernel 和 Pi run
 5. **模型选择不暗中借用。** 当前会话模型作为首席主线的默认输入；专用能力槽位只有在用户配置或 Run 明示 `inherit` 时使用。
    未配置的能力不得静默冒充已绑定模型。每个 Run 冻结最终模型、工具、权限、scope、输入来源和执行资源。
 6. **先完成一条真实纵切。** 任何抽象接缝都必须由首个开放问题任务消费；只写 DTO、角色目录或 UI 面板不能标记阶段完成。
+7. **界面与执行分别绑定。** Workbench Profile 属于 UIUX，Agent Profile 在产品中称“工作侧重”。
+   科研工具和调度不以科研 Shell 是否挂载为条件；工作台切换也不能应用侧重、派发任务或启动模型。
+
+### 7.0a 选择、继承与切换
+
+1. 工作台入口位于现有 Agent/IDE 切换区域，不放进项目选择菜单，不另建“研究中心”或平行研究会话库。
+   复用 Workbench Profile、Shell contributions、Transition Scene 和现有选择事务，交付整套科研 UIUX。
+2. 修改当前按 workspace 解析所选 Profile 的消费者：打开项目/会话保留当前用户主动选定的工作台。
+   所选工作台的身份与 workspace/session 解耦；项目内的资源、布局与阅读位置仍按原所有者保留。
+   用现有工作台配置调整选择作用域，不新增独立的科研模式 store，也不保留两套会自动争抢 Shell 的选择路径。
+3. 工作侧重沿既有项目设置、会话元数据、Host launch 与 Run 配置绑定：新对话显式选择优先，随后是创建时捕获的项目默认，
+   最后沿用现有通用/编程默认。保存选择来源；工作台类型不参与解析，修改项目默认不回写已有对话。
+4. 对话侧重控件显示当前配置与尚未应用的选择。用户修改后从下一轮请求沿已有 Run/worker 安全切点生效；
+   新配置就绪后提交，失败保留原配置。当前 Run 和已派发子 Run 保持冻结配置，必要时在同一 Thread 新建 Run。
+5. 切换工作台、切换侧重、停止任务是三个独立动作。前两者不删除研究成果或隐式取消在途分支；
+   继续科研时复用现有根 Thread，视图挂载、重连和反复切换不能再次派发。
+6. IDE 中的科研对话和科研工作台中的普通对话都必须可用。工作台按当前真实任务展示，没有实验或分支就不生成占位任务。
+   7A 先接通入口、基础科研 Shell 和根主线，7B–7E 逐步接入真实分支、实验、综合与写作视图。
 
 ### 7.1 权威与模块责任
 
 | 对象 | 唯一权威 | 允许的职责 | 禁止的职责 |
 | --- | --- | --- | --- |
+| 工作台选择与 UIUX | 现有 Workbench Profile/catalog 与 Surface transition controller | 主动选 Shell、贡献点、动画、保留共享工作现场 | 从项目/对话侧重自动切 Shell，修改执行配置或另建科研会话库 |
+| 项目默认与对话工作侧重 | 既有项目设置、会话配置；Run/worker 冻结实际执行配置 | 创建时继承、对话覆盖、记录来源与下一轮应用 | 把工作台当作配置来源，追改已有对话或在途 Run |
 | Thread/Run 生命周期 | ThreadRegistry / Run catalog | 分支身份、父子关系、运行配置、等待、取消、结果入口 | 保存完整科研知识图或复制全部材料 |
 | 研究板 projection | Host 研究协调器，绑定根 Thread 与 revision | 当前问题、分支索引、假设状态、最近综合、待处理事件 | 冒充原文、文件、运行或 Artifact 的事实来源 |
 | 文件与代码 | Documents / WorkingState / Rust kernel | 分支读写、基线、版本、合并和恢复 | 由研究协调器另存一份正文 |
 | 进程与计算 | Rust kernel process/PTY/resource 服务 | 运行、取消、输出、资源占用和退出事实 | 让模型轮询或直接管理 Host 凭据 |
 | 来源与网页 | 现有 web/retrieval/receipt 服务 | 搜索、抓取、来源身份和原文切片 | 把模型摘要当作来源正文 |
 | 研究产物 | Rust object/artifact 及现有引用域 | 图表、数据、日志、报告和版本引用 | 只把短期 OutputRef 当长期成果 |
-| 模型与凭据 | Pi SessionHost / user-owned model slots | 调用、流式事件和 Run 绑定 | 研究 Profile 保存一份凭据或偷偷换 provider |
+| 模型与凭据 | Pi SessionHost / user-owned model slots | 调用、流式事件和 Run 绑定 | 工作台或工作侧重保存一份凭据或偷偷换 provider |
 
 研究协调器可以把多个事实引用组合成一个 `ResearchBoardRevision`，但该 revision 必须能从 Thread 事件、分支结果和 Artifact 引用重建。
 写入研究板时使用现有 Host/catalog CAS；旧综合不能覆盖新分支事件，冲突时重新取当前 revision 生成下一次综合。
@@ -1199,8 +1223,9 @@ interface ResearchBoard {
 
 ### 7.3 Thread、Run 与研究分支
 
-1. 根会话显式进入 research Profile 后，首条研究请求建立一个 root research Thread 或绑定当前研究主线；普通 code session 不自动变成科研集群。
-2. 首席主线派发的每个分支仍调用现有 `thread.dispatch`。研究用途写入 manifest 的 profile/capability/purpose 元数据，
+1. 根会话采用科研工作侧重并收到研究请求后，建立一个 root research Thread 或绑定当前研究主线；在任何工作台中都走相同入口。
+   仅选择科研工作台或修改侧重不启动模型/根 Run；普通对话不因所在界面而自动变成科研集群。
+2. 首席主线派发的每个分支仍调用现有 `thread.dispatch`。研究用途写入 manifest 的 Agent Profile/capability/purpose 元数据，
    不用永久 role 绑定模型。分支只继承 dispatch 时实际可用的材料摘要、来源引用和授权 scope。
 3. 分支 Run 冻结 `modelBinding`、`toolAllowlist`、`permissions`、`workspaceScope`、`inputOrigin`、`resourceRequest` 和 parent board revision。
    后续升级模型必须新建 Run，不能在活动 Run 中偷偷换模型。
@@ -1212,7 +1237,7 @@ interface ResearchBoard {
 
 ### 7.4 能力路由与模型升级
 
-研究 Profile 声明能力目录，不复制当前 `harness-roles` 的永久职业绑定。第一版能力至少包括：
+科研工作侧重（Agent Profile）声明能力目录，不复制当前 `harness-roles` 的永久职业绑定。第一版能力至少包括：
 
 | capability | 输入重点 | 交付重点 | 默认路由 |
 | --- | --- | --- | --- |
@@ -1339,9 +1364,10 @@ interface ResearchWorkItem {
 
 写作缺口回到首席主线后，可以派发新的调查、设计或执行分支。文章不是最后一次性搬运结果，而是研究判断的一个反馈入口。
 
-### 7.10 最小 UI 投影
+### 7.10 科研工作台与共享工作现场
 
-第一阶段 UI 只需要让用户看清研究推进：
+科研工作台用独立 Shell/contribution 组织整套 UIUX，与 Agent/IDE 使用相同会话、文件、编辑器和运行 authority。
+顶部切换入口与 Transition Scene 在 7A 交付，后续按真实能力接通以下研究视图：
 
 1. 当前问题与首席主线暂时判断；
 2. 活跃分支、分支目的、当前状态和最近研究更新；
@@ -1350,17 +1376,25 @@ interface ResearchWorkItem {
 5. 结果卡片展开来源、代码、日志、图表和 Artifact；
 6. 派发、暂停、停止、扩大方向、要求综合和继续某条分支的自然语言入口。
 
+默认以主线、研究分支和关键结果为视觉重点，文件、Git 和原始终端按需展开。代码、材料、数据、图表与文章可以
+并排查看或展开到中央；需要完整开发环境时可主动切到 IDE，研究任务继续，已有资源和阅读位置保留。
+任何工作台中都显示对话的实际工作侧重并允许修改；选择科研 UIUX 不替用户改成科研侧重，选择普通对话不强制退出科研工作台。
+
 不在第一阶段建设复杂的科研数据库编辑器、默认大图、逐工具审批弹窗或完整论文编辑器。证据、实验、产物和文章视图必须共享 board/Thread/Artifact 引用，
 不能在 UI 各自复制一套状态。
 
 ### 7.11 分阶段交付
 
-**7A：Profile 与根主线。**
+**7A：工作台入口、独立工作侧重与根主线。**
 
-- 增加 research Agent Profile 的能力声明、工具集合和上下文模板；
-- 研究会话显式进入 Profile，普通 code session 不自动改变；
-- 复用当前模型作为首席主线，真实创建 root Thread/Run；
-- 验证用户问题 → 首席模型 → 持久 root Thread 的真实纵切。
+- 在现有 Agent/IDE 切换区域增加科研工作台入口，交付基础科研 Shell、主线与共享资源操作，复用已有整套切换动画；
+  去掉项目/会话导航自动决定 Shell 的路径，保留共享工作现场与切换失败时的原界面。
+- 增加科研 Agent Profile 的能力声明、工具集合和上下文模板；接通项目默认、对话手动选择、来源记录和下一轮配置应用。
+  工作台选择与工作侧重分别持久化、分别消费，不用同一 `research` 状态控制界面和执行。
+- 从任意工作台提交科研侧重下的用户请求，复用当前模型作为首席主线，真实创建或继续 root Thread/Run；
+  仅挂载科研工作台不会调用模型或派发任务。
+- 验证用户问题 → 首席模型 → 持久 root Thread；同时验证工作台切换、项目/会话导航、项目默认变更、运行中切侧重与失败恢复。
+  不能只交付菜单标签、空研究面板或一个没有消费者的 Profile DTO。
 
 **7B：研究分支与能力路由。**
 
@@ -1383,16 +1417,17 @@ interface ResearchWorkItem {
 - 产物可从 Thread result 和 board 引用读取，真实退出和取消可见；
 - 先证明一个开放问题的基线运行和一个变体运行，不先实现持久 notebook。
 
-**7E：综合、写作与 UI。**
+**7E：综合、写作与研究工作视图。**
 
 - 接通事件触发的首席综合与 board projection；
 - 接通按需 writing Thread，以及 writing-gap 回流；
-- 提供最小研究推进视图和自然语言控制；
+- 在 7A 已可使用的科研工作台中接通分支、实验、结果对比、来源展开、写作与自然语言控制，复用共享编辑和运行能力；
 - 验证结果冲突、意外发现、文章缺口和用户改方向可以回到下一轮研究。
 
 **7F：完整首个纵切与评估。**
 
 - 用一个真实开放计算问题贯通用户输入、并行调查、实验设计、快速执行、结果回流、综合和写作备忘录；
+- 在同一任务中切换科研工作台与 IDE，查看另一项目/对话，再回到成果，验证 UIUX 切换与执行互不改写；
 - 对比最强单 Agent、异构串行和异构并行三种形态，保持相近资源条件；
 - 观察研究进展、有效实验、结论质量、人工返工和达到下一判断的时间；
 - 只把真实发现的问题加入后续计划，不用一次评测构造永久门槛。
@@ -1412,13 +1447,18 @@ interface ResearchWorkItem {
 9. 过期背景 fresh 后仍能读到 Thread 成果和原始引用，不把旧摘要当作最新事实；
 10. 写作线发现主张缺口并回流新的研究分支，不能只改写没有依据的段落；
 11. 删除或归档根 Thread 时，后代运行、board projection、产物引用和工作区保留责任沿现有级联契约处理；
-12. 没有 research Profile 或专用模型配置时，普通 code harness 行为不改变。
+12. 没有科研工作侧重或专用模型配置时，普通 code harness 行为不改变；单独进入科研工作台不会启动研究。
+13. 科研 Run/实验运行中切到 IDE，再浏览另一个项目和普通对话，工作台保持用户选择；返回后研究任务、未保存代码和产物仍在。
+14. 科研工作台打开普通对话、IDE 打开科研对话，提示词和工具由对话实际侧重决定，均不被 Shell 覆盖。
+15. 修改项目默认只影响新对话；已有对话的手动选择保持。当前 Run 中改侧重只影响下一轮，配置准备失败不冒充已应用。
+16. 切换动画期间后台任务完成，结果仍只提交一次；目标 Shell 准备失败保留原界面，不重建会话或重复派发。
 
 ### 7.13 阶段完成判据
 
 阶段 7 完成必须同时满足：
 
-- 公开入口能够从真实用户问题启动 root research Thread；
+- 工作台入口、整体科研 UIUX 与既有切换动画可用，项目/会话导航不再自动切 Shell；
+- 项目默认与对话工作侧重独立于 UIUX，能从任意工作台提交真实用户问题并启动或继续 root research Thread；
 - 至少两种不同 capability 的真实子 Run 并行工作并返回 durable update；
 - 至少一个真实代码/数据执行产物进入现有 Artifact/Thread result 路径；
 - 事件触发综合能根据分支结果继续、收缩或派生路线；
