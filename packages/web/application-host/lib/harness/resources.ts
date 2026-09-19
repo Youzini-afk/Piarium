@@ -57,6 +57,28 @@ export interface ResourceAdmission {
   reason?: string;
 }
 
+/**
+ * Registration of a non-local execution target by connection management
+ * (SSH instance, remote Piarium Host, cluster). A freshly registered machine
+ * is offline with unknown connection until a real probe reports otherwise —
+ * registration alone never claims capacity or reachability.
+ */
+export interface ResourceMachineRegistration {
+  /** Stable machine identity; generated when omitted. */
+  machineId?: string;
+  kind: string;
+  label?: string;
+  /** Which experiment backend reaches this machine (e.g. "piarium-host", "slurm"). */
+  backend?: string;
+  state?: "available" | "degraded" | "offline";
+  capacity?: {
+    cpuCores?: number;
+    memoryMb?: number;
+    gpus?: Array<{ index: number; name?: string; memoryMb?: number }>;
+  };
+  connection?: { status: "connected" | "degraded" | "offline" | "unknown"; detail?: string };
+}
+
 interface ResourceServiceDeps {
   client: KernelClient;
   /** Monotonic clock injection for tests. */
@@ -64,6 +86,8 @@ interface ResourceServiceDeps {
   probeLocal?: () => LocalMachineProbe;
   onError?: (error: Error) => void;
 }
+
+export const resourceMachineRecordId = (machineId: string): string => `${MACHINE_PREFIX}${machineId}`;
 
 const recordIdFor = {
   machine: (id: string) => `${MACHINE_PREFIX}${id}`,
@@ -448,31 +472,9 @@ export function createResourceService(deps: ResourceServiceDeps) {
       allRecords(scoped, workspaceId, "resource.machine"),
       allRecords(scoped, workspaceId, "resource.sample"),
       allRecords(scoped, workspaceId, "resource.commitment"),
-      // Queue facts are read from the experiment service's durable records;
-      // this service presents them but never writes them.
       allRecords(scoped, workspaceId, "experiment.attempt"),
     ]);
     const sampleByMachine = new Map(samples.map((record) => [record.recordId.slice(SAMPLE_PREFIX.length), record]));
-    const queuedByMachine = new Map<string, ResourceMachineView["queued"]>();
-    for (const record of attempts) {
-      if (record.state !== "queued") continue;
-      const payload = payloadOf(record);
-      const machineId = str(payload.machineId) ?? LOCAL_MACHINE_ID;
-      const attemptId = str(payload.id);
-      if (!attemptId) continue;
-      const resources = payload.resources && typeof payload.resources === "object"
-        ? asResources(payload.resources) : {};
-      const entry = {
-        attemptId,
-        ...(Object.keys(resources).length ? { resources } : {}),
-        ...(str(payload.queueReason) ? { reason: str(payload.queueReason) } : {}),
-        queuedAt: num(payload.createdAt) ?? record.createdAt,
-      };
-      const bucket = queuedByMachine.get(machineId) ?? [];
-      bucket.push(entry);
-      queuedByMachine.set(machineId, bucket);
-    }
-    for (const bucket of queuedByMachine.values()) bucket.sort((a, b) => a.queuedAt - b.queuedAt);
     return machines.map((machine) => {
       const machineId = machine.recordId.slice(MACHINE_PREFIX.length);
       const active = commitments
@@ -480,8 +482,104 @@ export function createResourceService(deps: ResourceServiceDeps) {
         .filter((view): view is ResourceCommitmentView => (
           view !== null && view.machineId === machineId && (view.state === "confirmed" || view.state === "requested")
         ));
-      return machineView(machine, sampleByMachine.get(machineId) ?? null, active, queuedByMachine.get(machineId) ?? []);
+      return machineView(machine, sampleByMachine.get(machineId) ?? null, active, queuedAttemptsFor(attempts, machineId));
     });
+  };
+
+  // Queue facts are read from the experiment service's durable records;
+  // this service presents them but never writes them.
+  const queuedAttemptsFor = (
+    attempts: KernelRecordResult[],
+    machineId: string,
+  ): ResourceMachineView["queued"] => (
+    attempts
+      .filter((record) => record.state === "queued")
+      .flatMap((record) => {
+        const payload = payloadOf(record);
+        if ((str(payload.machineId) ?? LOCAL_MACHINE_ID) !== machineId) return [];
+        const attemptId = str(payload.id);
+        if (!attemptId) return [];
+        const resources = payload.resources && typeof payload.resources === "object"
+          ? asResources(payload.resources) : {};
+        return [{
+          attemptId,
+          ...(Object.keys(resources).length ? { resources } : {}),
+          ...(str(payload.queueReason) ? { reason: str(payload.queueReason) } : {}),
+          queuedAt: num(payload.createdAt) ?? record.createdAt,
+        }];
+      })
+      .sort((a, b) => a.queuedAt - b.queuedAt)
+  );
+
+  const getMachine = async (workspaceId: string, machineId: string): Promise<ResourceMachineView | null> => {
+    const scoped = await context(workspaceId);
+    const record = await scoped.getRecord(workspaceId, recordIdFor.machine(machineId));
+    if (!record) return null;
+    const [samples, commitments, attempts] = await Promise.all([
+      allRecords(scoped, workspaceId, "resource.sample"),
+      allRecords(scoped, workspaceId, "resource.commitment"),
+      allRecords(scoped, workspaceId, "experiment.attempt"),
+    ]);
+    const sample = samples.find((entry) => entry.recordId === recordIdFor.sample(machineId)) ?? null;
+    const active = commitments
+      .map(commitmentView)
+      .filter((view): view is ResourceCommitmentView => (
+        view !== null && view.machineId === machineId && (view.state === "confirmed" || view.state === "requested")
+      ));
+    return machineView(record, sample, active, queuedAttemptsFor(attempts, machineId));
+  };
+
+  const registerMachine = async (
+    workspaceId: string,
+    input: ResourceMachineRegistration,
+  ): Promise<ResourceMachineView> => {
+    const kind = input.kind?.trim();
+    if (!kind) throw new Error("machine registration requires a kind");
+    const machineId = input.machineId?.trim() || `machine-${randomUUID().slice(0, 12)}`;
+    if (machineId === LOCAL_MACHINE_ID) {
+      throw new Error("the local machine is self-describing; it cannot be registered");
+    }
+    const capacity = input.capacity
+      ? {
+          ...(num(input.capacity.cpuCores) !== undefined ? { cpuCores: num(input.capacity.cpuCores) } : {}),
+          ...(num(input.capacity.memoryMb) !== undefined ? { memoryMb: num(input.capacity.memoryMb) } : {}),
+          ...(Array.isArray(input.capacity.gpus)
+            ? { gpus: input.capacity.gpus.filter((gpu) => num(gpu?.index) !== undefined) }
+            : {}),
+        }
+      : undefined;
+    const scoped = await context(workspaceId);
+    const recordId = recordIdFor.machine(machineId);
+    const existing = await scoped.getRecord(workspaceId, recordId);
+    const prior = existing ? payloadOf(existing) : {};
+    const connection = input.connection
+      ? { status: input.connection.status, checkedAt: now(), ...(input.connection.detail ? { detail: input.connection.detail } : {}) }
+      : (prior.connection && typeof prior.connection === "object"
+          ? prior.connection as Record<string, unknown>
+          : { status: "unknown", checkedAt: now(), detail: "registered, never probed" });
+    const state = input.state
+      ?? (existing && (existing.state === "available" || existing.state === "degraded" || existing.state === "offline" || existing.state === "retired")
+          ? existing.state
+          : "offline");
+    const record = await putRecord(workspaceId, {
+      recordId,
+      recordType: "resource.machine",
+      state,
+      ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
+      payload: {
+        id: machineId,
+        kind,
+        ...(input.label?.trim() ? { label: input.label.trim() } : prior.label ? { label: prior.label } : {}),
+        ...(input.backend?.trim()
+          ? { backend: input.backend.trim() }
+          : prior.backend ? { backend: prior.backend } : {}),
+        ...(capacity ? { capacity } : prior.capacity ? { capacity: prior.capacity } : {}),
+        connection,
+      },
+    });
+    const view = await getMachine(workspaceId, str(payloadOf(record).id) ?? machineId);
+    if (!view) throw new Error("registered machine is unreadable");
+    return view;
   };
 
   const list = async (workspaceId: string): Promise<ResourceListResult> => {
@@ -512,6 +610,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
     ensureLocalMachine,
     sampleLocalMachine,
     listMachines,
+    getMachine,
+    registerMachine,
     list,
     admit,
     release,

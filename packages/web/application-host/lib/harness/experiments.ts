@@ -12,10 +12,9 @@
  * collection:"failed" and can be re-collected without re-running.
  */
 import { createHash, randomUUID } from "node:crypto";
-import fs from "node:fs/promises";
 import path from "node:path";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
-import type { KernelProcessSnapshot, KernelRecordResult } from "../kernel/protocol.generated.js";
+import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type {
   ExperimentArtifactState,
   ExperimentArtifactView,
@@ -34,7 +33,16 @@ import type {
 } from "@piarium/protocol";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import { HarnessServiceError } from "./service-error.js";
+import {
+  createLocalExperimentBackend,
+  type BackendJobHandle,
+  type BackendObservation,
+  type ExperimentBackend,
+  type ExperimentBackendSite,
+  type ResolvedExperimentBackend,
+} from "./experiment-backend.js";
 import type { ResourceService } from "./resources.js";
+import { resourceMachineRecordId } from "./resources.js";
 import type { SourceService } from "./sources.js";
 
 const SPEC_PREFIX = "experiment.spec:";
@@ -60,7 +68,7 @@ export interface ExperimentCaller {
   workspaceScope?: readonly string[];
 }
 
-interface ExperimentContext {
+export interface ExperimentContext {
   scoped: KernelScopedClient;
   rootId: string;
   canonicalRoot: string;
@@ -75,7 +83,9 @@ interface ExperimentContext {
 const SERVICE_CAPABILITIES = ["storage.read", "storage.write", "storage.maintenance", "process", "process.maintenance"];
 
 interface RunningJob {
-  processId: string;
+  backend: ExperimentBackend;
+  site: ExperimentBackendSite;
+  handle: BackendJobHandle;
   cursor: number;
   buffers: Record<"stdout" | "stderr", Buffer[]>;
   totals: Record<"stdout" | "stderr", number>;
@@ -90,6 +100,17 @@ interface ExperimentServiceDeps {
   sources?: SourceService;
   /** Resolve the owning workspace's canonical root (default experiment cwd). */
   resolveWorkspaceRoot: (workspaceId: string) => Promise<string | null>;
+  /**
+   * Resolve the execution backend for a machine record. The default resolves
+   * only the local kernel; connection managers register richer resolution for
+   * remote machines and schedulers. Returning null fails the attempt honestly
+   * instead of silently running it somewhere else.
+   */
+  resolveBackend?: (
+    ctx: ExperimentContext,
+    machineId: string,
+    machine: KernelRecordResult | null,
+  ) => Promise<ResolvedExperimentBackend | null> | ResolvedExperimentBackend | null;
   now?: () => number;
   onError?: (error: Error) => void;
 }
@@ -336,6 +357,33 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     return creating;
   };
 
+  /**
+   * Backend resolution: the machine record (when registered) tells which
+   * backend kind the target is reached through; the resolver returns a
+   * backend bound to a real execution site or null — never a fallback that
+   * runs the job on a different machine than requested.
+   */
+  const resolveBackend = async (
+    ctx: ExperimentContext,
+    caller: ExperimentCaller,
+    machineId: string,
+  ): Promise<ResolvedExperimentBackend | null> => {
+    const machine = machineId === LOCAL_MACHINE_ID
+      ? null
+      : await ctx.scoped.getRecord(caller.workspaceId, resourceMachineRecordId(machineId)).catch(() => null);
+    if (deps.resolveBackend) return deps.resolveBackend(ctx, machineId, machine);
+    if (machineId !== LOCAL_MACHINE_ID) return null;
+    return {
+      backend: createLocalExperimentBackend(ctx.scoped),
+      site: {
+        workspaceId: caller.workspaceId,
+        rootId: ctx.rootId,
+        canonicalRoot: ctx.canonicalRoot,
+        transport: ctx.scoped,
+      },
+    };
+  };
+
   const putRecord = async (
     ctx: ExperimentContext,
     workspaceId: string,
@@ -404,6 +452,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptId: string,
     spec: ExperimentSpecView,
+    resolved: ResolvedExperimentBackend,
     running: RunningJob | null,
   ): Promise<ExperimentArtifactView[]> => {
     const artifacts: ExperimentArtifactView[] = [];
@@ -470,12 +519,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     }
     for (const relativePath of spec.outputPaths) {
       try {
-        const absolute = path.join(ctx.canonicalRoot, relativePath);
-        const resolved = await canonicalizePathIdentity(absolute);
-        if (!resolved.startsWith(ctx.canonicalRoot)) {
-          throw new Error(`output path escaped the experiment root: ${relativePath}`);
-        }
-        const bytes = await fs.readFile(resolved);
+        const bytes = await resolved.backend.collectFile(resolved.site, relativePath);
         await persistBlob(relativePath, "file", bytes, false, { path: relativePath });
       } catch (error) {
         const artifactId = `${attemptId}:${relativePath}`.slice(0, 190);
@@ -507,13 +551,13 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     caller: ExperimentCaller,
     attemptId: string,
     running: RunningJob,
-    snapshot: KernelProcessSnapshot,
+    observation: BackendObservation,
   ): Promise<void> => {
     const jobRecordId = recordIdFor.job(jobIdFor(attemptId));
     const jobRecord = await ctx.scoped.getRecord(workspaceId, jobRecordId);
-    const jobPayload = jobRecord ? payloadOf(jobRecord) : { id: jobIdFor(attemptId), attemptId, backend: "local" };
-    const jobState: ExperimentJobState = snapshot.status === "exited" ? "exited"
-      : snapshot.status === "unknown" ? "unknown"
+    const jobPayload = jobRecord ? payloadOf(jobRecord) : { id: jobIdFor(attemptId), attemptId, backend: running.backend.backend };
+    const jobState: ExperimentJobState = observation.status === "exited" ? "exited"
+      : observation.status === "unknown" ? "unknown"
       : "failed";
     await putRecord(ctx, workspaceId, caller, {
       recordId: jobRecordId,
@@ -522,9 +566,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       ...(jobRecord ? { expectedRecordRevision: jobRecord.recordRevision } : {}),
       payload: {
         ...jobPayload,
-        exitCode: snapshot.exitCode,
-        signal: snapshot.signal,
-        reason: snapshot.reason,
+        exitCode: observation.exitCode,
+        signal: observation.signal,
+        reason: observation.reason,
         endedAt: now(),
       },
     }).catch(report);
@@ -536,34 +580,37 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (spec && jobState !== "unknown") {
       collection = "pending";
       try {
-        const artifacts = await persistArtifacts(ctx, workspaceId, caller, attemptId, spec, running);
+        const artifacts = await persistArtifacts(
+          ctx, workspaceId, caller, attemptId, spec,
+          { backend: running.backend, site: running.site }, running,
+        );
         collection = artifacts.some((artifact) => artifact.state === "failed") ? "failed" : "done";
       } catch {
         collection = "failed";
       }
     }
     if (jobState !== "unknown") {
-      await ctx.scoped.processRelease({ workspaceId, processId: running.processId }).catch(report);
+      await running.backend.release(running.site, running.handle.backendJobId).catch(report);
       const releasedRecord = await ctx.scoped.getRecord(workspaceId, jobRecordId).catch(() => null);
       await putRecord(ctx, workspaceId, caller, {
         recordId: jobRecordId,
         recordType: "experiment.job",
         state: "released",
         ...(releasedRecord ? { expectedRecordRevision: releasedRecord.recordRevision } : {}),
-        payload: { ...jobPayload, exitCode: snapshot.exitCode, signal: snapshot.signal, reason: snapshot.reason, endedAt: now() },
+        payload: { ...jobPayload, exitCode: observation.exitCode, signal: observation.signal, reason: observation.reason, endedAt: now() },
       }).catch(report);
     }
     const finalState: ExperimentAttemptState = running.cancelRequested ? "cancelled"
       : jobState === "unknown" ? "lost"
-      : snapshot.exitCode === 0 ? "completed"
+      : observation.exitCode === 0 ? "completed"
       : "failed";
     await updateAttempt(ctx, workspaceId, caller, attemptId, finalState, (payload) => ({
       ...payload,
-      exitCode: snapshot.exitCode,
-      signal: snapshot.signal,
+      exitCode: observation.exitCode,
+      signal: observation.signal,
       endedAt: now(),
       collection,
-      ...(snapshot.reason && finalState !== "completed" ? { error: snapshot.reason } : {}),
+      ...(observation.reason && finalState !== "completed" ? { error: observation.reason } : {}),
     }));
     const commitmentId = str(attemptPayload.commitmentId);
     if (commitmentId) await deps.resources.release(workspaceId, commitmentId, "attempt finished").catch(report);
@@ -578,12 +625,8 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     running: RunningJob,
   ): Promise<void> => {
     for (;;) {
-      const result = await ctx.scoped.processRead({
-        workspaceId,
-        processId: running.processId,
-        cursor: running.cursor,
-      });
-      const snapshot = result.process;
+      const result = await running.backend.read(running.site, running.handle.backendJobId, running.cursor);
+      const observation = result.observation;
       for (const chunk of result.chunks) {
         const bytes = Buffer.from(chunk.bytesBase64, "base64");
         running.totals[chunk.channel] += bytes.byteLength;
@@ -597,14 +640,14 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         }
       }
       running.cursor = result.nextCursor;
-      if (!snapshot.writerActive && running.cursor === result.endCursor) {
+      if (!observation.writerActive && running.cursor === result.endCursor) {
         jobs.delete(attemptId);
-        await finalize(ctx, workspaceId, caller, attemptId, running, snapshot);
+        await finalize(ctx, workspaceId, caller, attemptId, running, observation);
         return;
       }
-      if (snapshot.status === "unknown") {
+      if (observation.status === "unknown") {
         jobs.delete(attemptId);
-        await finalize(ctx, workspaceId, caller, attemptId, running, snapshot);
+        await finalize(ctx, workspaceId, caller, attemptId, running, observation);
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));
@@ -628,7 +671,20 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       }));
       return;
     }
-    const processId = processIdFor(attempt.attemptId);
+    const backendJobId = processIdFor(attempt.attemptId);
+    const resolved = await resolveBackend(ctx, caller, attempt.machineId ?? LOCAL_MACHINE_ID);
+    if (!resolved) {
+      await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "failed", (p) => ({
+        ...p,
+        error: `no execution backend is registered for machine ${attempt.machineId ?? LOCAL_MACHINE_ID}`,
+        endedAt: now(),
+        collection: "none",
+      }));
+      const commitmentId = str(payload.commitmentId);
+      if (commitmentId) await deps.resources.release(workspaceId, commitmentId, "no backend").catch(report);
+      await drainQueue(workspaceId);
+      return;
+    }
     try {
       const specEnv = payloadOf(specRecord!).env;
       const mergedEnv: Record<string, string> = { ...process.env } as Record<string, string>;
@@ -637,38 +693,36 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           if (typeof value === "string") mergedEnv[name] = value;
         }
       }
-      const snapshot = await ctx.scoped.processSpawn({
-        workspaceId,
-        processId,
-        rootId: ctx.rootId,
+      const { handle, observation } = await resolved.backend.spawn(resolved.site, {
+        attemptId: attempt.attemptId,
+        backendJobId,
         cwd: spec.cwd ?? "",
         command: spec.command,
         args: spec.args,
         env: Object.entries(mergedEnv)
           .filter(([name, value]) => name !== "NODE_CHANNEL_FD" && typeof value === "string")
           .map(([name, value]) => ({ name, value })),
-        mode: "pipe",
       });
       const jobId = jobIdFor(attempt.attemptId);
       await putRecord(ctx, workspaceId, caller, {
         recordId: recordIdFor.job(jobId),
         recordType: "experiment.job",
-        state: snapshot.status === "running" || snapshot.status === "starting" ? snapshot.status : "failed",
+        state: observation.status === "running" || observation.status === "starting" ? observation.status : "failed",
         payload: {
           id: jobId,
           attemptId: attempt.attemptId,
-          backend: "local",
-          machineId: LOCAL_MACHINE_ID,
-          backendJobId: processId,
-          kernelEpoch: snapshot.kernelEpoch,
-          pid: snapshot.pid,
+          backend: resolved.backend.backend,
+          machineId: attempt.machineId ?? LOCAL_MACHINE_ID,
+          backendJobId: handle.backendJobId,
+          kernelEpoch: handle.kernelEpoch,
+          pid: handle.pid,
           startedAt: now(),
-          reason: snapshot.reason,
+          reason: observation.reason,
         },
       });
-      if (snapshot.status === "failed") {
+      if (observation.status === "failed") {
         await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "failed", (p) => ({
-          ...p, error: snapshot.reason ?? "process failed to start", endedAt: now(), collection: "none",
+          ...p, error: observation.reason ?? "process failed to start", endedAt: now(), collection: "none",
         }));
         return;
       }
@@ -676,7 +730,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         ...p, startedAt: num(payload.startedAt) ?? now(),
       }));
       const running: RunningJob = {
-        processId,
+        backend: resolved.backend,
+        site: resolved.site,
+        handle,
         cursor: 0,
         buffers: { stdout: [], stderr: [] },
         totals: { stdout: 0, stderr: 0 },
@@ -819,15 +875,28 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         }
         if (attempt.state === "submitted") {
           // The launch may have been lost between the record write and spawn;
-          // the derived process id makes a fresh spawn idempotent.
+          // the derived backend identity makes a fresh spawn idempotent.
           await launch(attemptCtx, workspaceId, caller, record).catch(report);
           continue;
         }
-        const processId = processIdFor(attempt.attemptId);
+        const resolved = await resolveBackend(attemptCtx, caller, attempt.machineId ?? LOCAL_MACHINE_ID).catch(() => null);
+        if (!resolved) {
+          // No backend can query this machine right now (e.g. a remote target
+          // whose connector is not up yet). Keep the attempt pending — an
+          // unverifiable job is not a lost one.
+          report(new Error(`attempt ${attempt.attemptId}: no backend to reconcile machine ${attempt.machineId ?? LOCAL_MACHINE_ID}`));
+          continue;
+        }
+        const jobRecord = await attemptCtx.scoped
+          .getRecord(workspaceId, recordIdFor.job(jobIdFor(attempt.attemptId)))
+          .catch(() => null);
+        const backendJobId = str(jobRecord ? payloadOf(jobRecord).backendJobId : null) ?? processIdFor(attempt.attemptId);
         try {
-          const snapshot = await attemptCtx.scoped.processInspect({ workspaceId, processId });
+          const observation = await resolved.backend.inspect(resolved.site, backendJobId);
           const running: RunningJob = {
-            processId,
+            backend: resolved.backend,
+            site: resolved.site,
+            handle: { backendJobId },
             cursor: 0,
             buffers: { stdout: [], stderr: [] },
             totals: { stdout: 0, stderr: 0 },
@@ -835,15 +904,15 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             cancelRequested: attempt.state === "stopping" || payload.cancelRequested === true,
             poll: Promise.resolve(),
           };
-          if (attempt.state === "stopping") {
-            await attemptCtx.scoped.processKill({ workspaceId, processId, force: true }).catch(report);
+          if (attempt.state === "stopping" && resolved.backend.controls.includes("cancel")) {
+            await resolved.backend.kill(resolved.site, backendJobId).catch(report);
           }
           running.poll = poll(attemptCtx, workspaceId, caller, attempt.attemptId, running).catch(report);
           jobs.set(attempt.attemptId, running);
         } catch (error) {
           await updateAttempt(attemptCtx, workspaceId, caller, attempt.attemptId, "lost", (p) => ({
             ...p,
-            error: `backend process is unreachable after restart: ${errorMessage(error)}`,
+            error: `backend job is unreachable after restart: ${errorMessage(error)}`,
             endedAt: now(),
           })).catch(report);
         }
@@ -941,6 +1010,14 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         return { spec, attempt: view ?? recorded, text: describeAttempt(spec, view ?? recorded) };
       }
     }
+    const machineId = params.machineId ?? LOCAL_MACHINE_ID;
+    const machineRecord = machineId === LOCAL_MACHINE_ID
+      ? null
+      : await ctx.scoped.getRecord(caller.workspaceId, resourceMachineRecordId(machineId)).catch(() => null);
+    if (machineId !== LOCAL_MACHINE_ID && !machineRecord) {
+      throw new HarnessServiceError("not-found", `Machine is not registered: ${machineId}`);
+    }
+    const resolvedBackend = await resolveBackend(ctx, caller, machineId);
     const attemptRecord = await putRecord(ctx, caller.workspaceId, caller, {
       recordId: recordIdFor.attempt(attemptId),
       recordType: "experiment.attempt",
@@ -948,18 +1025,19 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       payload: {
         id: attemptId,
         specId: spec.specId,
-        backend: "local",
-        machineId: params.machineId ?? LOCAL_MACHINE_ID,
+        backend: resolvedBackend?.backend.backend
+          ?? str(machineRecord ? payloadOf(machineRecord).backend : null)
+          ?? "unresolved",
+        machineId,
         executionWorkspaceId: caller.executionWorkspaceId,
         ...(params.requestId ? { requestId: params.requestId } : {}),
         ...(params.resources ? { resources: params.resources } : {}),
         createdAt: now(),
       },
     });
-    const machineId = params.machineId ?? LOCAL_MACHINE_ID;
-    if (machineId !== LOCAL_MACHINE_ID) {
+    if (!resolvedBackend) {
       await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "failed", (p) => ({
-        ...p, error: `backend for machine ${machineId} is not available`, endedAt: now(),
+        ...p, error: `no execution backend is registered for machine ${machineId}`, endedAt: now(),
       }));
       const failed = await getAttemptRecord(ctx, caller.workspaceId, attemptId);
       const view = failed ? attemptView(failed) : null;
@@ -1010,25 +1088,34 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       await launch(ctx, workspaceId, caller, record);
       return;
     }
-    const processId = processIdFor(attempt.attemptId);
+    const resolved = await resolveBackend(ctx, caller, attempt.machineId ?? LOCAL_MACHINE_ID).catch(() => null);
+    if (!resolved) return;
+    const jobRecord = await ctx.scoped
+      .getRecord(workspaceId, recordIdFor.job(jobIdFor(attempt.attemptId)))
+      .catch(() => null);
+    const backendJobId = str(jobRecord ? payloadOf(jobRecord).backendJobId : null) ?? processIdFor(attempt.attemptId);
     try {
-      await ctx.scoped.processInspect({ workspaceId, processId });
+      await resolved.backend.inspect(resolved.site, backendJobId);
       const running: RunningJob = {
-        processId, cursor: 0,
+        backend: resolved.backend,
+        site: resolved.site,
+        handle: { backendJobId },
+        cursor: 0,
         buffers: { stdout: [], stderr: [] },
         totals: { stdout: 0, stderr: 0 },
         truncated: { stdout: false, stderr: false },
-        cancelRequested: attempt.state === "stopping",
+        cancelRequested: attempt.state === "stopping" || payloadOf(record).cancelRequested === true,
         poll: Promise.resolve(),
       };
-      if (attempt.state === "stopping") {
-        await ctx.scoped.processKill({ workspaceId, processId, force: true }).catch(report);
+      if ((attempt.state === "stopping" || payloadOf(record).cancelRequested === true)
+        && resolved.backend.controls.includes("cancel")) {
+        await resolved.backend.kill(resolved.site, backendJobId).catch(report);
       }
       running.poll = poll(ctx, workspaceId, caller, attempt.attemptId, running).catch(report);
       jobs.set(attempt.attemptId, running);
     } catch {
       await updateAttempt(ctx, workspaceId, caller, attempt.attemptId, "lost", (p) => ({
-        ...p, error: "backend process is unreachable", endedAt: now(),
+        ...p, error: "backend job is unreachable", endedAt: now(),
       })).catch(report);
     }
   };
@@ -1129,32 +1216,50 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       return attemptView(record)!;
     }
     const running = jobs.get(attemptId);
-    const processId = running?.processId ?? processIdFor(attemptId);
+    const resolved = running
+      ? { backend: running.backend, site: running.site }
+      : await resolveBackend(ctx, caller, view.machineId ?? LOCAL_MACHINE_ID);
+    const jobRecord = running ? null : await ctx.scoped
+      .getRecord(caller.workspaceId, recordIdFor.job(jobIdFor(attemptId)))
+      .catch(() => null);
+    const backendJobId = running?.handle.backendJobId
+      ?? str(jobRecord ? payloadOf(jobRecord).backendJobId : null)
+      ?? processIdFor(attemptId);
     await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "stopping", (p) => ({
       ...p, cancelRequested: true,
     }));
     if (running) running.cancelRequested = true;
-    await ctx.scoped.processKill({ workspaceId: caller.workspaceId, processId, force: true }).catch(report);
-    if (!running) {
+    if (resolved?.backend.controls.includes("cancel")) {
+      await resolved.backend.kill(resolved.site, backendJobId).catch(report);
+    }
+    if (!running && resolved) {
       try {
-        const snapshot = await ctx.scoped.processInspect({ workspaceId: caller.workspaceId, processId });
+        const observation = await resolved.backend.inspect(resolved.site, backendJobId);
         const job: RunningJob = {
-          processId, cursor: 0,
+          backend: resolved.backend,
+          site: resolved.site,
+          handle: { backendJobId },
+          cursor: 0,
           buffers: { stdout: [], stderr: [] },
           totals: { stdout: 0, stderr: 0 },
           truncated: { stdout: false, stderr: false },
           cancelRequested: true,
           poll: Promise.resolve(),
         };
-        if (!snapshot.writerActive) {
-          await finalize(ctx, caller.workspaceId, caller, attemptId, job, snapshot);
+        if (!observation.writerActive) {
+          await finalize(ctx, caller.workspaceId, caller, attemptId, job, observation);
         } else {
           jobs.set(attemptId, job);
           job.poll = poll(ctx, caller.workspaceId, caller, attemptId, job).catch(report);
         }
       } catch {
-        await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "cancelled", (p) => ({
-          ...p, endedAt: now(), collection: "none",
+        // The backend cannot confirm termination — `lost` keeps the fact
+        // honest instead of claiming a stop nobody observed.
+        await updateAttempt(ctx, caller.workspaceId, caller, attemptId, "lost", (p) => ({
+          ...p,
+          error: "termination could not be confirmed; the backend job is unreachable",
+          endedAt: now(),
+          collection: "none",
         })).catch(report);
       }
     }
@@ -1256,7 +1361,16 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const spec = specRecord ? specView(specRecord) : null;
     if (!spec) throw new HarnessServiceError("unavailable", "experiment spec record is unavailable");
     const running = jobs.get(attemptId) ?? null;
-    const artifacts = await persistArtifacts(ctx, caller.workspaceId, caller, attemptId, spec, running);
+    const resolved = running
+      ? { backend: running.backend, site: running.site }
+      : await resolveBackend(ctx, caller, view.machineId ?? LOCAL_MACHINE_ID);
+    if (!resolved?.backend.controls.includes("collect")) {
+      throw new HarnessServiceError(
+        "unavailable",
+        `No backend can collect outputs for machine ${view.machineId ?? LOCAL_MACHINE_ID}`,
+      );
+    }
+    const artifacts = await persistArtifacts(ctx, caller.workspaceId, caller, attemptId, spec, resolved, running);
     const collection = artifacts.some((artifact) => artifact.state === "failed") ? "failed" : "done";
     const updated = await updateAttempt(ctx, caller.workspaceId, caller, attemptId, view.state, (p) => ({
       ...p, collection,

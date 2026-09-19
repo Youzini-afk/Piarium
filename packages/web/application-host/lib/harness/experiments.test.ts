@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
+import { createLocalExperimentBackend, type ExperimentBackend } from "./experiment-backend.js";
 import { createResourceService } from "./resources.js";
 import { createSourceService } from "./sources.js";
 
@@ -249,5 +250,134 @@ describe("experiment service on the real kernel", () => {
       /unknown|retired/i,
     );
     assert.deepEqual(f.errors, []);
+  });
+
+  it("fails honestly when a registered machine has no backend, and refuses unregistered machines", async () => {
+    const f = await fixture();
+    await assert.rejects(
+      f.experiments.submit(f.caller, { ...node("process.stdout.write('x')"), machineId: "ghost" }),
+      /not registered/i,
+    );
+
+    const registered = await f.resources.registerMachine(f.caller.workspaceId, {
+      machineId: "remote-a",
+      kind: "ssh",
+      label: "Unbacked remote",
+    });
+    assert.equal(registered.state, "offline");
+    assert.equal(registered.connection.status, "unknown");
+
+    const submitted = await f.experiments.submit(f.caller, {
+      requestId: "req-nobackend",
+      ...node("process.stdout.write('x')"),
+      machineId: "remote-a",
+    });
+    assert.equal(submitted.attempt.state, "failed");
+    assert.match(submitted.attempt.error ?? "", /no execution backend/i);
+    assert.deepEqual(f.errors, []);
+  });
+
+  it("drives a registered machine through its resolved backend end to end", async () => {
+    const f = await fixture();
+    await f.resources.registerMachine(f.caller.workspaceId, {
+      machineId: "sim-cluster",
+      kind: "cluster",
+      label: "Simulated cluster",
+      backend: "sim",
+      state: "available",
+      capacity: { cpuCores: 64 },
+    });
+
+    const spawned: string[] = [];
+    const released: string[] = [];
+    const sim: ExperimentBackend = {
+      backend: "sim",
+      controls: ["cancel", "attach", "collect"],
+      async spawn(_site, request) {
+        spawned.push(request.backendJobId);
+        return {
+          handle: { backendJobId: `sim-${request.backendJobId}` },
+          observation: { status: "running", writerActive: true },
+        };
+      },
+      async inspect() {
+        return { status: "exited", writerActive: false, exitCode: 0 };
+      },
+      async read(_site, _id, cursor) {
+        return {
+          chunks: cursor === 0
+            ? [{ channel: "stdout" as const, bytesBase64: Buffer.from("sim-output").toString("base64") }]
+            : [],
+          nextCursor: 10,
+          endCursor: 10,
+          observation: { status: "exited", writerActive: false, exitCode: 0 },
+        };
+      },
+      async kill() {},
+      async release(_site, id) { released.push(id); },
+      async collectFile(_site, relativePath) { return Buffer.from(`collected:${relativePath}`); },
+    };
+    const errors: Error[] = [];
+    const experiments = createExperimentService({
+      client: f.client,
+      resources: f.resources,
+      sources: f.sources,
+      resolveWorkspaceRoot: async () => f.workspace,
+      resolveBackend: async (ctx, machineId) => {
+        if (machineId === "sim-cluster") {
+          return {
+            backend: sim,
+            site: {
+              workspaceId: f.caller.workspaceId,
+              rootId: "sim-root",
+              canonicalRoot: f.workspace,
+              transport: null,
+            },
+          };
+        }
+        if (machineId === "local") {
+          return { backend: createLocalExperimentBackend(ctx.scoped), site: { workspaceId: f.caller.workspaceId, rootId: ctx.rootId, canonicalRoot: ctx.canonicalRoot, transport: ctx.scoped } };
+        }
+        return null;
+      },
+      onError: (error) => errors.push(error),
+    });
+
+    const submitted = await experiments.submit(f.caller, {
+      requestId: "req-sim-1",
+      ...node("process.stdout.write('ignored-by-sim')"),
+      outputPaths: ["result.txt"],
+      machineId: "sim-cluster",
+    });
+    assert.equal(submitted.attempt.backend, "sim");
+    assert.equal(submitted.attempt.machineId, "sim-cluster");
+
+    const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.timedOut, false);
+    assert.equal(waited.attempt.state, "completed");
+    assert.equal(waited.attempt.exitCode, 0);
+    assert.equal(released.length, 1);
+    assert.ok(released[0]!.startsWith("sim-"));
+
+    const detail = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(detail.job?.backend, "sim");
+    assert.equal(detail.job?.machineId, "sim-cluster");
+    assert.ok(detail.job?.backendJobId?.startsWith("sim-"));
+    assert.ok(detail.artifacts.some((a) => a.name === "stdout" && a.state === "available"));
+    assert.ok(detail.artifacts.some((a) => a.name === "result.txt" && a.state === "available"));
+
+    const logs = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
+    assert.match(logs.text, /sim-output/);
+
+    // The idempotent retry returns the recorded attempt — no second spawn.
+    const retry = await experiments.submit(f.caller, {
+      requestId: "req-sim-1",
+      ...node("process.stdout.write('ignored-by-sim')"),
+      outputPaths: ["result.txt"],
+      machineId: "sim-cluster",
+    });
+    assert.equal(retry.attempt.attemptId, submitted.attempt.attemptId);
+    assert.equal(spawned.length, 1);
+    assert.deepEqual(errors, []);
   });
 });
