@@ -1025,7 +1025,7 @@ binary 验证。Application Host build 会对 emitted import graph 做运行时�
 
 设计权威为 [testing-ci-design.md](testing-ci-design.md)，现状审计与处置结果见 [testing-ci-audit.md](testing-ci-audit.md)。本阶段覆盖全仓，完成后再开始 AI4S 的 7A–7F。
 先建立整体判断，再分责任完成修改；不得把它交付成只修近期几处失败、只删源码断言或只移动 workflow 的局部补丁。
-当前状态是 Q0–Q2 已实施并在本地验证（D-293），待主代理验收后收口；以下编号用于交接和收口，不构成每次日常开发都要重复的检查流程。
+当前状态是 Q0–Q2 已实施并在本地验证（D-293），待主代理验收后收口；`packages/vscode` 适配层按 D-294 标记为 deprecated/unsupported，不计入本阶段正式产品测试证据或 required CI。以下编号用于交接和收口，不构成每次日常开发都要重复的检查流程。
 
 ### Q0. 全仓现状、责任和目标结构
 

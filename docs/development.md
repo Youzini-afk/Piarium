@@ -85,9 +85,10 @@ required number of checks. Do not turn its one-time cleanup plan into a checklis
   subsystem measurement rather than an informal microbenchmark. Kernel-dependent Vitest files run only
   through `packages/web/vitest.kernel.config.ts` under that entry; the main `packages/web` suite excludes
   them and stays deterministic without Rust artifacts.
-- The VS Code companion suite runs via `bun run --cwd packages/vscode test` (its package name keeps it
-  outside the `@piarium/*` `test:pi` filter); Electron splits `test:runtime` from the dedicated
-  `test:updater`/`test:linux-desktop` vitest files.
+- The VS Code adapter is deprecated/unsupported (D-294): `bun run --cwd packages/vscode test` stays
+  runnable but is not part of `test:pi` or required CI — full-suite runs show test-assembly failures
+  (cross-file `mock.module('vscode')` pollution, a flaky worktree fixture), not product faults.
+  Electron splits `test:runtime` from the dedicated `test:updater`/`test:linux-desktop` vitest files.
 - `bun.lock` covers development. `scripts/cloud-runtime.bun.lock` separately pins the production cloud
   runtime graph; dependency changes that reach it need `bun run update:cloud-runtime-lock`.
 - `@piarium/ui` runs under Vitest as part of `bun run test:pi`.

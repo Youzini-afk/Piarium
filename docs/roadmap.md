@@ -63,11 +63,12 @@ parallel; do not treat them as live design authority.
 4. Verify the resulting scope and feedback cost, update current evidence references, and close Q before
    starting the AI4S implementation slices. No fixed deletion ratio, coverage quota, test count, or retry-until-green policy.
 
-Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i18n/Electron/VS Code
+Delivered per [testing-ci-audit.md](testing-ci-audit.md): single-owner kernel/i18n/Electron
 suites, quoted-glob discovery, retargeted recovery evidence on the production journal engine,
 artifact-driven CI with docs-only gating, and the cloud daemon boot failure fixed at its product
-root cause (a production dependency declaration). Locally verified; awaiting primary-agent
-acceptance before AI4S implementation begins.
+root cause (a production dependency declaration). The dormant VS Code adapter is deprecated
+(D-294) and excluded from formal evidence; its removal is a later dedicated stage. Locally
+verified; awaiting primary-agent acceptance before AI4S implementation begins.
 
 ## Phase 0 — Foundation (complete)
 

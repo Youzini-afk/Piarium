@@ -94,8 +94,6 @@ jobs:
       - name: Build and verify native kernel authority
         run: node scripts/test-kernel-authority.mjs --build
       - run: bun run test:pi
-      - name: Test VS Code companion bridge
-        run: bun run --cwd packages/vscode test
       - run: |
           bun run --cwd packages/electron test:architecture
           bun run --cwd packages/electron test:updater

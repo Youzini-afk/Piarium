@@ -1,6 +1,6 @@
 # Piarium 测试与 CI 体系重整设计
 
-Status: accepted design (D-292); Stage Q implemented (D-293), locally verified and awaiting acceptance
+Status: accepted design (D-292); Stage Q implemented (D-293), locally verified and awaiting acceptance; `packages/vscode` adapter deprecated and excluded from formal evidence (D-294)
 
 Last updated: 2026-09-19
 

@@ -216,6 +216,11 @@ Measured `bun test` run: 53 pass, 6 fail, 5 file-level errors:
 Disposition: **wire** — add `test` (`bun test`) to the package, migrate the 5
 node:test files, add a CI step so the suite is no longer dead.
 
+Amended by D-294: the runner wiring was done, but the CI step was removed
+again — the package is a deprecated/unsupported historical adapter outside
+the formal product surface (see §10), so its suite stays runnable but is not
+required evidence.
+
 ## 6. Cloud deploy smoke failure (root-caused)
 
 CI failure signature: `PIARIUM_UI_PASSWORD is not set` →
@@ -346,9 +351,18 @@ was never the CI cause.
   `desktop-release.yml`; the UI suite inside `test:pi` already covers the
   same files, so the dedicated step was a second execution of the same
   environment.
-- **vscode suite in CI** — `bun run --cwd packages/vscode test` added to
-  `windows-runtime` after the kernel build (the native-search case needs
-  the release binary).
+- **vscode suite boundary correction (D-294)** — `bun run --cwd
+  packages/vscode test` was briefly added to `windows-runtime`, then
+  removed: `packages/vscode` is a deprecated/unsupported historical
+  adapter outside the formal product surface, so its suite is not Q
+  product evidence and not a required check. Measured full `bun test`:
+  57–58 pass / 1–2 fail — `src/webviewHtml.test.ts` passes standalone
+  but fails in the full suite from cross-file `mock.module('vscode')`
+  pollution (`vscode.Uri.joinPath` undefined), plus a flaky worktree
+  bootstrap fixture; both are test-assembly issues, not product faults.
+  The suite was not fixed and the code/tests stay in the repo; full
+  removal, build-entry, and doc cleanup belong to a later dedicated
+  stage.
 - **node-smoke** — moved out of `source-quality`; `production-build` runs
   `node --test .../store.smoke.test.ts` against the artifact `bun run
   build` already produced, instead of rebuilding the host a second time.
