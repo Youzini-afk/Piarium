@@ -36,7 +36,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
-| [research-cluster](decisions/research-cluster.md) | D-291/D-297/D-298 科研集群、工作台与侧重、真实根主线。 | 3 |
+| [research-cluster](decisions/research-cluster.md) | D-291/D-297/D-298/D-299 科研集群、工作台与侧重、真实根主线、能力路由。 | 4 |
 
 ## 决策索引
 
@@ -337,3 +337,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-296 | 2026-09-19 | retire the former VS Code companion before AI4S | implemented / locally verified | 完整删除 companion 包、开发/构建/打包入口、共享表面契约与当前文档；保留 LSP/TextMate/外部编辑器/provenance 语义；无兼容归档副本 | architecture；development；roadmap；status；public docs；root build and knowledge smoke | [foundation-governance](decisions/foundation-governance.md) |
 | D-297 | 2026-09-19 | 工作台 UIUX 与 Agent 工作侧重独立，科研/办公入口复用整体切换与动画 | 7A implemented at D-298; later work planned | 补齐 D-291 产品形态；项目默认只供新对话捕获，对话可覆盖；D-298 明确新 Run 应用与追问冻结 | research-cluster-design 10；agent-harness 10；plan 7A–7F；composable-workbench；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-298 | 2026-09-19 | AI4S 7A：科研工作台、独立工作侧重和同一用户 Pi 会话的真实根 Thread/Run | implemented / wired; validation boundary in status | 落地 D-297 7A；配置在新 Run 前应用，当前 Run 与追问队列冻结；研究集群其余部分仍计划中 | research-cluster-design；plan 7A；status；architecture；composable-workbench；UI/Host 模块文档 | [research-cluster](decisions/research-cluster.md) |
+| D-299 | 2026-09-19 | AI4S 7B 第一段：研究能力、专用模型槽位、工具集合和资源请求随分支 Run 冻结 | implemented / wired; 7B partial | 没有配置的能力明确 unavailable，不借用主模型；完整动态升级、调度和实验执行仍待后续阶段 | research-cluster-design；plan 7B；status；protocol；pi-host；Host harness | [research-cluster](decisions/research-cluster.md) |

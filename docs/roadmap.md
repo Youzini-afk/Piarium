@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | 7A workbench, independent focus and attached research root implemented (D-298); next: 7B capability routing |
+| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery

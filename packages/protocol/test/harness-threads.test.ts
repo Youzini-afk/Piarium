@@ -32,9 +32,23 @@ import {
   sealRetrievalEvidence,
   type HarnessServiceMap,
   type HostEventData,
+  RESEARCH_CAPABILITIES,
+  resolveResearchCapabilities,
 } from "../src/index.js";
 
 describe("thread protocol types (§9.3)", () => {
+  it("resolves only explicitly configured research capability slots", () => {
+    assert.deepEqual(RESEARCH_CAPABILITIES, [
+      "investigation", "experimental-design", "fast-exploration", "high-throughput-execution",
+    ]);
+    const resolved = resolveResearchCapabilities({
+      researchInvestigation: { providerId: "p", modelId: "investigator" },
+      researchFastExploration: { providerId: "p", modelId: "fast" },
+    });
+    assert.deepEqual(resolved.map((entry) => entry.capability), ["investigation", "fast-exploration"]);
+    assert.equal(resolveResearchCapabilities({}).length, 0);
+  });
+
   it("all thread methods are recognized by isHarnessMethod", () => {
     const threadMethods = [
       "thread.dispatch",

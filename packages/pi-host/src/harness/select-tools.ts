@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { HarnessSettings, ResolvedPreset } from "@piarium/protocol";
+import type { HarnessSettings, ResolvedPreset, ResolvedResearchCapability } from "@piarium/protocol";
 import { createBashTool } from "./bash-tool.js";
 import { createGrepTool } from "./grep-tool.js";
 import { createApplyPatchTool } from "./apply-patch-tool.js";
@@ -59,6 +59,8 @@ export interface SelectHarnessToolsDeps {
   threadRuntimeAvailable?: boolean;
   /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
   resolvedPresets?: readonly ResolvedPreset[];
+  /** Research capability model slots resolved for this worker. */
+  resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
   /** Active tool names of the dispatching session; the normal-dispatch tool default. */
   getActiveToolNames?: () => string[];
   /** Frozen session tool allowlist; submit_facts registers only when this includes it. */
@@ -99,6 +101,7 @@ export function selectHarnessTools(
     webSearchAvailable,
     threadRuntimeAvailable,
     resolvedPresets,
+    resolvedResearchCapabilities,
     getActiveToolNames,
     sessionToolAllowlist,
   } = deps;
@@ -177,6 +180,7 @@ export function selectHarnessTools(
       result.push(createDispatchTool(bridge, sessionId, resolvedPresets ?? [], {
         concurrency: settings.dispatch.concurrency,
         ...(getActiveToolNames ? { getActiveToolNames } : {}),
+        ...(resolvedResearchCapabilities ? { resolvedResearchCapabilities } : {}),
       }));
     }
     if (tools.threads !== false) {

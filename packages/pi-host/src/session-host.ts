@@ -95,6 +95,9 @@ import type {
   WorkFocusSelection,
 } from "@piarium/protocol";
 import {
+  resolveResearchCapabilities,
+} from "@piarium/protocol";
+import {
   packageSourceEnabled,
   packageSourceValue,
   setPackageSourceEnabled,
@@ -3462,6 +3465,7 @@ export class SessionHost {
         harnessSettings.models ?? {},
         sessionModel ? { providerId: sessionModel.provider, modelId: sessionModel.id } : null,
       );
+      const resolvedResearchCapabilities = resolveResearchCapabilities(harnessSettings.models ?? {});
       customTools.push(...selectHarnessTools(harnessSettings, {
         bridge: hostServicesBridge,
         sessionId: sessionManager.getSessionId(),
@@ -3477,6 +3481,7 @@ export class SessionHost {
         webSearchAvailable: this.#harnessWebSearchEnabled,
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         resolvedPresets,
+        resolvedResearchCapabilities,
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],
         ...(this.#sessionToolAllowlist ? { sessionToolAllowlist: this.#sessionToolAllowlist } : {}),
       }));

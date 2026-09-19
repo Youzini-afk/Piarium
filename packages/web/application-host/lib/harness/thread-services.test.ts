@@ -244,6 +244,52 @@ describe("thread services", () => {
     });
   });
 
+  it("freezes a configured research capability and resource request on a research branch", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-research-dispatch-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const spawn = vi.fn(async () => ({ sessionId: "research-child" }));
+    const service = createThreadDispatchService({
+      threadRegistry: registry,
+      threadSpawnSession: spawn,
+    } as never);
+    try {
+      const root = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "session", id: "parent-1" },
+        brief: "principal research",
+        kind: "discussion",
+        purpose: "research-root",
+        createdBy: "user",
+        concurrency: 4,
+        autoRun: false,
+        worktree: "none",
+        workFocus: "research",
+        tools: ["dispatch", "read", "grep", "find", "ls", "explore", "related", "recall", "threads", "wait", "send", "read_thread"],
+        permissions: {},
+        hidden: true,
+      });
+      const rootRun = await registry.startRun("workspace-1", root.id);
+      await registry.markRunRunning("workspace-1", root.id, rootRun.id, "parent-1");
+      const result = await service.handle({
+        task: "Compare two mechanisms",
+        model: { providerId: "research-provider", modelId: "design-model" },
+        research: { capability: "experimental-design", resources: { cpu: true } },
+      }, serviceContext());
+      const branch = await registry.getThread("workspace-1", { kind: "thread", id: root.id }, result.threadId);
+      expect(branch).toMatchObject({
+        manifest: {
+          research: { capability: "experimental-design", resources: { cpu: true } },
+          worktree: "none",
+        },
+        model: { providerId: "research-provider", modelId: "design-model" },
+      });
+      expect(spawn).toHaveBeenCalledOnce();
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
   it("runs a preset-less dispatch on the caller's resolved model and tools", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "thread-plain-dispatch-"));
     const registry = createThreadRegistry({ dataDir, hostId: "host-1" });

@@ -1,6 +1,6 @@
 # Piarium 科研集群设计
 
-Status: accepted design (D-291/D-297); phase 7A implemented at D-298, 7B–7F pending
+Status: accepted design (D-291/D-297); 7A and the first 7B capability-routing slice implemented at D-298/D-299, later 7B–7F pending
 
 Last updated: 2026-09-19
 

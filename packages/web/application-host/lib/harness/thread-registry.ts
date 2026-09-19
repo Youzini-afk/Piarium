@@ -10,6 +10,7 @@ import fs from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
+  isResearchCapability,
   normalizeFrozenHarnessPermissions,
   sealRetrievalEvidence,
   summarizeRetrievalEvidence,
@@ -39,6 +40,7 @@ import type {
   ThreadRun,
   ThreadRunInputOrigin,
   ThreadRunOutcome,
+  ThreadResearchManifest,
   ThreadTokens,
   ThreadViewCursor,
   ThreadReviewOf,
@@ -126,6 +128,7 @@ export interface CreateThreadInput {
   model?: { providerId: string; modelId: string };
   tools: string[];
   workFocus?: import("@piarium/protocol").WorkFocusId;
+  research?: ThreadResearchManifest;
   permissions: unknown;
   systemPromptFragment?: string;
   /** Bespoke first-Run prompt that survives queuing (auto-review threads). */
@@ -501,9 +504,20 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
   && (value.workFocus === "code" || value.workFocus === "research")
+  && (value.research === undefined || isResearchManifest(value.research))
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && (value.permissions === undefined || isRecord(value.permissions))
   && (value.promptText === undefined || isString(value.promptText))
+);
+
+const isResearchManifest = (value: unknown): value is ThreadResearchManifest => (
+  isRecord(value)
+  && isResearchCapability(value.capability)
+  && isRecord(value.resources)
+  && Object.entries(value.resources).every(([key, item]) => (
+    (key === "cpu" || key === "gpu" || key === "network" || key === "longRunning")
+      && typeof item === "boolean"
+  ))
 );
 
 const isReport = (value: unknown): value is ThreadReport | null => (
@@ -601,6 +615,7 @@ const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["froz
   && isNullableString(value.systemPromptFragment)
   && (value.inputOrigin === "task" || value.inputOrigin === "inherit" || value.inputOrigin === "continue" || value.inputOrigin === "fresh")
   && (value.workFocus === "code" || value.workFocus === "research")
+  && (value.research === undefined || isResearchManifest(value.research))
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -1311,6 +1326,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       const inheritedWorkFocus = input.parent.kind === "thread"
         ? findThread(catalog, input.parent.id)?.manifest.workFocus
         : undefined;
+      const inheritedResearch = input.parent.kind === "thread"
+        ? findThread(catalog, input.parent.id)?.manifest.research
+        : undefined;
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
         parent: structuredClone(input.parent),
@@ -1329,6 +1347,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],
           workFocus: input.workFocus ?? inheritedWorkFocus ?? "code",
+          ...(input.research === undefined
+            ? inheritedResearch === undefined ? {} : { research: structuredClone(inheritedResearch) }
+            : { research: structuredClone(input.research) }),
           worktree: input.worktree,
           permissions: normalizeFrozenHarnessPermissions(input.permissions),
           ...(input.promptText !== undefined ? { promptText: input.promptText } : {}),
@@ -1661,6 +1682,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           systemPromptFragment: thread.manifest.systemPromptFragment,
           inputOrigin: options.inputOrigin ?? thread.manifest.inputOrigin ?? "task",
           workFocus: thread.manifest.workFocus,
+          ...(thread.manifest.research === undefined ? {} : { research: structuredClone(thread.manifest.research) }),
         },
         workerState: "starting",
         outcome: null,

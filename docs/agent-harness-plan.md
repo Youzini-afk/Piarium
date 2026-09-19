@@ -1401,6 +1401,9 @@ interface ResearchWorkItem {
 
 **7B：研究分支与能力路由。**
 
+状态：D-299 已实现能力路由的第一段：分支可冻结能力、专用模型槽位、工具集合和资源请求；完整的动态升级、
+同 Thread 换模型、新 Run 继承和调度仍待本阶段后续工作。
+
 - 扩展 `dispatch` 的 research purpose/capability/resource manifest；
 - 接通 investigation/design/fast-exploration/high-throughput-execution 的模型解析；
 - 实现同 Thread 换模型的新 Run、分支继承窄输入、独立 WorkingState 和取消/等待；

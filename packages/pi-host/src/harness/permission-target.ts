@@ -133,10 +133,15 @@ function networkOrigins(toolName: string, params: Record<string, unknown>): stri
 function threadScopes(toolName: string, params: Record<string, unknown>): string[] {
   if (toolName !== "dispatch") return [];
   const preset = typeof params.preset === "string" ? params.preset.trim() : "";
+  const capability = typeof params.capability === "string" ? params.capability.trim() : "";
   const scope = Array.isArray(params.scope)
     ? params.scope.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).map((item) => item.trim())
     : [];
-  return [...new Set([...(preset ? [`preset:${preset}`] : []), ...scope.map((item) => `scope:${item}`)])];
+  return [...new Set([
+    ...(preset ? [`preset:${preset}`] : []),
+    ...(capability ? [`research:${capability}`] : []),
+    ...scope.map((item) => `scope:${item}`),
+  ])];
 }
 
 export function buildPermissionInspection(input: {

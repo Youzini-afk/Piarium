@@ -37,6 +37,7 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: 'harness.permissions.rules', page: 'harness-permissions', titleKey: 'settings.harness.rules.title', keywords: ['allow', 'deny', 'ask', 'regex', 'rules'] },
   { id: 'harness.models.retrieval', page: 'harness-models', titleKey: 'settings.harness.models.retrieval', keywords: ['explore', 'retrievalAgent', 'model'] },
   { id: 'harness.models.execution', page: 'harness-models', titleKey: 'settings.harness.models.execution', keywords: ['quickImplement', 'hardImplement', 'frontend', 'model'] },
+  { id: 'harness.models.research', page: 'harness-models', titleKey: 'settings.harness.models.research', keywords: ['investigation', 'experimental design', 'fast exploration', 'high throughput', 'research', 'model'] },
   { id: 'harness.models.assistance', page: 'harness-models', titleKey: 'settings.harness.models.assistance', keywords: ['review', 'check', 'reader', 'suggestions', 'permissionJudge', 'model'] },
   { id: 'harness.review', page: 'harness-models', titleKey: 'settings.page.harness.section.review', keywords: ['review', 'gate'] },
   { id: 'harness.context', page: 'harness-context', titleKey: 'settings.page.harness.context.backgroundPreparation', keywords: ['compaction', 'context'] },

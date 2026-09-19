@@ -192,7 +192,11 @@ export type HarnessModelRole =
   | "check"
   | "reader"
   | "suggestions"
-  | "permissionJudge";
+  | "permissionJudge"
+  | "researchInvestigation"
+  | "researchExperimentalDesign"
+  | "researchFastExploration"
+  | "researchHighThroughputExecution";
 
 export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   tools: {},

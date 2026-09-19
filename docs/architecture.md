@@ -490,7 +490,8 @@ Research uses the current user Pi session as its principal model. `ResearchRootR
 `agent_start`/settle events to Registry Thread/Run records, distinguishing attached roots from spawned
 child sessions. Settling detaches the live binding while retaining results and branches. No hidden main
 session or parallel research catalog exists. Shell changes do not apply focus, call a model or recreate
-sessions. Capability routing, scheduling and research synthesis remain planned in 7B–7F; the product
+sessions. D-299 adds the first capability-routing slice: dedicated research model slots and frozen
+branch manifests; scheduling, dynamic upgrades and research synthesis remain planned in 7B–7F. The product
 design is [research-cluster-design.md](research-cluster-design.md).
 
 Text content has one authority. The application host owns a revisioned document service with

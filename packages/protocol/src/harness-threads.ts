@@ -8,6 +8,7 @@
 
 import type { PermissionPolicy } from "./permission-gate.js";
 import type { WorkFocusId } from "./work-focus.js";
+import type { ThreadResearchManifest } from "./research-capabilities.js";
 
 export type ThreadKind = "discussion" | "implementation";
 export type ThreadPurpose = "task" | "research-root";
@@ -417,6 +418,8 @@ export interface ThreadLaunchManifest {
   tools: string[];
   /** Agent work focus frozen when this Thread was created. */
   workFocus: WorkFocusId;
+  /** Optional research capability and resource request frozen at dispatch. */
+  research?: ThreadResearchManifest;
   worktree: "none" | "shared" | "isolated";
   /** Frozen Host permission overlay. Nested children inherit or narrow it. */
   permissions?: PermissionPolicy;
@@ -668,6 +671,7 @@ export interface ThreadRunFrozenConfig {
   systemPromptFragment: string | null;
   inputOrigin: ThreadRunInputOrigin;
   workFocus: WorkFocusId;
+  research?: ThreadResearchManifest;
 }
 
 export interface ThreadRun {
@@ -1037,6 +1041,8 @@ export interface ThreadDispatchParams {
    * retained raw messages at dispatch time and prepends them to the task.
    */
   input?: "task" | "inherit";
+  /** Research capability is explicit and only available when its model slot is configured. */
+  research?: ThreadResearchManifest;
 }
 
 export interface ThreadFactsSetParams {

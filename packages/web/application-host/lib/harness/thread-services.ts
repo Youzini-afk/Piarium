@@ -22,6 +22,7 @@ import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
 import { HarnessServiceError } from "./service-error.js";
 import { EXECUTION_PRESETS } from "./presets.js";
+import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@piarium/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
 import { ThreadAdmissionError, ThreadRegistryError } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
@@ -225,11 +226,29 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       if (preset?.id === "retrieval" && !params.model) {
         throw new HarnessServiceError("unavailable", "retrieval is not configured; models.retrievalAgent is empty");
       }
+      const research = params.research;
+      if (research !== undefined && (!isResearchCapability(research.capability)
+        || !research.resources
+        || Object.entries(research.resources).some(([key, value]) => (
+          !["cpu", "gpu", "network", "longRunning"].includes(key) || typeof value !== "boolean"
+        )))) {
+        throw new HarnessServiceError("invalid-params", "research capability or resource manifest is malformed");
+      }
+      if (research !== undefined && params.preset !== undefined) {
+        throw new HarnessServiceError("invalid-params", "research capability cannot be combined with a preset");
+      }
       if (!preset && !params.model) {
         throw new HarnessServiceError("invalid-params", "A preset-less dispatch must resolve the caller's current model");
       }
       const { workspaceId, parent, owner } = await resolveOwningContext(host, ctx);
       assertOwnerTool(owner, "dispatch");
+      if (research !== undefined && owner?.execution.workFocus !== "research") {
+        throw new HarnessServiceError("denied", "Research capabilities require a research work focus");
+      }
+      const researchDefinition = research === undefined ? undefined : RESEARCH_CAPABILITY_DEFINITIONS[research.capability];
+      if (researchDefinition && !params.model) {
+        throw new HarnessServiceError("unavailable", `Research capability ${research?.capability ?? "unknown"} has no configured model slot`);
+      }
       // The execution budget is shared per root task (3.18C): a nested
       // dispatch inherits the owning Thread's frozen budget rather than
       // multiplying capacity by parent level.
@@ -271,7 +290,7 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       // inherits the caller's ordinary capabilities, so its claimed set must
       // stay inside the owning Run's frozen allowlist; a root session's
       // worker-resolved set is its own tools, which it already holds.
-      const tools = preset?.tools ?? params.tools ?? [];
+      const tools = researchDefinition?.tools ?? preset?.tools ?? params.tools ?? [];
       if (owner && !preset) {
         const denied = tools.filter((tool) => !owner.execution.tools.includes(tool));
         if (denied.length > 0) {
@@ -284,11 +303,11 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
       }
       // `shared` is an explicit opt-in only; write-capable work defaults to an
       // isolated WorkingState materialized on demand (D-285).
-      const worktree = params.worktree === "shared"
+      const worktree = researchDefinition?.worktree ?? (params.worktree === "shared"
         ? "shared" as const
         : captured.draftBaselineId || (preset?.id === "retrieval" && parent.kind === "thread")
           ? "isolated" as const
-          : preset?.worktree === "none" ? "none" as const : "isolated" as const;
+          : preset?.worktree === "none" ? "none" as const : "isolated" as const);
       // `inherit` fixes the parent's committed input at dispatch time; a queued
       // Thread never re-reads later parent state (D-285.4 / 3.18B).
       let inheritedContext: import("@piarium/protocol").ThreadInheritedContext | undefined;
@@ -334,6 +353,16 @@ export function createThreadDispatchService(host: HarnessServiceHost): HarnessSe
         permissions: normalizeFrozenHarnessPermissions(owner?.execution.permissions),
         ...(params.model ? { model: params.model } : {}),
         ...(preset?.systemPromptFragment ? { systemPromptFragment: preset.systemPromptFragment } : {}),
+        ...(researchDefinition ? {
+          research: {
+            capability: research!.capability,
+            resources: {
+              ...researchDefinition.defaultResources,
+              ...(research!.resources as ResearchResourceManifest),
+            },
+          },
+          systemPromptFragment: researchDefinition.systemPromptFragment,
+        } : {}),
         // task background is explicit; inherit already contains the fixed Pi
         // input. Neither may acquire future parent blocks during dequeue.
         carryBlocks: false,

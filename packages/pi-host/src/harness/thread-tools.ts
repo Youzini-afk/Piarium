@@ -3,6 +3,9 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
+  ResearchCapability,
+  ResearchResourceManifest,
+  ResolvedResearchCapability,
   ResolvedPreset,
   ThreadDispatchResult,
   ThreadListResult,
@@ -40,6 +43,18 @@ const DispatchParams = Type.Object({
   ], { description: "task starts on the brief (default); inherit carries the parent's committed input captured at dispatch" })),
   worktree: Type.Optional(Type.Literal("shared")),
   scope: Type.Optional(Type.Array(Type.String())),
+  capability: Type.Optional(Type.Union([
+    Type.Literal('investigation'),
+    Type.Literal('experimental-design'),
+    Type.Literal('fast-exploration'),
+    Type.Literal('high-throughput-execution'),
+  ], { description: 'Research capability; available only when its dedicated model slot is configured.' })),
+  resources: Type.Optional(Type.Object({
+    cpu: Type.Optional(Type.Boolean()),
+    gpu: Type.Optional(Type.Boolean()),
+    network: Type.Optional(Type.Boolean()),
+    longRunning: Type.Optional(Type.Boolean()),
+  })),
 });
 
 const ThreadListParams = Type.Object({
@@ -125,10 +140,12 @@ export function createDispatchTool(
     concurrency?: number;
     /** Active tool names of the dispatching session (normal-dispatch default). */
     getActiveToolNames?: () => string[];
+    resolvedResearchCapabilities?: readonly ResolvedResearchCapability[];
   } = {},
 ): ToolDefinition {
   const available = presets.map((p) => p.id);
   const teamPrompt = buildTeamPrompt([...presets]);
+  const researchCapabilities = options.resolvedResearchCapabilities ?? [];
   return defineTool({
     name: "dispatch",
     label: "Dispatch",
@@ -143,9 +160,33 @@ export function createDispatchTool(
     parameters: DispatchParams,
     executionMode: "parallel",
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
-      let model: { providerId: string; modelId: string } | undefined;
-      let tools: string[] | undefined;
-      if (params.preset !== undefined) {
+        let model: { providerId: string; modelId: string } | undefined;
+        let tools: string[] | undefined;
+        let research: { capability: ResearchCapability; resources: ResearchResourceManifest } | undefined;
+        if (params.capability !== undefined) {
+          const resolved = researchCapabilities.find((entry) => entry.capability === params.capability);
+          if (!resolved) {
+            return {
+              content: [{ type: 'text' as const, text: `research capability unavailable: ${params.capability}. Configure its dedicated model slot first.` }],
+              isError: true,
+              details: { code: 'unavailable', capability: params.capability },
+            };
+          }
+          if (params.preset !== undefined) {
+            return {
+              content: [{ type: 'text' as const, text: 'dispatch failed: capability cannot be combined with preset' }],
+              isError: true,
+              details: { code: 'invalid-params' },
+            };
+          }
+          model = resolved.model;
+          tools = resolved.definition.tools;
+          research = {
+            capability: resolved.capability,
+            resources: { ...resolved.definition.defaultResources, ...(params.resources ?? {}) },
+          };
+        }
+        if (params.preset !== undefined) {
         const preset = presets.find((p) => p.id === params.preset);
         if (!preset) {
           return {
@@ -158,7 +199,7 @@ export function createDispatchTool(
           };
         }
         model = preset.model;
-      } else {
+      } else if (params.capability === undefined) {
         const current = ctx?.model;
         if (!current) {
           return {
@@ -169,6 +210,12 @@ export function createDispatchTool(
         }
         model = { providerId: current.provider, modelId: current.id };
         tools = options.getActiveToolNames?.();
+      } else if (params.resources !== undefined && research === undefined) {
+        return {
+          content: [{ type: 'text' as const, text: 'dispatch failed: resources require a research capability' }],
+          isError: true,
+          details: { code: 'invalid-params' },
+        };
       }
       try {
         const result = await bridge.request<"thread.dispatch">("thread.dispatch", {
@@ -177,9 +224,10 @@ export function createDispatchTool(
           ...(params.preset !== undefined ? { preset: params.preset } : {}),
           ...(params.input !== undefined ? { input: params.input } : {}),
           ...(params.worktree !== undefined ? { worktree: params.worktree } : {}),
-          model,
+          ...(model === undefined ? {} : { model }),
           ...(tools !== undefined ? { tools } : {}),
           ...(params.scope !== undefined ? { scope: params.scope } : {}),
+          ...(research === undefined ? {} : { research }),
         });
         const typed = result as ThreadDispatchResult;
         return { content: [{ type: "text", text: typed.text }], details: { threadId: typed.threadId, queued: typed.queued } };

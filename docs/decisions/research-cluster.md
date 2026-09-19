@@ -94,3 +94,23 @@
 原生 Pi JSONL、用户工作区文件与项目资产不改写。工作台选择与 session work focus 各守既有权威。
 
 状态：7A 已实现并接线；本地验证与未实测边界见 [status](../agent-harness-status.md)。7B–7F 未宣称交付。
+
+### D-299 · 2026-09-19 · AI4S 7B 第一段：能力路由与冻结分支
+
+类型：研究分支执行配置
+
+决定：
+
+1. `thread.dispatch` 可声明 `investigation`、`experimental-design`、`fast-exploration` 或
+   `high-throughput-execution`。每种能力有独立模型槽位、工具集合、系统提示片段和默认资源请求；
+   用户可在 dispatch 时补充 CPU/GPU/network/long-running 请求。
+2. 能力槽位未配置时，dispatch 返回 `unavailable`，不静默使用主模型。能力分支只能从科研工作侧重的主线派出，
+   工具仍受父 Run 冻结 allowlist 约束。分支的 `research` manifest 进入 Thread/Run durable projection，资源请求暂时只冻结记录，
+   不在本段偷偷实现调度器。
+3. 能力分支沿既有 WorkingState/Thread/Run 和 Pi 子会话执行；隔离执行能力使用 isolated WorkingState，
+   调查/设计/快速探索默认只读。7B 后续再接动态模型升级、同 Thread 新 Run、资源等待和结果交接。
+
+原因：先让不同能力真正进入已有 Thread/Run 生命周期，才能在同一权限、工作状态和恢复边界内观察并行研究；
+预先建设一套独立的研究调度平台会把能力声明和实际执行再次分离。
+
+状态：7B 第一段已实现并接线；完整 7B 及 7C–7F 仍为后续阶段。

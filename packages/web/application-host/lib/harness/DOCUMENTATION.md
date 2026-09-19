@@ -43,8 +43,10 @@ and keeps its research branches and results. Child lifecycle code must not close
 
 The authenticated session thread projection returns `researchRoot` and `researchBranches` alongside
 ordinary threads. User actions on a retained branch are authorized through its durable research-root
-ancestry after the principal Run settles. Shell mounting is not an execution event. Research capability
-routing, resource scheduling, board updates, experiment adapters and writing loops belong to 7B–7F.
+ancestry after the principal Run settles. Shell mounting is not an execution event. The first 7B slice
+freezes capability, dedicated model slot, tool set and resource request on the branch manifest; missing
+slots are unavailable rather than silently borrowed. Dynamic upgrades, resource scheduling, board
+updates, experiment adapters and writing loops belong to the later 7B–7F slices.
 
 ### HarnessServiceHost (`service-host.ts`)
 

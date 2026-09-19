@@ -11,6 +11,7 @@ const groups = [
   { key: 'retrieval', slots: ['explore', 'retrievalAgent'] },
   { key: 'execution', slots: ['quickImplement', 'hardImplement', 'frontend'] },
   { key: 'assistance', slots: ['review', 'check', 'reader', 'suggestions', 'permissionJudge'] },
+  { key: 'research', slots: ['researchInvestigation', 'researchExperimentalDesign', 'researchFastExploration', 'researchHighThroughputExecution'] },
 ] as const satisfies readonly { key: string; slots: readonly HarnessModelRole[] }[];
 
 export function ModelsSettings(props: HarnessSettingsPageProps) {
