@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending acceptance; D-301 / 7G queued after the current task |
+| 11 | AI4S heterogeneous research cluster | 7A and first 7B capability-routing slice implemented (D-298/D-299); later 7B–7F pending acceptance; D-301 / 7G context and D-302 / 7H tool execution follow-ups queued |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -72,6 +72,15 @@ retention rules; old rosters do not accumulate in history or invalidate the grow
 The snapshot's input cost is included in capacity planning. This does not interrupt or retroactively
 expand the task already given to the executing Agent; acceptance will identify the seams to reuse and
 hand off 7G. The design is accepted, with no implementation or cache-benefit claim in this update.
+
+D-302 adds **7H: general Harness tool concurrency and background command delivery** after the current
+task. It replaces whole-batch serialization with resource/dependency coordination, makes long commands
+yield a usable execution handle promptly, and extends output retrieval with cancellable event waits.
+Completion facts join 7G's environment deltas; logs stay available on demand. Explicit waits or chosen
+continuations can resume an idle Agent, while ordinary output growth cannot. Shared shell state,
+permission checks and actual process/writer release remain authoritative. The current 30-second bridge
+deadline versus 60-second shell yield default is a concrete repair target. This is accepted design only;
+ordinary shell execution does not acquire the durable recovery guarantees of research experiments.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

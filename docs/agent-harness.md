@@ -83,7 +83,7 @@ repo map 的符号引用图 PageRank。Piarium 不复制它们的实现，只采
 | 知识库 | 优先保留 TriviumDB 嵌入式，每 host 每 workspace 一个 `.tdb`；Application Host 是唯一写者。TriviumDB 非不可替换依赖，具体问题先交用户联系作者处理；当前不迁移 SQLite、不建双写权威（D-071） |
 | embedding | 后端可替换，远程接入独立于重排。`harness.embedding` / `harness.rerank` 是用户所有的配置种类，不是聊天模型槽位。未配置远程且用户已安装本地组件时代码语义走 MiniLM，否则语义来源不可用，词法与结构/图检索继续（D-288）；配置有效即按同一 vector space 索引与查询。知识库仍可无向量。来源身份、用途、编码文本与维度决定向量复用，后台建设和查询分别调度；不从模型体积推断速度或跨语言质量（D-173/D-190） |
 | shell 形态 | PTY（复用终端运行时，后台 shell 即终端 tab）；持久会话 shell 保持 cwd / env / venv；stdin 开放且 harness 永不代写；等默认时长后**自动转后台**而非超时杀死；配套 `get_output` / `write_to_process` / `kill_shell`（Devin CLI 与 Codex `unified_exec` 的共同形状）；Git Bash 为默认解释器但 Windows 原生工具可从中调用 |
-| 工具并发 | 沿用 Pi 默认并行；只读工具并行，`edit` / `write` / `apply_patch` 按路径加锁（不同路径并行），`bash` 家族 `executionMode: sequential`；不做 apply model |
+| 工具并发 | 现有 Pi 默认并行，任一 sequential 工具使整批串行；写入仍经过 Host 资源协调。D-302 / 7H 后续按资源与依赖细化调度，不做 apply model（5.9） |
 | shell 环境 | 解释器按工作区环境选定（原生 Windows → Git Bash，WSL → wsl bash，远程 → 远端 shell），用户可覆盖，模型不按次选；login shell 继承用户工具链；环境变量只改交互与显示，**不设 `CI=1`**，locale 探测不硬编码 |
 | web | harness 自做 `webfetch` / `websearch`，参照 `pi-web-access` 能力清单原生实现（来源面板、凭据进 Pi auth、独立浏览器 profile、GitHub 走 octokit）；SSRF 复用 security.md；跨域重定向不跟随；搜索默认走 Exa/Parallel 免密钥服务，用户自配 API provider 优先，不复用模型账户（D-289）；桌面端 Electron 离屏渲染 JS。provider / render / domain policy 按 worker generation 冻结，credential 每次调用实时解析；第三方包存在不会自动替换原生工具（D-283） |
 | 模型与预设 | 普通线程明确继承当前模型，不要求 role。专用能力/预设沿现有独立槽位或明示的 inherit 解析，未配置不冒充可用；hardImplement/review 的当前模型继承明确展示。续接摘要沿活动请求派生，不新增凭据栈或费用面板（D-284/D-285） |
@@ -223,8 +223,8 @@ D-282 完成 R0/R6：传输用 acknowledgement-backed request credits，取消�
 | --- | --- | --- | --- |
 | `bash` | 覆盖 Pi | 独占（`executionMode: sequential`） | PTY、持久会话 shell、超时转后台不杀 |
 | `grep` | 覆盖 Pi | 并行 | rg 搜索、固定 surface 叠加、分组排序与有界结果 |
-| `edit` / `write` | 覆盖 Pi | 不同路径并行，同路径串行 | 参数不变，附加新引入的诊断 |
-| `apply_patch` | 新增 | 同上 | Codex 语法多文件编辑，按模型家族启用 |
+| `edit` / `write` | 覆盖 Pi | 工具层允许并发；实际提交受资源 gate 与修订检查约束 | 附加新引入的诊断；资源粒度调度目标见 5.9 |
+| `apply_patch` | 新增 | 当前 sequential，使同批调用串行 | Codex 语法多文件编辑，按模型家族启用；后续 7H 按完整路径集协调 |
 | `read` / `find` / `ls` | 同名适配 | 并行 | `read` 保留 Pi 原生分页、截断与图片；find/ls 取得 Host 的固定 dirty path/虚拟祖先并经 Pi 原生定义合并磁盘结果，过期相关来源不可回退 |
 | `get_output` / `write_to_process` / `kill_shell` | 新增 | 读并行，写与杀独占 | 后台 shell 与输出句柄；对运行中 shell 默认返回上次读取之后的增量（第 5.5 节） |
 | `diagnostics` | 新增 | 并行 | `pending` 后按需查 |
@@ -296,8 +296,9 @@ research 与 knowledge-work profile 再评估）。
 禁止。Codex 原生 Windows 与 Cursor 默认 PowerShell；Piarium 跟随 Pi。Git Bash 的已知坑（MSYS 路径自动转换会误转
 形如路径的参数，`MSYS_NO_PATHCONV=1` 可关；CRLF；fork 慢）由 shell 监督器的默认环境处理，不暴露给模型。
 
-参数：`command`、`cwd?`（工作区相对路径，默认沿用上一次）、`wait_ms?`（默认 60 s）。**没有超时杀死**：命令在
-`wait_ms` 内结束则同步返回；否则**自动转后台**，立即返回"已等待 N 秒，仍在运行，shell id X"与截至此刻的输出，
+当前公开工具参数包括 `command`、`waitMs?`；Host `shell.exec` 另支持 `cwd?`，普通调用沿用会话目录。
+Host 当前等待默认 60 s；Pi→Host bridge 默认 30 s，`bash` 未协调两者，是 D-302 / 7H 必须修正的接缝，不能据此宣称长命令默认路径可靠。
+**等待期限不等于进程期限**：命令在 `waitMs` 内结束则同步返回；否则**自动转后台**，返回"已等待 N 秒，仍在运行，shell id X"与截至此刻的输出，
 模型继续工作，稍后用 `get_output(X)` 取结果、`write_to_process(X, text)` 喂 stdin、`kill_shell(X)` 终止。这是
 Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `exec_command(yield_time_ms)` /
 `write_stdin` 共同的形状：由 harness 按经过时间决定前后台，模型不需要预判一条命令要跑多久，构建与测试也不会在
@@ -312,14 +313,14 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
   `createTerminalSession` / `attachTerminalSession` 创建与附着，HTTP 不能指定 owner/spawn。`sh_N` 由全局 terminal runtime
   分配，监督器使用返回的实际 id；同名会话只有完整创建身份一致且仍在运行时才能复用，HTTP 不能接管 Harness handle。
   关闭查看界面只脱离附着，显式终止仍走统一关闭链。哨兵格式与默认环境变量集在 `lib/harness/DOCUMENTATION.md`。
-- **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`wait_ms` 到了它转后台，模型在输出里看到提示文本，
+- **stdin 开着，harness 永不代写。** 等输入的程序会停在提示上；`waitMs` 到了它转后台，模型在输出里看到提示文本，
   用 `write_to_process` 回答或 `kill_shell` 放弃。Pi 内置 bash 的 stdin 是 ignore，与 `write_to_process` 不相容，
   因此这里不沿用。
 - **持久会话 shell，以 login shell 启动。** 一个 PTY shell 跑所有前台命令，先 source 用户的 `.bash_profile` /
   `.bashrc`——nvm、pyenv、conda、自定义 PATH 全部就位，agent 用的就是用户平时的环境（Claude Code 与 Codex 均如此）。
   cwd、环境变量、`source .venv/bin/activate`、`nvm use` 跨调用保持；Pi 内置 bash 每次 `spawn` 则不保持，`source
   venv` 后 `pytest` 报"not found"正是要消灭的那类工具错误。命令以哨兵标记包裹以分隔输出并捕获退出码。前台命令超过
-  `wait_ms` 时，**它所在的 shell 整个转为后台 shell**（拿到 id），host 起一个新的会话 shell 继承 cwd 服务后续前台
+  `waitMs` 时，**它所在的 shell 整个转为后台 shell**（拿到 id），host 起一个新的会话 shell 继承 cwd 服务后续前台
   命令——模型不被阻塞，后台命令也不失去它的 shell 状态。
 - **环境变量只改交互与显示，不改工具语义。** 叠加在用户环境之上：`GIT_TERMINAL_PROMPT=0`（git 不弹凭据框）、
   `PAGER=cat GIT_PAGER=cat`（不弹分页器）、`NO_COLOR=1`（减少 ANSI 噪音）、`PYTHONUNBUFFERED=1`、Linux 上
@@ -330,7 +331,7 @@ Devin CLI `exec` / `get_output` / `write_to_process` / `kill_shell` 与 Codex `e
   PTY 提供真实 `TERM`，不设 `TERM=dumb`。整套默认环境在设置中可见、可按工作区修改。
 - `kill_shell` 与会话结束时终止整个进程树；复用 host 已有的 process-tree termination。没有超时杀死。
 - 后台命令的完成由 PTY exit 事件产生，不以模型调用 `get_output` 为前提；start/end 各记录一次，重复观察只读已有事实。
-- 声明 `executionMode: "sequential"`：同一批工具调用中有 `bash` 时整批串行（Pi 的批次语义），因为它可以触碰任何路径。
+- 当前声明 `executionMode: "sequential"`，同批有 `bash` 时整批串行；这是现有 Pi 的批次语义。D-302 / 7H 将共享 shell 的顺序、文件影响范围与工具批次分开处理（5.9），不直接把 bash 改成无条件并行。
 - 执行期间向 mutation authority 注册为 `process` writer（`WRITER_MODES` 中已存在的模式），使恢复系统知道本轮
   文件覆盖不完整。这是恢复设计已预留的语义。
 - 会话关闭等待 PTY 实际退出，再释放写者；中断请求不等于命令已经结束。失败保留活动状态与可重试关闭，已从会话表移除的
@@ -426,7 +427,7 @@ Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，�
 
 ### 5.5 `get_output`、`write_to_process`、`kill_shell`、`diagnostics`
 
-`get_output(id, offset?, length?)` 统一读取两类东西：已完成输出的句柄（`out_x`）与仍在后台运行的 shell（`bash`
+`get_output(handle, offset?, length?)` 统一读取两类东西：已完成输出的句柄（`out_x`）与仍在后台运行的 shell（`bash`
 返回的 shell id）。没有它句柄是死的。`write_to_process(id, text)` 与 `kill_shell(id)` 服务后台 shell。
 `diagnostics(path?)` 供 `pending` 态后按需查询。
 
@@ -435,6 +436,10 @@ Cursor 为每个前沿模型单独调工具。Piarium 支持任意 provider，�
 运行，最近输出 40 秒前"。显式 `offset` / `length` 才是随机访问，用于回看。`diagnostics` 对同一路径的重复查询只报新增与
 消失的条目。游标由 host 按（会话，对象）保存，不占模型的上下文，压缩后第一次读取回到全量。已完成的输出句柄是静态的，
 没有增量语义，仍按 `offset` / `length` 分页。
+
+D-302 / 7H 将在同一工具上增加可取消的事件等待，保留默认立即读取和显式历史分页；后台完成事实接入 7G 环境增量。
+当前 `get_output` 尚不提供这项等待，Agent 后台 shell 的完成也没有通用 Zone 2 通知链；不能把用户终端事件或验证记录当成已接通的替代。
+具体启动、等待、通知和生命周期设计见 5.9.2。
 
 ### 5.6 `todo`（新增，主 agent 自己的计划）
 
@@ -506,16 +511,67 @@ Web / 云 host 无 Chromium 时返回 `unavailable (no renderer)`；检测到空
 
 ### 5.9 并发
 
-Pi 的 agent loop 默认**并行**执行一批工具调用（`toolExecution: "parallel"`），任一工具声明 `executionMode:
-"sequential"` 则整批串行。Claude Code 更保守：只读工具并行，Write / Edit / Bash 一律串行（`isConcurrencySafe`）。Cursor
-的多文件编辑速度来自模型一次发出多个独立文件的编辑并行应用，加一个专门合并编辑的 apply model——Cognition 指出
-edit-apply 模式在 2024 年普遍、现在更多由单模型一步完成，Piarium 不做 apply model。
+**实现现状（2026-09-20 代码核对）。** 内置 Pi 0.85.1 默认并行执行同一 assistant 消息中的多个工具调用，
+任一工具声明 `executionMode: "sequential"` 则整批串行；并行批次也要等工具结果全部返回才继续请求模型。
+`read`/搜索/Web/线程查询与派发等可并行，派发本身有副作用，不能把“允许并行”当作“只读/免审批”。
+`edit`/`write` 工具层允许并发，生产正文提交仍经过 Host gate、固定视图和修订检查；`apply_patch`、`bash`、
+进程输入/终止及部分线程生命周期工具显式串行。既有文档的“apply_patch 已按路径并行”是目标误写为现状，本节纠正。
 
-策略：只读工具（`grep` / `read` / `find` / `ls` / `get_output` / `diagnostics` / `dispatch` / `webfetch` / `websearch` /
-`recall` / `related`）并行；
-`edit` / `write` / `apply_patch` 在**不同路径上并行、同一路径串行**——harness 在 mutation boundary 前按路径加锁，恢复
-日志本来就按路径记录 before/after；`bash` / `write_to_process` / `kill_shell` 声明 `executionMode: "sequential"`，同批
-有它们时整批串行，因为 shell 可以触碰任何路径。这拿到多文件编辑的并行速度，也保住真正存在竞争处的安全。
+**后续目标（D-302 / 7H，尚未实施/验收）。** 独立工作可以重叠执行，有因果关系或共享可变资源的工作保持顺序；
+长操作尽快交回控制权，之后按需读取或等待。适用于普通 coding 和科研线程，不需要为一次工具并行额外创建 Agent。
+当前 D-300 执行任务先按原范围交付验收；7H 与 7G 衔接，不追溯扩大原任务。
+
+#### 5.9.1 按资源和依赖调度工具
+
+- **一个实际工具执行入口。** 调度接入 Pi 的真实工具批次路径；不只在 Host 放一个并行队列却继续被上游整批串行挡住，
+  也不在外部重跑 Agent loop。优先使用/补齐 Pi 的执行策略接缝，以可追踪的依赖修改交付，不手改安装目录或保留两套调度器。
+- **程序提供影响范围。** 原生工具从已校验参数、规范化资源身份与实际读写契约给出资源集合，包含 authority/workspace、
+  文件/目录子树、branch、shell 或目标线程。模型无需逐次填写依赖图；一次请求依赖尚未取得的结果时，应在结果返回后再发下一批。
+  不按工具名、shell 命令关键词或模型自称“只读”推断权限/副作用，第三方工具沿实际来源和声明处理。
+- **保留必要顺序。** 同一资源上写后读、读后写、写后写按调用顺序协调；独立读取、无关文件修改和无依赖的网络查询可重叠。
+  多文件 patch 先确定全部规范路径，一次协调其完整集合；目录/子路径与路径别名不能漏冲突。继续复用 Documents/WorkingState
+  的修订检查、持久操作和补偿；调度许可不代替底层提交权威。同一 branch 的短暂 CAS 提交串行不等于整项工具必须串行。
+- **串行约束只约束必要范围。** 已知资源可以使用各自执行顺序；影响未知且要求 sequential 的工具仍是有序屏障，
+  但屏障前后的独立批次各自并行，不再因出现一个屏障就把整批所有调用逐条执行。不能为追求并行越过尚未证明独立的屏障。
+  共享 shell 的 cwd/环境修改需要顺序；独立进程可以重叠，但独立进程身份不证明它们不会读写相同文件。
+- **审批、取消和结果保持原契约。** 排队前确定依赖，获得许可后执行；等待人工审批不占着文件提交锁。
+  同资源失败/拒绝不能让依赖调用误以为前置成功，独立已获许可的调用可以继续。结果按真实 toolCallId 配对，完成进度可先展示，
+  不在仍有未匹配工具结果时强行请求模型。取消未开始的工作不留下幽灵调用，已开始的副作用按实际结果与恢复状态报告。
+- 不引入调度模型、apply model、固定并发配额或按文件数量限流；背压来自现有 provider/资源能力和实际负载。
+  不把同文件多位置编辑、多文件单 patch、多工具并行、多 Agent、后台进程混作一种性能证据。
+
+#### 5.9.2 长命令交回控制权，事实与正文分开交付
+
+目标路径：`bash` 启动 → 短等待后直接完成或返回 shell/执行身份 → Agent 继续工作 → 完成事实进入下一次请求的环境增量 →
+需要时 `get_output` 展开正文。命令执行、工具返回与模型恢复是三个独立时点。
+
+1. **启动与等待。** 保留 `bash(command, waitMs?)`；7H 允许 `waitMs: 0` 明确要求启动后即返回身份，通常调用采用可配置的
+   短等待后自动转后台。默认等待值按现有交互与代表性短命令测量选择，本设计不猜一个通用秒数。后台分离不终止进程，
+   完成恰好发生在分离时也只能形成一个执行和一个真实结果。前台 shell 转后台后不再接收下一条普通命令；新的前台 shell
+   对 cwd/环境的继承必须如实表达，不宣称能复制前一进程中任意未导出的环境、函数或激活状态。
+2. **等待期限统一。** 协调工具、bridge、router 与进程启动/等待责任，修复当前 30 s 请求期限早于 60 s 后台返回的路径；
+   不只是把超时改成更大的固定数。等待结束返回 running/退出事实，取消观察只结束观察，显式 `kill_shell` 才请求终止。
+   进程执行期限只有明确产品配置/用户请求才存在；审计并删除未被执行端消费的 `runMs` 等空参数，不把等待超时变成暗中的杀进程。
+3. **按需读与事件等待。** 沿用 `get_output(handle, offset?, length?)`，增加可选 `waitMs`：默认立即读；指定等待时，
+   已有未读输出/终态直接返回，否则由新输出、实际退出、取消或本次观察期限结束唤醒。静态输出/显式历史切片直接读取，
+   不为已存在的字节等待。返回运行状态、退出码或“无新输出，仍运行”，不用循环轮询或“没有输出=卡死”的推断。
+   长期等待复用执行准入的让出/恢复接缝；让出模型名额不释放仍被进程占用的机器、writer 或目录责任。
+4. **完成通知接 7G。** 真实完成、失败、取消确认等新事实，带执行身份、命令简述、退出码和详情入口，作为来源明确的
+   环境增量在下一次安全模型请求前交付、之后留史。后台通知不用 `<user-terminal>` 冒充用户行为，不灌入全部日志，
+   不往团队现状四列表加进程清单。尚在运行/输出增长由工具和 UI 按需呈现；不能从日志关键词臆造“等输入”“失败”或科学判断。
+5. **交付不漏不重。** 命令执行身份/终态修订、每个模型接收者的事实收据与输出字节游标分开。`bash`/`get_output` 已实际
+   把同一终态交给该模型时，不再作为新消息重复播报；仅读过日志不算读过随后退出事实，完成通知也不消费未读日志。
+   UI 阅读不消费模型收据。7G 准备失败、取消、压缩/fresh 仍按实际保留原文恢复必要状态，不给历史中已知终态反复追加“新完成”。
+6. **何时恢复模型。** Agent 正在推进其他工作时，下次自然请求接收变化；已经空闲时，只有明确建立的等待或用户/Agent
+   选择的完成后续做关系才通过既有会话队列恢复。普通后台启动不自动订阅续做，输出增长不发起模型调用；订阅只记录一次
+   明确意图、可取消、完成早于订阅也可处理，并与自然续接合并，避免重复模型回合或在 active 会话旁开第二个 loop。
+7. **运行权威和生命周期。** Host 做授权、路由和呈现，Rust/既有 terminal runtime 拥有真实进程、输出与退出；
+   终止仍到实际进程树，确认退出前不释放 writer/目录保护。执行身份关联原 toolCallId，启动响应丢失后能查询已受理执行，
+   不能盲目重试命令造成双进程。查询入口复用既有会话/终端事实，并向模型提供可发现的找回方式。
+   普通 shell 按会话生命周期管理，不因此承诺跨 Host 重启重附着或耐久全文；确需断线/重启继续的实验使用 D-300 durable attempt，
+   二者共享底层能力和事实呈现，不把每条 shell 都强制变成实验。不可恢复/日志过期如实表达。
+
+验收同时覆盖工具执行并行与资源提交，不以单纯 `Promise.all` 或工具声明证明生产并发；代表性端到端场景和未实测边界见 plan 7H。
 
 ### 5.10 禁用与替换（适用于全部 harness 能力）
 
@@ -1132,6 +1188,10 @@ Host 投影可在段落完成、工具边界和结果事件后更新；只在既
 单次请求冻结一次材料与来源，重试沿既有请求/送达身份处理，不因刷新表制造重复历史。压缩/fresh 后环境增量按保留原文收据
 恢复必要基线，团队表直接重建当前视图；临时快照不伪造 Pi entry 或原文保留收据，也不因未落历史反复清理环境事件游标。
 知识召回仍按任务/条目变化工作，不因为每次准备输入就重新检索；程序只能合并明确重复事实，不能代替模型判断科学意义。
+
+D-302 / 7H 将后台命令的新完成事实接到这里的环境增量：执行身份、退出码、简述与正文入口，已由工具交付的同一终态不重复。
+日志字节游标与事实送达分开；通知不消耗未读日志，不添加另一张每请求完整进程表。活跃模型在自然请求中消费，
+空闲恢复只沿明确等待/完成后续做关系；输出增长不额外调用模型。该来源尚未接线，具体契约见 5.9.2。
 
 尾部位置有利于持续发现协作入口，但“U 型”位置效应不是对所有模型的固定保证。采用简短表、明确来源和稳定使用说明，
 用实际连续工作中的读取/通信与请求结构验证设计；不靠每轮重述任务或额外总结调用抵消可能的干扰。

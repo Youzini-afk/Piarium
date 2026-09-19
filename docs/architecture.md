@@ -336,6 +336,16 @@ both materials. Environment delivery receipts remain distinct from transient sna
 and neither UI reads nor a snapshot marker consumes a directed message or result body. This is a
 planned change to the existing Pi context owner, not an implemented second context service.
 
+D-302 / 7H is a further general Harness follow-up. Resource-aware tool scheduling belongs at the real
+Pi execution boundary, while Host authority and Rust file/process owners retain permission, mutation
+and lifecycle enforcement. Independent calls can overlap; shared resources and unresolved sequential
+barriers preserve order without forcing every independent group to execute one call at a time.
+Long shell calls return execution handles promptly; output reads may wait on real events, and completion
+facts join 7G's environment deltas without copying logs or updating old history. Observation timeout
+does not terminate execution. Idle Agent continuation requires an explicit wait or continuation intent;
+output growth alone starts no model call. Ordinary session shells remain distinct from durable research
+attempts. This design is queued after the current task, not a runtime delivery claim.
+
 D-286 makes the full context scope explicit: sufficient first presentation of tool material, stable
 history, actual request capacity, retained original messages, one continuation summary, history rereads,
 and independent plans/knowledge. A task can also start a fresh input view when its prior background is

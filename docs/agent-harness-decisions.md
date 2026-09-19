@@ -29,7 +29,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 16 |
-| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理。 | 33 |
+| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务。 | 34 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 61 |
@@ -340,3 +340,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-299 | 2026-09-19 | AI4S 7B 第一段：研究能力、专用模型槽位、工具集合和资源请求随分支 Run 冻结 | implemented / wired; 7B partial | 没有配置的能力明确 unavailable，不借用主模型；完整动态升级、调度和实验执行仍待后续阶段 | research-cluster-design；plan 7B；status；protocol；pi-host；Host harness | [research-cluster](decisions/research-cluster.md) |
 | D-300 | 2026-09-19 | 实验执行与远程资源、自然语言 Agent 交流、可选等待及自动原文现状 | accepted design / 当前执行待验收；现状注入目标 superseded in part | D-301 后续调整第 9 项；当前执行基线保留；本条部分取代 D-291 强制交接/机械综合并调整 D-285 后续消息交互 | research-cluster-design 6/7；plan 7C–7F；harness 9.2.5a/9.3.7/10.3；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-301 | 2026-09-19 | 环境增量留史、每请求完整团队快照附尾、固定协作说明与 user 来源边界 | accepted design / queued after current execution / not implemented or accepted | 部分取代 D-300 现状增量目标；不扩大当前执行任务，验收时接续 7G | harness 8.1.1/9.3.7；research-cluster-design 7.4；plan 7.8/7G；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
+| D-302 | 2026-09-20 | 工具按资源/依赖并行，后台启动、事件等待与完成事实接入 7G | accepted design / queued / not implemented or accepted | 纠正 apply_patch 并行现状，替代整批串行目标；保留真实权限/退出/写者与 D-300 实验合同 | harness 5.0/5.2/5.5/5.9/8.1.1；plan 7H；architecture；roadmap；status | [tool-environment](decisions/tool-environment.md) |
