@@ -297,6 +297,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     record: KernelRecordResult,
     sample: KernelRecordResult | null,
     commitments: ResourceCommitmentView[],
+    queued: ResourceMachineView["queued"],
   ): ResourceMachineView => {
     const payload = payloadOf(record);
     const connection = payload.connection && typeof payload.connection === "object"
@@ -360,6 +361,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
         },
       } : {}),
       commitments,
+      queued,
     };
   };
 
@@ -442,12 +444,35 @@ export function createResourceService(deps: ResourceServiceDeps) {
     await ensureLocalMachine(workspaceId).catch(report);
     await sampleLocalMachine(workspaceId).catch(report);
     const scoped = await context(workspaceId);
-    const [machines, samples, commitments] = await Promise.all([
+    const [machines, samples, commitments, attempts] = await Promise.all([
       allRecords(scoped, workspaceId, "resource.machine"),
       allRecords(scoped, workspaceId, "resource.sample"),
       allRecords(scoped, workspaceId, "resource.commitment"),
+      // Queue facts are read from the experiment service's durable records;
+      // this service presents them but never writes them.
+      allRecords(scoped, workspaceId, "experiment.attempt"),
     ]);
     const sampleByMachine = new Map(samples.map((record) => [record.recordId.slice(SAMPLE_PREFIX.length), record]));
+    const queuedByMachine = new Map<string, ResourceMachineView["queued"]>();
+    for (const record of attempts) {
+      if (record.state !== "queued") continue;
+      const payload = payloadOf(record);
+      const machineId = str(payload.machineId) ?? LOCAL_MACHINE_ID;
+      const attemptId = str(payload.id);
+      if (!attemptId) continue;
+      const resources = payload.resources && typeof payload.resources === "object"
+        ? asResources(payload.resources) : {};
+      const entry = {
+        attemptId,
+        ...(Object.keys(resources).length ? { resources } : {}),
+        ...(str(payload.queueReason) ? { reason: str(payload.queueReason) } : {}),
+        queuedAt: num(payload.createdAt) ?? record.createdAt,
+      };
+      const bucket = queuedByMachine.get(machineId) ?? [];
+      bucket.push(entry);
+      queuedByMachine.set(machineId, bucket);
+    }
+    for (const bucket of queuedByMachine.values()) bucket.sort((a, b) => a.queuedAt - b.queuedAt);
     return machines.map((machine) => {
       const machineId = machine.recordId.slice(MACHINE_PREFIX.length);
       const active = commitments
@@ -455,7 +480,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
         .filter((view): view is ResourceCommitmentView => (
           view !== null && view.machineId === machineId && (view.state === "confirmed" || view.state === "requested")
         ));
-      return machineView(machine, sampleByMachine.get(machineId) ?? null, active);
+      return machineView(machine, sampleByMachine.get(machineId) ?? null, active, queuedByMachine.get(machineId) ?? []);
     });
   };
 
@@ -475,7 +500,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
           const committed = machine.commitments.length
             ? `${machine.commitments.length} commitment(s)`
             : "no commitments";
-          return `${machine.machineId} · ${machine.kind} · ${machine.state} · ${machine.connection.status} · ${capacity} · ${usage} · ${committed}`;
+          const queued = machine.queued.length
+            ? ` · ${machine.queued.length} queued (${machine.queued.map((entry) => entry.attemptId).join(", ")})`
+            : "";
+          return `${machine.machineId} · ${machine.kind} · ${machine.state} · ${machine.connection.status} · ${capacity} · ${usage} · ${committed}${queued}`;
         }).join("\n");
     return { machines, generatedAt: now(), text };
   };

@@ -154,6 +154,15 @@ describe("experiment service on the real kernel", () => {
     assert.equal(impossible.attempt.state, "queued");
     assert.ok(impossible.attempt.queueReason);
 
+    // The queue is a visible resource fact, separate from confirmed commitments.
+    const whileQueued = await f.resources.list(f.caller.workspaceId);
+    const queuedMachine = whileQueued.machines.find((machine) => machine.machineId === "local");
+    assert.ok(queuedMachine);
+    assert.equal(queuedMachine.queued.length, 1);
+    assert.equal(queuedMachine.queued[0]!.attemptId, impossible.attempt.attemptId);
+    assert.match(queuedMachine.queued[0]!.reason ?? "", /cpuCores|insufficient/i);
+    assert.match(whileQueued.text, /1 queued/);
+
     // Cancelling the queued attempt releases nothing it never held and ends it.
     const cancelled = await f.experiments.cancel(f.caller, impossible.attempt.attemptId);
     assert.equal(cancelled.state, "cancelled");
@@ -163,6 +172,7 @@ describe("experiment service on the real kernel", () => {
     assert.ok(local);
     assert.equal(local.state, "available");
     assert.ok((local.capacity?.cpuCores ?? 0) > 0);
+    assert.equal(local.queued.length, 0);
     assert.ok(overview.text.length > 0);
     assert.deepEqual(f.errors, []);
   });

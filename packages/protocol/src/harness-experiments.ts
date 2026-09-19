@@ -261,6 +261,16 @@ export interface ResourceMachineView {
     stale: boolean;
   };
   commitments: ResourceCommitmentView[];
+  /**
+   * Attempts queued for capacity on this machine, oldest first. A queued
+   * attempt holds no commitment and no process.
+   */
+  queued: Array<{
+    attemptId: string;
+    resources?: ExperimentResourceRequest;
+    reason?: string;
+    queuedAt: number;
+  }>;
 }
 
 export interface ResourceListResult {
