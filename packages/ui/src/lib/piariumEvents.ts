@@ -27,6 +27,12 @@ export type HarnessKnowledgeChangedEvent = {
   scope: 'workspace' | 'user';
 };
 
+export type HarnessExperimentChangedEvent = {
+  type: 'harness-experiment-changed';
+  workspaceId: string;
+  fact: 'attempt' | 'machine' | 'source';
+};
+
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
   projectId: string;
@@ -46,7 +52,7 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent;
+export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent;
 type Listener = (event: PiariumEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -200,6 +206,16 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
     if (workspaceId && sessionId) {
       for (const listener of listeners) listener({ type: 'harness-blocks-changed', workspaceId, sessionId });
+    }
+    return;
+  }
+
+  if (envelope.type === 'piarium:harness-experiment-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';
+    const fact = properties?.fact;
+    if (workspaceId && (fact === 'attempt' || fact === 'machine' || fact === 'source')) {
+      for (const listener of listeners) listener({ type: 'harness-experiment-changed', workspaceId, fact });
     }
     return;
   }

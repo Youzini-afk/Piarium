@@ -4033,6 +4033,38 @@ describe("thread runtime", () => {
     expect(run?.request?.frozen?.research?.capability).toBe("experimental-design");
   });
 
+  it("promotes a worktree-changing continuation to a fresh Run with a real isolated preparation", async () => {
+    const input = { ...createInput(), worktree: "none" as const, tools: ["read"] };
+    const thread = await registry.createThread(input);
+    const firstRun = await registry.startRun(WORKSPACE, thread.id);
+    await runtime.spawn({ ...input, threadId: thread.id, runId: firstRun.id });
+    await registry.endRun(WORKSPACE, thread.id, firstRun.id, "success", null, reportFor("child-1"));
+    const { runId } = await runtime.continueRun({
+      workspaceId: WORKSPACE,
+      parent: PARENT,
+      threadId: thread.id,
+      mode: "continue",
+      task: "execute this in an isolated worktree",
+      frozen: {
+        model: { providerId: "research-provider", modelId: "throughput-model" },
+        tools: ["read"],
+        permissions: { mode: "normal", rules: [] },
+        scope: [],
+        worktree: "isolated",
+        systemPromptFragment: "Run in isolation.",
+        inputOrigin: "continue",
+        workFocus: "research",
+        research: { capability: "high-throughput-execution", resources: { cpu: true, longRunning: true } },
+      },
+    });
+    const run = await registry.getActiveRun(WORKSPACE, thread.id);
+    expect(run?.id).toBe(runId);
+    expect(run?.frozen?.inputOrigin).toBe("fresh");
+    expect(sessionAdapter.open).not.toHaveBeenCalled();
+    expect(prepareWorktree).toHaveBeenNthCalledWith(2, expect.objectContaining({ mode: "isolated" }));
+    expect(sessionAdapter.create).toHaveBeenCalledTimes(2);
+  });
+
   it("a parked continuation keeps its resolved frozen override", async () => {
     const solo = { ...createInput(), concurrency: 1 };
     const thread = await registry.createThread(solo);

@@ -59,11 +59,13 @@ const ExperimentParams = Type.Object({
     Type.Literal("list"),
     Type.Literal("get"),
     Type.Literal("logs"),
+    Type.Literal("artifact"),
     Type.Literal("wait"),
     Type.Literal("cancel"),
     Type.Literal("collect"),
-  ], { description: "submit starts a durable attempt; get/logs/collect expand by attemptId; wait blocks until terminal or timeout; cancel requests backend stop" }),
+  ], { description: "submit starts a durable attempt; get/logs/artifact/collect expand by attemptId; wait blocks until terminal or timeout; cancel requests backend stop" }),
   attemptId: Type.Optional(Type.String({ description: "Required for get, logs, wait, cancel, collect" })),
+  artifactId: Type.Optional(Type.String({ description: "artifact: collected result identity from get/collect; reads text by byte page" })),
   // submit
   requestId: Type.Optional(Type.String({ description: "submit: idempotency key — a retry with the same id returns the recorded attempt instead of starting a second job" })),
   title: Type.Optional(Type.String({ description: "submit: short human-readable label for this experiment" })),
@@ -122,13 +124,14 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
   return defineTool({
     name: "experiment",
     label: "Experiment",
-    description: "Run and manage durable experiments. submit pins a spec and starts an attempt on a machine (local backend now); list shows concise attempt rows; get/logs/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
-    promptSnippet: "experiment: submit/list/get/logs/wait/cancel/collect durable experiment attempts",
+    description: "Run and manage durable experiments. submit pins a spec and starts an attempt on a machine (local backend now); list shows concise attempt rows; get/logs/artifact/collect expand one attemptId; wait blocks until the attempt finishes or times out; cancel requests backend stop. Retrying a submit with the same requestId returns the recorded attempt instead of starting a second job.",
+    promptSnippet: "experiment: submit/list/get/logs/artifact/wait/cancel/collect durable experiment attempts",
     promptGuidelines: [
       "An attempt keeps running when your Run ends or the session disconnects — use list/get to reattach by attemptId, not a fresh submit.",
       "wait only ends when the attempt reaches a terminal state or its deadline passes; a timeout never cancels the job.",
       "experiment is not a shell — it records specs, jobs, and collected artifacts durably. Use bash for interactive troubleshooting.",
       "Check resources before demanding CPU/GPU; an attempt queues when its request cannot be confirmed.",
+      "Use artifact with an artifactId from get/collect to inspect a collected table or result; follow nextOffset to continue text. Binary artifacts remain downloadable from the research panel.",
     ],
     parameters: ExperimentParams,
     executionMode: "sequential",
@@ -141,6 +144,22 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
       };
       try {
         switch (params.action) {
+          case "artifact": {
+            const attemptId = needAttempt();
+            if (!params.artifactId?.trim()) return invalidParams("experiment", "artifact requires artifactId");
+            const result = await bridge.request("experiment.artifact", {
+              attemptId,
+              artifactId: params.artifactId,
+              ...(params.offset === undefined ? {} : { offset: params.offset }),
+              ...(params.maxBytes === undefined ? {} : { maxBytes: params.maxBytes }),
+            }, signal ? { signal } : undefined);
+            return {
+              content: [{ type: "text", text: result.text === null
+                ? `${result.name}: this byte range is binary. Download the artifact from the research panel.`
+                : `${result.name} [bytes ${result.offset}–${result.nextOffset}${result.eof ? ", end" : "; continue with offset=" + result.nextOffset}]\n${result.text}` }],
+              details: { attemptId, artifactId: result.artifactId, offset: result.offset, nextOffset: result.nextOffset, eof: result.eof, binary: result.text === null },
+            };
+          }
           case "submit": {
             if (params.specId !== undefined && (params.command !== undefined || params.args !== undefined
               || params.cwd !== undefined || params.env !== undefined || params.inputs !== undefined

@@ -5,6 +5,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useHarnessThreadState } from '@/components/pi-session/HarnessThreadStateContext';
 import { projectHarnessThreadState } from '@/components/pi-session/harnessThreadPresentation';
 import { useI18n } from '@/lib/i18n';
+import { ResearchFactsPanel } from './ResearchFactsPanel';
 
 // Read the same projection as the branch controls and timeline. Selecting this
 // shell never creates a research run or changes the conversation's work focus.
@@ -37,6 +38,7 @@ const ResearchOverview: React.FC = () => {
           <p className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap text-foreground">{conclusion}</p>
         </details>
       ) : null}
+      <ResearchFactsPanel />
     </section>
   );
 };

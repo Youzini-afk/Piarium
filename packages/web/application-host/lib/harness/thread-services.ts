@@ -24,7 +24,7 @@ import { HarnessServiceError } from "./service-error.js";
 import { EXECUTION_PRESETS } from "./presets.js";
 import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@piarium/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
-import { ThreadAdmissionError, ThreadRegistryError } from "./thread-registry.js";
+import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
 
 interface ThreadSnapshot {
@@ -759,6 +759,41 @@ const peerEquals = (left: ThreadMessagePeer, right: ThreadMessagePeer): boolean 
   left.kind === right.kind && left.id === right.id
 );
 
+/**
+ * Restrict a branch transcript to the selected Run's durable bounds. A
+ * continuation may reuse one Pi session, so reading the whole branch would
+ * silently attach later Run output to an earlier Run.
+ */
+const entriesForRun = <T extends { id: string }>(
+  entries: readonly T[],
+  run: ThreadRun,
+  runs: readonly ThreadRun[],
+): T[] | null => {
+  const ref = run.report?.transcriptRef;
+  let fromId: string | null = null;
+  let toId: string | null = null;
+  if (ref) {
+    if (ref.fromEntryId === null && ref.toEntryId === null) return [];
+    fromId = ref.fromEntryId;
+    toId = ref.toEntryId;
+  } else {
+    const previous = runs
+      .filter((candidate) => candidate.id !== run.id && candidate.attempt < run.attempt && candidate.sessionId === run.sessionId)
+      .toSorted((left, right) => left.attempt - right.attempt)
+      .at(-1);
+    if (previous) {
+      const previousTo = previous.report?.transcriptRef.toEntryId;
+      if (!previousTo) return null;
+      fromId = previousTo;
+    }
+  }
+  const fromIndex = fromId === null ? 0 : entries.findIndex((entry) => entry.id === fromId) + (ref ? 0 : 1);
+  const toIndex = toId === null ? entries.length - 1 : entries.findIndex((entry) => entry.id === toId);
+  if ((fromId !== null && (fromIndex < 0 || (!ref && entries.findIndex((entry) => entry.id === fromId) < 0)))
+    || (toId !== null && toIndex < 0)) return null;
+  return entries.slice(Math.max(0, fromIndex), toIndex < 0 ? entries.length : toIndex + 1);
+};
+
 const continueError = (error: unknown): never => {
   if (error instanceof ThreadRuntimeError) {
     const code = error.code === "not-found"
@@ -908,18 +943,75 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const deliveryOf = (status: ThreadMessageRecord["status"]): "delivered" | "held" | "scheduled" => (
         status === "pending" ? "scheduled" : status === "held" ? "held" : "delivered"
       );
+      const priorMessage = params.requestId === undefined ? undefined
+        : target?.messages?.find((message) => message.direction === "in" && message.id === params.requestId)
+          ?? owner?.messages?.find((message) => message.direction === "out" && message.id === params.requestId);
+      const priorContinuation = target && params.requestId !== undefined
+        ? target.pendingContinuations?.find((request) => request.requestId === params.requestId)
+        : undefined;
+      const priorRun = target && params.requestId !== undefined
+        ? (await registry.listRuns(workspaceId, target.id)).find((candidate) => candidate.request?.requestId === params.requestId)
+        : undefined;
+      const priorIntent = priorContinuation ?? priorRun?.request;
+
+      // Resolve the next Run's complete identity before checking a retry. A
+      // capability can change the required worktree, in which case the
+      // retained session cannot honestly be continued: the request is
+      // promoted as a fresh Run so normal spawn/fresh preparation creates the
+      // real frozen execution directory and carries the retained context.
+      const requestedMode = params.context ?? "continue";
+      let executionMode = requestedMode;
+      let rerouteFrozen: ThreadRun["frozen"] | undefined;
+      if (priorIntent) executionMode = priorIntent.mode;
+      if (upgradeRequested && target) {
+        const definition = params.capability === undefined
+          ? undefined
+          : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
+        const model = params.model === "inherit" ? target.model : params.model ?? null;
+        if (params.model === "inherit" && !target.model) {
+          throw new HarnessServiceError("unavailable", "The target Thread has no recorded model to inherit");
+        }
+        if (definition && !model) {
+          throw new HarnessServiceError("unavailable", `Research capability ${definition.capability} has no configured model slot; pass model "inherit" to keep the Thread's model`);
+        }
+        executionMode = definition?.worktree !== undefined && definition.worktree !== target.manifest.worktree
+          ? "fresh"
+          : executionMode;
+        rerouteFrozen = {
+          model: model ?? target.model,
+          tools: definition ? [...definition.tools] : [...target.manifest.tools],
+          ...(target.manifest.permissions ? { permissions: structuredClone(target.manifest.permissions) } : {}),
+          scope: [...target.manifest.scope],
+          worktree: definition?.worktree ?? target.manifest.worktree,
+          systemPromptFragment: definition?.systemPromptFragment ?? target.manifest.systemPromptFragment,
+          inputOrigin: executionMode,
+          workFocus: target.manifest.workFocus,
+          ...(definition ? {
+            research: {
+              capability: definition.capability,
+              resources: { ...definition.defaultResources, ...(params.resources ?? {}) },
+            },
+          } : {}),
+        };
+      }
 
       // Idempotent retry: a recorded request returns its outcome instead of
       // delivering or scheduling again (3.18C).
       if (params.requestId !== undefined) {
-        const priorIn = target?.messages?.find((m) => m.direction === "in" && m.id === params.requestId);
-        const priorOut = owner?.messages?.find((m) => m.direction === "out" && m.id === params.requestId);
-        const prior = priorIn ?? priorOut;
+        const prior = priorMessage;
         if (prior) {
+          if (priorIntent?.frozen && !upgradeRequested) {
+            throw new HarnessServiceError("invalid-params", "requestId is already bound to a different execution identity");
+          }
           if (!peerEquals(prior.from, fromPeer) || !peerEquals(prior.to, toPeer)
             || prior.kind !== kind || prior.text !== params.message || prior.replyTo !== params.replyTo
-            || (kind === "request" && (prior.context ?? "continue") !== (params.context ?? "continue"))) {
+            || (kind === "request" && (prior.context ?? "continue") !== requestedMode)) {
             throw new HarnessServiceError("invalid-params", "requestId is already bound to a different message or sender");
+          }
+          if (upgradeRequested) {
+            if (!priorIntent || !sameFrozenRunConfig(priorIntent.frozen, rerouteFrozen) || priorIntent.mode !== executionMode) {
+              throw new HarnessServiceError("invalid-params", "requestId is already bound to a different execution identity");
+            }
           }
           if (target?.pendingContinuations?.some((request) => request.requestId === prior.id)) {
             return { accepted: true, lifecycle: target.lifecycle, attention: target.attention,
@@ -946,7 +1038,7 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
 
       const recordState = (status: ThreadMessageRecord["status"], runId?: string) => registry.recordDirectedMessage(workspaceId, {
         id: requestId, from: fromPeer, to: toPeer, kind, text: params.message,
-        ...(kind === "request" ? { context: params.context ?? "continue" } : {}),
+        ...(kind === "request" ? { context: requestedMode } : {}),
         ...(params.replyTo !== undefined ? { replyTo: params.replyTo } : {}),
         status, ...(runId ? { runId } : {}), at: recordedAt,
       });
@@ -1016,35 +1108,6 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
         // "inherit" keeps the Thread's recorded model, an explicit selection
         // re-routes it, and a capability carries its own tools/fragment/
         // resources. Earlier Runs are never rewritten (7B/D-300).
-        let frozen: ThreadRun["frozen"];
-        if (upgradeRequested) {
-          const definition = params.capability === undefined
-            ? undefined
-            : RESEARCH_CAPABILITY_DEFINITIONS[params.capability];
-          const model = params.model === "inherit" ? thread.model : params.model ?? null;
-          if (params.model === "inherit" && !thread.model) {
-            throw new HarnessServiceError("unavailable", "The target Thread has no recorded model to inherit");
-          }
-          if (definition && !model) {
-            throw new HarnessServiceError("unavailable", `Research capability ${definition.capability} has no configured model slot; pass model "inherit" to keep the Thread's model`);
-          }
-          frozen = {
-            model: model ?? thread.model,
-            tools: definition ? [...definition.tools] : [...thread.manifest.tools],
-            ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
-            scope: [...thread.manifest.scope],
-            worktree: definition?.worktree ?? thread.manifest.worktree,
-            systemPromptFragment: definition?.systemPromptFragment ?? thread.manifest.systemPromptFragment,
-            inputOrigin: params.context ?? "continue",
-            workFocus: thread.manifest.workFocus,
-            ...(definition ? {
-              research: {
-                capability: definition.capability,
-                resources: { ...definition.defaultResources, ...(params.resources ?? {}) },
-              },
-            } : {}),
-          };
-        }
         // Record first so a retry cannot double-schedule while the Run starts.
         await recordState("pending");
         let continued: { runId?: string };
@@ -1053,11 +1116,11 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
             workspaceId,
             parent: thread.parent,
             threadId: thread.id,
-            mode: params.context ?? "continue",
+            mode: executionMode,
             task: params.message,
             requestId,
             from: fromPeer,
-            ...(frozen ? { frozen } : {}),
+            ...(rerouteFrozen ? { frozen: rerouteFrozen } : {}),
           });
         } catch (error) {
           return continueError(error);
@@ -1067,8 +1130,8 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           // a pending message. The runtime normally recorded it; enforce that
           // postcondition idempotently at this public admission boundary too.
           await registry.enqueueContinuation(workspaceId, thread.id, {
-            requestId, mode: params.context ?? "continue", task: params.message, from: fromPeer,
-            ...(frozen ? { frozen } : {}), at: recordedAt,
+            requestId, mode: executionMode, task: params.message, from: fromPeer,
+            ...(rerouteFrozen ? { frozen: rerouteFrozen } : {}), at: recordedAt,
           });
           return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention, messageId: requestId, delivery: "scheduled" };
         }
@@ -1235,7 +1298,9 @@ export function createThreadHistoryService(host: HarnessServiceHost): HarnessSer
     ctx.signal.throwIfAborted();
     if (source.sessionId !== run.sessionId || source.scope !== "branch") throw new HarnessServiceError("unavailable", "The source transcript identity did not match the retained Run");
     let page: ReturnType<typeof readHistoryPage>;
-    try { page = readHistoryPage(source.entries, params); }
+    const scopedEntries = entriesForRun(source.entries, run, await registry.listRuns(workspaceId, owner.id));
+    if (scopedEntries === null) throw new HarnessServiceError("unavailable", "The requested Run transcript bounds are unavailable");
+    try { page = readHistoryPage(scopedEntries, params); }
     catch (error) { throw new HarnessServiceError("invalid-params", error instanceof Error ? error.message : String(error)); }
     return { ...page, details: { ...page.details, runId: run.id, sessionId: run.sessionId, threadId: owner.id } };
   } };
@@ -1362,9 +1427,14 @@ export function createThreadReadService(host: HarnessServiceHost): HarnessServic
         if (history.sessionId !== source.sessionId || history.scope !== "branch") {
           throw new HarnessServiceError("unavailable", "The transcript identity did not match the selected Run");
         }
+        const runs = await registry.listRuns(workspaceId, thread.id);
+        const scopedEntries = entriesForRun(history.entries, source, runs);
+        if (scopedEntries === null) {
+          throw new HarnessServiceError("unavailable", "The selected Run transcript bounds are unavailable");
+        }
         let page: ReturnType<typeof readHistoryPage>;
         try {
-          page = readHistoryPage(history.entries, {
+          page = readHistoryPage(scopedEntries, {
             ...(params.entry !== undefined ? { entry: params.entry } : {}),
             ...(params.before !== undefined ? { before: params.before } : {}),
             ...(params.after !== undefined ? { after: params.after } : {}),

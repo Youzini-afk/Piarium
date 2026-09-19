@@ -94,6 +94,24 @@ const mcpTool = (name: string) => ({
 const normal = () => ({ mode: "normal" as const, rules: defaultRules("normal") });
 
 describe("native permission gate integration", () => {
+  it("recognizes native research queries and keeps experiment control grants bound to the target", async () => {
+    const { bridge, audits } = makeBridge();
+    const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };
+    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [
+      { name: "experiment", sourceInfo }, { name: "resources", sourceInfo },
+    ]);
+    const result = ui(["Allow for this session scope", "Deny"]);
+    await call({ toolName: "resources", input: {} }, result.context as never);
+    await call({ toolName: "experiment", input: { action: "logs", attemptId: "a" } }, result.context as never);
+    assert.equal(result.state.selectCalls, 0);
+    assert.equal(audits.at(-1)?.target.source.kind, "harness");
+    await call({ toolName: "experiment", input: { action: "cancel", attemptId: "a" } }, result.context as never);
+    await call({ toolName: "experiment", input: { action: "cancel", attemptId: "a" } }, result.context as never);
+    const denied = await call({ toolName: "experiment", input: { action: "cancel", attemptId: "b" } }, result.context as never);
+    assert.equal(result.state.selectCalls, 2);
+    assert.equal((denied as { block: boolean }).block, true);
+  });
+
   it("is the gate for Pi built-ins and allows maintained read-only actions without prompting", async () => {
     const { bridge, audits } = makeBridge();
     const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("read")]);

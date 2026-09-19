@@ -71,23 +71,52 @@ selected/active/generation/pending/failed。新 Run 启动前应用，进行中�
 科研提示使用当前用户 Pi 会话与模型；真实 agent_start/settle 对应 Registry 根 Thread 和 Run，没有隐藏主会话或第二套研究数据库。
 attached-root 与 spawned-child 区分生命周期；主线结束后分支、原始会话和结果保留。视图挂载不调用模型。
 
-后续 7B–7F 仍为 Partial：D-299 已接通研究能力模型槽位、分支工具集合和资源请求的冻结；动态升级、同 Thread
-换模型、新 Run 继承、通用协作/资源调度、实验 attempt/远程执行、综合/写作闭环和完整科研质量评估尚未完成。
-本阶段只证明入口与执行身份纵切，不宣称异构科研集群、真实付费模型质量或完整桌面跨平台验收完成。
+D-299 当时只证明入口与执行身份纵切；动态升级、同 Thread 换模型、通用协作与本机实验的后续交付见 D-300/D-303。
+7B–7F 整体仍为 Partial：受管远程与原生集群执行、综合/写作闭环及完整科研质量评估尚未完成，
+不宣称异构科研集群、真实付费模型质量或完整桌面跨平台验收完成。
 
-**D-300（2026-09-19）：实验执行与通用多 Agent 协作设计已修订，尚未实施。**
+**D-300（2026-09-19）：实验执行与通用多 Agent 协作设计；分段实施及验收见下。**
 [设计第 6–7 节](research-cluster-design.md) 与 plan 7C–7E 取代强制 ResearchUpdate/研究板和机械事件综合：
 7D 包含本机/受管远程/首个原生集群后端、资源观测与确认分配、真实取消/重连及产物保留；7E 使用自然语言消息与可选等待，
 从最后一段已有可见输出生成约 20 字现状预览，持续经 Zone 2 增量提供并可展开原文，不增加汇报或总结模型。
 
-当前工具仍为已交付的 `inform/request/replyTo` 语义，不能声称新的 `send(..., wait=...)` 已接线。
-已有线程观察与 Zone 2 也不等于上述同组现状表、稳定段落定位和每次工具续接的完整消费链已完成。
-冻结的资源请求仍是声明，不代表已实际分配 CPU/GPU。受管远程实验、跨机器调度/恢复与原生集群作业纵切尚未交付。
-本轮只更新设计、计划和决策，不新增运行时验证证据；D-298/D-299 的既有交付范围保持。
+设计提出时的能力缺口已由下面的分段提交与验收返工逐项处理，不能继续将“当时尚未实施”当作当前状态。
+受管远程实验、跨机器调度/恢复与原生集群作业纵切仍未交付；登记机器和注入测试 backend 不等于这些后端已经存在。
+
+**D-300 实施进展（2026-09-19，按序提交）：**
+- 7B 余项：冻结模型传入会话创建并持久化 model_change；同 Thread 新 Run 可经 `thread.send` 升级 capability/资源/模型（settled/lost 后）；dispatch 明示 `model:"inherit"`（`7a31f551`）。
+- 7E-1：`send(to, message, wait)` 按 requestId 关联等待答复，同 requestId 续等不重发；等待让出模型执行名额但不释放实验资源（`337a0c3d`）。
+- 7E-2/3：每请求团队现状尾注（zone2.status/statusDelivered + 观察游标 + `piarium-context` 持久收据），`read_thread` 增加 `what:"transcript"` 原文展开（`fe54ea56`）。
+- 7C/7D-1：kernel typed records（research.source/experiment.*/resource.*）+ Host experiment/resource/source 服务 + 本机后端；attempt 幂等提交、准入、排队、真实进程、退出事实、取消、游标日志、产物收集与重启重附着；`experiment`/`resources`/`research_source` 工具经 `harnessExperiments` 能力门控（`56de0424`）。
+- 7D-2：资源概览分列容量/确认承诺/观测用量/来源/时间戳/连接状态与按机器的排队 attempt（`f661b96e`）。
+- 7D-3：实验后端接缝（`experiment-backend.ts`）+ 非本机机器登记；登记的集群机器经自定义后端跑通完整生命周期，无后端机器如实拒绝提交。受管远程与 Slurm 适配器仍未交付，不声称远程执行（`3044887c`）。
+- 7F：会话域 HTTP 路由（experiments list/get/logs/cancel/collect、resources、sources，rootScopeForSession 解析归属工作区、requireAuth 生效、忽略请求侧 scope 字段）；`piarium:harness-experiment-changed` SSE 事件；Research Workbench 概览内新增事实面板（attempts/machines/sources、取消与收集入口）。
+
+原交付报告证据（验收前）：`experiments.test.ts` 7/7；路由 8/8；面板 4/4；web harness 套件 979 通过。主代理随后发现这些证据未覆盖规格/资源/恢复/跨会话 UI 等缺陷，不能据此宣布完整 7F 全部通过。
+未验证：受管远程/Slurm 后端、完整桌面 Host 重启路径、真实付费模型驱动下的端到端实验链。
+
+**D-303 / 7B–7F 验收返工（2026-09-20）：本机生产链与通用协作修复，整阶段仍为 Partial。**
+
+- 执行规格保留命令参数顺序、稳定请求身份与原始 actor；规格资源用于实际准入。输入经 Rust 固定到 immutable root，attempt 在独立目录执行，后续修改源目录不能污染排队输入或另一 attempt 的同名输出。
+- 机器与承诺统一到 Host 级 Rust catalog 域，跨工作区准入共享事实并幂等释放；这是 Piarium 预留，不是对其他用户进程的 OS 隔离。CPU 来自真实计时采样，未观测 CPU/GPU 不显示成零。
+- 实验身份、来源对象与产物按实际会话/Thread 关系授权；只读资源工具不授予启动/取消能力。来源 objectHash 进入真实 GC 引用；文件/URI locator 本身不冒充已下载内容。
+- 完成、观察不可用、取消确认、收集与释放分别处理。真实进程未确认停止时不释放承诺；显式 Thread kill/delete 联动实验，正常 Run settlement/archive 保持独立生命周期。
+- 7F 更新走正确的 `/api/piarium/events` 客户端。面板按需展开详情、日志与可下载产物，跨会话/乱序请求不覆盖当前事实；模型通过 `experiment(action:"artifact")` 分页读取收集文本，二进制不作为 base64 塞进模型。
+- capability 切换需要新执行现场时，Run 经正常 fresh/spawn 路径准备；原始 continuation 意愿与实际执行 mode 分开。消息重试核对稳定冻结配置；显式 Run 原文按真实范围读取，边界缺失不返回整个 session，旧输出不冒充新 Run。
+- 现状范围覆盖实际可交流的父/兄弟/子关系；删除无依据的 30 行截断，不把没展示的行确认成已送达。每请求完整临时表仍属后续 7G，未在本轮偷偷改变原 D-300 上下文目标。
+
+验收后的定向证据：
+- 真实 release kernel：`experiments.test.ts` + `experiment-workspace.test.ts` 21 项、`resources.test.ts` 4 项、`sources.test.ts` 1 项通过。覆盖独立输入/输出、源目录回收后的续接与取消、超过 8 MiB 的日志完整读取、跨工作区准入、来源 GC 保留、启动响应丢失、未知状态恢复观察，以及 backend 已释放后仍能重试 commitment 清理。
+- 公开消费者：路由/关系授权/服务 capability 17 项，Pi 实验工具与权限 23 项，面板行为 10 项通过；8 语言文案 parity 通过。HTTP 下载验证连续输出多个内容块，模型文本阅读与二进制结果区分。
+- 通用协作：thread status 13、runtime 83、registry 44、services 49 项分别通过，包含显式 continue 被提升为 fresh 后的同 requestId 重试和缺失原文边界。
+- protocol build、Application Host tests / Pi Host / UI 类型检查、改动范围 lint、工程文档 16 项、文档链接校验与 `git diff --check` 通过。没有重跑全仓套件，也没有把 service 重建当作完整桌面 Host 重启证据。
+
+本机输入捕获会读取声明范围内的依赖/数据树，具有实际时间与存储成本；本轮不宣称受控性能改善。批量矩阵与大规模数据复用仍需完成其实际产品链和成本验收。
+完整 7D 仍缺受管远程/Slurm 实现；完整 7F 仍缺开放科研问题、真实模型及串行/并行对比。7G/7H 单独接续，不用其新增目标追溯否定本轮原任务。
+本机功能阶段按代码逻辑、生产通路和实际消费者收口。未开展的真机、真实模型和对比实测保留为证据范围说明，不因测试清单未补齐阻断本轮交付；受管远程、Slurm 与批量矩阵等实际未实现功能继续留在后续计划。
 
 **D-301 / 后续 7G（2026-09-19）：请求前环境增量与完整团队现状表设计已接受，尚未实施/验收。**
-当前执行 Agent 正在按此前 D-300 prompt 推进；上面的 D-300 段保留为此前交付边界，不据在途代码更新验收结论。
-本项排在该轮完成之后，主代理验收原任务时一并提出，再接续实施，不中途扩展执行范围。
+D-300 原任务与 D-303 验收返工的边界如上；本项是接续阶段，不将其新增要求冒充已经实现的行为。
 
 目标：传统环境观察在每次实际模型请求前检查，新事实送达后留在历史；每个授权 Agent 同时获得当前关系范围内的完整短表，
 作为临时尾部附页，不只推变化行、不只给主 Agent、不把历次表写入历史。固定协作说明放稳定系统提示，动态材料默认为标明来源的

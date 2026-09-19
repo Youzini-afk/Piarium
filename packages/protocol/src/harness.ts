@@ -1223,6 +1223,7 @@ export interface HarnessServiceMap {
   "experiment.list": { params: import("./harness-experiments.js").ExperimentListParams; result: import("./harness-experiments.js").ExperimentListResult };
   "experiment.get": { params: import("./harness-experiments.js").ExperimentGetParams; result: import("./harness-experiments.js").ExperimentGetResult };
   "experiment.logs": { params: import("./harness-experiments.js").ExperimentLogsParams; result: import("./harness-experiments.js").ExperimentLogsResult };
+  "experiment.artifact": { params: import("./harness-experiments.js").ExperimentArtifactReadParams; result: import("./harness-experiments.js").ExperimentArtifactReadResult };
   "experiment.cancel": { params: import("./harness-experiments.js").ExperimentCancelParams; result: import("./harness-experiments.js").ExperimentCancelResult };
   "experiment.wait": { params: import("./harness-experiments.js").ExperimentWaitParams; result: import("./harness-experiments.js").ExperimentWaitResult };
   "experiment.collect": { params: import("./harness-experiments.js").ExperimentCollectParams; result: import("./harness-experiments.js").ExperimentCollectResult };
@@ -1241,6 +1242,8 @@ export type HarnessMethod = keyof HarnessServiceMap;
 export type HarnessCapability =
   | "context.session"
   | "control.experiment"
+  | "read.experiment"
+  | "write.research-source"
   | "control.thread"
   | "process.shell"
   | "read.lsp"
@@ -1305,15 +1308,16 @@ export const HARNESS_METHOD_CAPABILITY = {
   "surface.snapshot.commit": "context.session",
   "surface.snapshot.release": "context.session",
   "experiment.submit": "control.experiment",
-  "experiment.list": "control.experiment",
-  "experiment.get": "control.experiment",
-  "experiment.logs": "control.experiment",
+  "experiment.list": "read.experiment",
+  "experiment.get": "read.experiment",
+  "experiment.logs": "read.experiment",
+  "experiment.artifact": "read.experiment",
   "experiment.cancel": "control.experiment",
-  "experiment.wait": "control.experiment",
+  "experiment.wait": "read.experiment",
   "experiment.collect": "control.experiment",
-  "resource.list": "control.experiment",
-  "source.register": "control.experiment",
-  "source.list": "control.experiment",
+  "resource.list": "read.experiment",
+  "source.register": "write.research-source",
+  "source.list": "read.experiment",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1392,6 +1396,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "experiment.list",
   "experiment.get",
   "experiment.logs",
+  "experiment.artifact",
   "experiment.cancel",
   "experiment.wait",
   "experiment.collect",

@@ -50,6 +50,9 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   symbols: { mutation: 'none', executionMode: 'parallel' },
   definition: { mutation: 'none', executionMode: 'parallel' },
   references: { mutation: 'none', executionMode: 'parallel' },
+  experiment: { mutation: 'process', executionMode: 'sequential' },
+  resources: { mutation: 'none', executionMode: 'parallel' },
+  research_source: { mutation: 'none', executionMode: 'parallel' },
 };
 
 export const toolMutation = (name: string): HarnessToolMutation | 'unknown' => (

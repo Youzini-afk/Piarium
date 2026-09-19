@@ -88,6 +88,11 @@ describe("harness service host authorization", () => {
     expect(deriveHarnessCapabilities(["explore"], { threadRuntime: false })).toContain("read.search");
     expect(deriveHarnessCapabilities(["read"], { documentRead: true, threadRuntime: false })).toContain("read.document");
     expect(deriveHarnessCapabilities(["read"], { documentRead: false, threadRuntime: false })).not.toContain("read.document");
+    const researchReader = deriveHarnessCapabilities(["resources", "research_source"], { threadRuntime: true, experiments: true });
+    expect(researchReader).toContain("read.experiment");
+    expect(researchReader).toContain("write.research-source");
+    expect(researchReader).not.toContain("control.experiment");
+    expect(deriveHarnessCapabilities(["experiment"], { threadRuntime: true, experiments: true })).toContain("control.experiment");
   });
 
   it("accepts only the registered broker principal and preserves the current run", async () => {

@@ -70,6 +70,21 @@ export type {
   ThreadWorktree,
 };
 
+/** Stable structural encoding for durable idempotency identities. Object key
+ * order is irrelevant; array order remains significant because tools/scope
+ * and rule ordering are part of the frozen configuration. */
+export const stableIdentityJson = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableIdentityJson(item)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableIdentityJson(record[key])}`).join(",")}}`;
+};
+
+export const sameFrozenRunConfig = (
+  left: ThreadRun["frozen"] | undefined,
+  right: ThreadRun["frozen"] | undefined,
+): boolean => stableIdentityJson(left ?? null) === stableIdentityJson(right ?? null);
+
 export const THREAD_REGISTRY_SCHEMA_VERSION = 10;
 
 /** A retryable scheduling decision, not a storage or execution failure. */
@@ -1641,12 +1656,15 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       }
       if (options.request) {
         const previous = catalog.runs.find((run) => run.threadId === threadId && run.request?.requestId === options.request!.requestId);
-        if (previous) {
-          if (previous.request!.task !== options.request.task || previous.request!.mode !== options.request.mode
-            || previous.request!.from.kind !== options.request.from.kind || previous.request!.from.id !== options.request.from.id) {
+        const parked = (thread.pendingContinuations ?? []).find((request) => request.requestId === options.request!.requestId);
+        const prior = previous?.request ?? parked;
+        if (prior) {
+          if (prior.task !== options.request.task || prior.mode !== options.request.mode
+            || prior.from.kind !== options.request.from.kind || prior.from.id !== options.request.from.id
+            || !sameFrozenRunConfig(prior.frozen, options.request.frozen)) {
             throw new Error("Continuation identity is already bound to different input");
           }
-          return { value: { run: previous, started: false }, changed: [], write: false };
+          if (previous) return { value: { run: previous, started: false }, changed: [], write: false };
         }
       }
       const current = activeRunFor(catalog, thread);
@@ -2100,7 +2118,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       ?? catalog.runs.find((run) => run.threadId === threadId && run.request?.requestId === continuation.requestId)?.request;
     if (prior) {
       if (prior.task !== continuation.task || prior.mode !== continuation.mode
-        || prior.from.kind !== continuation.from.kind || prior.from.id !== continuation.from.id) {
+        || prior.from.kind !== continuation.from.kind || prior.from.id !== continuation.from.id
+        || !sameFrozenRunConfig(prior.frozen, continuation.frozen)) {
         throw new Error("Continuation identity is already bound to different input");
       }
       return { value: thread, changed: [], write: false };

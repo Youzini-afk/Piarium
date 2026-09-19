@@ -11,13 +11,36 @@ import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.j
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ResearchSourceView, SourceListParams, SourceListResult, SourceRegisterParams } from "@piarium/protocol";
 import { HarnessServiceError } from "./service-error.js";
+import type { ExperimentCaller } from "./experiments.js";
 
 const SOURCE_PREFIX = "research.source:";
 const SOURCE_KINDS = new Set(["dataset", "paper", "code", "artifact", "collection", "other"]);
 
+const mayRead = (record: KernelRecordResult, caller?: ExperimentCaller): boolean => {
+  if (caller?.allowedThreadIds === undefined) return true;
+  if (record.threadId) return caller.allowedThreadIds.includes(record.threadId);
+  return record.sessionId === caller.sessionId || record.sessionId === caller.rootSessionId;
+};
+
+const relativeSourcePath = (value: string, scope?: readonly string[]): string => {
+  const normalized = value.replaceAll("\\", "/");
+  if (normalized.startsWith("/") || /^[A-Za-z]:/.test(normalized) || normalized.includes("\0")
+    || normalized.split("/").includes("..")) {
+    throw new HarnessServiceError("invalid-params", "source path must be workspace-relative");
+  }
+  const result = normalized.split("/").filter((part) => part && part !== ".").join("/");
+  if (!result) throw new HarnessServiceError("invalid-params", "source path must identify a file or directory");
+  if (scope?.length && !scope.some((root) => root === "" || result === root || result.startsWith(`${root}/`))) {
+    throw new HarnessServiceError("denied", "source path is outside the actor scope");
+  }
+  return result;
+};
+
 interface SourceServiceDeps {
   client: KernelClient;
   now?: () => number;
+  /** Source fact changed — drives UI refresh. */
+  onChange?: (workspaceId: string) => void;
 }
 
 const payloadOf = (record: KernelRecordResult): Record<string, unknown> => {
@@ -43,7 +66,10 @@ const view = (record: KernelRecordResult): ResearchSourceView | null => {
   const label = str(payload.label);
   const uri = str(payload.uri);
   const sourcePath = str(payload.path);
-  const objectHash = str(payload.objectHash);
+  const objectHash = record.references.find((reference) => reference.slot === "content")?.objectHash;
+  if (payload.objectHash && payload.objectHash !== objectHash) {
+    throw new HarnessServiceError("unavailable", "Research source content reference is inconsistent");
+  }
   const note = str(payload.note);
   return {
     sourceId,
@@ -85,17 +111,19 @@ export function createSourceService(deps: SourceServiceDeps) {
   const register = async (
     workspaceId: string,
     params: SourceRegisterParams,
-    actor: { sessionId?: string; threadId?: string; runId?: string },
+    actor: { sessionId?: string; threadId?: string; runId?: string; workspaceScope?: readonly string[] },
   ): Promise<ResearchSourceView> => {
     const kind = typeof params.kind === "string" ? params.kind.trim() : "";
     if (!SOURCE_KINDS.has(kind)) {
       throw new HarnessServiceError("invalid-params", `source kind must be one of ${[...SOURCE_KINDS].join(", ")}`);
     }
     const uri = typeof params.uri === "string" && params.uri.trim() ? params.uri.trim() : undefined;
-    const path = typeof params.path === "string" && params.path.trim() ? params.path.trim() : undefined;
-    const objectHash = typeof params.objectHash === "string" && params.objectHash.startsWith("sha256-")
-      ? params.objectHash
-      : undefined;
+    const path = typeof params.path === "string" && params.path.trim()
+      ? relativeSourcePath(params.path.trim(), actor.workspaceScope) : undefined;
+    if (params.objectHash !== undefined && !/^sha256-[a-f0-9]{64}$/.test(params.objectHash)) {
+      throw new HarnessServiceError("invalid-params", "source objectHash must be a SHA-256 object identity");
+    }
+    const objectHash = params.objectHash;
     if (!uri && !path && !objectHash) {
       throw new HarnessServiceError("invalid-params", "source requires a uri, path or objectHash locator");
     }
@@ -119,23 +147,25 @@ export function createSourceService(deps: SourceServiceDeps) {
         createdAt: now(),
       }),
       ownerIds: [],
-      references: [],
+      references: objectHash ? [{ slot: "content", objectHash }] : [],
       ...(actor.sessionId ? { sessionId: actor.sessionId } : {}),
       ...(actor.threadId ? { threadId: actor.threadId } : {}),
       ...(actor.runId ? { runId: actor.runId } : {}),
     });
     const result = view(record);
     if (!result) throw new HarnessServiceError("failed", "registered source record is unreadable");
+    try { deps.onChange?.(workspaceId); } catch { /* observer errors must not break writes */ }
     return result;
   };
 
-  const get = async (workspaceId: string, sourceId: string): Promise<ResearchSourceView | null> => {
+  const get = async (workspaceId: string, sourceId: string, caller?: ExperimentCaller): Promise<ResearchSourceView | null> => {
     const scoped = await context(workspaceId);
     const record = await scoped.getRecord(workspaceId, `${SOURCE_PREFIX}${sourceId}`);
+    if (record && !mayRead(record, caller)) throw new HarnessServiceError("denied", "Research source is outside the caller's task relationships");
     return record ? view(record) : null;
   };
 
-  const list = async (workspaceId: string, params: SourceListParams): Promise<SourceListResult> => {
+  const list = async (workspaceId: string, params: SourceListParams, caller?: ExperimentCaller): Promise<SourceListResult> => {
     const scoped = await context(workspaceId);
     const all: KernelRecordResult[] = [];
     let cursor: number | undefined;
@@ -148,6 +178,7 @@ export function createSourceService(deps: SourceServiceDeps) {
       cursor = page.nextCursor === null ? undefined : page.nextCursor;
     } while (cursor !== undefined);
     const sources = all
+      .filter((record) => mayRead(record, caller))
       .map(view)
       .filter((entry): entry is ResearchSourceView => entry !== null)
       .filter((entry) => params.kind === undefined || entry.kind === params.kind);

@@ -36,7 +36,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | [structure-symbol-graph](decisions/structure-symbol-graph.md) | 3.1/3.8/3.11/3.12 符号图采集与验收、tree-sitter 结构切片、语法 wasm、LSP 导航。 | 52 |
 | [workingstate-threads](decisions/workingstate-threads.md) | 3.4/3.4a/3.5/3.6/3.7/3.10/3.18 工作状态、任务线程/协作、Integration/恢复应用、P0 存储形状与 T 纵切。 | 58 |
 | [stage-r-kernel](decisions/stage-r-kernel.md) | D-252~D-283 Rust 系统内核迁移全程（R0–R6）与 D-283 权限/Web 收口。 | 32 |
-| [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301 科研集群、工作台与侧重、真实根主线、能力路由、实验执行、通用协作与请求上下文。 | 6 |
+| [research-cluster](decisions/research-cluster.md) | D-291/D-297–D-301/D-303 科研集群、工作台与侧重、真实根主线、能力路由、实验执行、通用协作与请求上下文及验收返工。 | 7 |
 
 ## 决策索引
 
@@ -341,3 +341,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-300 | 2026-09-19 | 实验执行与远程资源、自然语言 Agent 交流、可选等待及自动原文现状 | accepted design / 当前执行待验收；现状注入目标 superseded in part | D-301 后续调整第 9 项；当前执行基线保留；本条部分取代 D-291 强制交接/机械综合并调整 D-285 后续消息交互 | research-cluster-design 6/7；plan 7C–7F；harness 9.2.5a/9.3.7/10.3；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-301 | 2026-09-19 | 环境增量留史、每请求完整团队快照附尾、固定协作说明与 user 来源边界 | accepted design / queued after current execution / not implemented or accepted | 部分取代 D-300 现状增量目标；不扩大当前执行任务，验收时接续 7G | harness 8.1.1/9.3.7；research-cluster-design 7.4；plan 7.8/7G；architecture；roadmap；status | [research-cluster](decisions/research-cluster.md) |
 | D-302 | 2026-09-20 | 工具按资源/依赖并行，后台启动、事件等待与完成事实接入 7G | accepted design / queued / not implemented or accepted | 纠正 apply_patch 并行现状，替代整批串行目标；保留真实权限/退出/写者与 D-300 实验合同 | harness 5.0/5.2/5.5/5.9/8.1.1；plan 7H；architecture；roadmap；status | [tool-environment](decisions/tool-environment.md) |
+| D-303 | 2026-09-20 | D-300 本机实验与协作纵切验收返工；完整 7D/7F 保持 Partial | implementation / focused acceptance in status | 纠正规格、资源、恢复、原文与 UI 消费边界；不追溯扩大到 7G/7H | plan 7B/7F；status；Host/Pi harness module docs | [research-cluster](decisions/research-cluster.md) |

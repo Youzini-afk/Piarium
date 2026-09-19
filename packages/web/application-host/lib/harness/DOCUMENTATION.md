@@ -43,10 +43,43 @@ and keeps its research branches and results. Child lifecycle code must not close
 
 The authenticated session thread projection returns `researchRoot` and `researchBranches` alongside
 ordinary threads. User actions on a retained branch are authorized through its durable research-root
-ancestry after the principal Run settles. Shell mounting is not an execution event. The first 7B slice
-freezes capability, dedicated model slot, tool set and resource request on the branch manifest; missing
-slots are unavailable rather than silently borrowed. Dynamic upgrades, resource scheduling, board
-updates, experiment adapters and writing loops belong to the later 7B–7F slices.
+ancestry after the principal Run settles. Shell mounting is not an execution event. Capability, model,
+tools and resources are frozen per Run; missing model slots are unavailable rather than silently
+borrowed. Changing the worktree policy prepares the new Run through the fresh execution path, retaining
+the requested continuation identity separately from the actual mode. Managed remote/Slurm adapters
+and the full research evaluation remain separate delivery slices.
+
+### Research execution and facts (7B–7F acceptance)
+
+`research-access.ts` derives the model/UI caller from durable session bindings and actual Thread
+relationships. Sharing a workspace does not authorize one root to inspect or cancel another root's
+attempts. A user root can view its research tree; a worker sees its own related parent, siblings and
+children. Read/resource/source capabilities do not grant experiment process control.
+
+`experiments.ts` owns orchestration over kernel records and the backend contract. A spec keeps ordered
+arguments and a fixed input root; an attempt owns an independent materialized directory under kernel
+storage. `experiment-workspace.ts` captures and checks source bytes through Rust, includes ignored
+files under the declared capture scope, excludes the kernel scan's `.git`/`.piarium` metadata, and
+rewrites internal absolute links to remain inside the captured tree. It does not promise an OS sandbox.
+Capturing a large dependency/data tree has a real cost; spec reuse keeps the prior input root.
+
+Machine capacity, observations and Piarium commitments share a Host-level kernel catalog domain in
+`resources.ts`. Reservations are serialized across owning workspaces and survive service recreation;
+they do not claim OS isolation from external processes. Resource release can wake queued attempts in
+other workspaces. Unknown CPU/GPU measurements remain unknown. `sources.ts` retains actual object
+references; a path or URI locator alone is provenance, not proof that remote content was downloaded.
+
+`experiment-routes.ts` exposes the same authorized facts to the research panel, including paged logs
+and streamed artifact downloads. The model's `experiment(action:"artifact")` reads collected text by
+byte page; binary bodies stay out of model text. UI refresh uses `/api/piarium/events`, invalidates
+older requests on session changes, and exposes failures without replacing them with empty facts.
+
+Thread kill/delete closes the worker before stopping its independent attempts and reclaiming state.
+Normal Run settlement and archive do not terminate an experiment. Host shutdown detaches observers;
+the backend owns execution and reconnection facts. Backend uncertainty is not observed termination.
+The local backend is implemented; registering another machine or testing an injected backend does
+not provide a managed remote or Slurm implementation. Full desktop restart and real-model research
+quality require their own evidence. D-301/7G and D-302/7H remain follow-up work.
 
 ### HarnessServiceHost (`service-host.ts`)
 

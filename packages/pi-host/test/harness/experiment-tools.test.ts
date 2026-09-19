@@ -55,6 +55,25 @@ const attemptView = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("experiment tool", () => {
+  it("reads a collected result by identity and keeps binary bytes out of model text", async () => {
+    const { bridge, requests } = scriptedBridge({
+      "experiment.artifact": (params: { artifactId: string }) => ({
+        attemptId: "attempt-1", artifactId: params.artifactId, name: "result.csv",
+        offset: 0, nextOffset: 9, eof: true, bytesBase64: "private-raw-bytes",
+        text: params.artifactId === "binary" ? null : "score,0.9",
+      }),
+    });
+    const tool = createExperimentTool(bridge, SESSION);
+    const text = await tool.execute("text", { action: "artifact", attemptId: "attempt-1", artifactId: "csv" } as never, undefined, undefined, undefined as never);
+    assert.match(JSON.stringify(text.content), /score,0.9/);
+    assert.doesNotMatch(JSON.stringify(text), /private-raw-bytes/);
+    const binary = await tool.execute("binary", { action: "artifact", attemptId: "attempt-1", artifactId: "binary" } as never, undefined, undefined, undefined as never);
+    assert.match(JSON.stringify(binary.content), /binary/);
+    assert.doesNotMatch(JSON.stringify(binary), /private-raw-bytes/);
+    assert.equal(requests[0]!.method, "experiment.artifact");
+    bridge.dispose();
+  });
+
   it("submit forwards the inline spec and returns spec+attempt identities", async () => {
     const { bridge, requests } = scriptedBridge({
       "experiment.submit": (params: { command: string; args?: string[] }) => {
@@ -180,6 +199,7 @@ describe("experiment tool", () => {
     const tool = createExperimentTool(bridge, SESSION);
     const cancelled = await tool.execute("call-1", { action: "cancel", attemptId: "attempt-1" } as never, undefined, undefined, undefined as never);
     assert.equal(requests[0]!.method, "experiment.cancel");
+    assert.match((cancelled.content[0] as { text: string }).text, /cancelled/);
     const collected = await tool.execute("call-1", { action: "collect", attemptId: "attempt-1" } as never, undefined, undefined, undefined as never);
     assert.equal(requests[1]!.method, "experiment.collect");
     assert.match((collected.content[0] as { text: string }).text, /collection done/);

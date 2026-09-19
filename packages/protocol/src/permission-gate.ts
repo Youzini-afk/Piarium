@@ -333,6 +333,9 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
 
   // Build rules from HARNESS_TOOL_META mutation attribute
   for (const [tool, meta] of Object.entries(HARNESS_TOOL_META)) {
+    if (tool === "experiment") {
+      rules.push({ tool, match: { param: "action", pattern: "^(list|get|logs|artifact|wait)$" }, decision: "allow" });
+    }
     const mutation: HarnessToolMutation = meta.mutation;
     if (mutation === "none") {
       // Read-only tools always allowed

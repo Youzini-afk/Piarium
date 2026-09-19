@@ -1645,7 +1645,7 @@ describe("thread services", () => {
       expect(result).toMatchObject({ accepted: true, delivery: "delivered", runId: "run-upgraded" });
       expect(continueRun).toHaveBeenCalledWith(expect.objectContaining({
         threadId: child.thread.id,
-        mode: "continue",
+        mode: "fresh",
         frozen: expect.objectContaining({
           model: { providerId: "research-provider", modelId: "design-model" },
           tools: expect.arrayContaining(["read", "dispatch"]),
@@ -1653,12 +1653,75 @@ describe("thread services", () => {
             capability: "experimental-design",
             resources: expect.objectContaining({ cpu: true }),
           },
-          inputOrigin: "continue",
+          inputOrigin: "fresh",
         }),
       }));
       // The recorded request is durable on the target's ledger.
       expect((await registry.getThreadById("workspace-1", child.thread.id))?.messages)
         .toEqual([expect.objectContaining({ direction: "in", kind: "request", status: "delivered" })]);
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("keeps the original continue context on a forced-fresh request retry", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-forced-fresh-retry-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async (_input: {
+      mode: "continue" | "fresh";
+      task: string;
+      requestId: string;
+      from: { kind: "thread"; id: string };
+      frozen: NonNullable<import("@piarium/protocol").ThreadRunFrozenConfig>;
+    }) => ({ runId: "run-upgraded" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await registry.createThread({
+        workspaceId: "workspace-1",
+        parent: { kind: "thread", id: caller.thread.id },
+        brief: "research implementation",
+        kind: "implementation" as const,
+        createdBy: "agent" as const,
+        concurrency: 4,
+        autoRun: true,
+        worktree: "none" as const,
+        model: { providerId: "old-provider", modelId: "old-model" },
+        tools: ["read"],
+        permissions: {},
+      });
+      const oldRun = await registry.startRun("workspace-1", child.id);
+      await registry.endRun("workspace-1", child.id, oldRun.id, "success", null, {
+        blocksSnapshot: {}, changedFiles: [], conclusion: "done", confidence: 0.8, deviations: [],
+        transcriptRef: { fromEntryId: null, runtimeId: "pi", sessionId: "child-none", toEntryId: null }, unresolved: [],
+      });
+      const request = {
+        threadId: child.id,
+        message: "run in the high-throughput capability",
+        from: "parent-agent" as const,
+        kind: "request" as const,
+        requestId: "req-forced-fresh",
+        context: "continue" as const,
+        capability: "high-throughput-execution" as const,
+        model: { providerId: "research-provider", modelId: "throughput-model" },
+      };
+      await service.handle(request, threadCtx(caller.sessionId));
+      const firstCall = continueRun.mock.calls[0]![0];
+      expect(firstCall.mode).toBe("fresh");
+      await registry.admitRun("workspace-1", child.id, "pi", {
+        allowSettled: true,
+        inputOrigin: firstCall.mode,
+        frozen: firstCall.frozen,
+        request: { ...firstCall, at: new Date().toISOString() },
+      });
+      const retry = await service.handle(request, threadCtx(caller.sessionId));
+      expect(retry).toMatchObject({ accepted: true, messageId: "req-forced-fresh" });
+      expect(continueRun).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });
@@ -1692,6 +1755,42 @@ describe("thread services", () => {
           research: expect.objectContaining({ capability: "fast-exploration" }),
         }),
       }));
+    } finally {
+      await registry.dispose();
+      rmSync(dataDir, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects a reused requestId when the capability/model identity changes", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "thread-send-capability-identity-"));
+    const registry = createThreadRegistry({ dataDir, hostId: "host-1" });
+    const continueRun = vi.fn(async () => ({ runId: "run-identity" }));
+    const service = createThreadSendService({
+      threadRegistry: registry,
+      threadSendToSession: vi.fn(async () => {}),
+      threadContinueRun: continueRun,
+    } as never);
+    try {
+      const caller = await researchCaller(registry);
+      const child = await settledChildOf(registry, caller.thread.id);
+      const request = {
+        threadId: child.thread.id,
+        message: "route this request",
+        from: "parent-agent" as const,
+        kind: "request" as const,
+        requestId: "req-identity",
+        capability: "high-throughput-execution" as const,
+        model: { providerId: "research-provider", modelId: "throughput-model" },
+      };
+      await service.handle(request, threadCtx(caller.sessionId));
+      await expect(service.handle({
+        ...request,
+        model: { providerId: "research-provider", modelId: "different-model" },
+      }, threadCtx(caller.sessionId))).rejects.toMatchObject({
+        harnessCode: "invalid-params",
+        message: expect.stringContaining("execution identity"),
+      });
+      expect(continueRun).toHaveBeenCalledOnce();
     } finally {
       await registry.dispose();
       rmSync(dataDir, { force: true, recursive: true });

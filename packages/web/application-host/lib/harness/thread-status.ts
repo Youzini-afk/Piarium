@@ -29,8 +29,10 @@ export interface ThreadStatusProgress {
   text: string;
   /** The Run this output belongs to — an older Run is marked, not disguised. */
   runId: string;
-  /** Session entry holding the original passage. */
+  /** Session entry holding the original passage; empty when reportRevision is set. */
   entryId: string;
+  /** Present when the visible fallback is a durable Run report, not a transcript entry. */
+  reportRevision?: number;
   at: string;
   /** True when the current Run produced no visible output yet. */
   fromEarlierRun: boolean;
@@ -71,22 +73,43 @@ const excerptText = (text: string): string => {
   return chars.length <= PROGRESS_VISIBLE_CHARS ? collapsed : `${chars.slice(0, PROGRESS_VISIBLE_CHARS).join("")}…`;
 };
 
+const latestVisibleText = (entry: PiSessionEntry): string => {
+  if (entry.type !== "message" || entry.message.role !== "assistant") return "";
+  return entry.message.content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text.trim())
+    .filter(Boolean)
+    .at(-1) ?? "";
+};
+
 /**
  * The last completed assistant text of a session branch. Streaming parts land
  * in the session file only once committed, so this never reads a half-written
  * message and never wakes the observed agent.
  */
-export const lastVisibleOutput = (entries: readonly PiSessionEntry[]): { text: string; entryId: string; at: string } | null => {
-  for (let index = entries.length - 1; index >= 0; index -= 1) {
+export const lastVisibleOutput = (
+  entries: readonly PiSessionEntry[],
+  afterEntryId?: string | null,
+): { text: string; entryId: string; at: string } | null => {
+  let start = entries.length - 1;
+  if (afterEntryId) {
+    const boundary = entries.findIndex((entry) => entry.id === afterEntryId);
+    if (boundary < 0) return null;
+    // The scan below skips every entry at or before the previous Run's leaf.
+    for (let index = start; index > boundary; index -= 1) {
+      const entry = entries[index]!;
+      if (entry.type !== "message" || entry.message.role !== "assistant") continue;
+      if (entry.message.stopReason === "pending") continue;
+      const text = collapse(latestVisibleText(entry));
+      if (text) return { text: excerptText(text), entryId: entry.id, at: entry.timestamp };
+    }
+    return null;
+  }
+  for (let index = start; index >= 0; index -= 1) {
     const entry = entries[index]!;
     if (entry.type !== "message" || entry.message.role !== "assistant") continue;
     if (entry.message.stopReason === "pending") continue;
-    const text = collapse(
-      entry.message.content
-        .filter((part) => part.type === "text")
-        .map((part) => part.text)
-        .join(" "),
-    );
+    const text = collapse(latestVisibleText(entry));
     if (text) return { text: excerptText(text), entryId: entry.id, at: entry.timestamp };
   }
   return null;
@@ -126,20 +149,52 @@ export interface ThreadStatusProjectorOptions {
 export function createThreadStatusProjector(options: ThreadStatusProjectorOptions) {
   const excerptCache = new Map<string, { stamp: string; excerpt: { text: string; entryId: string; at: string } | null }>();
 
-  const excerptFor = async (run: ThreadRun | null): Promise<{ text: string; entryId: string; at: string } | null> => {
+  const entriesForRun = (
+    entries: readonly PiSessionEntry[],
+    run: ThreadRun,
+    runs: readonly ThreadRun[],
+  ): PiSessionEntry[] | null => {
+    const ref = run.report?.transcriptRef;
+    let fromId: string | null = null;
+    let toId: string | null = null;
+    if (ref) {
+      if (ref.fromEntryId === null && ref.toEntryId === null) return [];
+      fromId = ref.fromEntryId;
+      toId = ref.toEntryId;
+    } else {
+      const previous = runs
+        .filter((candidate) => candidate.id !== run.id && candidate.attempt < run.attempt && candidate.sessionId === run.sessionId)
+        .toSorted((left, right) => left.attempt - right.attempt)
+        .at(-1);
+      if (previous) {
+        const previousTo = previous.report?.transcriptRef.toEntryId;
+        if (!previousTo) return null;
+        fromId = previousTo;
+      }
+    }
+    const fromEntryIndex = fromId === null ? -1 : entries.findIndex((entry) => entry.id === fromId);
+    const toEntryIndex = toId === null ? entries.length : entries.findIndex((entry) => entry.id === toId);
+    if ((fromId !== null && fromEntryIndex < 0) || (toId !== null && toEntryIndex < 0)) return null;
+    const start = fromId === null ? 0 : fromEntryIndex + (ref ? 0 : 1);
+    return entries.slice(start, toEntryIndex === entries.length ? entries.length : toEntryIndex + 1);
+  };
+
+  const excerptFor = async (run: ThreadRun | null, runs: readonly ThreadRun[]): Promise<{ text: string; entryId: string; at: string } | null> => {
     if (!run?.sessionId || !options.readEntries) return null;
     // lastActivityAt is the registry-maintained commit signal: unchanged runs
     // reuse the cached excerpt, new committed output invalidates it.
     const stamp = run.lastActivityAt;
-    const cached = excerptCache.get(run.sessionId);
+    const key = `${run.id}\0${run.sessionId}`;
+    const cached = excerptCache.get(key);
     if (cached?.stamp === stamp) return cached.excerpt;
     let excerpt: { text: string; entryId: string; at: string } | null = null;
     try {
-      excerpt = lastVisibleOutput((await options.readEntries(run.sessionId)).entries);
+      const entries = entriesForRun((await options.readEntries(run.sessionId)).entries, run, runs);
+      excerpt = entries === null ? null : lastVisibleOutput(entries);
     } catch {
       excerpt = null;
     }
-    excerptCache.set(run.sessionId, { stamp, excerpt });
+    excerptCache.set(key, { stamp, excerpt });
     return excerpt;
   };
 
@@ -148,26 +203,30 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
     activeRun: ThreadRun | null,
     runs: readonly ThreadRun[],
   ): Promise<ThreadStatusProgress | null> => {
-    const candidate = activeRun ?? runs.findLast((run) => run.sessionId) ?? null;
-    const excerpt = await excerptFor(candidate);
-    if (excerpt && candidate) {
-      return {
-        ...excerpt,
-        runId: candidate.id,
-        fromEarlierRun: activeRun !== null && candidate.id !== activeRun.id,
-      };
-    }
-    // No visible output on this Run — a settled Thread's report conclusion is
-    // the recorded final answer, marked with its own revision/time.
-    const report = thread.report;
-    if (report?.conclusion) {
-      return {
-        text: excerptText(report.conclusion),
-        runId: candidate?.id ?? "",
-        entryId: `report-r${report.resultRevision ?? 0}`,
-        at: thread.updatedAt,
-        fromEarlierRun: activeRun !== null,
-      };
+    const candidates = activeRun
+      ? [activeRun, ...runs.toSorted((left, right) => right.attempt - left.attempt).filter((run) => run.id !== activeRun.id)]
+      : runs.toSorted((left, right) => right.attempt - left.attempt);
+    for (const candidate of candidates) {
+      const excerpt = await excerptFor(candidate, runs);
+      if (excerpt) {
+        return {
+          ...excerpt,
+          runId: candidate.id,
+          fromEarlierRun: activeRun !== null && candidate.id !== activeRun.id,
+        };
+      }
+      const report = candidate.report
+        ?? (thread.lifecycle === "settled" && candidate.id === thread.activeRunId ? thread.report : null);
+      if (report?.conclusion && report.resultRevision !== undefined) {
+        return {
+          text: excerptText(report.conclusion),
+          runId: candidate.id,
+          entryId: "",
+          reportRevision: report.resultRevision,
+          at: thread.updatedAt,
+          fromEarlierRun: activeRun !== null && candidate.id !== activeRun.id,
+        };
+      }
     }
     return null;
   };
@@ -195,7 +254,7 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
     // Every excerpt carries its locate reference: read_thread entry expands
     // the original passage even after the thread keeps writing.
     const base = progress
-      ? `${progress.text} [${progress.runId}:${progress.entryId}]${progress.fromEarlierRun ? ` (earlier run · ${progress.at})` : ""}`
+      ? `${progress.text} [${progress.runId}:${progress.reportRevision !== undefined ? `report:r${progress.reportRevision}` : progress.entryId}]${progress.fromEarlierRun ? ` (earlier run · ${progress.at})` : ""}`
       : "—";
     const suffix = markers.map((marker) => marker.text).join(" · ");
     return suffix ? `${base} · ${suffix}` : base;
@@ -210,10 +269,14 @@ export function createThreadStatusProjector(options: ThreadStatusProjectorOption
       workspaceId: string,
       parent: ThreadParent,
       cursor: ThreadStatusCursor | null,
+      threadIds?: readonly string[],
     ): Promise<{ rows: ThreadStatusRow[]; cursor: ThreadStatusCursor; removed: string[] }> {
       const registry = options.registry();
       if (!registry) throw new Error("Thread registry not configured");
-      const snapshots = await registry.listThreadSnapshots(workspaceId, parent);
+      const snapshots = threadIds === undefined
+        ? await registry.listThreadSnapshots(workspaceId, parent)
+        : (await Promise.all([...new Set(threadIds)].map((threadId) => registry.getThreadSnapshot(workspaceId, threadId))))
+          .filter((snapshot): snapshot is NonNullable<typeof snapshot> => snapshot !== null);
       const next: ThreadStatusCursor = { cells: {}, inboundSeen: {}, resultSeen: {} };
       const rows: ThreadStatusRow[] = [];
       for (const { thread, activeRun } of snapshots) {

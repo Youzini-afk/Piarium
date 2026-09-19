@@ -28,6 +28,16 @@ The pi-host harness tools are custom tools registered in the Pi session's
 | `webfetch` | Read a source URL, find literal text, or expand extracted Markdown line ranges | `web.fetch` |
 | `dispatch`, `threads`, `wait`, `send`, `read_thread`, `merge`, `kill` | Operate Host-owned durable child threads | `thread.*` |
 | `submit_facts` | Retrieval child delivers Host-validated facts | `thread.facts.set` |
+| `experiment` | Submit and manage attempts, page logs and collected text artifacts | `experiment.submit/list/get/logs/artifact/wait/cancel/collect` |
+| `resources` | Read machine capacity, commitments, observations and queued work | `resource.list` |
+| `research_source` | Register or inspect provenance and retained source objects | `source.register/list` |
+
+Research tools register only when the Host advertises their actual services and the session's frozen
+tool selection permits them. Queries are native read actions; starting/stopping attempts retains the
+process permission gate. A resource query does not confer process-control capability. Experiment
+output remains available through its attempt/artifact identity even when it was produced outside the
+Agent's own working directory. See the Host harness documentation and current status for backend and
+recovery evidence; the optional backend resolver alone is not a delivered remote scheduler.
 
 ## Registration
 

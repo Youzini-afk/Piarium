@@ -57,8 +57,10 @@ async function fixture() {
     workspaceId: "ws",
     executionWorkspaceId: "ws",
     sessionId: "s-1",
+    rootSessionId: "s-1",
     threadId: "t-1",
     runId: "r-1",
+    workspaceScope: [],
   };
   return { root, workspace, client, resources, sources, experiments, caller, errors };
 }
@@ -68,6 +70,50 @@ const node = (...script: string[]) => ({
   args: ["-e", script.join(";")],
   env: { ELECTRON_RUN_AS_NODE: "1" },
 });
+
+async function serviceWithBackend(
+  f: Awaited<ReturnType<typeof fixture>>,
+  machineId: string,
+  backend: ExperimentBackend,
+) {
+  await f.resources.registerMachine(f.caller.workspaceId, {
+    machineId,
+    kind: "cluster",
+    label: machineId,
+    backend: backend.backend,
+    state: "available",
+    connection: { status: "connected" },
+    capacity: { cpuCores: 64 },
+  });
+  return createExperimentService({
+    client: f.client,
+    resources: f.resources,
+    sources: f.sources,
+    resolveWorkspaceRoot: async () => f.workspace,
+    resolveBackend: async (ctx, target) => target === machineId
+      ? {
+          backend,
+          site: {
+            workspaceId: f.caller.workspaceId,
+            rootId: `${machineId}-root`,
+            canonicalRoot: f.workspace,
+            transport: null,
+          },
+        }
+      : target === "local"
+        ? {
+            backend: createLocalExperimentBackend(ctx.scoped),
+            site: {
+              workspaceId: f.caller.workspaceId,
+              rootId: ctx.rootId,
+              canonicalRoot: ctx.canonicalRoot,
+              transport: ctx.scoped,
+            },
+          }
+        : null,
+    onError: (error) => f.errors.push(error),
+  });
+}
 
 describe("experiment service on the real kernel", () => {
   it("runs a local attempt to completion, collects streams and output files, and dedupes the request", async () => {
@@ -84,7 +130,7 @@ describe("experiment service on the real kernel", () => {
       outputPaths: ["result.txt"],
     });
     assert.equal(submitted.spec.state, "active");
-    assert.match(submitted.attempt.attemptId, /^attempt-req-complete-1/);
+    assert.match(submitted.attempt.attemptId, /^attempt-[a-f0-9]{40}$/);
 
     // A retry with the same requestId returns the recorded attempt — no second job.
     const retry = await f.experiments.submit(f.caller, { requestId: "req-complete-1", ...spec, outputPaths: ["result.txt"] });
@@ -94,14 +140,24 @@ describe("experiment service on the real kernel", () => {
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
     assert.equal(waited.attempt.exitCode, 0);
-    assert.equal(waited.attempt.collection, "done");
-
     const detail = await f.experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(waited.attempt.collection, "done", JSON.stringify({ artifacts: detail.artifacts, errors: f.errors.map(String) }));
     assert.equal(detail.job?.backend, "local");
     assert.ok(detail.job?.backendJobId);
     assert.equal(detail.job?.state, "released");
-    assert.ok(detail.artifacts.some((a) => a.name === "stdout" && a.state === "available" && a.objectHash));
+    assert.ok(detail.artifacts.some((a) => a.name === "stdout" && a.state === "available" && a.byteLength));
     assert.ok(detail.artifacts.some((a) => a.name === "result.txt" && a.state === "available" && a.objectHash));
+    const resultArtifact = detail.artifacts.find((artifact) => artifact.name === "result.txt")!;
+    const download = await f.experiments.readArtifact(f.caller, submitted.attempt.attemptId, resultArtifact.artifactId);
+    const downloaded: Buffer[] = [];
+    for await (const chunk of download.chunks) downloaded.push(Buffer.from(chunk));
+    assert.equal(Buffer.concat(downloaded).toString("utf8"), "answer=42");
+    const resultPage = await f.experiments.readArtifactPage(f.caller, {
+      attemptId: submitted.attempt.attemptId,
+      artifactId: resultArtifact.artifactId,
+      maxBytes: 64,
+    });
+    assert.equal(resultPage.text, "answer=42");
 
     const out = await f.experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId, stream: "stdout" });
     assert.equal(out.origin, "artifact");
@@ -180,8 +236,10 @@ describe("experiment service on the real kernel", () => {
 
   it("reattaches a running attempt after the supervising service restarts", async () => {
     const f = await fixture();
-    // ~1.5s job: the first service instance goes away while it runs.
+    // ~1.5s job: persist one output page, then the first service instance and
+    // original source directory go away while the independent attempt runs.
     const submitted = await f.experiments.submit(f.caller, node(
+      "process.stdout.write('early-page')",
       "setTimeout(()=>{process.stdout.write('late-exit')},1500)",
     ));
     const attemptId = submitted.attempt.attemptId;
@@ -192,9 +250,18 @@ describe("experiment service on the real kernel", () => {
       view = (await f.experiments.get(f.caller, attemptId)).attempt;
     }
     assert.equal(view.state, "running");
+    const outputDeadline = Date.now() + 10_000;
+    let early = "";
+    while (!early.includes("early-page") && Date.now() < outputDeadline) {
+      await pause();
+      early = (await f.experiments.logs(f.caller, { attemptId })).text;
+    }
+    assert.match(early, /early-page/);
 
     // A fresh service instance over the same kernel reconciles the attempt and
     // rebuilds the poller — its wait resolves when the process actually exits.
+    f.experiments.detachObservers();
+    await fs.rm(f.workspace, { recursive: true, force: true });
     const errors: Error[] = [];
     const restarted = createExperimentService({
       client: f.client,
@@ -207,11 +274,43 @@ describe("experiment service on the real kernel", () => {
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
     const logs = await restarted.logs(f.caller, { attemptId });
+    assert.match(logs.text, /early-page/);
     assert.match(logs.text, /late-exit/);
+  });
+
+  it("can inspect and stop a materialized local attempt after its original source directory is reclaimed", async () => {
+    const f = await fixture();
+    const submitted = await f.experiments.submit(f.caller, node("setInterval(()=>{},1000)"));
+    const attemptId = submitted.attempt.attemptId;
+    const deadline = Date.now() + 15_000;
+    let state = submitted.attempt.state;
+    while (state !== "running" && Date.now() < deadline) {
+      await pause();
+      state = (await f.experiments.get(f.caller, attemptId)).attempt.state;
+    }
+    assert.equal(state, "running");
+    f.experiments.detachObservers();
+    await fs.rm(f.workspace, { recursive: true, force: true });
+
+    const restarted = createExperimentService({
+      client: f.client,
+      resources: f.resources,
+      sources: f.sources,
+      resolveWorkspaceRoot: async () => f.workspace,
+      onError: (error) => f.errors.push(error),
+    });
+    assert.equal((await restarted.get(f.caller, attemptId)).attempt.state, "running");
+    const stopping = await restarted.cancel(f.caller, attemptId);
+    assert.ok(stopping.state === "stopping" || stopping.state === "cancelled");
+    const waited = await restarted.wait(f.caller, attemptId, 15_000);
+    assert.equal(waited.timedOut, false);
+    assert.equal(waited.attempt.state, "cancelled");
   });
 
   it("registers sources, resolves them as inputs, and rejects retired or malformed locators", async () => {
     const f = await fixture();
+    await fs.mkdir(path.join(f.workspace, "data/fixtures"), { recursive: true });
+    await fs.writeFile(path.join(f.workspace, "data/fixtures/example.txt"), "fixed input");
     const registered = await f.sources.register(f.caller.workspaceId, {
       kind: "dataset",
       label: "fixtures",
@@ -225,7 +324,7 @@ describe("experiment service on the real kernel", () => {
     assert.equal(listed.sources[0]!.sourceId, registered.sourceId);
 
     await assert.rejects(
-      f.sources.register(f.caller.workspaceId, { kind: "dataset" }),
+      f.sources.register(f.caller.workspaceId, { kind: "dataset" }, {}),
       /locator|uri|path|objectHash/i,
     );
 
@@ -356,6 +455,8 @@ describe("experiment service on the real kernel", () => {
     assert.equal(waited.timedOut, false);
     assert.equal(waited.attempt.state, "completed");
     assert.equal(waited.attempt.exitCode, 0);
+    const releaseDeadline = Date.now() + 5_000;
+    while (released.length === 0 && Date.now() < releaseDeadline) await pause();
     assert.equal(released.length, 1);
     assert.ok(released[0]!.startsWith("sim-"));
 
@@ -379,5 +480,363 @@ describe("experiment service on the real kernel", () => {
     assert.equal(retry.attempt.attemptId, submitted.attempt.attemptId);
     assert.equal(spawned.length, 1);
     assert.deepEqual(errors, []);
+  });
+
+  it("keeps ordered args and root-scoped request identities distinct and rejects request reuse with another spec", async () => {
+    const f = await fixture();
+    const resources = { cpuCores: 1_000_000 };
+    const first = await f.experiments.submit(f.caller, {
+      requestId: "matrix/a?b",
+      command: "ordered-command",
+      args: ["alpha", "beta"],
+      resources,
+    });
+    const reordered = await f.experiments.submit(f.caller, {
+      requestId: "matrix/a/b",
+      command: "ordered-command",
+      args: ["beta", "alpha"],
+      resources,
+    });
+    assert.notEqual(first.attempt.attemptId, reordered.attempt.attemptId);
+    assert.notEqual(first.spec.specId, reordered.spec.specId);
+    await assert.rejects(
+      f.experiments.submit(f.caller, {
+        requestId: "matrix/a?b",
+        command: "ordered-command",
+        args: ["different"],
+        resources,
+      }),
+      /already bound|different experiment/i,
+    );
+    await f.experiments.cancel(f.caller, first.attempt.attemptId);
+    await f.experiments.cancel(f.caller, reordered.attempt.attemptId);
+  });
+
+  it("uses resources pinned on a reused spec instead of bypassing admission", async () => {
+    const f = await fixture();
+    const first = await f.experiments.submit(f.caller, {
+      command: "never-launched",
+      resources: { cpuCores: 1_000_000 },
+    });
+    assert.equal(first.attempt.state, "queued");
+    await f.experiments.cancel(f.caller, first.attempt.attemptId);
+
+    const reused = await f.experiments.submit(f.caller, { specId: first.spec.specId });
+    assert.equal(reused.attempt.state, "queued");
+    assert.match(reused.attempt.queueReason ?? "", /cpuCores|insufficient/i);
+    await f.experiments.cancel(f.caller, reused.attempt.attemptId);
+  });
+
+  it("reconciles a lost submit response and transient polling failure without releasing or duplicating the job", async () => {
+    const f = await fixture();
+    let spawnCalls = 0;
+    let createdJobs = 0;
+    let readCalls = 0;
+    const backend: ExperimentBackend = {
+      backend: "fault-reconcile",
+      controls: ["cancel", "attach", "collect"],
+      async spawn(_site, request) {
+        spawnCalls += 1;
+        if (createdJobs === 0) createdJobs += 1;
+        if (spawnCalls === 1) throw new Error("response dropped after durable submit");
+        return { handle: { backendJobId: request.backendJobId }, observation: { status: "running", writerActive: true } };
+      },
+      async inspect() { return { status: "running", writerActive: true }; },
+      async read(_site, _id, cursor) {
+        readCalls += 1;
+        if (readCalls === 1) throw new Error("temporary observation outage");
+        const bytes = Buffer.from("reconciled-output");
+        return {
+          chunks: cursor === 0 ? [{ channel: "stdout", bytesBase64: bytes.toString("base64") }] : [],
+          nextCursor: bytes.byteLength,
+          endCursor: bytes.byteLength,
+          observation: { status: "exited", writerActive: false, exitCode: 0 },
+        };
+      },
+      async kill() {},
+      async release() {},
+      async collectFile() { throw new Error("no declared files"); },
+    };
+    const experiments = await serviceWithBackend(f, "fault-reconcile-machine", backend);
+    const submitted = await experiments.submit(f.caller, {
+      requestId: "lost-response",
+      ...node("process.stdout.write('unused')"),
+      machineId: "fault-reconcile-machine",
+      resources: { cpuCores: 1 },
+    });
+    assert.equal(submitted.attempt.state, "submitted");
+    const reserved = await f.resources.list(f.caller.workspaceId);
+    assert.equal(reserved.machines.find((machine) => machine.machineId === "fault-reconcile-machine")?.commitments.length, 1);
+
+    const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.timedOut, false);
+    assert.equal(waited.attempt.state, "completed");
+    assert.equal(createdJobs, 1);
+    assert.equal(spawnCalls, 2);
+    assert.ok(readCalls >= 2);
+    const logs = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
+    assert.equal(logs.text, "reconciled-output");
+  });
+
+  it("persists logs before release, retries collection independently, and never marks a failed release as released", async () => {
+    const f = await fixture();
+    let fileAvailable = false;
+    let releases = 0;
+    const output = Buffer.from("durable-before-release");
+    const backend: ExperimentBackend = {
+      backend: "fault-finalize",
+      controls: ["cancel", "attach", "collect"],
+      async spawn(_site, request) {
+        return { handle: { backendJobId: request.backendJobId }, observation: { status: "running", writerActive: true } };
+      },
+      async inspect() { return { status: "exited", writerActive: false, exitCode: 0 }; },
+      async read(_site, _id, cursor) {
+        return {
+          chunks: cursor === 0 ? [{ channel: "stdout", bytesBase64: output.toString("base64") }] : [],
+          nextCursor: output.byteLength,
+          endCursor: output.byteLength,
+          observation: { status: "exited", writerActive: false, exitCode: 0 },
+        };
+      },
+      async kill() {},
+      async release() {
+        releases += 1;
+        if (releases === 1) throw new Error("release bookkeeping unavailable");
+      },
+      async collectFile() {
+        if (!fileAvailable) throw new Error("result transfer unavailable");
+        return Buffer.from("final-result");
+      },
+    };
+    const experiments = await serviceWithBackend(f, "fault-finalize-machine", backend);
+    const submitted = await experiments.submit(f.caller, {
+      ...node("process.stdout.write('unused')"),
+      machineId: "fault-finalize-machine",
+      outputPaths: ["result.txt"],
+    });
+    const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.attempt.state, "completed");
+    assert.equal(waited.attempt.collection, "failed");
+    assert.equal(releases, 0);
+    const durableLog = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
+    assert.equal(durableLog.origin, "live");
+    assert.equal(durableLog.text, output.toString());
+
+    fileAvailable = true;
+    const collected = await experiments.collect(f.caller, submitted.attempt.attemptId);
+    assert.equal(collected.attempt.collection, "done");
+    assert.equal(releases, 1);
+    const retriedRelease = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(releases, 2);
+    assert.equal(retriedRelease.job?.state, "released");
+    const persistedLog = await experiments.logs(f.caller, { attemptId: submitted.attempt.attemptId });
+    assert.equal(persistedLog.origin, "artifact");
+    assert.equal(persistedLog.text, output.toString());
+  });
+
+  it("retries a failed terminal commitment release after the backend job is already released", async () => {
+    const f = await fixture();
+    let releaseAttempts = 0;
+    const flakyResources = {
+      ...f.resources,
+      release: async (workspaceId: string, commitmentId: string, reason: string) => {
+        releaseAttempts += 1;
+        if (releaseAttempts === 1) throw new Error("temporary commitment persistence failure");
+        await f.resources.release(workspaceId, commitmentId, reason);
+      },
+    };
+    const experiments = createExperimentService({
+      client: f.client,
+      resources: flakyResources,
+      sources: f.sources,
+      resolveWorkspaceRoot: async () => f.workspace,
+      onError: (error) => f.errors.push(error),
+    });
+    const submitted = await experiments.submit(f.caller, {
+      ...node("process.exit(0)"),
+      resources: { cpuCores: 1 },
+    });
+    const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.attempt.state, "completed");
+    const releaseDeadline = Date.now() + 5_000;
+    while (releaseAttempts < 1 && Date.now() < releaseDeadline) await pause();
+    assert.equal(releaseAttempts, 1);
+    assert.equal(
+      (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
+      1,
+    );
+
+    const reconciled = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(reconciled.job?.state, "released");
+    assert.equal(releaseAttempts, 2);
+    assert.equal(
+      (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
+      0,
+    );
+  });
+
+  it("keeps polling after restart when inspect throws and the first observation is unknown", async () => {
+    const f = await fixture();
+    let phase: "initial" | "recovery" = "initial";
+    let recoveryReads = 0;
+    const backend: ExperimentBackend = {
+      backend: "unknown-recovery",
+      controls: ["cancel", "attach", "collect"],
+      async spawn(_site, request) {
+        return { handle: { backendJobId: request.backendJobId }, observation: { status: "running", writerActive: true } };
+      },
+      async inspect() {
+        if (phase === "recovery") throw new Error("connector is reconnecting");
+        return { status: "running", writerActive: true };
+      },
+      async read(_site, _id, cursor) {
+        if (phase === "initial") {
+          return { chunks: [], nextCursor: cursor, endCursor: cursor, observation: { status: "running", writerActive: true } };
+        }
+        recoveryReads += 1;
+        if (recoveryReads === 1) {
+          return { chunks: [], nextCursor: cursor, endCursor: cursor, observation: { status: "unknown", writerActive: true, reason: "reconnecting" } };
+        }
+        return { chunks: [], nextCursor: cursor, endCursor: cursor, observation: { status: "exited", writerActive: false, exitCode: 0 } };
+      },
+      async kill() {},
+      async release() {},
+      async collectFile() { throw new Error("no files"); },
+    };
+    const first = await serviceWithBackend(f, "unknown-recovery-machine", backend);
+    const submitted = await first.submit(f.caller, {
+      ...node("process.exit(0)"),
+      machineId: "unknown-recovery-machine",
+    });
+    assert.equal(submitted.attempt.state, "running");
+    first.detachObservers();
+    phase = "recovery";
+    const restarted = await serviceWithBackend(f, "unknown-recovery-machine", backend);
+    const waited = await restarted.wait(f.caller, submitted.attempt.attemptId, 15_000);
+    assert.equal(waited.timedOut, false);
+    assert.equal(waited.attempt.state, "completed");
+    assert.ok(recoveryReads >= 2);
+  });
+
+  it("retains output beyond eight MiB and pages UTF-8 without splitting code points", async () => {
+    const f = await fixture();
+    const prefixBytes = 8 * 1024 * 1024 + 1024;
+    const submitted = await f.experiments.submit(f.caller, node(
+      `process.stdout.write(Buffer.concat([Buffer.alloc(${prefixBytes},120),Buffer.from('😀tail')]))`,
+    ));
+    const waited = await f.experiments.wait(f.caller, submitted.attempt.attemptId, 45_000);
+    assert.equal(waited.attempt.state, "completed");
+    const detail = await f.experiments.get(f.caller, submitted.attempt.attemptId);
+    const stdout = detail.artifacts.find((artifact) => artifact.name === "stdout");
+    assert.equal(stdout?.byteLength, prefixBytes + Buffer.byteLength("😀tail"));
+    assert.equal(stdout?.truncated, undefined);
+    const page = await f.experiments.logs(f.caller, {
+      attemptId: submitted.attempt.attemptId,
+      offset: prefixBytes + 1,
+      maxBytes: 8,
+    });
+    assert.equal(page.offset, prefixBytes);
+    assert.equal(page.text, "😀tail");
+    assert.equal(page.eof, true);
+    const artifactPage = await f.experiments.readArtifactPage(f.caller, {
+      attemptId: submitted.attempt.attemptId,
+      artifactId: stdout!.artifactId,
+      offset: prefixBytes + 1,
+      maxBytes: 8,
+    });
+    assert.equal(artifactPage.offset, prefixBytes);
+    assert.equal(artifactPage.text, "😀tail");
+  }, 45_000);
+
+  it("isolates root-scoped specs and preserves the original attempt attribution during UI collection", async () => {
+    const f = await fixture();
+    const firstCaller: ExperimentCaller = {
+      ...f.caller,
+      rootSessionId: "root-one",
+      allowedThreadIds: ["t-1"],
+    };
+    const secondCaller: ExperimentCaller = {
+      workspaceId: f.caller.workspaceId,
+      executionWorkspaceId: f.caller.executionWorkspaceId,
+      sessionId: "s-2",
+      rootSessionId: "root-two",
+      threadId: "t-2",
+      runId: "r-2",
+      workspaceScope: [],
+      allowedThreadIds: ["t-2"],
+    };
+    const first = await f.experiments.submit(firstCaller, node("process.stdout.write('one')"));
+    const second = await f.experiments.submit(secondCaller, node("process.stdout.write('two')"));
+    assert.notEqual(first.spec.specId, second.spec.specId);
+    await assert.rejects(f.experiments.get(firstCaller, second.attempt.attemptId), /unknown experiment attempt/i);
+    assert.deepEqual((await f.experiments.list(firstCaller, {})).attempts.map((attempt) => attempt.attemptId), [first.attempt.attemptId]);
+
+    await f.experiments.wait(firstCaller, first.attempt.attemptId, 15_000);
+    const uiCaller: ExperimentCaller = {
+      workspaceId: f.caller.workspaceId,
+      executionWorkspaceId: f.caller.executionWorkspaceId,
+      sessionId: "ui-session",
+      rootSessionId: "root-one",
+      workspaceScope: [],
+      allowedThreadIds: ["t-1"],
+    };
+    const collected = await f.experiments.collect(uiCaller, first.attempt.attemptId);
+    assert.equal(collected.attempt.threadId, "t-1");
+    assert.equal(collected.attempt.runId, "r-1");
+  });
+
+  it("closes thread submission while stop waits for an in-flight intent and confirms backend termination", async () => {
+    const f = await fixture();
+    let spawnEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { spawnEntered = resolve; });
+    let finishSpawn!: () => void;
+    const spawnGate = new Promise<void>((resolve) => { finishSpawn = resolve; });
+    let stopped = false;
+    const backend: ExperimentBackend = {
+      backend: "stop-race",
+      controls: ["cancel", "attach", "collect"],
+      async spawn(_site, request) {
+        spawnEntered();
+        await spawnGate;
+        return { handle: { backendJobId: request.backendJobId }, observation: { status: "running", writerActive: true } };
+      },
+      async inspect() {
+        return stopped
+          ? { status: "cancelled", writerActive: false }
+          : { status: "running", writerActive: true };
+      },
+      async read(_site, _id, cursor) {
+        return {
+          chunks: [], nextCursor: cursor, endCursor: cursor,
+          observation: stopped
+            ? { status: "cancelled", writerActive: false }
+            : { status: "running", writerActive: true },
+        };
+      },
+      async kill() { stopped = true; },
+      async release() {},
+      async collectFile() { throw new Error("no files"); },
+    };
+    const experiments = await serviceWithBackend(f, "stop-race-machine", backend);
+    const submitting = experiments.submit(f.caller, {
+      requestId: "stop-race-submit",
+      ...node("setInterval(()=>{},1000)"),
+      machineId: "stop-race-machine",
+    });
+    await entered;
+    const stopping = experiments.stopForThreads(f.caller.workspaceId, [f.caller.threadId!]);
+    await assert.rejects(
+      experiments.submit(f.caller, {
+        requestId: "must-not-pass-stop-gate",
+        ...node("process.exit(0)"),
+        machineId: "stop-race-machine",
+      }),
+      /thread .* stopping/i,
+    );
+    finishSpawn();
+    const submitted = await submitting;
+    await stopping;
+    const detail = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(detail.attempt.state, "cancelled");
   });
 });

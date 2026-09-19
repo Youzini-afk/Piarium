@@ -43,7 +43,7 @@ import {
   projectWorkspaceSpace,
   readVolumeSpace,
 } from "./working-state/thread-space.js";
-import { ThreadAdmissionError, type CreateThreadInput, type ThreadRegistry } from "./thread-registry.js";
+import { sameFrozenRunConfig, ThreadAdmissionError, type CreateThreadInput, type ThreadRegistry } from "./thread-registry.js";
 import type { ThreadWorktreeRuntime } from "./thread-worktree.js";
 import type { IntegrationCoordinator, IntegrationPlanInput } from "./working-state/integration-coordinator.js";
 import { projectThreadResultHistory, type RetentionThreadSnapshot } from "./working-state/thread-history.js";
@@ -117,6 +117,8 @@ export interface ThreadSessionAdapter {
 export interface ThreadRuntimeOptions {
   registry: ThreadRegistry;
   sessions: ThreadSessionAdapter;
+  /** Explicit kill/delete cleanup for experiments owned by a Thread. */
+  stopExperimentsForThread?(workspaceId: string, threadId: string): Promise<void>;
   /** Deletes a Pi session's worker, file, and metadata (thread deletion, D-242). */
   deleteSession?(sessionId: string): Promise<unknown>;
   /**
@@ -384,6 +386,34 @@ const entryText = (entry: PiSessionMessageEntry): string => {
       .join("\n");
   }
   return "";
+};
+
+const transcriptRefForRun = (
+  entries: readonly { id: string }[],
+  run: ThreadRun,
+  runs: readonly ThreadRun[],
+  sessionId: string,
+): Pick<ThreadReport["transcriptRef"], "fromEntryId" | "toEntryId" | "branchLeafId"> => {
+  const previous = runs
+    .filter((candidate) => candidate.id !== run.id && candidate.attempt < run.attempt && candidate.sessionId === sessionId)
+    .toSorted((left, right) => left.attempt - right.attempt)
+    .at(-1);
+  const previousTo = previous?.report?.transcriptRef.toEntryId;
+  // A lost predecessor without durable transcript bounds makes the new
+  // session window unknowable. Preserve that uncertainty instead of claiming
+  // the old assistant output for the new Run.
+  if (previous && !previousTo) {
+    return { fromEntryId: null, toEntryId: null };
+  }
+  const previousIndex = previousTo ? entries.findIndex((entry) => entry.id === previousTo) : -1;
+  if (previousTo && previousIndex < 0) return { fromEntryId: null, toEntryId: null };
+  const first = previousIndex >= 0 ? entries[previousIndex + 1] : entries[0];
+  const last = entries.at(-1);
+  return {
+    fromEntryId: first?.id ?? null,
+    toEntryId: last?.id ?? null,
+    ...(last?.id ? { branchLeafId: last.id } : {}),
+  };
 };
 
 const initialPrompt = (
@@ -2632,6 +2662,8 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const stats = statsResult.ok ? statsResult.value : null;
     const entries = entriesResult.ok ? entriesResult.value : null;
     const blocks = blocksResult.ok ? blocksResult.value : undefined;
+    const runs = await options.registry.listRuns(binding.workspaceId, binding.threadId);
+    const transcriptBounds = transcriptRefForRun(entries?.entries ?? [], currentRun, runs, binding.sessionId);
     if (!statsResult.ok) {
       unresolved.push(`Unable to read run metrics: ${statsResult.error instanceof Error ? statsResult.error.message : String(statsResult.error)}`);
     }
@@ -2655,7 +2687,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           costUsd: Math.max(0, stats.cost - binding.baseline.cost),
         });
       }
-      const branchEntries = entries?.entries ?? [];
       const report: ThreadReport = {
         conclusion: conclusion.text,
         changedFiles: [],
@@ -2665,9 +2696,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         transcriptRef: {
           runtimeId: "pi",
           sessionId: binding.sessionId,
-          fromEntryId: branchEntries[0]?.id ?? null,
-          toEntryId: entries?.leafId ?? branchEntries.at(-1)?.id ?? null,
-          ...(entries?.leafId ? { branchLeafId: entries.leafId } : {}),
+          ...transcriptBounds,
         },
         blocksSnapshot: Object.fromEntries((blocks ?? []).map((block) => [block.label, block.content])),
       };
@@ -2897,7 +2926,6 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ...(diffStats ? { diffStats } : {}),
       });
     }
-    const branchEntries = entries?.entries ?? [];
     const blocksSnapshot = Object.fromEntries((blocks ?? []).map((block) => [block.label, block.content]));
     // The current Run's final report is authoritative. Retained notes remain
     // inspectable, but old keeper decisions never manufacture new deviations.
@@ -2912,9 +2940,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       transcriptRef: {
         runtimeId: "pi",
         sessionId: binding.sessionId,
-        fromEntryId: branchEntries[0]?.id ?? null,
-        toEntryId: entries?.leafId ?? branchEntries.at(-1)?.id ?? null,
-        ...(entries?.leafId ? { branchLeafId: entries.leafId } : {}),
+        ...transcriptBounds,
       },
       blocksSnapshot,
       ...(currentWorktree?.resultCommit ? { resultCommit: currentWorktree.resultCommit } : {}),
@@ -3434,6 +3460,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           await options.sessions.close(sessionId).catch(reportError);
         }
       }
+      if (owningWorkspaceId) await options.stopExperimentsForThread?.(owningWorkspaceId, threadId);
       if (binding) {
         await publishPartialResult(binding.workspaceId, binding.parent, threadId).catch(reportError);
         const run = await options.registry.getActiveRun(binding.workspaceId, threadId);
@@ -4456,6 +4483,11 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         return fail("retryable", "sessions", error);
       }
     }
+    // Deletion is an explicit terminal operation. Stop independent experiment
+    // processes after every persisted worker/session has been closed, before
+    // any store/worktree/catalog cleanup; archive and Run settlement do not
+    // call this hook.
+    await options.stopExperimentsForThread?.(workspaceId, threadId);
     // Phase 2: release working-state objects. Idempotent —if the branch/draft
     // was already released, the store operations are no-ops on missing rows.
     if (deletion.phase === "sessions" || deletion.phase === "store") try {
@@ -5515,20 +5547,39 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   }): Promise<{ runId?: string }> => {
     const requestId = input.requestId ?? `continuation-${randomUUID()}`;
     const from = input.from ?? { kind: "user" as const, id: "host" };
-    const prior = (await options.registry.listRuns(input.workspaceId, input.threadId))
-      .find((run) => run.request?.requestId === requestId);
-    if (prior) {
-      if (prior.request!.task !== input.task || prior.request!.mode !== input.mode
-        || prior.request!.from.kind !== from.kind || prior.request!.from.id !== from.id) {
-        throw new ThreadRuntimeError("invalid-request", "Continuation identity is already bound to different input");
-      }
-      if (prior.outcome === "failure" || prior.outcome === "cancelled") {
-        throw new ThreadRuntimeError("unavailable", prior.exitReason ?? "The recorded execution attempt failed");
-      }
-      return { runId: prior.id };
-    }
     const thread = await options.registry.getThread(input.workspaceId, input.parent, input.threadId);
     if (!thread) throw new ThreadRuntimeError("not-found", `Thread not found: ${input.threadId}`);
+    const priorRun = (await options.registry.listRuns(input.workspaceId, input.threadId))
+      .find((run) => run.request?.requestId === requestId);
+    const priorPending = thread.pendingContinuations?.find((request) => request.requestId === requestId);
+    const priorIntent = priorRun?.request ?? priorPending;
+    // A worktree policy change cannot reuse the retained Pi session's cwd.
+    // Promote the request to the existing fresh-input path so the new Run is
+    // prepared in the frozen directory while retaining the old context.
+    const effectiveMode = input.mode === "continue" && priorIntent?.mode === "fresh"
+      ? "fresh" as const
+      : input.frozen && input.frozen.worktree !== thread.manifest.worktree
+        ? "fresh" as const
+        : input.mode;
+    const effectiveFrozen = input.frozen
+      ? { ...structuredClone(input.frozen), inputOrigin: effectiveMode }
+      : undefined;
+    input = {
+      ...input,
+      mode: effectiveMode,
+      ...(effectiveFrozen ? { frozen: effectiveFrozen } : {}),
+    };
+    if (priorRun) {
+      if (priorRun.request!.task !== input.task || priorRun.request!.mode !== input.mode
+        || priorRun.request!.from.kind !== from.kind || priorRun.request!.from.id !== from.id
+        || !sameFrozenRunConfig(priorRun.request!.frozen, input.frozen)) {
+        throw new ThreadRuntimeError("invalid-request", "Continuation identity is already bound to different input");
+      }
+      if (priorRun.outcome === "failure" || priorRun.outcome === "cancelled") {
+        throw new ThreadRuntimeError("unavailable", priorRun.exitReason ?? "The recorded execution attempt failed");
+      }
+      return { runId: priorRun.id };
+    }
     if (thread.kind !== "implementation") {
       throw new ThreadRuntimeError("invalid-request", "Execution requests apply to implementation threads");
     }

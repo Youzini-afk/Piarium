@@ -83,7 +83,9 @@ export function deriveHarnessCapabilities(
     availability.experiments
     && ["experiment", "resources", "research_source"].some((name) => tools.has(name))
   ) {
-    capabilities.add("control.experiment");
+    capabilities.add("read.experiment");
+    if (tools.has("experiment")) capabilities.add("control.experiment");
+    if (tools.has("research_source")) capabilities.add("write.research-source");
   }
   return [...capabilities];
 }

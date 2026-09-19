@@ -54,8 +54,12 @@ export function classifyPermissionToolSource(tool: PiToolInfoLike | undefined, t
   return { kind: "unknown", id: `unknown:${toolName}`, scope: sourceInfo.scope };
 }
 
-export function classifyPermissionAction(toolName: string, source: PermissionToolSource): PermissionAction {
+export function classifyPermissionAction(toolName: string, source: PermissionToolSource, params?: Record<string, unknown>): PermissionAction {
   if (source.kind === "mcp" || source.kind === "package" || source.kind === "unknown") return "unknown";
+  if (toolName === "experiment") {
+    return ["list", "get", "logs", "artifact", "wait"].includes(String(params?.action)) ? "read" : "process";
+  }
+  if (toolName === "research_source") return params?.action === "list" ? "read" : "thread";
   if (NETWORK_TOOLS.has(toolName)) return "network";
   if (WRITE_TOOLS.has(toolName)) return "write";
   if (PROCESS_TOOLS.has(toolName)) return "process";
@@ -131,6 +135,11 @@ function networkOrigins(toolName: string, params: Record<string, unknown>): stri
 }
 
 function threadScopes(toolName: string, params: Record<string, unknown>): string[] {
+  if (toolName === "experiment") {
+    return ["action", "attemptId", "machineId", "specId"].flatMap((key) => (
+      typeof params[key] === "string" ? [`experiment:${key}:${params[key]}`] : []
+    ));
+  }
   if (toolName !== "dispatch") return [];
   const preset = typeof params.preset === "string" ? params.preset.trim() : "";
   const capability = typeof params.capability === "string" ? params.capability.trim() : "";
@@ -151,7 +160,7 @@ export function buildPermissionInspection(input: {
   tool: PiToolInfoLike | undefined;
 }): PermissionInspectParams {
   const source = classifyPermissionToolSource(input.tool, input.toolName);
-  const action = classifyPermissionAction(input.toolName, source);
+  const action = classifyPermissionAction(input.toolName, source, input.params);
   const shell = input.toolName === "bash"
     ? shellEvidence(input.params.command)
     : input.toolName === "write_to_process"

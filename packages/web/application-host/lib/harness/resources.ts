@@ -9,7 +9,7 @@
  * treated as free.
  */
 import os from "node:os";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type {
@@ -23,6 +23,8 @@ const MACHINE_PREFIX = "resource.machine:";
 const COMMITMENT_PREFIX = "resource.commitment:";
 const SAMPLE_PREFIX = "resource.sample:";
 const LOCAL_MACHINE_ID = "local";
+/** Host-local catalog namespace shared by every owning workspace. */
+const RESOURCE_WORKSPACE_ID = "__piarium_host_resources__";
 const SAMPLE_STALE_MS = 120_000;
 
 export interface LocalMachineProbe {
@@ -33,19 +35,27 @@ export interface LocalMachineProbe {
   cpuPercent?: number;
 }
 
-const defaultProbe = (): LocalMachineProbe => {
-  const cores = os.cpus().length;
-  const memoryMb = Math.round(os.totalmem() / (1024 * 1024));
-  const usedMemoryMb = Math.round((os.totalmem() - os.freemem()) / (1024 * 1024));
-  const load = os.loadavg()[0];
-  const cpuPercent = load !== undefined && Number.isFinite(load) && cores > 0
-    ? Math.min(100, Math.round((load / cores) * 100))
-    : undefined;
-  return {
-    cpuCores: cores,
-    memoryMb,
-    usedMemoryMb,
-    ...(cpuPercent === undefined ? {} : { cpuPercent }),
+const createDefaultProbe = (): (() => LocalMachineProbe) => {
+  let previous: { total: number; idle: number } | undefined;
+  return () => {
+    const cpuSnapshots = os.cpus();
+    const cores = cpuSnapshots.length;
+    const memoryMb = Math.round(os.totalmem() / (1024 * 1024));
+    const usedMemoryMb = Math.round((os.totalmem() - os.freemem()) / (1024 * 1024));
+    const totals = cpuSnapshots.reduce((sum, cpu) => (
+      sum + cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.idle
+    ), 0);
+    const idle = cpuSnapshots.reduce((sum, cpu) => sum + cpu.times.idle, 0);
+    const cpuPercent = previous && totals > previous.total && idle >= previous.idle
+      ? Math.min(100, Math.max(0, Math.round((1 - ((idle - previous.idle) / (totals - previous.total))) * 100)))
+      : undefined;
+    previous = { total: totals, idle };
+    return {
+      cpuCores: cores,
+      memoryMb,
+      usedMemoryMb,
+      ...(cpuPercent === undefined ? {} : { cpuPercent }),
+    };
   };
 };
 
@@ -85,6 +95,10 @@ interface ResourceServiceDeps {
   now?: () => number;
   probeLocal?: () => LocalMachineProbe;
   onError?: (error: Error) => void;
+  /** Machine/commitment fact changed — drives UI refresh. Samples never emit. */
+  onChange?: (workspaceId: string) => void;
+  /** Capacity was returned; Host may reconcile queued attempts in each known workspace. */
+  onCapacityAvailable?: (workspaceId: string) => void | Promise<void>;
 }
 
 export const resourceMachineRecordId = (machineId: string): string => `${MACHINE_PREFIX}${machineId}`;
@@ -110,33 +124,88 @@ const num = (value: unknown): number | undefined => (
   typeof value === "number" && Number.isFinite(value) ? value : undefined
 );
 
+const nonNegative = (value: unknown): number | undefined => {
+  const parsed = num(value);
+  return parsed === undefined || parsed < 0 ? undefined : parsed;
+};
+
+const percent = (value: unknown): number | undefined => {
+  const parsed = num(value);
+  return parsed === undefined || parsed < 0 || parsed > 100 ? undefined : parsed;
+};
+
 const str = (value: unknown): string | undefined => (
   typeof value === "string" && value ? value : undefined
 );
 
 const asResources = (value: unknown): ExperimentResourceRequest => {
   const raw = value && typeof value === "object" ? value as Record<string, unknown> : {};
-  const cpuCores = num(raw.cpuCores);
-  const memoryMb = num(raw.memoryMb);
-  const gpuCount = num(raw.gpuCount);
-  const gpuMemoryMb = num(raw.gpuMemoryMb);
+  const cpuCores = nonNegative(raw.cpuCores);
+  const memoryMb = nonNegative(raw.memoryMb);
+  const gpuCount = nonNegative(raw.gpuCount);
+  const gpuMemoryMb = nonNegative(raw.gpuMemoryMb);
   return {
     ...(cpuCores === undefined ? {} : { cpuCores }),
     ...(memoryMb === undefined ? {} : { memoryMb }),
     ...(gpuCount === undefined ? {} : { gpuCount }),
     ...(gpuMemoryMb === undefined ? {} : { gpuMemoryMb }),
+    ...(typeof raw.longRunning === "boolean" ? { longRunning: raw.longRunning } : {}),
   };
 };
 
 const gpuCapacity = (capacity: Record<string, unknown>): { count?: number; memoryMb?: number } => {
   if (!Array.isArray(capacity.gpus)) return {};
+  const entries = capacity.gpus.filter((gpu): gpu is Record<string, unknown> => (
+    !!gpu && typeof gpu === "object"
+  ));
+  if (entries.length !== capacity.gpus.length) return {};
+  const count = entries.length;
+  const memories = entries.map((gpu) => nonNegative(gpu.memoryMb));
+  const memoryMb = memories.every((memory): memory is number => memory !== undefined)
+    ? memories.reduce((sum, memory) => sum + memory, 0)
+    : undefined;
   return {
-    count: capacity.gpus.length,
-    memoryMb: capacity.gpus.reduce((sum, gpu) => (
-      sum + (gpu && typeof gpu === "object" ? num((gpu as Record<string, unknown>).memoryMb) ?? 0 : 0)
-    ), 0),
+    count,
+    ...(memoryMb === undefined ? {} : { memoryMb }),
   };
 };
+
+const resourceDimensions = ["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const;
+type ResourceDimension = typeof resourceDimensions[number];
+
+const validateResources = (value: ExperimentResourceRequest): ExperimentResourceRequest => {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("resource request must be an object");
+  }
+  const normalized: ExperimentResourceRequest = {};
+  for (const key of resourceDimensions) {
+    const raw = value[key];
+    if (raw === undefined) continue;
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+      throw new Error(`resource request ${key} must be finite`);
+    }
+    if (raw < 0) throw new Error(`resource request ${key} cannot be negative`);
+    if (raw > 0) normalized[key] = raw;
+  }
+  if (value.longRunning !== undefined) {
+    if (typeof value.longRunning !== "boolean") throw new Error("resource request longRunning must be boolean");
+    normalized.longRunning = value.longRunning;
+  }
+  return normalized;
+};
+
+const hasResourceDimension = (resources: ExperimentResourceRequest): boolean => (
+  resourceDimensions.some((key) => resources[key] !== undefined && resources[key]! > 0)
+);
+
+const sameResources = (left: ExperimentResourceRequest, right: ExperimentResourceRequest): boolean => (
+  resourceDimensions.every((key) => left[key] === right[key])
+  && left.longRunning === right.longRunning
+);
+
+const commitmentIdFor = (workspaceId: string, machineId: string, attemptId: string): string => (
+  `commit-${createHash("sha256").update(`${workspaceId}\0${machineId}\0${attemptId}`).digest("hex").slice(0, 32)}`
+);
 
 const remainingCapacity = (
   capacity: Record<string, unknown>,
@@ -144,13 +213,13 @@ const remainingCapacity = (
 ): ExperimentResourceRequest => {
   const remaining: ExperimentResourceRequest = {};
   const gpus = gpuCapacity(capacity);
-  const totals: Record<"cpuCores" | "memoryMb" | "gpuCount" | "gpuMemoryMb", number | undefined> = {
-    cpuCores: num(capacity.cpuCores),
-    memoryMb: num(capacity.memoryMb),
+  const totals: Record<ResourceDimension, number | undefined> = {
+    cpuCores: nonNegative(capacity.cpuCores),
+    memoryMb: nonNegative(capacity.memoryMb),
     gpuCount: gpus.count,
     gpuMemoryMb: gpus.memoryMb,
   };
-  for (const key of ["cpuCores", "memoryMb", "gpuCount", "gpuMemoryMb"] as const) {
+  for (const key of resourceDimensions) {
     const total = totals[key];
     if (total === undefined) continue;
     const used = committed.reduce((sum, entry) => sum + (entry[key] ?? 0), 0);
@@ -159,15 +228,55 @@ const remainingCapacity = (
   return remaining;
 };
 
+interface CommitmentFact {
+  view: ResourceCommitmentView;
+  ownerWorkspaceId?: string;
+}
+
+const lockChains = new WeakMap<object, Map<string, Promise<void>>>();
+
+const withMachineLock = async <Result>(client: KernelClient, machineId: string, task: () => Promise<Result>): Promise<Result> => {
+  let chains = lockChains.get(client);
+  if (!chains) {
+    chains = new Map();
+    lockChains.set(client, chains);
+  }
+  const previous = chains.get(machineId) ?? Promise.resolve();
+  const current = previous.then(task, task);
+  const tail = current.then(() => undefined, () => undefined);
+  chains.set(machineId, tail);
+  void tail.then(() => {
+    if (chains?.get(machineId) === tail) chains.delete(machineId);
+  });
+  return current;
+};
+
 export function createResourceService(deps: ResourceServiceDeps) {
   const now = deps.now ?? (() => Date.now());
-  const probe = deps.probeLocal ?? defaultProbe;
-  // Admission is serialized per machine so two submissions cannot both observe
-  // the same remaining capacity before either commitment lands.
-  const admissionChains = new Map<string, Promise<unknown>>();
+  const probe = deps.probeLocal ?? createDefaultProbe();
   const contexts = new Map<string, Promise<KernelScopedClient>>();
+  const knownWorkspaces = new Set<string>();
   const report = (error: unknown) => {
     if (deps.onError) deps.onError(error instanceof Error ? error : new Error(String(error)));
+  };
+  const rememberWorkspace = (workspaceId: string) => {
+    if (workspaceId && workspaceId !== RESOURCE_WORKSPACE_ID) knownWorkspaces.add(workspaceId);
+  };
+  const changed = (workspaceId: string) => {
+    rememberWorkspace(workspaceId);
+    for (const target of knownWorkspaces) {
+      try { deps.onChange?.(target); } catch { /* observer errors must not break writes */ }
+    }
+  };
+  const capacityAvailable = (workspaceId: string) => {
+    rememberWorkspace(workspaceId);
+    for (const target of knownWorkspaces) {
+      try {
+        void Promise.resolve(deps.onCapacityAvailable?.(target)).catch(report);
+      } catch (error) {
+        report(error);
+      }
+    }
   };
 
   const context = (workspaceId: string): Promise<KernelScopedClient> => {
@@ -185,6 +294,26 @@ export function createResourceService(deps: ResourceServiceDeps) {
     })();
     contexts.set(workspaceId, creating);
     void creating.catch(() => { if (contexts.get(workspaceId) === creating) contexts.delete(workspaceId); });
+    return creating;
+  };
+
+  const globalContext = (): Promise<KernelScopedClient> => {
+    const existing = contexts.get(RESOURCE_WORKSPACE_ID);
+    if (existing) return existing;
+    const creating = (async () => {
+      const grant = await deps.client.issueGrant({
+        grantId: `resource-host:${randomUUID()}`,
+        owningWorkspace: RESOURCE_WORKSPACE_ID,
+        executionWorkspace: RESOURCE_WORKSPACE_ID,
+        capabilities: ["storage.read", "storage.write", "storage.maintenance"],
+        pathScopes: [""],
+      });
+      return deps.client.scoped(grant);
+    })();
+    contexts.set(RESOURCE_WORKSPACE_ID, creating);
+    void creating.catch(() => {
+      if (contexts.get(RESOURCE_WORKSPACE_ID) === creating) contexts.delete(RESOURCE_WORKSPACE_ID);
+    });
     return creating;
   };
 
@@ -219,7 +348,9 @@ export function createResourceService(deps: ResourceServiceDeps) {
       expectedRecordRevision?: number;
     },
   ): Promise<KernelRecordResult> => {
-    const scoped = await context(workspaceId);
+    const scoped = workspaceId === RESOURCE_WORKSPACE_ID
+      ? await globalContext()
+      : await context(workspaceId);
     return scoped.putRecord({
       operationId: `${input.recordType}:${randomUUID()}`,
       recordId: input.recordId,
@@ -236,25 +367,39 @@ export function createResourceService(deps: ResourceServiceDeps) {
     });
   };
 
-  const ensureLocalMachine = async (workspaceId: string): Promise<KernelRecordResult> => {
+  const putGlobalRecord = async (input: Parameters<typeof putRecord>[1]): Promise<KernelRecordResult> => (
+    putRecord(RESOURCE_WORKSPACE_ID, input)
+  );
+
+  const ensureLocalMachineUnsafe = async (): Promise<KernelRecordResult> => {
     const recordId = recordIdFor.machine(LOCAL_MACHINE_ID);
-    const scoped = await context(workspaceId);
-    const existing = await scoped.getRecord(workspaceId, recordId);
+    const scoped = await globalContext();
+    const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
     const observed = probe();
-    const capacity = { cpuCores: observed.cpuCores, memoryMb: observed.memoryMb };
+    const cpuCores = nonNegative(observed.cpuCores);
+    const memoryMb = nonNegative(observed.memoryMb);
+    if (cpuCores === undefined || memoryMb === undefined) {
+      throw new Error("local machine probe returned invalid capacity");
+    }
+    const capacity = { cpuCores, memoryMb };
     if (existing) {
       const payload = payloadOf(existing);
       const prior = payload.capacity && typeof payload.capacity === "object"
         ? payload.capacity as Record<string, unknown>
         : {};
       // Refresh capacity facts only when the probe actually observed a change.
-      if (num(prior.cpuCores) === capacity.cpuCores && num(prior.memoryMb) === capacity.memoryMb) {
+      const priorConnection = payload.connection && typeof payload.connection === "object"
+        ? payload.connection as Record<string, unknown>
+        : {};
+      if (nonNegative(prior.cpuCores) === capacity.cpuCores
+        && nonNegative(prior.memoryMb) === capacity.memoryMb
+        && priorConnection.status === "connected") {
         return existing;
       }
-      return putRecord(workspaceId, {
+      return putGlobalRecord({
         recordId,
         recordType: "resource.machine",
-        state: existing.state,
+        state: "available",
         expectedRecordRevision: existing.recordRevision,
         payload: {
           ...payload,
@@ -263,7 +408,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
         },
       });
     }
-    return putRecord(workspaceId, {
+    return putGlobalRecord({
       recordId,
       recordType: "resource.machine",
       state: "available",
@@ -277,12 +422,19 @@ export function createResourceService(deps: ResourceServiceDeps) {
     });
   };
 
-  const sampleLocalMachine = async (workspaceId: string): Promise<KernelRecordResult> => {
+  const ensureLocalMachine = (_workspaceId: string): Promise<KernelRecordResult> => {
+    rememberWorkspace(_workspaceId);
+    return withMachineLock(deps.client, LOCAL_MACHINE_ID, ensureLocalMachineUnsafe);
+  };
+
+  const sampleLocalMachineUnsafe = async (): Promise<KernelRecordResult> => {
     const recordId = recordIdFor.sample(LOCAL_MACHINE_ID);
-    const scoped = await context(workspaceId);
-    const existing = await scoped.getRecord(workspaceId, recordId);
+    const scoped = await globalContext();
+    const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
     const observed = probe();
-    return putRecord(workspaceId, {
+    const usedMemoryMb = nonNegative(observed.usedMemoryMb);
+    if (usedMemoryMb === undefined) throw new Error("local machine probe returned invalid memory usage");
+    return putGlobalRecord({
       recordId,
       recordType: "resource.sample",
       state: "observed",
@@ -292,29 +444,45 @@ export function createResourceService(deps: ResourceServiceDeps) {
         observedAt: now(),
         source: "host-os",
         usage: {
-          memoryMb: observed.usedMemoryMb,
-          ...(observed.cpuPercent === undefined ? {} : { cpuPercent: observed.cpuPercent }),
+          memoryMb: usedMemoryMb,
+          ...(percent(observed.cpuPercent) === undefined ? {} : { cpuPercent: percent(observed.cpuPercent) }),
         },
       },
     });
   };
 
-  const commitmentView = (record: KernelRecordResult): ResourceCommitmentView | null => {
+  const sampleLocalMachine = (_workspaceId: string): Promise<KernelRecordResult> => {
+    rememberWorkspace(_workspaceId);
+    return withMachineLock(deps.client, LOCAL_MACHINE_ID, sampleLocalMachineUnsafe);
+  };
+
+  const commitmentFact = (record: KernelRecordResult): CommitmentFact | null => {
     const payload = payloadOf(record);
     const machineId = str(payload.machineId);
     if (!machineId) return null;
     const attemptId = str(payload.attemptId);
     const confirmedAt = num(payload.confirmedAt);
     const releasedAt = num(payload.releasedAt);
+    const ownerWorkspaceId = str(payload.workspaceId);
     return {
-      commitmentId: record.recordId.slice(COMMITMENT_PREFIX.length),
-      machineId,
-      ...(attemptId ? { attemptId } : {}),
-      resources: asResources(payload.resources),
-      state: record.state as ResourceCommitmentView["state"],
-      ...(confirmedAt === undefined ? {} : { confirmedAt }),
-      ...(releasedAt === undefined ? {} : { releasedAt }),
+      ...(ownerWorkspaceId === undefined ? {} : { ownerWorkspaceId }),
+      view: {
+        commitmentId: record.recordId.slice(COMMITMENT_PREFIX.length),
+        machineId,
+        ...(attemptId ? { attemptId } : {}),
+        resources: asResources(payload.resources),
+        state: record.state as ResourceCommitmentView["state"],
+        ...(confirmedAt === undefined ? {} : { confirmedAt }),
+        ...(releasedAt === undefined ? {} : { releasedAt }),
+      },
     };
+  };
+
+  const commitmentView = (fact: CommitmentFact, workspaceId: string): ResourceCommitmentView => {
+    if (fact.ownerWorkspaceId === workspaceId) return fact.view;
+    const shared = { ...fact.view };
+    delete shared.attemptId;
+    return shared;
   };
 
   const machineView = (
@@ -339,10 +507,10 @@ export function createResourceService(deps: ResourceServiceDeps) {
       ? capacity.gpus.flatMap((gpu) => {
           if (!gpu || typeof gpu !== "object") return [];
           const entry = gpu as Record<string, unknown>;
-          const index = num(entry.index);
-          if (index === undefined) return [];
+          const index = nonNegative(entry.index);
+          if (index === undefined || !Number.isInteger(index)) return [];
           const name = str(entry.name);
-          const memoryMb = num(entry.memoryMb);
+          const memoryMb = nonNegative(entry.memoryMb);
           return [{
             index,
             ...(name ? { name } : {}),
@@ -350,11 +518,30 @@ export function createResourceService(deps: ResourceServiceDeps) {
           }];
         })
       : undefined;
+    const usageGpus = Array.isArray(usage?.gpus)
+      ? usage.gpus.flatMap((gpu) => {
+          if (!gpu || typeof gpu !== "object") return [];
+          const entry = gpu as Record<string, unknown>;
+          const index = nonNegative(entry.index);
+          if (index === undefined || !Number.isInteger(index)) return [];
+          const name = str(entry.name);
+          const memoryMb = nonNegative(entry.memoryMb);
+          const utilizationPercent = percent(entry.utilizationPercent);
+          const usedMemoryMb = nonNegative(entry.usedMemoryMb);
+          return [{
+            index,
+            ...(name ? { name } : {}),
+            ...(memoryMb === undefined ? {} : { memoryMb }),
+            ...(utilizationPercent === undefined ? {} : { utilizationPercent }),
+            ...(usedMemoryMb === undefined ? {} : { usedMemoryMb }),
+          }];
+        })
+      : undefined;
     const label = str(payload.label);
     const detail = str(connection.detail);
-    const cpuCapacity = num(capacity?.cpuCores);
-    const memoryCapacity = num(capacity?.memoryMb);
-    const usedCpuPercent = num(usage?.cpuPercent);
+    const cpuCapacity = nonNegative(capacity?.cpuCores);
+    const memoryCapacity = nonNegative(capacity?.memoryMb);
+    const usedCpuPercent = percent(usage?.cpuPercent);
     const usedMemoryMb = num(usage?.memoryMb);
     return {
       machineId: record.recordId.slice(MACHINE_PREFIX.length),
@@ -379,6 +566,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
         usage: {
           ...(usedCpuPercent === undefined ? {} : { cpuPercent: usedCpuPercent }),
           ...(usedMemoryMb === undefined ? {} : { memoryMb: usedMemoryMb }),
+          ...(usageGpus ? { gpus: usageGpus } : {}),
           observedAt,
           source: str(samplePayload?.source) ?? "unknown",
           stale: now() - observedAt > SAMPLE_STALE_MS,
@@ -395,32 +583,59 @@ export function createResourceService(deps: ResourceServiceDeps) {
     resources: ExperimentResourceRequest,
     attemptId: string,
   ): Promise<ResourceAdmission> => {
-    const key = `${workspaceId}${machineId}`;
-    const run = async (): Promise<ResourceAdmission> => {
-      await ensureLocalMachine(workspaceId);
-      const scoped = await context(workspaceId);
-      const machine = await scoped.getRecord(workspaceId, recordIdFor.machine(machineId));
+    if (!workspaceId || !machineId || !attemptId) throw new Error("resource admission identity is required");
+    rememberWorkspace(workspaceId);
+    const normalized = validateResources(resources);
+    return withMachineLock(deps.client, machineId, async () => {
+      if (machineId === LOCAL_MACHINE_ID) await ensureLocalMachineUnsafe();
+      const scoped = await globalContext();
+      const machine = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
       if (!machine || machine.state !== "available") {
         return { status: "insufficient", reason: `machine ${machineId} is ${machine?.state ?? "unknown"}` };
       }
-      const capacity = (payloadOf(machine).capacity ?? {}) as Record<string, unknown>;
-      const commitments = (await allRecords(scoped, workspaceId, "resource.commitment"))
+      const machinePayload = payloadOf(machine);
+      const connection = machinePayload.connection && typeof machinePayload.connection === "object"
+        ? machinePayload.connection as Record<string, unknown>
+        : {};
+      if (connection.status !== "connected") {
+        return { status: "insufficient", reason: `machine ${machineId} connection is ${str(connection.status) ?? "unknown"}` };
+      }
+      const capacity = (machinePayload.capacity ?? {}) as Record<string, unknown>;
+      const commitmentId = commitmentIdFor(workspaceId, machineId, attemptId);
+      const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.commitment(commitmentId));
+      if (existing) {
+        const fact = commitmentFact(existing);
+        if (!fact || fact.ownerWorkspaceId !== workspaceId || fact.view.machineId !== machineId || fact.view.attemptId !== attemptId) {
+          throw new Error(`resource commitment identity conflict for ${commitmentId}`);
+        }
+        if (!sameResources(fact.view.resources, normalized)) {
+          throw new Error(`attempt ${attemptId} already has a different resource commitment`);
+        }
+        if (fact.view.state === "confirmed" || fact.view.state === "requested") {
+          const allCommitments = (await allRecords(scoped, RESOURCE_WORKSPACE_ID, "resource.commitment"))
+            .filter((record) => record.state === "confirmed" || record.state === "requested")
+            .map(commitmentFact)
+            .filter((fact): fact is CommitmentFact => fact !== null && fact.view.machineId === machineId);
+          return {
+            status: "confirmed",
+            commitmentId,
+            remaining: remainingCapacity(capacity, allCommitments.map((entry) => entry.view.resources)),
+          };
+        }
+        return { status: "insufficient", reason: `attempt ${attemptId} has a ${fact.view.state} commitment` };
+      }
+      const commitments = (await allRecords(scoped, RESOURCE_WORKSPACE_ID, "resource.commitment"))
         .filter((record) => record.state === "confirmed" || record.state === "requested")
-        .map(commitmentView)
-        .filter((view): view is ResourceCommitmentView => view !== null && view.machineId === machineId);
-      const remaining = remainingCapacity(capacity, commitments.map((view) => view.resources));
-      const gpus = gpuCapacity(capacity);
-      const requested: Array<["cpuCores" | "memoryMb" | "gpuCount" | "gpuMemoryMb", number | undefined]> = [
-        ["cpuCores", resources.cpuCores],
-        ["memoryMb", resources.memoryMb],
-        ["gpuCount", resources.gpuCount],
-        ["gpuMemoryMb", resources.gpuMemoryMb],
-      ];
-      for (const [dimension, wanted] of requested) {
+        .map(commitmentFact)
+        .filter((fact): fact is CommitmentFact => fact !== null && fact.view.machineId === machineId);
+      const remaining = remainingCapacity(capacity, commitments.map((fact) => fact.view.resources));
+      for (const dimension of resourceDimensions) {
+        const wanted = normalized[dimension];
         if (wanted === undefined || wanted <= 0) continue;
+        const gpus = gpuCapacity(capacity);
         const capacityTotal = dimension === "gpuCount" ? gpus.count
           : dimension === "gpuMemoryMb" ? gpus.memoryMb
-          : num(capacity[dimension]);
+          : nonNegative(capacity[dimension]);
         if (capacityTotal === undefined) {
           return { status: "insufficient", remaining, reason: `machine ${machineId} reports no ${dimension} capacity` };
         }
@@ -428,61 +643,81 @@ export function createResourceService(deps: ResourceServiceDeps) {
           return { status: "insufficient", remaining, reason: `insufficient ${dimension} on ${machineId}` };
         }
       }
-      const commitmentId = `commit-${randomUUID()}`;
-      await putRecord(workspaceId, {
+      if (!hasResourceDimension(normalized)) return { status: "confirmed" };
+      await putGlobalRecord({
         recordId: recordIdFor.commitment(commitmentId),
         recordType: "resource.commitment",
         state: "confirmed",
         payload: {
           id: commitmentId,
+          workspaceId,
           machineId,
           attemptId,
-          resources,
+          resources: normalized,
           confirmedBy: "local-admission",
           confirmedAt: now(),
         },
       });
-      return { status: "confirmed", commitmentId, remaining };
-    };
-    const chained = (admissionChains.get(key) ?? Promise.resolve()).then(run, run);
-    admissionChains.set(key, chained.catch(() => undefined));
-    return chained;
+      changed(workspaceId);
+      return {
+        status: "confirmed",
+        commitmentId,
+        remaining: remainingCapacity(capacity, [...commitments.map((fact) => fact.view.resources), normalized]),
+      };
+    });
   };
 
   const release = async (workspaceId: string, commitmentId: string, reason: string): Promise<void> => {
+    rememberWorkspace(workspaceId);
     const recordId = recordIdFor.commitment(commitmentId);
-    const scoped = await context(workspaceId);
-    const existing = await scoped.getRecord(workspaceId, recordId);
-    if (!existing || (existing.state !== "confirmed" && existing.state !== "requested")) return;
-    const payload = payloadOf(existing);
-    await putRecord(workspaceId, {
-      recordId,
-      recordType: "resource.commitment",
-      state: "released",
-      expectedRecordRevision: existing.recordRevision,
-      payload: { ...payload, releasedAt: now(), releaseReason: reason },
+    const existing = await globalContext().then((scoped) => scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId));
+    const machineId = existing ? str(payloadOf(existing).machineId) : undefined;
+    if (!machineId) return;
+    await withMachineLock(deps.client, machineId, async () => {
+      const scoped = await globalContext();
+      const current = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
+      if (!current || (current.state !== "confirmed" && current.state !== "requested")) return;
+      const fact = commitmentFact(current);
+      if (!fact || fact.ownerWorkspaceId !== workspaceId) return;
+      const payload = payloadOf(current);
+      await putGlobalRecord({
+        recordId,
+        recordType: "resource.commitment",
+        state: "released",
+        expectedRecordRevision: current.recordRevision,
+        payload: { ...payload, releasedAt: now(), releaseReason: reason },
+      });
+      changed(workspaceId);
+      capacityAvailable(workspaceId);
     });
   };
 
   const listMachines = async (workspaceId: string): Promise<ResourceMachineView[]> => {
+    rememberWorkspace(workspaceId);
     await ensureLocalMachine(workspaceId).catch(report);
     await sampleLocalMachine(workspaceId).catch(report);
     const scoped = await context(workspaceId);
+    const resourceScoped = await globalContext();
     const [machines, samples, commitments, attempts] = await Promise.all([
-      allRecords(scoped, workspaceId, "resource.machine"),
-      allRecords(scoped, workspaceId, "resource.sample"),
-      allRecords(scoped, workspaceId, "resource.commitment"),
+      allRecords(resourceScoped, RESOURCE_WORKSPACE_ID, "resource.machine"),
+      allRecords(resourceScoped, RESOURCE_WORKSPACE_ID, "resource.sample"),
+      allRecords(resourceScoped, RESOURCE_WORKSPACE_ID, "resource.commitment"),
       allRecords(scoped, workspaceId, "experiment.attempt"),
     ]);
     const sampleByMachine = new Map(samples.map((record) => [record.recordId.slice(SAMPLE_PREFIX.length), record]));
     return machines.map((machine) => {
       const machineId = machine.recordId.slice(MACHINE_PREFIX.length);
       const active = commitments
-        .map(commitmentView)
-        .filter((view): view is ResourceCommitmentView => (
-          view !== null && view.machineId === machineId && (view.state === "confirmed" || view.state === "requested")
+        .map(commitmentFact)
+        .filter((fact): fact is CommitmentFact => (
+          fact !== null && fact.view.machineId === machineId && (fact.view.state === "confirmed" || fact.view.state === "requested")
         ));
-      return machineView(machine, sampleByMachine.get(machineId) ?? null, active, queuedAttemptsFor(attempts, machineId));
+      return machineView(
+        machine,
+        sampleByMachine.get(machineId) ?? null,
+        active.map((fact) => commitmentView(fact, workspaceId)),
+        queuedAttemptsFor(attempts, machineId),
+      );
     });
   };
 
@@ -501,10 +736,11 @@ export function createResourceService(deps: ResourceServiceDeps) {
         if (!attemptId) return [];
         const resources = payload.resources && typeof payload.resources === "object"
           ? asResources(payload.resources) : {};
+        const reason = str(payload.queueReason);
         return [{
           attemptId,
           ...(Object.keys(resources).length ? { resources } : {}),
-          ...(str(payload.queueReason) ? { reason: str(payload.queueReason) } : {}),
+          ...(reason ? { reason } : {}),
           queuedAt: num(payload.createdAt) ?? record.createdAt,
         }];
       })
@@ -512,74 +748,109 @@ export function createResourceService(deps: ResourceServiceDeps) {
   );
 
   const getMachine = async (workspaceId: string, machineId: string): Promise<ResourceMachineView | null> => {
-    const scoped = await context(workspaceId);
-    const record = await scoped.getRecord(workspaceId, recordIdFor.machine(machineId));
+    rememberWorkspace(workspaceId);
+    const scoped = await globalContext();
+    const record = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
     if (!record) return null;
+    const workspaceScoped = await context(workspaceId);
     const [samples, commitments, attempts] = await Promise.all([
-      allRecords(scoped, workspaceId, "resource.sample"),
-      allRecords(scoped, workspaceId, "resource.commitment"),
-      allRecords(scoped, workspaceId, "experiment.attempt"),
+      allRecords(scoped, RESOURCE_WORKSPACE_ID, "resource.sample"),
+      allRecords(scoped, RESOURCE_WORKSPACE_ID, "resource.commitment"),
+      allRecords(workspaceScoped, workspaceId, "experiment.attempt"),
     ]);
     const sample = samples.find((entry) => entry.recordId === recordIdFor.sample(machineId)) ?? null;
     const active = commitments
-      .map(commitmentView)
-      .filter((view): view is ResourceCommitmentView => (
-        view !== null && view.machineId === machineId && (view.state === "confirmed" || view.state === "requested")
+      .map(commitmentFact)
+      .filter((fact): fact is CommitmentFact => (
+        fact !== null && fact.view.machineId === machineId && (fact.view.state === "confirmed" || fact.view.state === "requested")
       ));
-    return machineView(record, sample, active, queuedAttemptsFor(attempts, machineId));
+    return machineView(record, sample, active.map((fact) => commitmentView(fact, workspaceId)), queuedAttemptsFor(attempts, machineId));
+  };
+
+  /** Host-only machine fact lookup for experiment backend resolution. */
+  const getMachineRecord = async (workspaceId: string, machineId: string): Promise<KernelRecordResult | null> => {
+    rememberWorkspace(workspaceId);
+    const scoped = await globalContext();
+    return scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.machine(machineId));
   };
 
   const registerMachine = async (
     workspaceId: string,
     input: ResourceMachineRegistration,
   ): Promise<ResourceMachineView> => {
+    rememberWorkspace(workspaceId);
     const kind = input.kind?.trim();
     if (!kind) throw new Error("machine registration requires a kind");
     const machineId = input.machineId?.trim() || `machine-${randomUUID().slice(0, 12)}`;
     if (machineId === LOCAL_MACHINE_ID) {
       throw new Error("the local machine is self-describing; it cannot be registered");
     }
+    const validStates = ["available", "degraded", "offline", "retired"] as const;
+    if (input.state !== undefined && !validStates.includes(input.state)) throw new Error("machine state is invalid");
+    const validConnections = ["connected", "degraded", "offline", "unknown"] as const;
+    if (input.connection && !validConnections.includes(input.connection.status)) throw new Error("machine connection status is invalid");
     const capacity = input.capacity
       ? {
-          ...(num(input.capacity.cpuCores) !== undefined ? { cpuCores: num(input.capacity.cpuCores) } : {}),
-          ...(num(input.capacity.memoryMb) !== undefined ? { memoryMb: num(input.capacity.memoryMb) } : {}),
-          ...(Array.isArray(input.capacity.gpus)
-            ? { gpus: input.capacity.gpus.filter((gpu) => num(gpu?.index) !== undefined) }
-            : {}),
+          ...(input.capacity.cpuCores === undefined ? {} : {
+            cpuCores: nonNegative(input.capacity.cpuCores) ?? (() => { throw new Error("machine cpu capacity is invalid"); })(),
+          }),
+          ...(input.capacity.memoryMb === undefined ? {} : {
+            memoryMb: nonNegative(input.capacity.memoryMb) ?? (() => { throw new Error("machine memory capacity is invalid"); })(),
+          }),
+          ...(input.capacity.gpus === undefined ? {} : {
+            gpus: input.capacity.gpus.map((gpu) => {
+              const index = nonNegative(gpu?.index);
+              if (index === undefined || !Number.isInteger(index)) throw new Error("machine GPU index is invalid");
+              const memoryMb = gpu?.memoryMb === undefined ? undefined : nonNegative(gpu.memoryMb);
+              if (gpu?.memoryMb !== undefined && memoryMb === undefined) throw new Error("machine GPU memory is invalid");
+              return {
+                index,
+                ...(gpu?.name?.trim() ? { name: gpu.name.trim() } : {}),
+                ...(memoryMb === undefined ? {} : { memoryMb }),
+              };
+            }),
+          }),
         }
       : undefined;
-    const scoped = await context(workspaceId);
-    const recordId = recordIdFor.machine(machineId);
-    const existing = await scoped.getRecord(workspaceId, recordId);
-    const prior = existing ? payloadOf(existing) : {};
-    const connection = input.connection
-      ? { status: input.connection.status, checkedAt: now(), ...(input.connection.detail ? { detail: input.connection.detail } : {}) }
-      : (prior.connection && typeof prior.connection === "object"
-          ? prior.connection as Record<string, unknown>
-          : { status: "unknown", checkedAt: now(), detail: "registered, never probed" });
-    const state = input.state
-      ?? (existing && (existing.state === "available" || existing.state === "degraded" || existing.state === "offline" || existing.state === "retired")
-          ? existing.state
-          : "offline");
-    const record = await putRecord(workspaceId, {
-      recordId,
-      recordType: "resource.machine",
-      state,
-      ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
-      payload: {
-        id: machineId,
-        kind,
-        ...(input.label?.trim() ? { label: input.label.trim() } : prior.label ? { label: prior.label } : {}),
-        ...(input.backend?.trim()
-          ? { backend: input.backend.trim() }
-          : prior.backend ? { backend: prior.backend } : {}),
-        ...(capacity ? { capacity } : prior.capacity ? { capacity: prior.capacity } : {}),
-        connection,
-      },
+    return withMachineLock(deps.client, machineId, async () => {
+      const scoped = await globalContext();
+      const recordId = recordIdFor.machine(machineId);
+      const existing = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordId);
+      const prior = existing ? payloadOf(existing) : {};
+      const priorKind = str(prior.kind);
+      if (priorKind && priorKind !== kind) {
+        throw new Error(`machine ID ${machineId} already identifies a different machine`);
+      }
+      const backend = input.backend?.trim() || str(prior.backend);
+      if (input.backend?.trim() && str(prior.backend) && input.backend.trim() !== str(prior.backend)) {
+        throw new Error(`machine ID ${machineId} already identifies a different backend`);
+      }
+      const connection = input.connection
+        ? { status: input.connection.status, checkedAt: now(), ...(input.connection.detail ? { detail: input.connection.detail } : {}) }
+        : (prior.connection && typeof prior.connection === "object"
+            ? prior.connection as Record<string, unknown>
+            : { status: "unknown", checkedAt: now(), detail: "registered, never probed" });
+      const state = input.state
+        ?? (existing && validStates.includes(existing.state as typeof validStates[number]) ? existing.state as typeof validStates[number] : "offline");
+      const record = await putGlobalRecord({
+        recordId,
+        recordType: "resource.machine",
+        state,
+        ...(existing ? { expectedRecordRevision: existing.recordRevision } : {}),
+        payload: {
+          id: machineId,
+          kind,
+          ...(input.label?.trim() ? { label: input.label.trim() } : prior.label ? { label: prior.label } : {}),
+          ...(backend ? { backend } : {}),
+          ...(capacity ? { capacity } : prior.capacity ? { capacity: prior.capacity } : {}),
+          connection,
+        },
+      });
+      const view = await getMachine(workspaceId, str(payloadOf(record).id) ?? machineId);
+      if (!view) throw new Error("registered machine is unreadable");
+      changed(workspaceId);
+      return view;
     });
-    const view = await getMachine(workspaceId, str(payloadOf(record).id) ?? machineId);
-    if (!view) throw new Error("registered machine is unreadable");
-    return view;
   };
 
   const list = async (workspaceId: string): Promise<ResourceListResult> => {
@@ -611,6 +882,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     sampleLocalMachine,
     listMachines,
     getMachine,
+    getMachineRecord,
     registerMachine,
     list,
     admit,

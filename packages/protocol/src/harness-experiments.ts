@@ -193,6 +193,25 @@ export interface ExperimentCancelParams {
   attemptId: string;
 }
 
+export interface ExperimentArtifactReadParams {
+  attemptId: string;
+  artifactId: string;
+  offset?: number;
+  maxBytes?: number;
+}
+
+export interface ExperimentArtifactReadResult {
+  attemptId: string;
+  artifactId: string;
+  name: string;
+  offset: number;
+  nextOffset: number;
+  eof: boolean;
+  bytesBase64: string;
+  /** Null for binary material; the same artifact remains downloadable in the UI. */
+  text: string | null;
+}
+
 export interface ExperimentCancelResult {
   attempt: ExperimentAttemptView;
 }

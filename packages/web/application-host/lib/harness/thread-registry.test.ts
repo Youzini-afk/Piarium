@@ -732,6 +732,33 @@ describe("thread registry", () => {
     expect(dequeued).toEqual([settled.id]);
   });
 
+  it("binds a parked requestId to its frozen execution identity", async () => {
+    const thread = await registry.createThread(createInput({ brief: "identity" }));
+    const frozen = {
+      model: { providerId: "provider-a", modelId: "model-a" },
+      tools: ["read"],
+      scope: [],
+      worktree: "isolated" as const,
+      systemPromptFragment: null,
+      inputOrigin: "fresh" as const,
+      workFocus: "code" as const,
+    };
+    await registry.enqueueContinuation(WORKSPACE, thread.id, parked({ requestId: "req-identity", frozen }));
+    await registry.enqueueContinuation(WORKSPACE, thread.id, parked({ requestId: "req-identity", frozen: {
+      workFocus: frozen.workFocus,
+      inputOrigin: frozen.inputOrigin,
+      systemPromptFragment: frozen.systemPromptFragment,
+      worktree: frozen.worktree,
+      scope: frozen.scope,
+      tools: frozen.tools,
+      model: frozen.model,
+    } }));
+    await expect(registry.enqueueContinuation(WORKSPACE, thread.id, parked({
+      requestId: "req-identity",
+      frozen: { ...frozen, model: { providerId: "provider-b", modelId: "model-b" } },
+    }))).rejects.toThrow("different input");
+  });
+
   it("counts nested threads against the same root admission domain", async () => {
     const parent = await registry.createThread(createInput({ brief: "parent thread" }));
     const parentRun = await registry.startRun(WORKSPACE, parent.id);

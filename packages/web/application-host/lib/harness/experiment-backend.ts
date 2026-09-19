@@ -10,10 +10,9 @@
  * binds its native scheduler — none of them may fake pause/resume/checkpoint
  * or a `reserve` they cannot honour.
  */
-import fs from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import type { KernelScopedClient } from "../kernel/kernel-client.js";
-import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 
 /** Execution site resolved by the backend: where the job actually runs. */
 export interface ExperimentBackendSite {
@@ -50,6 +49,13 @@ export interface BackendReadResult {
   observation: BackendObservation;
 }
 
+/** Content already streamed into the owning kernel object store. */
+export interface BackendCollectedObject {
+  objectHash: string;
+  byteLength: number;
+  ownerId: string;
+}
+
 export interface ExperimentBackend {
   /** Stable backend identity recorded on the attempt and job records. */
   readonly backend: string;
@@ -78,7 +84,8 @@ export interface ExperimentBackend {
   }): Promise<{ handle: BackendJobHandle; observation: BackendObservation }>;
   /**
    * Query the durable backend identity. Throws when the backend cannot
-   * confirm the job — the caller treats that as `lost`, never as failed.
+   * confirm the job. The caller keeps the attempt and allocation pending for
+   * later reconciliation; an observation outage is not an execution terminal.
    */
   inspect(site: ExperimentBackendSite, backendJobId: string): Promise<BackendObservation>;
   /** Read output chunks after `cursor` plus the current job observation. */
@@ -92,7 +99,7 @@ export interface ExperimentBackend {
    * validated at submit; the backend still rejects escapes as
    * defence-in-depth.
    */
-  collectFile(site: ExperimentBackendSite, relativePath: string): Promise<Buffer>;
+  collectFile(site: ExperimentBackendSite, relativePath: string): Promise<Buffer | BackendCollectedObject>;
 }
 
 /** A backend bound to the resolved execution site for one attempt. */
@@ -170,11 +177,32 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient): Experi
     await scoped.processRelease({ workspaceId: site.workspaceId, processId: backendJobId });
   },
   async collectFile(site, relativePath) {
-    const absolute = path.join(site.canonicalRoot, relativePath);
-    const resolved = await canonicalizePathIdentity(absolute);
-    if (resolved !== site.canonicalRoot && !resolved.startsWith(`${site.canonicalRoot}${path.sep}`)) {
+    const normalized = relativePath.replaceAll("\\", "/");
+    if (!normalized || path.isAbsolute(relativePath) || normalized.split("/").includes("..") || normalized.includes("\0")) {
       throw new Error(`output path escaped the experiment root: ${relativePath}`);
     }
-    return fs.readFile(resolved);
+    const captured = await scoped.fileCapture({
+      operationId: `experiment-output-capture:${randomUUID()}`,
+      workspaceId: site.workspaceId,
+      rootId: site.rootId,
+      path: normalized,
+      store: true,
+    });
+    if (typeof captured.stateJson !== "string" || typeof captured.ownerId !== "string") {
+      throw new Error(`kernel did not retain experiment output: ${relativePath}`);
+    }
+    let state: unknown;
+    try { state = JSON.parse(captured.stateJson); } catch { throw new Error(`kernel returned malformed output state: ${relativePath}`); }
+    if (!state || typeof state !== "object" || (state as { kind?: unknown }).kind !== "regular-file"
+      || typeof (state as { objectHash?: unknown }).objectHash !== "string"
+      || typeof (state as { byteLength?: unknown }).byteLength !== "number") {
+      await scoped.releaseBlob(captured.ownerId).catch(() => undefined);
+      throw new Error(`experiment output is not a regular file: ${relativePath}`);
+    }
+    return {
+      objectHash: (state as { objectHash: string }).objectHash,
+      byteLength: (state as { byteLength: number }).byteLength,
+      ownerId: captured.ownerId,
+    };
   },
 });

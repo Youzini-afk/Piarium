@@ -99,6 +99,7 @@ import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/dur
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, type SessionSnapshot } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
+import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
@@ -1299,17 +1300,35 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Experiment/resource/source authority (7C/7D, D-300). The service grant is
   // Host-internal — the same trust level as the native process host — so a
   // detached reconciler can inspect, stop and collect jobs after restarts.
+  const broadcastResearchFacts = (workspaceId: string, fact: 'attempt' | 'machine' | 'source') => {
+    for (const client of uiPiariumEventClients) {
+      try {
+        writeSseEvent(client, {
+          type: 'piarium:harness-experiment-changed',
+          properties: { workspaceId, fact },
+        });
+      } catch {
+        uiPiariumEventClients.delete(client);
+      }
+    }
+  };
   const resourceService = createResourceService({
     client: kernelClient,
     onError: (error) => console.error("[PiariumResource]", error.message),
+    onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'machine'),
+    onCapacityAvailable: (workspaceId) => experimentService.refreshQueue(workspaceId),
   });
-  const sourceService = createSourceService({ client: kernelClient });
+  const sourceService = createSourceService({
+    client: kernelClient,
+    onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'source'),
+  });
   const experimentService = createExperimentService({
     client: kernelClient,
     resources: resourceService,
     sources: sourceService,
     resolveWorkspaceRoot: async (workspaceId) => (await documentsAuthority.inspectWorkspace(workspaceId)).root,
     onError: (error) => console.error("[PiariumExperiment]", error.message),
+    onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
   });
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
@@ -1633,6 +1652,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   threadRuntime = createThreadRuntime({
     registry: threadRegistry,
+    stopExperimentsForThread: (workspaceId, threadId) => experimentService.stopForThreads(workspaceId, [threadId]),
     deleteSession: (sessionId) => piRuntimeBroker.deleteSession(sessionId),
     deleteKnowledgeSession: async (workspaceId, sessionId) => {
       // Delete the session's event/block/session knowledge nodes through the
@@ -1903,6 +1923,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     registry: threadRegistry,
     runtime: threadRuntime,
     sendToThread: createUserThreadSendAdapter(() => harnessServiceHost, threadRuntime!),
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerHarnessExperimentRoutes(app, {
+    runtime: threadRuntime,
+    registry: threadRegistry,
+    experiments: experimentService,
+    resources: resourceService,
+    sources: sourceService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerHarnessContextRoutes(app, {
@@ -2934,6 +2962,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
       piSessionAutomation.stop();
+      experimentService.detachObservers();
       brokerUnsubscribe();
       await harnessSessionRegistration.dispose();
       await unregisterWorkbenchLayoutService();

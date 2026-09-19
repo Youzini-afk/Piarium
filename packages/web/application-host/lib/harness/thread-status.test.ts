@@ -112,6 +112,17 @@ describe("thread status projection", () => {
     expect(excerpt?.text.endsWith("…")).toBe(true);
   });
 
+  it("previews the latest visible text block within an assistant entry", () => {
+    const entry = assistantEntry("multi", "early block") as Extract<PiSessionEntry, { type: "message" }>;
+    const assistant = entry.message as Extract<typeof entry.message, { role: "assistant" }>;
+    assistant.content = [
+      { type: "text", text: "early block" },
+      { type: "text", text: "latest block with the useful result" },
+    ];
+    expect(lastVisibleOutput([entry])?.text).toContain("latest block");
+    expect(lastVisibleOutput([entry])?.text).not.toContain("early block");
+  });
+
   it("maps lifecycle, attention, and worker state into the state column", async () => {
     const thread = await registry.createThread(input());
     const run = await registry.startRun(WORKSPACE, thread.id);
@@ -237,6 +248,70 @@ describe("thread status projection", () => {
     expect(rows[0]?.progress?.runId).toBe(run1.id);
   });
 
+  it("attributes a reused session's progress to the active Run's transcript window", async () => {
+    const thread = await registry.createThread(input({ brief: "continued writer" }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "session-reused");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "success", null, {
+      ...report(),
+      resultRevision: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "session-reused", fromEntryId: "old", toEntryId: "old" },
+    });
+    const second = (await registry.admitRun(WORKSPACE, thread.id, "pi", { allowSettled: true })).run;
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "session-reused");
+    const host = {
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => entriesResult([
+        assistantEntry("old", "the old Run answer"),
+        assistantEntry("new", "the new Run answer"),
+      ], sessionId),
+    } as unknown as HarnessServiceHost;
+    const projector = createThreadStatusProjector({
+      registry: () => registry,
+      readEntries: host.threadHistoryEntries ?? null,
+    });
+    const { rows } = await projector.build(WORKSPACE, PARENT, null);
+    expect(rows[0]?.progress).toMatchObject({ runId: second.id, entryId: "new", fromEarlierRun: false });
+    expect(rows[0]?.progress?.text).toContain("new Run");
+  });
+
+  it("keeps the earlier Run when a continuation has no new entries", async () => {
+    const thread = await registry.createThread(input({ brief: "empty continuation" }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "session-empty");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "success", null, {
+      ...report(),
+      resultRevision: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "session-empty", fromEntryId: "old", toEntryId: "old" },
+    });
+    const second = (await registry.admitRun(WORKSPACE, thread.id, "pi", { allowSettled: true })).run;
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "session-empty");
+    const host = {
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => entriesResult([assistantEntry("old", "old Run answer")], sessionId),
+    } as unknown as HarnessServiceHost;
+    const projector = createThreadStatusProjector({ registry: () => registry, readEntries: host.threadHistoryEntries ?? null });
+    const { rows } = await projector.build(WORKSPACE, PARENT, null);
+    expect(rows[0]?.progress).toMatchObject({ runId: first.id, entryId: "old", fromEarlierRun: true });
+  });
+
+  it("does not attribute old output to a Run after a lost predecessor without bounds", async () => {
+    const thread = await registry.createThread(input({ brief: "lost predecessor" }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "session-lost");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "lost");
+    const second = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "session-lost");
+    const host = {
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => entriesResult([assistantEntry("old", "lost Run answer")], sessionId),
+    } as unknown as HarnessServiceHost;
+    const projector = createThreadStatusProjector({ registry: () => registry, readEntries: host.threadHistoryEntries ?? null });
+    const { rows } = await projector.build(WORKSPACE, PARENT, null);
+    expect(rows[0]?.progress?.runId).toBe(first.id);
+    expect(rows[0]?.progress?.fromEarlierRun).toBe(true);
+  });
+
   it("expands a cited excerpt through read_thread transcript entry lookup", async () => {
     const thread = await registry.createThread(input({ brief: "writer" }));
     const run = await registry.startRun(WORKSPACE, thread.id);
@@ -276,7 +351,28 @@ describe("thread status projection", () => {
     expect(cited.text).toContain("polished the wording");
   });
 
-  it("bounds the emitted table and reports the omitted range", async () => {
+  it("scopes an explicit Run transcript to its retained bounds", async () => {
+    const thread = await registry.createThread(input({ brief: "bounded transcript" }));
+    const first = await registry.startRun(WORKSPACE, thread.id);
+    await registry.markRunRunning(WORKSPACE, thread.id, first.id, "session-reused");
+    await registry.endRun(WORKSPACE, thread.id, first.id, "success", null, {
+      ...report(),
+      resultRevision: 1,
+      transcriptRef: { runtimeId: "pi", sessionId: "session-reused", fromEntryId: "old", toEntryId: "old" },
+    });
+    const second = (await registry.admitRun(WORKSPACE, thread.id, "pi", { allowSettled: true })).run;
+    await registry.markRunRunning(WORKSPACE, thread.id, second.id, "session-reused");
+    const entries = [assistantEntry("old", "the old Run answer"), assistantEntry("new", "the new Run answer")];
+    const read = createThreadReadService({
+      threadRegistry: registry,
+      threadHistoryEntries: async (sessionId: string) => entriesResult(entries, sessionId),
+    } as unknown as HarnessServiceHost);
+    const page = await read.handle({ threadId: thread.id, what: "transcript", runId: first.id, entry: "old" }, ctx(PARENT.id));
+    expect(page.text).toContain("the old Run answer");
+    expect(page.text).not.toContain("the new Run answer");
+  });
+
+  it("delivers the complete status table without an arbitrary row cap", async () => {
     for (let i = 0; i < 35; i += 1) {
       await registry.createThread(input({ brief: `task-${String(i).padStart(2, "0")}`, autoRun: false }));
     }
@@ -287,7 +383,7 @@ describe("thread status projection", () => {
     } as unknown as HarnessServiceHost;
     const services = createZone2StatusServices(host);
     const result = await services.status.handle({}, ctx(PARENT.id));
-    expect(result.content).toContain("5 more threads in scope");
-    expect(result.content).toContain("call threads for the full table");
+    expect(result.content).toContain("task-34");
+    expect(result.content).not.toContain("more threads in scope");
   });
 });

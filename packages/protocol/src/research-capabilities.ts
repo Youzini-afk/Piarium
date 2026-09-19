@@ -61,7 +61,7 @@ export const RESEARCH_CAPABILITY_DEFINITIONS: Readonly<Record<ResearchCapability
   'fast-exploration': {
     capability: 'fast-exploration',
     slot: 'researchFastExploration',
-    tools: ['read', 'grep', 'find', 'ls', 'explore', 'related', 'recall'],
+    tools: ['read', 'grep', 'find', 'ls', 'explore', 'related', 'recall', 'threads', 'wait', 'send', 'read_thread', 'resources', 'research_source'],
     worktree: 'none',
     systemPromptFragment: 'Explore a bounded route quickly. Return concrete observations, useful negative results, and the next discriminating question.',
     defaultResources: { cpu: true },
