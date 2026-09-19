@@ -22,12 +22,17 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
+  SessionWorkFocusSnapshot,
+  WorkFocusId,
+  WorkFocusExecutionRole,
+  WorkFocusSelection,
 } from "@piarium/protocol";
 import {
   findFoundationalPackageBySource,
   FOUNDATIONAL_PI_PACKAGE_MANIFEST_REVISION,
   matchesFoundationalPackage,
   isRuntimeMethod,
+  productDefaultWorkFocus,
   type FoundationalPiPackageId,
   type FoundationalPiPackageManifestEntry,
   type FoundationalPiPackageStatusSnapshot,
@@ -82,6 +87,12 @@ export type PiSessionDeleteCoordinator = (request: {
   sessionId: string;
   summary: SessionSummary;
 }) => Promise<void>;
+
+export type PiSessionRunCoordinator = (request: {
+  sessionId: string;
+  snapshot: SessionSnapshot;
+  summary: SessionSummary;
+}) => Promise<{ workspace?: SessionWorkspaceBinding } | void>;
 
 interface SessionExecutionAdmissionState {
   awaitsAgentSettlement: boolean;
@@ -189,6 +200,10 @@ export interface PiRuntimeBrokerOptions {
   admitSessionExecution?: PiSessionExecutionAdmission;
   shutdownTimeoutMs?: number;
   promptForProjectTrust?(request: ProjectTrustRequest): Promise<ProjectTrustDecision>;
+  resolveProjectWorkFocus?(input: {
+    cwd: string;
+    workspace?: SessionWorkspaceBinding;
+  }): Promise<WorkFocusId | undefined> | WorkFocusId | undefined;
 }
 
 export const PI_CATALOG_METHODS = [
@@ -247,6 +262,7 @@ const BROKER_ONLY_RUNTIME_METHODS: Record<Exclude<RuntimeMethod, HostMethod>, tr
   "session.delete": true,
   "session.entries.preview": true,
   "session.unarchive": true,
+  "session.workFocus.set": true,
 };
 
 const isSessionDynamicMethod = (value: unknown): value is SessionDynamicMethod => (
@@ -325,6 +341,7 @@ export class PiRuntimeBroker {
   readonly #sessionWorkspaceScopes = new Map<string, readonly string[]>();
   readonly #knownSummaries = new Map<string, SessionSummary>();
   readonly #pendingWorkspaceBindings = new Map<string, SessionWorkspaceBinding>();
+  readonly #workFocusTails = new Map<string, Promise<void>>();
   readonly #pendingProjectTrust = new Map<string, PendingProjectTrust>();
   readonly #runtimeGeneration: number;
   readonly #sessionExecutionAdmissions = new Map<PiHostClient, SessionExecutionAdmissionState>();
@@ -343,6 +360,7 @@ export class PiRuntimeBroker {
   #receiptPromise: Promise<PackageProvisioningReceiptStore> | undefined;
   #sessionExecutionAdmission: PiSessionExecutionAdmission | undefined;
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
+  #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
 
   constructor(options: PiRuntimeBrokerOptions) {
     this.#options = options;
@@ -406,6 +424,13 @@ export class PiRuntimeBroker {
       throw new TypeError("Pi session delete coordinator must be a function");
     }
     this.#sessionDeleteCoordinator = coordinate;
+  }
+
+  setSessionRunCoordinator(coordinate: PiSessionRunCoordinator | undefined): void {
+    if (coordinate !== undefined && typeof coordinate !== "function") {
+      throw new TypeError("Pi session run coordinator must be a function");
+    }
+    this.#sessionRunCoordinator = coordinate;
   }
 
   async warmup(): Promise<HostHandshakeResult> {
@@ -568,10 +593,17 @@ export class PiRuntimeBroker {
       permissions?: PermissionPolicy;
       scope?: string[];
       tools?: string[];
+      workFocus?: WorkFocusId;
+      workFocusRole?: WorkFocusExecutionRole;
     },
   ): Promise<SessionSnapshot> {
     await this.#ensureFoundationalBootstrap();
     const normalizedCwd = resolve(cwd);
+    const workFocus = await this.#resolveInitialWorkFocus(
+      normalizedCwd,
+      workspace,
+      launch?.workFocus,
+    );
     const worker = await this.#spawnWorker(normalizedCwd);
     try {
       const snapshot = await worker.request("session.create", {
@@ -581,8 +613,12 @@ export class PiRuntimeBroker {
         ...(launch?.model === undefined ? {} : { model: { ...launch.model } }),
         ...(launch?.permissions === undefined ? {} : { permissions: launch.permissions }),
         ...(launch?.tools === undefined ? {} : { tools: [...launch.tools] }),
+        workFocus,
+        workFocusGeneration: 1,
+        ...(launch?.workFocusRole === undefined ? {} : { workFocusRole: launch.workFocusRole }),
       });
       this.#bindSession(worker, snapshot.sessionId);
+      await (await this.#metadataFor(worker)).ensureWorkFocus(snapshot.sessionId, workFocus);
       if (launch?.scope?.length) this.#sessionWorkspaceScopes.set(snapshot.sessionId, [...launch.scope]);
       if (workspace !== undefined) {
         await this.#persistWorkspaceBinding(
@@ -615,6 +651,7 @@ export class PiRuntimeBroker {
     sessionId?: string;
     scope?: string[];
     tools?: string[];
+    workFocusRole?: WorkFocusExecutionRole;
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     if (input.sessionId) {
@@ -647,6 +684,7 @@ export class PiRuntimeBroker {
       ...(input.model === undefined ? {} : { model: { ...input.model } }),
       ...(input.scope === undefined ? {} : { scope: [...input.scope] }),
       ...(input.tools === undefined ? {} : { tools: [...input.tools] }),
+      ...(input.workFocusRole === undefined ? {} : { workFocusRole: input.workFocusRole }),
     };
     let known = this.#knownSummaryForOpen(normalizedInput);
     if (
@@ -687,6 +725,13 @@ export class PiRuntimeBroker {
     };
     const opened = await this.#openUnboundSessionWorker(workerCwd, openInput);
     try {
+      const metadata = await this.#metadataFor(opened.worker);
+      const workFocus = await metadata.getWorkFocus(opened.snapshot.sessionId);
+      await opened.worker.request("session.workFocus.apply", {
+        generation: workFocus.active.generation,
+        sessionId: opened.snapshot.sessionId,
+        selection: workFocus.active,
+      });
       this.#bindSession(opened.worker, opened.snapshot.sessionId);
       if (input.scope?.length) this.#sessionWorkspaceScopes.set(opened.snapshot.sessionId, [...input.scope]);
       if (input.workspace !== undefined) {
@@ -740,6 +785,32 @@ export class PiRuntimeBroker {
       ) as Promise<HostMethodResult<M>>;
     }
     const worker = this.#workerForSession(sessionId);
+    if ((method as HostMethod) === "agent.prompt") {
+      return this.#promptWithSelectedWorkFocus(
+        worker,
+        sessionId,
+        params as HostMethodParams<"agent.prompt">,
+      ) as Promise<HostMethodResult<M>>;
+    }
+    if ((method as HostMethod) === "agent.steer" || (method as HostMethod) === "agent.followUp") {
+      return this.#withWorkFocusBoundary(sessionId, async () => {
+        const cwd = this.#workerCwds.get(worker);
+        if (!cwd) {
+          throw new PiRuntimeBrokerError(
+            "session_context_unavailable",
+            `Workspace context is unavailable for Pi session: ${sessionId}`,
+          );
+        }
+        return this.#requestWithExecutionAdmission(
+          worker,
+          cwd,
+          sessionId,
+          method,
+          params,
+          "agent-run",
+        );
+      }) as Promise<HostMethodResult<M>>;
+    }
     if ((method as HostMethod) === "session.snapshot") {
       return worker.request("session.snapshot", params as HostMethodParams<"session.snapshot">)
         .then((snapshot) => this.#enrichSnapshot(worker, snapshot)) as Promise<HostMethodResult<M>>;
@@ -760,6 +831,120 @@ export class PiRuntimeBroker {
       params,
       AGENT_RUN_METHODS.has(method) ? "agent-run" : "workspace-mutation",
     );
+  }
+
+  async setSessionWorkFocus(
+    sessionId: string,
+    workFocus: WorkFocusId,
+  ): Promise<SessionSnapshot> {
+    return this.#withWorkFocusBoundary(sessionId, async () => {
+      const worker = this.#workerForSession(sessionId);
+      const metadata = await this.#metadataFor(worker);
+      const state = await metadata.selectWorkFocus(sessionId, {
+        id: workFocus,
+        source: "explicit",
+      });
+      this.#rememberWorkFocus(sessionId, state);
+      const snapshot = await worker.request("session.snapshot", { sessionId });
+      return this.#enrichSnapshot(worker, snapshot);
+    });
+  }
+
+  async #promptWithSelectedWorkFocus(
+    worker: PiHostClient,
+    sessionId: string,
+    params: HostMethodParams<"agent.prompt">,
+  ): Promise<HostMethodResult<"agent.prompt">> {
+    return this.#withWorkFocusBoundary(sessionId, async () => {
+      const metadata = await this.#metadataFor(worker);
+      const current = await metadata.getWorkFocus(sessionId);
+      if (current.status !== "applied") {
+        const candidate: SessionWorkFocusSnapshot = {
+          active: {
+            ...current.selected,
+            generation: current.active.generation
+              + (current.active.id === current.selected.id && current.active.source === current.selected.source ? 0 : 1),
+          },
+          selected: { ...current.selected },
+          status: "applied",
+        };
+        try {
+          await worker.request("session.workFocus.apply", {
+            generation: candidate.active.generation,
+            sessionId,
+            selection: current.selected,
+          });
+          let applied: SessionWorkFocusSnapshot;
+          try {
+            applied = await metadata.applySelectedWorkFocus(sessionId, current.selected);
+          } catch (commitError) {
+            await worker.request("session.workFocus.apply", {
+              generation: current.active.generation,
+              sessionId,
+              selection: current.active,
+            });
+            throw commitError;
+          }
+          this.#rememberWorkFocus(sessionId, applied);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const failed = await metadata.failSelectedWorkFocus(sessionId, current.selected, message);
+          this.#rememberWorkFocus(sessionId, failed);
+          await worker.request("session.workFocus.publish", { sessionId }).catch(() => undefined);
+          throw new PiRuntimeBrokerError(
+            "work_focus_prepare_failed",
+            `Unable to apply ${current.selected.id} work focus: ${message}`,
+            { retryable: true },
+          );
+        }
+        await worker.request("session.workFocus.publish", { sessionId });
+      }
+      const cwd = this.#workerCwds.get(worker);
+      if (!cwd) {
+        throw new PiRuntimeBrokerError(
+          "session_context_unavailable",
+          `Workspace context is unavailable for Pi session: ${sessionId}`,
+        );
+      }
+      if (this.#sessionRunCoordinator) {
+        const rawSnapshot = await worker.request("session.snapshot", { sessionId });
+        const snapshot = await this.#enrichSnapshot(worker, rawSnapshot);
+        const summary = this.#knownSummaries.get(sessionId);
+        if (!summary) {
+          throw new PiRuntimeBrokerError(
+            "session_context_unavailable",
+            `Session summary is unavailable before Pi run start: ${sessionId}`,
+          );
+        }
+        const prepared = await this.#sessionRunCoordinator({
+          sessionId,
+          snapshot: structuredClone(snapshot),
+          summary: structuredClone(summary),
+        });
+        if (prepared?.workspace) {
+          await this.#persistWorkspaceBinding(
+            metadata,
+            sessionId,
+            prepared.workspace,
+            worker,
+            "Failed to persist the research workspace binding",
+          );
+          this.#knownSummaries.set(sessionId, {
+            ...summary,
+            workspace: structuredClone(prepared.workspace),
+          });
+          await worker.request("session.workFocus.publish", { sessionId });
+        }
+      }
+      return this.#requestWithExecutionAdmission(
+        worker,
+        cwd,
+        sessionId,
+        "agent.prompt",
+        params,
+        "agent-run",
+      );
+    });
   }
 
   requestForSessionDynamic(sessionId: string, method: unknown, params: unknown): Promise<unknown> {
@@ -1485,16 +1670,45 @@ export class PiRuntimeBroker {
 
   async #enrichSnapshot(worker: PiHostClient, snapshot: SessionSnapshot): Promise<SessionSnapshot> {
     const summary = await this.#rememberSummary(worker, snapshot.sessionId);
+    const workFocus = summary.workFocus
+      ?? snapshot.workFocus
+      ?? productDefaultWorkFocus();
     if (summary.workspace === undefined) {
-      const enriched = { ...snapshot };
+      const enriched = { ...snapshot, workFocus: structuredClone(workFocus) };
       delete enriched.workspace;
       delete enriched.workspacePersistence;
       return enriched;
     }
-    const enriched = { ...snapshot, workspace: summary.workspace };
+    const enriched = { ...snapshot, workspace: summary.workspace, workFocus: structuredClone(workFocus) };
     if (summary.workspacePersistence === "pending") enriched.workspacePersistence = "pending";
     else delete enriched.workspacePersistence;
     return enriched;
+  }
+
+  #rememberWorkFocus(sessionId: string, workFocus: SessionWorkFocusSnapshot): void {
+    const summary = this.#knownSummaries.get(sessionId);
+    if (summary) this.#knownSummaries.set(sessionId, { ...summary, workFocus: structuredClone(workFocus) });
+  }
+
+  async #resolveInitialWorkFocus(
+    cwd: string,
+    workspace: SessionWorkspaceBinding | undefined,
+    explicit: WorkFocusId | undefined,
+  ): Promise<WorkFocusSelection> {
+    if (explicit) return { id: explicit, source: "explicit" };
+    const project = await this.#options.resolveProjectWorkFocus?.({ cwd, ...(workspace ? { workspace } : {}) });
+    if (project) return { id: project, source: "project-default" };
+    return { id: "code", source: "product-default" };
+  }
+
+  #withWorkFocusBoundary<T>(sessionId: string, operation: () => Promise<T>): Promise<T> {
+    const previous = this.#workFocusTails.get(sessionId) ?? Promise.resolve();
+    const task = previous.then(operation, operation);
+    const tail = task.then(() => undefined, () => undefined);
+    this.#workFocusTails.set(sessionId, tail);
+    return task.finally(() => {
+      if (this.#workFocusTails.get(sessionId) === tail) this.#workFocusTails.delete(sessionId);
+    });
   }
 
   async #persistWorkspaceBinding(
@@ -1545,12 +1759,18 @@ export class PiRuntimeBroker {
     if (envelope.event !== "session.snapshot") return envelope;
     const workspace = this.#pendingWorkspaceBindings.get(sessionId)
       ?? this.#knownSummaries.get(sessionId)?.workspace;
-    if (workspace === undefined) return envelope;
+    const workFocus = this.#knownSummaries.get(sessionId)?.workFocus
+      ?? (envelope.data as SessionSnapshot).workFocus
+      ?? productDefaultWorkFocus();
+    if (workspace === undefined) {
+      return { ...envelope, data: { ...envelope.data, workFocus } };
+    }
     return {
       ...envelope,
       data: {
         ...envelope.data,
         workspace,
+        workFocus,
         ...(this.#pendingWorkspaceBindings.has(sessionId)
           ? { workspacePersistence: "pending" as const }
           : {}),

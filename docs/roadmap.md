@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S design accepted, implementation pending
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S 7A implemented, 7B–7F pending
 
 Last updated: 2026-09-19
 
@@ -26,7 +26,7 @@ authoritative record of delivery, and each phase names the design document that 
 | R | Rust system kernel and Host separation | Complete (D-282); delivery evidence in [harness status](agent-harness-status.md) |
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
-| 11 | AI4S heterogeneous research cluster | Design accepted (D-291/D-297); next: independent workbench UIUX and work focus, then research execution |
+| 11 | AI4S heterogeneous research cluster | 7A workbench, independent focus and attached research root implemented (D-298); next: 7B capability routing |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -51,7 +51,8 @@ projects or conversations keeps the user's chosen workbench. The later office ex
 separation. Research execution builds on the existing Pi runtime, Thread/Run, Host scheduler, retrieval,
 context, permissions and Rust kernel, and remains available in the IDE. The first vertical slice is an
 open research question explored by heterogeneous model branches, fast execution workers and event-triggered
-synthesis. These are design targets only; production delivery is recorded in the status matrix.
+synthesis. The 7A entry, focus and real principal-run attachment are implemented; heterogeneous capability
+routing, scheduling and synthesis remain planned. Verification boundaries are recorded in harness status.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
@@ -541,7 +542,7 @@ Each built-in shell contribution is its extension ID suffixed with `.shell`.
    `editor`, `secondary-sidebar`, `panel`, `status` alongside the existing agent-era targets),
    contribution slots, and editor/debug/test/task context keys. The profile document carries a
    revision and every mutation is `expectedRevision`-checked. Layout layers merge
-   `distribution → user → workspace`; profile selection resolves `workspace → user → active`. Shell
+   `distribution → user → workspace`; profile selection now resolves `user → active` (D-298). Shell
    state is reported truthfully as one of `builtin`, `disabled`, `failed`, `missing`, or `ready`.
    `@piarium/extension-host` persists the document, the Web application host serves it, and the UI
    stages a candidate shell and only commits the selection after it mounts, so a failed or superseded

@@ -16,7 +16,7 @@ contracts without hardcoding an origin, port, desktop IPC channel, or local path
   refresh behavior.
 - `src/components/sections/shared/DOCUMENTATION.md`: Settings layout, controls, save feedback, and
   search integration.
-- `src/workbenches`: official Agent/IDE Shells and Settings React composition. Lower `lib` modules do
+- `src/workbenches`: official Agent/IDE/Research Shells and Settings React composition. Lower `lib` modules do
   not import this layer.
 - `src/features`: narrow React/store integrations, such as adapting the active-editor Store to the
   framework-neutral Agent/editor kernel.
@@ -25,6 +25,17 @@ Runtime API types and auth/fetch/URL/switch primitives are imported directly fro
 `@piarium/application-client`; UI-owned forwarding modules are not part of the boundary.
 
 ## Theme and component system
+
+Research uses `MainLayout` for shared window controls, navigation, permissions, settings and resource
+panels. Its conversation composition shows the real research-root Thread/Run and an expandable branch
+and materials area. `HarnessThreadStateProvider` owns this read-only projection; branches remain
+available from the ordinary Agent/IDE thread panel too. Rendering a shell never creates a Run.
+
+`PiWorkFocusControl` selects execution focus independently of the shell. New drafts can use a project
+default or an explicit override; the broker captures the choice when creating the session. Existing
+sessions show selected and applied focus separately. A change applies before the next new Run, while
+the current Run and its follow-up queue retain their configuration. Session metadata, not the active
+project or UI profile, owns the durable choice. Project defaults use the existing settings/autosave path.
 
 Piarium themes expose semantic surface, interactive, status, primary, syntax, and feature tokens.
 Components use those roles rather than embedding palette colors: selection describes current state,

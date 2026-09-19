@@ -79,6 +79,7 @@ import { createHarnessPathAuthority } from './lib/harness/path-authority.js';
 import { createExploreFileReader } from './lib/harness/explore-file-reader.js';
 import { createThreadWorktreeRuntime } from './lib/harness/thread-worktree.js';
 import { createThreadRuntime } from './lib/harness/thread-runtime.js';
+import { createResearchRootRuntime } from './lib/harness/research-root-runtime.js';
 import { createWorktreeReclaimGuard } from './lib/harness/worktree-reclaim-guard.js';
 import { resolveThreadWorktreeSettings } from './lib/harness/thread-worktree-settings.js';
 import { createKernelWorkspaceWorkingStateAccess, KernelStorageAdapter } from './lib/kernel/storage-adapter.js';
@@ -92,7 +93,7 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, type SessionSnapshot } from '@piarium/protocol';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
@@ -913,6 +914,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     // service itself is always present, so changing provider does not require
     // an application restart.
     harnessWebSearch: true,
+    resolveProjectWorkFocus: async ({ cwd, workspace }) => {
+      const settings = await readSettingsFromDisk();
+      const projects = sanitizeProjects(settings.projects || []) ?? [];
+      const projectId = workspace?.kind === 'workspace' ? workspace.id : undefined;
+      const normalizedCwd = normalizeDirectoryPath(cwd);
+      const explicitProject = projectId === undefined
+        ? undefined
+        : projects.find((entry) => entry.id === projectId);
+      const project = explicitProject
+        ?? projects.find((entry) => normalizeDirectoryPath(entry.path) === normalizedCwd);
+      return project?.defaultWorkFocus === 'code' || project?.defaultWorkFocus === 'research'
+        ? project.defaultWorkFocus
+        : undefined;
+    },
     ...brokerOptions,
   }));
   const createPiRuntimeBroker = (brokerOptions: HostPiRuntimeBrokerFactoryOptions) => attachPiSessionExecutionAdmission(
@@ -1760,6 +1775,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           ...(input.permissions ? { permissions: input.permissions } : {}),
           ...(input.scope?.length ? { scope: input.scope } : {}),
           tools: input.tools,
+          workFocus: input.workFocus,
+          workFocusRole: 'branch',
         },
       ),
       open: (input) => piRuntimeBroker.openSession({
@@ -1770,6 +1787,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         sessionId: input.sessionId,
         workspace: { authorityId: input.workspaceId, id: input.workspaceId, kind: 'workspace' },
         tools: input.tools,
+        workFocusRole: 'branch',
       }),
       prompt: async (sessionId, text, instructions, images) => {
         const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.prompt', {
@@ -1821,6 +1839,48 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
     });
   };
+  const researchRootRuntime = createResearchRootRuntime({
+    registry: threadRegistry,
+    getSessionSnapshot: (sessionId) => (
+      sessionSnapshots.get(sessionId) as unknown as SessionSnapshot | undefined
+    ) ?? null,
+    sessions: {
+      snapshot: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }),
+      stats: (sessionId) => piRuntimeBroker.requestForSession(sessionId, 'session.stats', { sessionId }),
+      entries: (sessionId, scope = 'branch') => piRuntimeBroker.requestForSession(sessionId, 'session.entries', { sessionId, scope }),
+    },
+    onError: (error) => {
+      console.error('[ResearchRoot] Runtime failed:', errorMessage(error));
+    },
+    rejectHarnessRequest: async (sessionId, requestId, message) => {
+      await piRuntimeBroker.requestForSession(
+        sessionId,
+        'harness.respond',
+        buildHarnessRespondParams(sessionId, requestId, {
+          ok: false,
+          error: { code: 'unavailable', message, retryable: true },
+        }),
+      );
+    },
+  });
+  piRuntimeBroker.setSessionRunCoordinator(async ({ snapshot }) => {
+    if (snapshot.workFocus?.active.id !== 'research' || snapshot.workspace?.kind === 'workspace') return;
+    try {
+      const identity = await documentsAuthority.resolveWorkspace({ path: snapshot.cwd });
+      return {
+        workspace: {
+          authorityId: identity.workspaceId,
+          id: identity.workspaceId,
+          kind: 'workspace' as const,
+        },
+      };
+    } catch (error) {
+      throw new Error(
+        `Research work focus requires an admitted workspace for ${snapshot.cwd}: ${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  });
   registerHarnessThreadRoutes(app, {
     registry: threadRegistry,
     runtime: threadRuntime,
@@ -1856,6 +1916,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   piRuntimeBroker.setSessionDeleteCoordinator(async ({ sessionId, summary }) => {
+    if (summary.workspace?.kind === 'workspace') {
+      const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
+      const researchRoot = (await threadRegistry.listThreads(
+        workspaceId,
+        { kind: 'session', id: sessionId },
+        true,
+      )).find((thread) => thread.purpose === 'research-root');
+      if (researchRoot) {
+        await researchRootRuntime.cancelSession(sessionId, 'user session deleted');
+        await threadRuntime!.kill(researchRoot.id, false, workspaceId);
+      }
+    }
     await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
     if (summary.workspace?.kind !== 'workspace') return;
     const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
@@ -2566,8 +2638,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sessionRuntime.processBrokerEvent(event);
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
-    void harnessRouter.processEvent(event);
-    threadRuntime.processEvent(event);
+    void researchRootRuntime.processEvent(event, async () => {
+      await harnessRouter.processEvent(event);
+      threadRuntime.processEvent(event);
+    }).catch((error) => {
+      console.error('[ResearchRoot] Event routing failed:', errorMessage(error));
+    });
     if (event?.kind === 'worker.exit') {
       if (event.sessionId) {
         const ownsRegisteredSession = !event.actor || harnessSessionRegistration.hasActor(event.actor);
@@ -2854,7 +2930,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
-        threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
+        researchRootRuntime.dispose(), threadRuntime.dispose(), terminalRuntime?.shutdown(), languageSupervisor.dispose(), managedLanguageServers.dispose(), runRuntime.dispose(),
       ]);
       const processShutdownErrors = processShutdown.flatMap((result) => result.status === 'rejected' ? [result.reason] : []);
       await languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); });

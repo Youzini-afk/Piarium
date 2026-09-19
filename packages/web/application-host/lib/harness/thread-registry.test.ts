@@ -77,6 +77,7 @@ describe("thread registry", () => {
     expect((await registry.getThread(WORKSPACE, PARENT, thread.id))?.lifecycle).toBe("active");
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
+      owner: "spawned-child",
       owningWorkspaceId: WORKSPACE,
       threadId: thread.id,
       runId: starting.id,
@@ -92,6 +93,7 @@ describe("thread registry", () => {
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
+      owner: "spawned-child",
       owningWorkspaceId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
@@ -105,12 +107,13 @@ describe("thread registry", () => {
     const run = await registry.startRun(WORKSPACE, thread.id);
     await registry.markRunRunning(WORKSPACE, thread.id, run.id, "child-session-1");
     const bindingsPath = threadSessionBindingsPath(dataDir, "test-host");
-    await writeFile(bindingsPath, JSON.stringify({ schemaVersion: 1, bindings: [] }, null, 2), "utf8");
+    await writeFile(bindingsPath, JSON.stringify({ schemaVersion: 2, bindings: [] }, null, 2), "utf8");
     await registry.dispose();
     registry = createThreadRegistry({ dataDir, hostId: "test-host" });
     await registry.reconcileAfterHostRestart();
     expect(await registry.getSessionBinding("child-session-1")).toEqual({
       sessionId: "child-session-1",
+      owner: "spawned-child",
       owningWorkspaceId: WORKSPACE,
       threadId: thread.id,
       runId: run.id,
@@ -118,9 +121,10 @@ describe("thread registry", () => {
     });
 
     await writeFile(bindingsPath, JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       bindings: [{
         sessionId: "ghost-session",
+        owner: "spawned-child",
         owningWorkspaceId: "wrong-ws",
         threadId: "ghost-thread",
         runId: "ghost-run",

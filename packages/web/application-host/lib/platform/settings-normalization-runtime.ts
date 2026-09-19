@@ -186,6 +186,9 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
       const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
+      const defaultWorkFocus = candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research'
+        ? candidate.defaultWorkFocus
+        : null;
       const addedAt = typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt)
         ? candidate.addedAt
         : null;
@@ -208,6 +211,7 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
         ...(iconBackground ? { iconBackground } : {}),
         ...(color ? { color } : {}),
         ...(defaultModel && defaultModel.includes('/') ? { defaultModel } : {}),
+        ...(defaultWorkFocus ? { defaultWorkFocus } : {}),
         ...(addedAt !== null && addedAt >= 0 ? { addedAt } : {}),
         ...(lastOpenedAt !== null && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };

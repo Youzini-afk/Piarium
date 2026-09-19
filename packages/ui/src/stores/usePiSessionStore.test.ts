@@ -621,11 +621,13 @@ describe('Pi session store', () => {
       undefined,
       undefined,
       { id: 'workspace-a', kind: 'workspace' },
+      'research',
     );
 
     expect(runtime.calls.find((call) => call.method === 'session.create')?.params).toEqual({
       cwd: 'D:/worktree/feature',
       workspace: { authorityId: 'canonical-workspace-a', id: 'workspace-a', kind: 'workspace' },
+      workFocus: 'research',
     });
     runtime.event('session.snapshot', snapshot('session-a', 'D:/worktree/feature'), 'session-a');
     expect(store.getState().records['session-a']?.snapshot?.workspace).toEqual({
@@ -634,6 +636,36 @@ describe('Pi session store', () => {
       kind: 'workspace',
     });
     expect(store.getState().records['session-a']?.snapshot?.workspacePersistence).toBe('pending');
+  });
+
+  test('keeps the active focus while a new selection waits for its execution boundary', async () => {
+    const runtime = new FakeRuntime();
+    const active = { id: 'code', source: 'project-default', generation: 1 } as const;
+    const pending: SessionSnapshot = {
+      ...snapshot('session-a'),
+      busy: true,
+      isStreaming: true,
+      workFocus: { active, selected: { id: 'research', source: 'explicit' }, status: 'pending' },
+    };
+    runtime.handler = (method) => {
+      if (method === 'session.workFocus.set') return pending;
+      throw new Error(`Unexpected ${method}`);
+    };
+    const store = createPiSessionStore(runtime);
+
+    await store.getState().selectWorkFocus('session-a', 'research');
+    expect(runtime.calls).toEqual([{
+      method: 'session.workFocus.set', params: { sessionId: 'session-a', workFocus: 'research' },
+    }]);
+    expect(store.getState().records['session-a']?.snapshot?.workFocus).toEqual(pending.workFocus);
+    expect(store.getState().records['session-a']?.snapshot?.isStreaming).toBe(true);
+
+    runtime.event('session.snapshot', {
+      ...pending,
+      workFocus: { ...pending.workFocus!, status: 'failed', failure: { message: 'Could not prepare tools', at: 1 } },
+    }, 'session-a');
+    expect(store.getState().records['session-a']?.snapshot?.workFocus?.active).toEqual(active);
+    expect(store.getState().records['session-a']?.snapshot?.workFocus?.status).toBe('failed');
   });
 
   test('migrates an existing project workspace binding when the session opens', async () => {

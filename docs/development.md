@@ -68,19 +68,21 @@ coverage gaps instead of converting them into a false pass.
 
 Stage Q, specified in [testing-ci-design.md](testing-ci-design.md) and the
 [harness implementation plan](agent-harness-plan.md), is the completed engineering phase before the
-current companion-retirement stage. It reassessed test responsibilities, fixtures, discovery, repeated
+AI4S implementation stage. It reassessed test responsibilities, fixtures, discovery, repeated
 builds and CI execution across the repository. The result is accepted; current scripts remain the
 command authority. Its success is useful regression protection and faster, clearer feedback, not a
 deletion quota or a required number of checks. Do not turn its one-time cleanup plan into a checklist
 for every change.
 
-## Current retirement stage
+## Companion retirement and current AI4S stage
 
 D-296 retires the former VS Code companion before AI4S. The implementation removes the companion
 package, development/build/packaging entrypoints, companion-only shared surface contracts, and current
 installation or marketplace guidance. No archived compatibility copy is kept. The documentation and
 implementation are complete, and the root build plus built-server knowledge smoke passed locally.
-Packaged, cross-platform, and remote-CI evidence remains outside this local result. AI4S starts next.
+Packaged, cross-platform, and remote-CI evidence remains outside that local result. AI4S phase 7A now
+implements the research workbench, independent work focus and real root Thread/Run attachment. Follow
+the phase 7 plan and current harness status for subsequent capability routing and experiment delivery.
 
 ## Repository and build facts
 

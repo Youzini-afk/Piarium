@@ -9,11 +9,20 @@ import {
   stat,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { SessionSummary, SessionWorkspaceBinding } from "@piarium/protocol";
+import {
+  isWorkFocusId,
+  isWorkFocusSource,
+  productDefaultWorkFocus,
+  type SessionSummary,
+  type SessionWorkspaceBinding,
+  type SessionWorkFocusSnapshot,
+  type WorkFocusSelection,
+} from "@piarium/protocol";
 
 interface SessionMetadata {
   archivedAt?: string;
   workspace?: SessionWorkspaceBinding;
+  workFocus?: SessionWorkFocusSnapshot;
 }
 
 interface SessionMetadataDocument {
@@ -46,6 +55,32 @@ function parseWorkspaceBinding(value: unknown): SessionWorkspaceBinding | undefi
     };
   }
   return undefined;
+}
+
+function parseWorkFocusSelection(value: unknown): WorkFocusSelection | null {
+  if (!isRecord(value) || !isWorkFocusId(value.id) || !isWorkFocusSource(value.source)) return null;
+  return { id: value.id, source: value.source };
+}
+
+function parseWorkFocus(value: unknown): SessionWorkFocusSnapshot | undefined {
+  if (!isRecord(value)) return undefined;
+  const active = parseWorkFocusSelection(value.active);
+  const selected = parseWorkFocusSelection(value.selected);
+  if (!active || !selected || !isRecord(value.active)
+    || !Number.isSafeInteger(value.active.generation) || Number(value.active.generation) < 1
+    || (value.status !== "applied" && value.status !== "pending" && value.status !== "failed")) return undefined;
+  const failure = isRecord(value.failure)
+    && typeof value.failure.message === "string"
+    && Number.isFinite(value.failure.at)
+    ? { at: Number(value.failure.at), message: value.failure.message }
+    : undefined;
+  if (value.status === "failed" && !failure) return undefined;
+  return {
+    active: { ...active, generation: Number(value.active.generation) },
+    selected,
+    status: value.status,
+    ...(failure ? { failure } : {}),
+  };
 }
 
 function processIsAlive(pid: number): boolean {
@@ -132,9 +167,11 @@ function parseDocument(content: string, path: string): SessionMetadataDocument {
   for (const [sessionId, raw] of Object.entries(value.sessions)) {
     if (!isRecord(raw)) continue;
     const workspace = parseWorkspaceBinding(raw.workspace);
+    const workFocus = parseWorkFocus(raw.workFocus);
     sessions[sessionId] = {
       ...(typeof raw.archivedAt === "string" ? { archivedAt: raw.archivedAt } : {}),
       ...(workspace === undefined ? {} : { workspace }),
+      ...(workFocus === undefined ? {} : { workFocus }),
     };
   }
   return { sessions, version: 1 };
@@ -181,6 +218,7 @@ export class SessionMetadataStore {
       else delete enriched.archivedAt;
       if (metadata?.workspace) enriched.workspace = metadata.workspace;
       else delete enriched.workspace;
+      enriched.workFocus = structuredClone(metadata?.workFocus ?? productDefaultWorkFocus());
       return enriched;
     });
   }
@@ -189,6 +227,93 @@ export class SessionMetadataStore {
     await this.#mutate((document) => {
       const existing = document.sessions[sessionId] ?? {};
       document.sessions[sessionId] = { ...existing, workspace };
+    });
+  }
+
+  async getWorkFocus(sessionId: string): Promise<SessionWorkFocusSnapshot> {
+    const document = await this.#serialize(() => this.#read());
+    return structuredClone(document.sessions[sessionId]?.workFocus ?? productDefaultWorkFocus());
+  }
+
+  async ensureWorkFocus(
+    sessionId: string,
+    selection: WorkFocusSelection,
+  ): Promise<SessionWorkFocusSnapshot> {
+    return this.#mutate((document) => {
+      const existing = document.sessions[sessionId] ?? {};
+      if (existing.workFocus) return structuredClone(existing.workFocus);
+      const workFocus: SessionWorkFocusSnapshot = {
+        active: { ...selection, generation: 1 },
+        selected: { ...selection },
+        status: "applied",
+      };
+      document.sessions[sessionId] = { ...existing, workFocus };
+      return structuredClone(workFocus);
+    });
+  }
+
+  async selectWorkFocus(
+    sessionId: string,
+    selection: WorkFocusSelection,
+  ): Promise<SessionWorkFocusSnapshot> {
+    return this.#mutate((document) => {
+      const existing = document.sessions[sessionId] ?? {};
+      const current = existing.workFocus ?? productDefaultWorkFocus();
+      const alreadyApplied = current.active.id === selection.id
+        && current.active.source === selection.source;
+      const workFocus: SessionWorkFocusSnapshot = {
+        active: { ...current.active },
+        selected: { ...selection },
+        status: alreadyApplied ? "applied" : "pending",
+      };
+      document.sessions[sessionId] = { ...existing, workFocus };
+      return structuredClone(workFocus);
+    });
+  }
+
+  async applySelectedWorkFocus(
+    sessionId: string,
+    expected: WorkFocusSelection,
+  ): Promise<SessionWorkFocusSnapshot> {
+    return this.#mutate((document) => {
+      const existing = document.sessions[sessionId] ?? {};
+      const current = existing.workFocus ?? productDefaultWorkFocus();
+      if (current.selected.id !== expected.id || current.selected.source !== expected.source) {
+        throw new Error("Work focus selection changed while it was being applied");
+      }
+      const changed = current.active.id !== expected.id || current.active.source !== expected.source;
+      const workFocus: SessionWorkFocusSnapshot = {
+        active: {
+          ...expected,
+          generation: changed ? current.active.generation + 1 : current.active.generation,
+        },
+        selected: { ...expected },
+        status: "applied",
+      };
+      document.sessions[sessionId] = { ...existing, workFocus };
+      return structuredClone(workFocus);
+    });
+  }
+
+  async failSelectedWorkFocus(
+    sessionId: string,
+    expected: WorkFocusSelection,
+    message: string,
+  ): Promise<SessionWorkFocusSnapshot> {
+    return this.#mutate((document) => {
+      const existing = document.sessions[sessionId] ?? {};
+      const current = existing.workFocus ?? productDefaultWorkFocus();
+      if (current.selected.id !== expected.id || current.selected.source !== expected.source) {
+        return structuredClone(current);
+      }
+      const workFocus: SessionWorkFocusSnapshot = {
+        active: { ...current.active },
+        selected: { ...current.selected },
+        status: "failed",
+        failure: { at: Date.now(), message },
+      };
+      document.sessions[sessionId] = { ...existing, workFocus };
+      return structuredClone(workFocus);
     });
   }
 

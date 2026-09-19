@@ -68,4 +68,29 @@
 第 10 节；[agent-harness-plan.md](../agent-harness-plan.md) 阶段 7；[composable-workbench.md](../composable-workbench.md)
 选择语义；architecture、roadmap、status 与决策索引。D-291 正文保留；本条补齐其产品形态与独立绑定。
 
-状态：已接受设计；本轮仅同步文档，科研工作台、侧重选择与新选择语义均待实施。
+状态：设计已在 D-298 的 7A 中实现；异构能力路由、调度、实验和写作仍按 7B–7F 继续实施。
+
+### D-298 · 2026-09-19 · AI4S 7A：独立工作台与真实研究主线
+
+类型：产品入口与执行身份
+
+决定：
+
+1. 增加第一方 `piarium.research` Shell，复用已有 Profile 切换事务、动画和共享窗口/导航/资源框架。
+   删除 workspace Profile selection 的持久字段与写者，项目只保留布局。科研展示从既有 Thread 投影读取主线与分支，
+   不从原生 Pi session 的 fork 关系猜测科研分支，不为展示而创建任务。
+2. 工作侧重使用独立的 `code`/`research` 执行配置。项目条目保存新对话默认，broker 的 session metadata 保存
+   创建时捕获的来源及 selected/active/generation。运行中只修改待应用选择；新 Run 启动前 stage worker、提交
+   durable metadata 再发布，失败保留原 active。当前 Run 的 steer/followUp 属于同一次执行，保持其冻结侧重。
+3. 科研主线直接使用用户当前 Pi 会话与模型。实际 agent_start 附着一个 `purpose: research-root` Thread 与新 Run，
+   实际 settle 写报告和原文引用；不会额外启动主模型会话。普通分支仍使用原 ThreadRuntime 和原生 Pi 子会话。
+4. Run/session binding 显式区分 `attached-root` 与 `spawned-child`。主线结束解绑不留子会话 tombstone，lost 不自动
+   作为子任务重启，删除 Thread 不删其附着的用户会话；主会话删除仍沿其自己的 broker 生命周期处理。
+   用户在主线运行中或结束后均能以 user 身份操作其研究分支。
+5. 本阶段保持现有模型选择和工具授权。异构 capability 路由、研究更新与调度、实验/产物组织、综合写作和质量验证
+   按 7B–7F 实施。通用侧重仍可使用已有工具；科研侧重不扩大权限，不限制在科研 Shell 内执行。
+
+持久格式：Thread catalog 使用 schema 10，session-binding 索引使用 schema 2；不引入旧内部格式迁移或双写。
+原生 Pi JSONL、用户工作区文件与项目资产不改写。工作台选择与 session work focus 各守既有权威。
+
+状态：7A 已实现并接线；本地验证与未实测边界见 [status](../agent-harness-status.md)。7B–7F 未宣称交付。

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { ProjectEntry } from '@piarium/application-client';
+import type { WorkFocusId } from '@piarium/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
@@ -52,6 +53,7 @@ interface ProjectsStore {
     color?: string | null;
     iconBackground?: string | null;
     defaultModel?: string | null;
+    defaultWorkFocus?: WorkFocusId;
   }) => void;
   uploadProjectIcon: (id: string, file: File) => Promise<{ ok: boolean; error?: string }>;
   removeProjectIcon: (id: string) => Promise<{ ok: boolean; error?: string }>;
@@ -271,6 +273,9 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     const defaultModel = normalizeDefaultModel(candidate.defaultModel);
     if (defaultModel) {
       project.defaultModel = defaultModel;
+    }
+    if (candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research') {
+      project.defaultWorkFocus = candidate.defaultWorkFocus;
     }
     if (candidate.iconBackground === null) {
       project.iconBackground = null;
@@ -557,6 +562,7 @@ export const useProjectsStore = create<ProjectsStore>()(
       color?: string | null;
       iconBackground?: string | null;
       defaultModel?: string | null;
+      defaultWorkFocus?: WorkFocusId;
     }) => {
       const { projects, activeProjectId } = get();
       const nextProjects = projects.map((project) => {
@@ -579,6 +585,7 @@ export const useProjectsStore = create<ProjectsStore>()(
             delete updated.defaultModel;
           }
         }
+        if (meta.defaultWorkFocus !== undefined) updated.defaultWorkFocus = meta.defaultWorkFocus;
         return updated;
       });
       set({ projects: nextProjects });

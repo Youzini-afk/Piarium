@@ -13,6 +13,7 @@
 import {
   PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
   type PiariumApplicationSurface,
 } from '@piarium/extension-contract';
 import { registerWorkbenchShellComponent } from '@/lib/extensions/shell-component-registry';
@@ -20,6 +21,7 @@ import { registerBuiltinSettingsWorkbench } from './settings/register';
 
 let agentRegistration: Promise<void> | null = null;
 let ideRegistration: Promise<void> | null = null;
+let researchRegistration: Promise<void> | null = null;
 
 const registerAgentShell = (): Promise<void> => {
   if (agentRegistration) return agentRegistration;
@@ -45,6 +47,18 @@ const registerIdeShell = (): Promise<void> => {
   return pending;
 };
 
+const registerResearchShell = (): Promise<void> => {
+  if (researchRegistration) return researchRegistration;
+  const pending = import('./research/ResearchWorkbenchShell').then(({ ResearchWorkbenchShell }) => {
+    registerWorkbenchShellComponent(PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID, ResearchWorkbenchShell);
+  });
+  researchRegistration = pending;
+  void pending.catch(() => {
+    if (researchRegistration === pending) researchRegistration = null;
+  });
+  return pending;
+};
+
 export const registerWorkbenchShells = async (surface: PiariumApplicationSurface): Promise<void> => {
   registerBuiltinSettingsWorkbench();
   const registrations: Promise<void>[] = [];
@@ -53,6 +67,9 @@ export const registerWorkbenchShells = async (surface: PiariumApplicationSurface
   }
   if (surface === 'web' || surface === 'desktop') {
     registrations.push(registerIdeShell());
+  }
+  if (surface === 'web' || surface === 'desktop' || surface === 'mobile') {
+    registrations.push(registerResearchShell());
   }
   await Promise.all(registrations);
 };

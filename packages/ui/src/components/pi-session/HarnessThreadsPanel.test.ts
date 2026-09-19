@@ -4,6 +4,7 @@ import {
   harnessThreadsAtEntry,
   mergeHarnessThreadSnapshot,
   parseHarnessThreadList,
+  parseHarnessThreadProjection,
   parseHarnessThreadMutation,
   parseHarnessThreadSpace,
   projectHarnessThreadState,
@@ -11,13 +12,14 @@ import {
 
 const thread = (overrides: Partial<Thread> = {}): Thread => ({
   id: 'thread-1',
+  purpose: 'task',
   parent: { kind: 'session', id: 'parent-1' },
   workspaceId: 'workspace-1',
   forkPoint: null,
   brief: 'Check the implementation',
   preset: 'check',
   model: null,
-  manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: 'Run checks.', tools: ['read', 'bash'], worktree: 'shared' },
+  manifest: { workFocus: 'code', carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: 'Run checks.', tools: ['read', 'bash'], worktree: 'shared' },
   createdBy: 'agent',
   kind: 'implementation',
   worktree: null,
@@ -41,6 +43,7 @@ const run = (overrides: Partial<ThreadRun> = {}): ThreadRun => ({
   attempt: 1,
   runtimeId: 'pi',
   sessionId: 'child-1',
+  sessionOwner: 'spawned-child',
   workerState: 'running',
   outcome: null,
   exitReason: null,
@@ -55,6 +58,16 @@ const run = (overrides: Partial<ThreadRun> = {}): ThreadRun => ({
 });
 
 describe('HarnessThreadsPanel projection', () => {
+  test('projects the attached root and its branches without treating unrelated sessions as research', () => {
+    const root = { thread: thread({ id: 'root', purpose: 'research-root', hidden: true }), activeRun: run({ sessionId: 'parent-1', sessionOwner: 'attached-root' }) };
+    const branch = { thread: thread({ parent: { kind: 'thread', id: 'root' } }), activeRun: run() };
+    const response = { workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' }, threads: [], researchRoot: root, researchBranches: [branch] };
+    expect(parseHarnessThreadProjection(response).researchRoot).toEqual(root);
+    expect(parseHarnessThreadProjection(response).researchBranches).toEqual([branch]);
+    expect(() => parseHarnessThreadProjection({ ...response, researchBranches: [{ ...branch, thread: thread() }] })).toThrow(/research branch/i);
+    expect(parseHarnessThreadProjection({ ...response, researchRoot: null, researchBranches: [] }).researchRoot).toBeNull();
+  });
+
   test('keeps execution, attention, and integration states distinct', () => {
     expect(projectHarnessThreadState({ thread: thread(), activeRun: run() })).toBe('running');
     expect(projectHarnessThreadState({ thread: thread({ attention: 'user' }), activeRun: run() })).toBe('waiting');

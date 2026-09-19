@@ -1,4 +1,4 @@
-import type { AgentInputContext, PiRuntimeSnapshot } from '@piarium/protocol';
+import type { AgentInputContext, PiRuntimeSnapshot, WorkFocusId } from '@piarium/protocol';
 import type { WorktreeMetadata, DraftStarterRef, FileEditorSettingsPatch } from './ui-dto.js';
 import type {
   PiariumExtensionActualState,
@@ -655,6 +655,8 @@ export interface ProjectEntry {
   iconBackground?: string | null;
   color?: string | null;
   defaultModel?: string;
+  /** Captured by newly created conversations unless they provide an explicit work focus. */
+  defaultWorkFocus?: WorkFocusId;
   addedAt?: number;
   lastOpenedAt?: number;
   sidebarCollapsed?: boolean;

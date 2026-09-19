@@ -46,6 +46,9 @@ import {
   type HarnessEmbedParams,
   type HarnessRerankDocument,
   type HarnessRerankParams,
+  isWorkFocusId,
+  isWorkFocusSource,
+  type WorkFocusSelection,
 } from "@piarium/protocol";
 import { HostError, toProtocolError } from "./errors.js";
 import { PackageAuthorityHost } from "./package-authority-host.js";
@@ -61,6 +64,45 @@ const readAgentInputContext = (params: Record<string, unknown>): AgentInputConte
   const context = parseAgentInputContext(params.inputContext);
   if (!context) throw new HostError("invalid_params", "inputContext is malformed");
   return context;
+};
+
+const optionalWorkFocusSelection = (
+  params: Record<string, unknown>,
+): WorkFocusSelection | undefined => {
+  if (params.workFocus === undefined) return undefined;
+  const value = expectRecord(params.workFocus, "workFocus");
+  if (!isWorkFocusId(value.id) || !isWorkFocusSource(value.source)) {
+    throw new HostError("invalid_params", "workFocus must contain a valid id and source");
+  }
+  return { id: value.id, source: value.source };
+};
+
+const readWorkFocusSelection = (params: Record<string, unknown>): WorkFocusSelection => {
+  const value = expectRecord(params.selection, "selection");
+  if (!isWorkFocusId(value.id) || !isWorkFocusSource(value.source)) {
+    throw new HostError("invalid_params", "selection must contain a valid work focus id and source");
+  }
+  return { id: value.id, source: value.source };
+};
+
+const optionalWorkFocusRole = (
+  params: Record<string, unknown>,
+): import("@piarium/protocol").WorkFocusExecutionRole | undefined => {
+  const value = params.workFocusRole;
+  if (value === undefined) return undefined;
+  if (value !== "principal" && value !== "branch") {
+    throw new HostError("invalid_params", "workFocusRole must be principal or branch");
+  }
+  return value;
+};
+
+const optionalPositiveInteger = (params: Record<string, unknown>, key: string): number | undefined => {
+  const value = params[key];
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw new HostError("invalid_params", `${key} must be a positive integer`);
+  }
+  return Number(value);
 };
 
 const HOST_CAPABILITIES: HostCapabilities = {
@@ -662,6 +704,9 @@ export class HostController {
           optionalStringList(params, "tools"),
           optionalModelSelection(params),
           optionalPermissionPolicy(params),
+          optionalWorkFocusSelection(params),
+          optionalPositiveInteger(params, "workFocusGeneration"),
+          optionalWorkFocusRole(params),
         );
       case "session.open": {
         const cwd = optionalString(params, "cwd");
@@ -670,6 +715,9 @@ export class HostController {
         const tools = optionalStringList(params, "tools");
         const model = optionalModelSelection(params);
         const permissions = optionalPermissionPolicy(params);
+        const workFocus = optionalWorkFocusSelection(params);
+        const workFocusGeneration = optionalPositiveInteger(params, "workFocusGeneration");
+        const workFocusRole = optionalWorkFocusRole(params);
         return this.#sessionHost.open({
           ...(cwd === undefined ? {} : { cwd }),
           ...(sessionFile === undefined ? {} : { sessionFile }),
@@ -677,8 +725,28 @@ export class HostController {
           ...(tools === undefined ? {} : { tools }),
           ...(model === undefined ? {} : { model }),
           ...(permissions === undefined ? {} : { permissions }),
+          ...(workFocus === undefined ? {} : { workFocus }),
+          ...(workFocusGeneration === undefined ? {} : { workFocusGeneration }),
+          ...(workFocusRole === undefined ? {} : { workFocusRole }),
         });
       }
+      case "session.workFocus.apply": {
+        const generation = optionalPositiveInteger(params, "generation");
+        if (generation === undefined) {
+          throw new HostError("invalid_params", "generation is required");
+        }
+        return {
+          applied: this.#sessionHost.applyWorkFocus(
+            readString(params, "sessionId"),
+            readWorkFocusSelection(params),
+            generation,
+          ),
+        };
+      }
+      case "session.workFocus.publish":
+        return {
+          published: this.#sessionHost.publishWorkFocus(readString(params, "sessionId")),
+        };
       case "session.resolve": {
         const sessionFile = resolve(readString(params, "sessionFile"));
         try {

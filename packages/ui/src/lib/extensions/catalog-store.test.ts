@@ -50,7 +50,7 @@ const snapshot = (): PiariumExtensionHostStateSnapshot => ({
     document: {
       activeProfileId: 'default',
       layouts: [],
-      profileSelections: { users: {}, workspaces: {} },
+      profileSelections: { users: {} },
       profiles: [{ id: 'default', label: 'Default' }],
       revision: 0,
       schemaVersion: 1,

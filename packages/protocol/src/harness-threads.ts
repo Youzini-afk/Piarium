@@ -7,8 +7,11 @@
  */
 
 import type { PermissionPolicy } from "./permission-gate.js";
+import type { WorkFocusId } from "./work-focus.js";
 
 export type ThreadKind = "discussion" | "implementation";
+export type ThreadPurpose = "task" | "research-root";
+export type ThreadSessionOwner = "spawned-child" | "attached-root";
 export type ThreadCreatedBy = "user" | "agent";
 export type ThreadLifecycle = "queued" | "active" | "settled" | "archived";
 export type ThreadAttention = "none" | "user" | "permission" | "thread" | "stalled" | "looping";
@@ -42,6 +45,7 @@ export interface ThreadSessionBinding {
   threadId: string;
   runId: string;
   parent: ThreadParent;
+  owner: ThreadSessionOwner;
 }
 
 export type RetrievalFactStatus = "source-checked" | "unknown" | "unavailable";
@@ -411,6 +415,8 @@ export interface ThreadLaunchManifest {
   scope: string[];
   systemPromptFragment: string | null;
   tools: string[];
+  /** Agent work focus frozen when this Thread was created. */
+  workFocus: WorkFocusId;
   worktree: "none" | "shared" | "isolated";
   /** Frozen Host permission overlay. Nested children inherit or narrow it. */
   permissions?: PermissionPolicy;
@@ -496,6 +502,8 @@ export interface Thread {
   manifest: ThreadLaunchManifest;
   createdBy: ThreadCreatedBy;
   kind: ThreadKind;
+  /** Distinguishes ordinary delegated work from the real user-session research root. */
+  purpose: ThreadPurpose;
   worktree: ThreadWorktree | null;
   /** Host-owned working-state branch associated with this Thread. */
   workBranchId?: string;
@@ -659,6 +667,7 @@ export interface ThreadRunFrozenConfig {
   worktree: "none" | "shared" | "isolated";
   systemPromptFragment: string | null;
   inputOrigin: ThreadRunInputOrigin;
+  workFocus: WorkFocusId;
 }
 
 export interface ThreadRun {
@@ -671,6 +680,8 @@ export interface ThreadRun {
   attempt: number;
   runtimeId: string;
   sessionId: string | null;
+  /** Whether sessionId is a spawned child or an existing user session attached to this Run. */
+  sessionOwner: ThreadSessionOwner;
   /** Last published resultRevision known when this Run started, if any. */
   inputRevision?: number;
   /** Frozen execution configuration. Required by the current Host catalog validator. */

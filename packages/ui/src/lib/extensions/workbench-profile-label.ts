@@ -5,6 +5,8 @@ import {
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL,
 } from '@piarium/extension-contract';
 import type { I18nKey } from '@/lib/i18n';
 
@@ -17,6 +19,10 @@ const officialIdeProfileLabels = new Set([
   PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
 ]);
 
+const officialResearchProfileLabels = new Set([
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL,
+]);
+
 export const workbenchProfileLabel = (
   profile: { id: string; label: string },
   t: (key: I18nKey) => string,
@@ -26,6 +32,9 @@ export const workbenchProfileLabel = (
   }
   if (profile.id === PIARIUM_WORKBENCH_IDE_PROFILE_ID && officialIdeProfileLabels.has(profile.label)) {
     return t('settings.piarium.extensions.workbench.profile.ide');
+  }
+  if (profile.id === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID && officialResearchProfileLabels.has(profile.label)) {
+    return t('research-workbench.profile.label');
   }
   return profile.label;
 };

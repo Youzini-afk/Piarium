@@ -268,14 +268,13 @@ const proveShellReady = async (
 const persistProfileSelection = async (
   deps: WorkbenchShellTransitionDependencies,
   profileId: string,
-  workspaceId: string | undefined,
   expectedRevision: number,
 ): Promise<void> => {
   await deps.selectProfile({
     expectedRevision,
     profileId,
-    scope: workspaceId ? 'workspace' : 'user',
-    scopeId: workspaceId ?? 'default',
+    scope: 'user',
+    scopeId: 'default',
   });
   await deps.refreshCatalog();
 };
@@ -405,7 +404,7 @@ export const runSelectActiveWorkbenchProfile = (
   }, profileId);
   await commitCandidateShell(deps, {
     ...(options?.beforeCommit ? { beforeCommit: options.beforeCommit } : {}),
-    persist: (expectedRevision) => persistProfileSelection(deps, profileId, workspaceId, expectedRevision),
+    persist: (expectedRevision) => persistProfileSelection(deps, profileId, expectedRevision),
     profileId,
     replacementSelections: layout.replacementSelections,
     ...(options?.enableShell ? { enableShell: true } : {}),

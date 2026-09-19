@@ -94,7 +94,7 @@ const hostState = (
     authoritative: true,
     diagnostics: [],
     document: {
-      activeProfileId: 'default', layouts: [], profileSelections: { users: {}, workspaces: {} },
+      activeProfileId: 'default', layouts: [], profileSelections: { users: {} },
       profiles: [{ id: 'default', label: 'Default' }], revision: 0, schemaVersion: 1,
       updatedAt: '1970-01-01T00:00:00.000Z',
     },

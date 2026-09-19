@@ -53,15 +53,15 @@ describe("thread protocol types (§9.3)", () => {
 
   it("separates durable work from an execution attempt", () => {
     const run: ThreadRun = {
-      id: "run-1", threadId: "thread-1", attempt: 1, runtimeId: "pi", sessionId: "session-child",
+      id: "run-1", threadId: "thread-1", attempt: 1, runtimeId: "pi", sessionId: "session-child", sessionOwner: "spawned-child",
       workerState: "lost", outcome: "lost", exitReason: "host restarted",
       tokens: { input: 1, output: 2, cacheRead: 3 }, costUsd: null, steps: 4, lastToolCall: null,
       startedAt: "2026-01-01T00:00:00Z", lastActivityAt: "2026-01-01T00:01:00Z", endedAt: "2026-01-01T00:01:00Z",
     };
     const thread: Thread = {
       id: "thread-1", parent: { kind: "session", id: "parent-1" }, workspaceId: "workspace-1",
-      forkPoint: null, brief: "test", preset: "check", model: null, createdBy: "agent", kind: "implementation",
-      manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: "Run checks.", tools: ["read", "bash"], worktree: "shared" },
+      forkPoint: null, brief: "test", preset: "check", model: null, createdBy: "agent", kind: "implementation", purpose: "task",
+      manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: "Run checks.", tools: ["read", "bash"], workFocus: "code", worktree: "shared" },
       worktree: null, lifecycle: "active", attention: "permission", waitingFor: { kind: "permission", text: "allow?" },
       integration: "conflict", diffStats: null, report: null, activeRunId: run.id,
       createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:01:00Z", eventSeq: 2, hidden: false,

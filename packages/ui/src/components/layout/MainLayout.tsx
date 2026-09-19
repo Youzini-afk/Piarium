@@ -49,7 +49,11 @@ const DiagramView = lazyWithChunkRecovery(() => import('@/components/views/Diagr
 const SettingsView = lazyWithChunkRecovery(() => import('@/components/views/SettingsView').then(m => ({ default: m.SettingsView })));
 const SettingsWindow = lazyWithChunkRecovery(() => import('@/components/views/SettingsWindow').then(m => ({ default: m.SettingsWindow })));
 
-export const MainLayout: React.FC = () => {
+interface MainLayoutProps {
+    renderConversation?: (active: boolean) => React.ReactNode;
+}
+
+export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) => {
     const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
     const isContextRailOpen = useUIStore((state) => state.isContextRailOpen);
     const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -253,6 +257,10 @@ export const MainLayout: React.FC = () => {
     }, [activeMainTab, isMobile, mobileRightSidebarOpen]);
 
     const isChatActive = activeMainTab === 'chat';
+    const conversationActive = isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen;
+    const conversation = renderConversation
+        ? renderConversation(conversationActive)
+        : <ChatView active={conversationActive} />;
 
     return (
         <DiffWorkerProvider>
@@ -319,7 +327,7 @@ export const MainLayout: React.FC = () => {
                     >
                         <main className="w-full h-full overflow-hidden bg-background relative" data-page-scroll-lock="true">
                             <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
-                                <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
+                                <ErrorBoundary>{conversation}</ErrorBoundary>
                             </div>
                             {secondaryView && (
                                 <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
@@ -422,7 +430,7 @@ export const MainLayout: React.FC = () => {
                                         <div className="relative flex flex-1 min-h-0 min-w-0 overflow-hidden" data-page-scroll-lock="true">
                                             <main className="flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                                 <div className={cn('absolute inset-0', (!isChatActive || isSurfacePageOpen) && 'invisible')}>
-                                                    <ErrorBoundary><ChatView active={isChatActive && !isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
+                                                    <ErrorBoundary>{conversation}</ErrorBoundary>
                                                 </div>
                                                 {secondaryView && (
                                                     <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>

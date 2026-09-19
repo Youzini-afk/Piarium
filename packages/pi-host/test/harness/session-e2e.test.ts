@@ -273,6 +273,123 @@ const waitUntil = async (predicate: () => Promise<boolean>): Promise<void> => {
   }
 };
 
+describe("session e2e — work focus", () => {
+  it("applies research only at run boundaries without retaining its prompt after code resumes", async () => {
+    await withTempRoot("piarium-work-focus-", async (root) => {
+      await writeFile(join(root, "observation.txt"), "measured result\n", "utf8");
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code turn"); },
+        (context) => {
+          contexts.push(structuredClone(context));
+          return fauxAssistantMessage([fauxToolCall("read", { path: "observation.txt" })]);
+        },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("research turn"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("code again"); },
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("research again"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(
+          root,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { id: "code", source: "product-default" },
+        );
+        await session.host.prompt(snapshot.sessionId, "implement a small change");
+        await session.host.session.waitForIdle();
+        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /piarium-work-focus id="research"/);
+
+        assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2), true);
+        await session.host.prompt(snapshot.sessionId, "investigate the observation");
+        await session.host.session.waitForIdle();
+        assert.match(contexts[1]?.systemPrompt ?? "", /principal researcher/);
+        assert.equal(contexts[2]?.systemPrompt, contexts[1]?.systemPrompt);
+        assert.equal(session.host.snapshot().workFocus?.active.id, "research");
+
+        assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "code", source: "explicit" }, 3), true);
+        await session.host.prompt(snapshot.sessionId, "implement the selected analysis");
+        await session.host.session.waitForIdle();
+        assert.doesNotMatch(contexts[3]?.systemPrompt ?? "", /piarium-work-focus id="research"/);
+
+        assert.equal(session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 4), true);
+        await session.host.prompt(snapshot.sessionId, "test a competing explanation");
+        await session.host.session.waitForIdle();
+        assert.equal((contexts[4]?.systemPrompt?.match(/<piarium-work-focus id="research">/g) ?? []).length, 1);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("keeps the applied code focus when research preparation is rejected during a live run", async () => {
+    await withTempRoot("piarium-work-focus-failure-", async (root) => {
+      const faux = registerFauxProvider();
+      let release!: () => void;
+      let entered!: () => void;
+      const waiting = new Promise<void>((resolve) => { entered = resolve; });
+      const delayed = new Promise<void>((resolve) => { release = resolve; });
+      faux.setResponses([
+        async () => { entered(); await delayed; return fauxAssistantMessage("code turn done"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(root);
+        const running = session.host.prompt(snapshot.sessionId, "keep the code run active");
+        await waiting;
+        assert.throws(
+          () => session.host.applyWorkFocus(snapshot.sessionId, { id: "research", source: "explicit" }, 2),
+          /only be applied before a new user run/i,
+        );
+        assert.equal(session.host.snapshot().workFocus?.active.id, "code");
+        release();
+        await running;
+        await session.host.session.waitForIdle();
+      } finally {
+        release?.();
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+
+  it("uses the bounded research identity for a spawned branch session", async () => {
+    await withTempRoot("piarium-work-focus-branch-", async (root) => {
+      const faux = registerFauxProvider();
+      const contexts: Context[] = [];
+      faux.setResponses([
+        (context) => { contexts.push(structuredClone(context)); return fauxAssistantMessage("branch finding"); },
+      ]);
+      const session = await setupSession({ root, faux });
+      try {
+        const snapshot = await session.host.create(
+          root,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          { id: "research", source: "explicit" },
+          1,
+          "branch",
+        );
+        await session.host.prompt(snapshot.sessionId, "check the bounded alternative");
+        await session.host.session.waitForIdle();
+        assert.match(contexts[0]?.systemPrompt ?? "", /independent research branch/);
+        assert.doesNotMatch(contexts[0]?.systemPrompt ?? "", /principal researcher/);
+      } finally {
+        await session.dispose();
+        faux.unregister();
+      }
+    });
+  });
+});
+
 describe("session e2e — passive thread input", () => {
   it("shows a passive note in the next actual tool continuation without adding a turn", async () => {
     await withTempRoot("piarium-passive-tool-boundary-", async (root) => {

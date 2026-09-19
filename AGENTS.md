@@ -62,8 +62,9 @@ bearer/pairing data, or file contents.
 
 ## Workbench and data invariants
 
-- Agent Workspace (`default`) and IDE Workbench (`piarium.ide`) are extension-provided shells selected
-  through Workbench Profiles. Do not add a global `agentMode`/`ideMode` ownership branch.
+- Agent Workspace (`default`), IDE Workbench (`piarium.ide`), and Research Workbench (`piarium.research`)
+  are extension-provided shells selected through Workbench Profiles. Work focus is independent session
+  execution configuration; project or session navigation never changes the selected shell.
 - Shells own presentation. Documents, editor groups, terminals, Git, profiles, and runtime identity
   remain in the shared kernel or their trusted host authority.
 - `DocumentsAPI` is the single text-content path. `FilesAPI` remains browse/binary/CRUD and

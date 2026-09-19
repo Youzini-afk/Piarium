@@ -7,6 +7,8 @@ import type {
   SessionSnapshot,
   SessionSummary,
   SessionWorkspaceBinding,
+  WorkFocusId,
+  WorkFocusExecutionRole,
 } from "@piarium/protocol";
 import { PiRuntimeNotReadyError } from "./errors.js";
 import { resolveBundledPiHostEntry } from "./host-entry.js";
@@ -15,6 +17,7 @@ import {
   type PiRuntimeBrokerEvent,
   type PiRuntimeBrokerOptions,
   type PiSessionDeleteCoordinator,
+  type PiSessionRunCoordinator,
   type ProjectTrustDecision,
 } from "./runtime-broker.js";
 import {
@@ -58,6 +61,7 @@ export class PiRuntimeLifecycle {
   #nextId = 1;
   #revision = 0;
   #sessionDeleteCoordinator: PiSessionDeleteCoordinator | undefined;
+  #sessionRunCoordinator: PiSessionRunCoordinator | undefined;
 
   constructor(options: PiRuntimeLifecycleOptions) {
     this.#createBroker = options.createBroker;
@@ -113,6 +117,13 @@ export class PiRuntimeLifecycle {
     this.#sessionDeleteCoordinator = coordinate;
     for (const generation of this.#generations.values()) {
       generation.broker.setSessionDeleteCoordinator(coordinate);
+    }
+  }
+
+  setSessionRunCoordinator(coordinate: PiSessionRunCoordinator | undefined): void {
+    this.#sessionRunCoordinator = coordinate;
+    for (const generation of this.#generations.values()) {
+      generation.broker.setSessionRunCoordinator(coordinate);
     }
   }
 
@@ -187,7 +198,7 @@ export class PiRuntimeLifecycle {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
-    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[] },
+    launch?: { model?: { providerId: string; modelId: string }; scope?: string[]; tools?: string[]; workFocus?: WorkFocusId; workFocusRole?: WorkFocusExecutionRole },
   ): Promise<SessionSnapshot> {
     return this.requireBroker().createSession(cwd, name, parentSession, workspace, launch);
   }
@@ -199,6 +210,7 @@ export class PiRuntimeLifecycle {
     sessionId?: string;
     scope?: string[];
     tools?: string[];
+    workFocusRole?: WorkFocusExecutionRole;
     workspace?: SessionWorkspaceBinding;
   }): Promise<SessionSnapshot> {
     const broker = input.sessionId ? this.#findBrokerForSession(input.sessionId) : undefined;
@@ -271,6 +283,9 @@ export class PiRuntimeLifecycle {
         if (property === "setSessionDeleteCoordinator") {
           return (coordinate: PiSessionDeleteCoordinator | undefined) => this.setSessionDeleteCoordinator(coordinate);
         }
+        if (property === "setSessionRunCoordinator") {
+          return (coordinate: PiSessionRunCoordinator | undefined) => this.setSessionRunCoordinator(coordinate);
+        }
         if (property === "requestForSession") {
           return (
             sessionId: string,
@@ -337,6 +352,9 @@ export class PiRuntimeLifecycle {
     });
     if (this.#sessionDeleteCoordinator !== undefined) {
       broker.setSessionDeleteCoordinator(this.#sessionDeleteCoordinator);
+    }
+    if (this.#sessionRunCoordinator !== undefined) {
+      broker.setSessionRunCoordinator(this.#sessionRunCoordinator);
     }
     let handshake: HostHandshakeResult;
     try {

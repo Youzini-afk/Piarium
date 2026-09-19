@@ -18,6 +18,10 @@ export const HarnessThreadStateProvider: React.FC<{
   const [includeArchived, setIncludeArchived] = React.useState(false);
   const includeArchivedRef = React.useRef(false);
   const [threads, setThreads] = React.useState<HarnessThreadSnapshot[]>([]);
+  const [researchRoot, setResearchRoot] = React.useState<HarnessThreadSnapshot | null>(null);
+  const researchRootRef = React.useRef<HarnessThreadSnapshot | null>(null);
+  const [researchBranches, setResearchBranches] = React.useState<HarnessThreadSnapshot[]>([]);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [scope, setScope] = React.useState<{ parent: ThreadParent; workspaceId: string }>({
     parent: { kind: 'session', id: parentSessionId },
     workspaceId: workspaceId ?? '',
@@ -36,6 +40,17 @@ export const HarnessThreadStateProvider: React.FC<{
 
   const merge = React.useCallback((snapshot: HarnessThreadSnapshot) => {
     eventRevision.current += 1;
+    if (snapshot.thread.purpose === 'research-root') {
+      const current = researchRootRef.current;
+      if (current && current.thread.eventSeq > snapshot.thread.eventSeq) return;
+      researchRootRef.current = snapshot;
+      setResearchRoot(snapshot);
+      return;
+    }
+    if (snapshot.thread.parent.kind === 'thread' && snapshot.thread.parent.id === researchRootRef.current?.thread.id) {
+      setResearchBranches((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: includeArchivedRef.current }));
+      return;
+    }
     setThreads((current) => mergeHarnessThreadSnapshot(current, snapshot, { includeArchived: includeArchivedRef.current }));
   }, []);
 
@@ -51,10 +66,23 @@ export const HarnessThreadStateProvider: React.FC<{
       throw new Error(`Unable to load threads (${response.status})`);
     }
     const projection = parseHarnessThreadProjection(await response.json(), { includeArchived: includeArchivedRef.current });
+    setLoadError(null);
     commitScope({ workspaceId: projection.workspaceId, parent: projection.parent });
+    if (eventRevision.current === revisionAtStart
+      || (projection.researchRoot && (!researchRootRef.current
+        || projection.researchRoot.thread.eventSeq >= researchRootRef.current.thread.eventSeq))) {
+      researchRootRef.current = projection.researchRoot;
+      setResearchRoot(projection.researchRoot);
+    }
+    setResearchBranches((current) => eventRevision.current === revisionAtStart
+      ? projection.researchBranches
+      : projection.researchBranches.reduce((list, snapshot) => (
+        mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: includeArchivedRef.current })
+      ), current));
     setThreads((current) => {
-      if (eventRevision.current === revisionAtStart) return projection.threads;
-      return projection.threads.reduce(
+      const ordinary = projection.threads.filter(({ thread }) => thread.purpose !== 'research-root');
+      if (eventRevision.current === revisionAtStart) return ordinary;
+      return ordinary.reduce(
         (list, snapshot) => mergeHarnessThreadSnapshot(list, snapshot, { includeArchived: includeArchivedRef.current }),
         current,
       );
@@ -65,20 +93,27 @@ export const HarnessThreadStateProvider: React.FC<{
     const controller = new AbortController();
     eventRevision.current = 0;
     setThreads([]);
+    researchRootRef.current = null;
+    setResearchRoot(null);
+    setResearchBranches([]);
+    setLoadError(null);
     commitScope({ workspaceId: workspaceId ?? '', parent: { kind: 'session', id: parentSessionId } });
     if (!workspaceId) return () => controller.abort();
     void reload(controller.signal).catch((error) => {
-      if (!controller.signal.aborted) console.warn('[HarnessThreadState] Failed to load threads:', error);
+      if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : String(error));
     });
     const unsubscribe = subscribePiariumEvents((event) => {
       if (event.type === 'stream-ready') {
-        void reload(controller.signal).catch(() => undefined);
+        void reload(controller.signal).catch((error) => {
+          if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : String(error));
+        });
         return;
       }
       if (
         event.type !== 'harness-thread-changed'
         || event.workspaceId !== scopeRef.current.workspaceId
-        || !sameHarnessThreadParent(event.parent, scopeRef.current.parent)
+        || (!sameHarnessThreadParent(event.parent, scopeRef.current.parent)
+          && !(event.parent.kind === 'thread' && event.parent.id === researchRootRef.current?.thread.id))
       ) return;
       merge({ thread: event.thread, activeRun: event.activeRun });
     });
@@ -92,7 +127,7 @@ export const HarnessThreadStateProvider: React.FC<{
     includeArchivedRef.current = value;
     setIncludeArchived(value);
     void reload().catch((error) => {
-      console.warn('[HarnessThreadState] Failed to reload threads:', error);
+      setLoadError(error instanceof Error ? error.message : String(error));
     });
   }, [reload]);
 
@@ -103,8 +138,11 @@ export const HarnessThreadStateProvider: React.FC<{
     reload,
     setIncludeArchived: setIncludeArchivedAndReload,
     threads,
+    researchRoot,
+    researchBranches,
+    loadError,
     workspaceId: scope.workspaceId,
-  }), [includeArchived, merge, reload, scope.parent, scope.workspaceId, setIncludeArchivedAndReload, threads]);
+  }), [includeArchived, merge, reload, scope.parent, scope.workspaceId, setIncludeArchivedAndReload, threads, researchRoot, researchBranches, loadError]);
 
   return <HarnessThreadStateContext.Provider value={value}>{children}</HarnessThreadStateContext.Provider>;
 };

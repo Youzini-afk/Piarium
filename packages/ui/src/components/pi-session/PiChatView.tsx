@@ -10,6 +10,7 @@ import type {
   PiSessionMessageEntry,
   PiUserMessage,
   ThinkingLevel,
+  WorkFocusId,
 } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -90,6 +91,9 @@ interface PiChatViewProps {
   active?: boolean;
   autoOpenDraft?: boolean;
   readOnly?: boolean;
+  conversationHeader?: React.ReactNode;
+  threadPanelMode?: 'sidebar' | 'inline';
+  threadPanelTitle?: string;
 }
 
 const DRAFT_PROJECT_MARKER = '__PIARIUM_DRAFT_PROJECT__';
@@ -160,6 +164,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   active = true,
   autoOpenDraft = true,
   readOnly = false,
+  conversationHeader,
+  threadPanelMode = 'sidebar',
+  threadPanelTitle,
 }) => {
   const { t } = useI18n();
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
@@ -189,6 +196,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const recoverTo = usePiSessionStore((state) => state.recoverTo);
   const selectModel = usePiSessionStore((state) => state.selectModel);
   const selectThinking = usePiSessionStore((state) => state.selectThinking);
+  const selectWorkFocus = usePiSessionStore((state) => state.selectWorkFocus);
   const updateSubmission = usePiSessionStore((state) => state.updateSubmission);
   const projects = useProjectsStore((state) => state.projects);
   const activeProjectId = useProjectsStore((state) => state.activeProjectId);
@@ -231,6 +239,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const clearPiDraft = usePiDraftStore((state) => state.clear);
   const transferPendingPiDraft = usePiDraftStore((state) => state.transferPendingDraft);
   const [creating, setCreating] = React.useState(false);
+  const [changingWorkFocus, setChangingWorkFocus] = React.useState(false);
+  const workFocusChangeInFlight = React.useRef(false);
   const [recoveryEntry, setRecoveryEntry] = React.useState<PiSessionMessageEntry | null>(null);
   const [recoveryPlan, setRecoveryPlan] = React.useState<WorkspaceCombinedRecoveryPlan | null>(null);
   const [recoveryBusyEntryId, setRecoveryBusyEntryId] = React.useState<string | null>(null);
@@ -239,7 +249,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
   const [treeInitialQuery, setTreeInitialQuery] = React.useState('');
   const appliedEditorRevisions = React.useRef(new Map<string, number>());
   const submission = currentRecord?.submission;
-  const sending = submission?.status === 'preparing' || submission?.status === 'dispatching';
+  const sending = changingWorkFocus || submission?.status === 'preparing' || submission?.status === 'dispatching';
   const updateDraft = React.useCallback((sessionId: string, update: Partial<PiDraftState>) => {
     setPiDraft(sessionId, update, runtimeKey);
   }, [runtimeKey, setPiDraft]);
@@ -293,6 +303,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     const snapshot = record?.snapshot;
     if (
       !snapshot
+      || workFocusChangeInFlight.current
       || record.submission?.status === 'preparing'
       || record.submission?.status === 'dispatching'
     ) return;
@@ -451,7 +462,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     setCreating(true);
     try {
       setDirectory(pendingCwd, { showOverlay: false });
-      const snapshot = await createSession(pendingCwd, undefined, undefined, pendingWorkspace);
+      const snapshot = await createSession(pendingCwd, undefined, undefined, pendingWorkspace, pendingDraft.workFocus);
       const transferredDraft = transferPendingPiDraft(
         pendingCwd,
         snapshot.sessionId,
@@ -479,6 +490,22 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
     if (!currentSessionId || !level) return;
     await selectThinking(currentSessionId, level);
   }, [currentSessionId, selectThinking]);
+
+  const currentWorkspace = currentRecord?.snapshot?.workspace ?? currentSummary?.workspace;
+  const conversationProject = currentWorkspace?.kind === 'workspace'
+    ? projects.find((project) => project.id === currentWorkspace.id)
+    : undefined;
+  const handleCurrentWorkFocusChange = React.useCallback(async (focus: WorkFocusId | undefined) => {
+    if (!currentSessionId || workFocusChangeInFlight.current) return;
+    workFocusChangeInFlight.current = true;
+    setChangingWorkFocus(true);
+    try {
+      await selectWorkFocus(currentSessionId, focus ?? conversationProject?.defaultWorkFocus ?? 'code');
+    } finally {
+      workFocusChangeInFlight.current = false;
+      setChangingWorkFocus(false);
+    }
+  }, [conversationProject?.defaultWorkFocus, currentSessionId, selectWorkFocus]);
 
   const handlePendingDictationSend = React.useCallback(async (transcript: string) => {
     if (!pendingCwd) return;
@@ -705,6 +732,9 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 selectedAgent={draft.agent}
                 selectedModel={draft.model}
                 selectedThinkingLevel={draft.thinkingLevel}
+                workFocus={draft.workFocus ?? activeProject?.defaultWorkFocus ?? 'code'}
+                defaultWorkFocus={activeProject ? activeProject.defaultWorkFocus ?? 'code' : undefined}
+                inheritedWorkFocus={draft.workFocus === undefined && activeProject !== null}
                 sending={creating || sending}
                 sessionId={null}
                 workspace={pendingWorkspace}
@@ -713,6 +743,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 onChangeImages={(images) => updatePendingDraft({ images })}
                 onChangeModel={(model) => updatePendingDraft({ model })}
                 onChangeThinkingLevel={(thinkingLevel) => updatePendingDraft({ thinkingLevel })}
+                onChangeWorkFocus={(workFocus) => updatePendingDraft({ workFocus })}
                 onSendText={handlePendingDictationSend}
                 onSend={submitPendingDraft}
               />
@@ -815,6 +846,11 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
       <HarnessThreadStateProvider parentSessionId={currentSessionId} workspaceId={threadWorkspaceId}>
       <div className={cn('@container relative flex h-full min-h-0 bg-background', !active && 'pointer-events-none')}>
         <div className="flex min-w-0 flex-1 flex-col">
+        {conversationHeader}
+        {threadWorkspaceId && threadPanelMode === 'inline' ? (
+          <HarnessThreadsPanel presentation="inline" title={threadPanelTitle}
+            fallbackCwd={sessionCwd} parentSessionId={currentSessionId} workspaceId={threadWorkspaceId} />
+        ) : null}
         <WorkbenchReplacement
           target={WORKBENCH_REPLACEMENT_TARGETS.chatTimeline}
           fallback={entries.length === 0 && !currentRecord.liveAssistant && !transientUser ? (
@@ -902,6 +938,8 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 selectedAgent={draft.agent}
                 selectedModel={snapshot.model}
                 selectedThinkingLevel={snapshot.thinkingLevel}
+                workFocus={snapshot.workFocus?.selected.id ?? 'code'}
+                defaultWorkFocus={conversationProject ? conversationProject.defaultWorkFocus ?? 'code' : undefined}
                 sending={creating || sending || sessionOpening}
                 sessionId={snapshot.sessionId}
                 snapshot={snapshot}
@@ -913,6 +951,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
                 onChangeImages={(images) => updateDraft(currentSessionId, { images })}
                 onChangeModel={handleCurrentModelChange}
                 onChangeThinkingLevel={handleCurrentThinkingChange}
+                onChangeWorkFocus={handleCurrentWorkFocusChange}
                 onSendText={handleDictationSend}
                 onSend={handleSend}
               />
@@ -922,7 +961,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
           {!previewOnly ? <PiExtensionUiChrome placement="belowEditor" sessionId={currentSessionId} /> : null}
         </section>
         </div>
-        {threadWorkspaceId ? (
+        {threadWorkspaceId && threadPanelMode === 'sidebar' ? (
           <HarnessThreadsPanel
             fallbackCwd={sessionCwd}
             parentSessionId={currentSessionId}

@@ -41,9 +41,10 @@ vi.mock('./PiTimeline', () => ({ PiTimeline: (props: { entries: unknown[] }) => 
 
 const snapshot = (): HarnessThreadSnapshot => ({
   thread: {
+    purpose: 'task',
     id: 'thread-1', parent: { kind: 'session', id: 'parent-1' }, workspaceId: 'workspace-1',
     forkPoint: null, brief: 'Continue the implementation', preset: null, model: null,
-    manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: ['src'], systemPromptFragment: null, tools: ['read'], worktree: 'isolated' },
+    manifest: { workFocus: 'code', carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: ['src'], systemPromptFragment: null, tools: ['read'], worktree: 'isolated' },
     createdBy: 'agent', kind: 'implementation', lifecycle: 'settled', attention: 'none',
     worktree: { path: '/old-cwd', base: 'base', materialized: false },
     waitingFor: null, integration: 'none', diffStats: null, report: null, activeRunId: 'run-1',
@@ -51,6 +52,7 @@ const snapshot = (): HarnessThreadSnapshot => ({
   },
   activeRun: {
     id: 'run-1', threadId: 'thread-1', attempt: 1, runtimeId: 'runtime-1', sessionId: 'old-session',
+    sessionOwner: 'spawned-child',
     workerState: 'exited', outcome: 'success', exitReason: null, tokens: { input: 0, output: 0, cacheRead: 0 },
     costUsd: null, steps: 1, lastToolCall: null, startedAt: '2026-09-10T00:00:00.000Z',
     lastActivityAt: '2026-09-10T00:00:00.000Z', endedAt: '2026-09-10T00:00:00.000Z',
@@ -77,6 +79,7 @@ beforeEach(() => {
     workspaceId: 'workspace-1', parent: { kind: 'session', id: 'parent-1' },
     includeArchived: false, setIncludeArchived: vi.fn(), merge: vi.fn(), reload: vi.fn(async () => {}),
     threads: [snapshot()],
+    researchRoot: null, researchBranches: [], loadError: null,
   };
   mocks.openSession.mockResolvedValue(undefined);
   mocks.prefetchSession.mockImplementation(() => new Promise<SessionEntriesResult>((resolve, reject) => {
@@ -103,6 +106,25 @@ const clickOpen = async () => {
 };
 
 describe('thread panel transcript is inspection, not execution', () => {
+  it('keeps retained research branches inspectable in the inline research workspace', async () => {
+    const branch = snapshot();
+    branch.thread.parent = { kind: 'thread', id: 'research-root' };
+    state.threads = [];
+    state.researchBranches = [branch];
+    await act(async () => root.render(
+      <HarnessThreadStateContext.Provider value={state}>
+        <HarnessThreadsPanel workspaceId="workspace-1" parentSessionId="parent-1" presentation="inline" title="Research branches" />
+      </HarnessThreadStateContext.Provider>,
+    ));
+    expect(container.querySelector('summary')?.textContent).toContain('Research branches');
+    expect(container.textContent).toContain(branch.thread.brief);
+    const button = container.querySelector<HTMLButtonElement>('button[title="harness.threads.transcript"]')!;
+    await act(async () => button.click());
+    expect(mocks.prefetchSession).toHaveBeenCalledExactlyOnceWith('old-session');
+    expect(mocks.openSession).not.toHaveBeenCalled();
+    expect(vi.mocked(runtimeFetch).mock.calls.filter(([, init]) => init?.method === 'POST')).toEqual([]);
+  });
+
   for (const lifecycle of ['settled', 'archived'] as const) {
     it(`reads ${lifecycle} history without restoring a directory, opening a worker or starting a Run`, async () => {
       state.threads[0]!.thread.lifecycle = lifecycle;

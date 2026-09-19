@@ -336,6 +336,12 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.color === 'string' && candidate.color.trim().length > 0) {
       project.color = candidate.color.trim();
     }
+    if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.trim()) {
+      project.defaultModel = candidate.defaultModel.trim();
+    }
+    if (candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research') {
+      project.defaultWorkFocus = candidate.defaultWorkFocus;
+    }
     if (candidate.iconBackground === null) {
       (project as unknown as Record<string, unknown>).iconBackground = null;
     } else {

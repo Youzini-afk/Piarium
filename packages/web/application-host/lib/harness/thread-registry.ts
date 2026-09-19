@@ -33,6 +33,7 @@ import type {
   ThreadMessagePeer,
   ThreadMessageRecord,
   ThreadParent,
+  ThreadPurpose,
   ThreadPendingContinuation,
   ThreadReport,
   ThreadRun,
@@ -42,6 +43,7 @@ import type {
   ThreadViewCursor,
   ThreadReviewOf,
   ThreadSessionBinding,
+  ThreadSessionOwner,
   ThreadVerificationProjection,
   ThreadWaitingFor,
   ThreadWorktree,
@@ -66,7 +68,7 @@ export type {
   ThreadWorktree,
 };
 
-export const THREAD_REGISTRY_SCHEMA_VERSION = 9;
+export const THREAD_REGISTRY_SCHEMA_VERSION = 10;
 
 /** A retryable scheduling decision, not a storage or execution failure. */
 export class ThreadAdmissionError extends Error {
@@ -111,6 +113,7 @@ export interface CreateThreadInput {
   preset?: string;
   kind: ThreadKind;
   createdBy: ThreadCreatedBy;
+  purpose?: ThreadPurpose;
   forkPoint?: { entryId: string };
   carryBlocks?: boolean;
   concurrency: number;
@@ -122,6 +125,7 @@ export interface CreateThreadInput {
   worktree: "none" | "shared" | "isolated";
   model?: { providerId: string; modelId: string };
   tools: string[];
+  workFocus?: import("@piarium/protocol").WorkFocusId;
   permissions: unknown;
   systemPromptFragment?: string;
   /** Bespoke first-Run prompt that survives queuing (auto-review threads). */
@@ -496,6 +500,7 @@ const isLaunchManifest = (value: unknown): value is ThreadLaunchManifest => (
   && Array.isArray(value.scope) && value.scope.every(isString)
   && isNullableString(value.systemPromptFragment)
   && Array.isArray(value.tools) && value.tools.every(isString)
+  && (value.workFocus === "code" || value.workFocus === "research")
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && (value.permissions === undefined || isRecord(value.permissions))
   && (value.promptText === undefined || isString(value.promptText))
@@ -541,6 +546,7 @@ const isThread = (value: unknown): value is Thread => {
     && (value.manifest.draftBaselineId === null || value.manifest.worktree === "isolated")
     && (value.createdBy === "user" || value.createdBy === "agent")
     && (value.kind === "discussion" || value.kind === "implementation")
+    && (value.purpose === "task" || value.purpose === "research-root")
     && (value.worktree === null || (isRecord(value.worktree)
       && isString(value.worktree.path)
       && (value.worktree.managedRoot === undefined || isString(value.worktree.managedRoot))
@@ -594,6 +600,7 @@ const isFrozenRunConfig = (value: unknown): value is NonNullable<ThreadRun["froz
   && (value.worktree === "none" || value.worktree === "shared" || value.worktree === "isolated")
   && isNullableString(value.systemPromptFragment)
   && (value.inputOrigin === "task" || value.inputOrigin === "inherit" || value.inputOrigin === "continue" || value.inputOrigin === "fresh")
+  && (value.workFocus === "code" || value.workFocus === "research")
 );
 
 const isThreadRun = (value: unknown): value is ThreadRun => {
@@ -604,6 +611,7 @@ const isThreadRun = (value: unknown): value is ThreadRun => {
     && Number(value.attempt) > 0
     && isString(value.runtimeId)
     && isNullableString(value.sessionId)
+    && (value.sessionOwner === "spawned-child" || value.sessionOwner === "attached-root")
     && (value.inputRevision === undefined || (Number.isSafeInteger(value.inputRevision) && Number(value.inputRevision) > 0))
     && isFrozenRunConfig(value.frozen)
     && (value.report === undefined || (value.report !== null && isReport(value.report)))
@@ -648,7 +656,7 @@ const isThreadCatalogFileName = (name: string): boolean => (
   name.endsWith(".json") && name !== SESSION_BINDINGS_FILE_NAME
 );
 
-const SESSION_BINDINGS_SCHEMA_VERSION = 1;
+const SESSION_BINDINGS_SCHEMA_VERSION = 2;
 
 interface ThreadSessionBindingsDocument {
   schemaVersion: typeof SESSION_BINDINGS_SCHEMA_VERSION;
@@ -855,6 +863,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         || !isString(entry.threadId) || entry.threadId.length === 0
         || !isString(entry.runId) || entry.runId.length === 0
         || !isParent(entry.parent)
+        || (entry.owner !== "spawned-child" && entry.owner !== "attached-root")
       ) {
         throw new ThreadRegistryError("corrupt", `Thread session binding is invalid: ${path}`, path);
       }
@@ -864,6 +873,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         threadId: entry.threadId,
         runId: entry.runId,
         parent: entry.parent,
+        owner: entry.owner,
       });
     }
     return bindings;
@@ -889,7 +899,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         historicalSessionIds.clear();
         for (const catalog of cache.values()) {
           for (const run of catalog.runs) {
-            if (run.sessionId) historicalSessionIds.add(run.sessionId);
+            if (run.sessionId && run.sessionOwner === "spawned-child") historicalSessionIds.add(run.sessionId);
           }
         }
         const derived = derivedBindingsFromCatalogs();
@@ -898,7 +908,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         staleBindingIds.clear();
         for (const binding of persistedBindings) {
           const current = derived.get(binding.sessionId);
-          if (!current || !sameBinding(current, binding)) staleBindingIds.add(binding.sessionId);
+          // An attached root is an index over a user-owned session, not a child
+          // session tombstone. Startup reconciliation deliberately marks its
+          // interrupted Run lost and drops the index without poisoning that
+          // user session for a later reopen.
+          if (binding.owner === "spawned-child" && (!current || !sameBinding(current, binding))) {
+            staleBindingIds.add(binding.sessionId);
+          }
         }
         await persistSessionBindings();
         sessionBindingsLoaded = true;
@@ -942,7 +958,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       for (const [sessionId, existing] of sessionBindings) {
         if (existing.threadId === binding.threadId || sessionId === binding.sessionId) {
           sessionBindings.delete(sessionId);
-          if (sessionId !== binding.sessionId) historicalSessionIds.add(sessionId);
+          if (sessionId !== binding.sessionId && existing.owner === "spawned-child") historicalSessionIds.add(sessionId);
         }
       }
       historicalSessionIds.delete(binding.sessionId);
@@ -952,10 +968,16 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return structuredClone(binding);
   };
 
-  const unbindRunSession = async (sessionId: string): Promise<void> => {
+  const unbindRunSession = async (
+    sessionId: string,
+    options: { retainHistorical?: boolean } = {},
+  ): Promise<void> => {
     await mutateSessionBindings(() => {
+      const existing = sessionBindings.get(sessionId);
       sessionBindings.delete(sessionId);
-      historicalSessionIds.add(sessionId);
+      const retainHistorical = options.retainHistorical ?? existing?.owner === "spawned-child";
+      if (retainHistorical) historicalSessionIds.add(sessionId);
+      else historicalSessionIds.delete(sessionId);
     });
   };
 
@@ -964,6 +986,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     && left.owningWorkspaceId === right.owningWorkspaceId
     && left.threadId === right.threadId
     && left.runId === right.runId
+    && left.owner === right.owner
     && parentEquals(left.parent, right.parent)
   );
 
@@ -978,6 +1001,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const thread = catalog.threads.find((entry) => entry.id === run.threadId) ?? null;
     if (!thread || thread.activeRunId !== run.id || thread.lifecycle === "archived"
       || (run.outcome !== null && run.outcome !== "lost")
+      || (run.sessionOwner === "attached-root" && run.outcome === "lost")
       || (run.workerState !== "starting" && run.workerState !== "running" && run.workerState !== "lost")) return null;
     return {
       sessionId: run.sessionId,
@@ -985,6 +1009,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       threadId: run.threadId,
       runId: run.id,
       parent: thread.parent,
+      owner: run.sessionOwner,
     };
   };
 
@@ -998,6 +1023,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       && (run.outcome === null || run.outcome === "lost")
       && (run.workerState === "starting" || run.workerState === "running" || run.workerState === "lost")
       && run.sessionId === binding.sessionId
+      && run.sessionOwner === binding.owner
       && parentEquals(thread.parent, binding.parent);
   };
 
@@ -1282,6 +1308,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         throw new Error("Cannot create a thread while its parent is archived or being cascaded");
       }
       const timestamp = nowISO();
+      const inheritedWorkFocus = input.parent.kind === "thread"
+        ? findThread(catalog, input.parent.id)?.manifest.workFocus
+        : undefined;
       const thread: Thread = {
         id: `thread-${randomUUID().slice(0, 8)}`,
         parent: structuredClone(input.parent),
@@ -1299,12 +1328,14 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           scope: [...(input.scope ?? [])].map(normalizeThreadScopePath),
           systemPromptFragment: input.systemPromptFragment ?? null,
           tools: [...new Set(input.tools)],
+          workFocus: input.workFocus ?? inheritedWorkFocus ?? "code",
           worktree: input.worktree,
           permissions: normalizeFrozenHarnessPermissions(input.permissions),
           ...(input.promptText !== undefined ? { promptText: input.promptText } : {}),
         },
         createdBy: input.createdBy,
         kind: input.kind,
+        purpose: input.purpose ?? "task",
         worktree: null,
         lifecycle: input.autoRun ? "queued" : "active",
         attention: "none",
@@ -1339,6 +1370,22 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const catalog = await catalogForScope(workspaceId, parent);
     return structuredClone(findThreadInScope(catalog, parent, threadId));
   };
+
+  const updateThreadBrief = async (
+    workspaceId: string,
+    threadId: string,
+    brief: string,
+  ): Promise<Thread | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    if (!thread) return { value: null, changed: [], write: false };
+    const normalized = brief.trim();
+    if (!normalized || thread.brief === normalized) {
+      return { value: thread, changed: [], write: false };
+    }
+    thread.brief = normalized;
+    touchThread(catalog, thread);
+    return { value: thread, changed: [thread] };
+  });
 
   const listWorkspaceThreads = async (workspaceId: string): Promise<Thread[]> => {
     const catalog = await loadWorkspace(workspaceId);
@@ -1553,7 +1600,13 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     workspaceId: string,
     threadId: string,
     runtimeId = "pi",
-    options: { allowSettled?: boolean; inputOrigin?: ThreadRunInputOrigin; request?: ThreadPendingContinuation } = {},
+    options: {
+      allowSettled?: boolean;
+      frozen?: ThreadRun["frozen"];
+      inputOrigin?: ThreadRunInputOrigin;
+      request?: ThreadPendingContinuation;
+      sessionOwner?: ThreadSessionOwner;
+    } = {},
   ): Promise<{ run: ThreadRun; started: boolean }> => (
     mutateWorkspace<{ run: ThreadRun; started: boolean }>(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
@@ -1597,8 +1650,9 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         attempt,
         runtimeId,
         sessionId: null,
+        sessionOwner: options.sessionOwner ?? "spawned-child",
         ...(inputRevision ? { inputRevision } : {}),
-        frozen: {
+        frozen: options.frozen ? structuredClone(options.frozen) : {
           model: structuredClone(thread.model),
           tools: [...thread.manifest.tools],
           ...(thread.manifest.permissions ? { permissions: structuredClone(thread.manifest.permissions) } : {}),
@@ -1606,6 +1660,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
           worktree: thread.manifest.worktree,
           systemPromptFragment: thread.manifest.systemPromptFragment,
           inputOrigin: options.inputOrigin ?? thread.manifest.inputOrigin ?? "task",
+          workFocus: thread.manifest.workFocus,
         },
         workerState: "starting",
         outcome: null,
@@ -1678,6 +1733,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       threadId,
       runId,
       parent: run.parent,
+      owner: run.run.sessionOwner,
     });
     return structuredClone(run.run);
   };
@@ -2440,6 +2496,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       // Persisting its id here also makes a host crash in the conversion window
       // recoverable through the ordinary lost-Run reconciliation path.
       sessionId: previous.sessionId,
+      sessionOwner: previous.sessionOwner,
       frozen: {
         model: input.model ?? thread.model,
         tools: [...new Set(input.tools)],
@@ -2448,6 +2505,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
         worktree: "isolated",
         systemPromptFragment: input.systemPromptFragment ?? null,
         inputOrigin: "inherit",
+        workFocus: previous.frozen?.workFocus ?? thread.manifest.workFocus,
       },
       workerState: "starting",
       outcome: null,
@@ -2746,6 +2804,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     createThread,
     assertDispatchAllowed,
     getThread,
+    updateThreadBrief,
     getThreadById,
     getThreadSnapshot,
     listThreads,

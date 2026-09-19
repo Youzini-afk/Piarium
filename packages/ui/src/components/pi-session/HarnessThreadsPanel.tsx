@@ -72,13 +72,18 @@ export const HarnessThreadsPanel: React.FC<{
   workspaceId: string;
   parentSessionId: string;
   fallbackCwd?: string;
-}> = ({ workspaceId, parentSessionId, fallbackCwd }) => {
+  presentation?: 'sidebar' | 'inline';
+  title?: string;
+}> = ({ workspaceId, parentSessionId, fallbackCwd, presentation = 'sidebar', title }) => {
   const { t } = useI18n();
   const prefetchSession = usePiSessionStore((state) => state.prefetchSession);
   const [historyPreview, setHistoryPreview] = React.useState<{ result: SessionEntriesResult; brief: string; cwd?: string } | null>(null);
   React.useEffect(() => { setHistoryPreview(null); }, [workspaceId, parentSessionId]);
   const threadState = useHarnessThreadState();
-  const threads = threadState.threads;
+  const threads = React.useMemo(() => [
+    ...threadState.threads,
+    ...threadState.researchBranches,
+  ], [threadState.threads, threadState.researchBranches]);
   const webSources = useWebSources(parentSessionId);
   const pinSource = useWebSourcesStore((state) => state.pinSource);
   const unpinSource = useWebSourcesStore((state) => state.unpinSource);
@@ -951,6 +956,16 @@ export const HarnessThreadsPanel: React.FC<{
           ) : null}
         </DialogContent>
       </Dialog>
+      {presentation === 'inline' ? (
+        <details className="group shrink-0 border-b border-border/60">
+          <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2 typography-meta text-muted-foreground hover:text-foreground sm:px-6">
+            <Icon name="arrow-right-s" className="size-3.5 transition-transform group-open:rotate-90" />
+            <span>{title ?? t('harness.context.title')}</span>
+            {itemCount ? <span className="ml-auto tabular-nums">{itemCount}</span> : null}
+          </summary>
+          <div className="max-h-[40dvh] overflow-auto">{content}</div>
+        </details>
+      ) : <>
       <aside className="hidden w-72 shrink-0 flex-col border-l border-border/60 bg-[var(--surface-subtle)]/35 xl:flex" aria-label={t('harness.context.title')}>
         <div className="flex h-10 shrink-0 items-center justify-between border-b border-border/50 px-3">
           <span className="typography-meta font-medium text-foreground">{t('harness.context.title')}</span>
@@ -968,6 +983,7 @@ export const HarnessThreadsPanel: React.FC<{
       >
         {content}
       </MobileOverlayPanel>
+      </>}
     </>
   );
 };

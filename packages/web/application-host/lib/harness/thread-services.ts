@@ -748,7 +748,12 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       const registry = host.threadRegistry;
       if (!registry || !host.threadSendToSession) throw new HarnessServiceError("unavailable", "Thread runtime is not configured");
       const { workspaceId, owner: initialOwner } = await resolveOwningContext(host, ctx);
-      let owner = initialOwner;
+      // Authenticated UI calls stay user-originated while the same Pi session
+      // is temporarily attached to its principal root. Worker calls still act
+      // with the root Thread's frozen authority.
+      let owner = ctx.requestSource === "user" && initialOwner?.purpose === "research-root"
+        ? null
+        : initialOwner;
       assertOwnerTool(owner, "send");
       const kind = params.kind ?? "inform";
       if (params.context !== undefined && kind !== "request") {
@@ -772,6 +777,20 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           : { kind: "session", id: ctx.sessionId };
       const fromLabel = messagePeerLabel(fromPeer);
 
+      const isUserResearchBranch = async (candidate: Thread): Promise<boolean> => {
+        if (ctx.requestSource !== "user") return false;
+        let parent = candidate.parent;
+        while (parent.kind === "thread") {
+          const ancestor = await registry.getThreadById(workspaceId, parent.id);
+          if (!ancestor) return false;
+          if (ancestor.purpose === "research-root") {
+            return ancestor.parent.kind === "session" && ancestor.parent.id === ctx.sessionId;
+          }
+          parent = ancestor.parent;
+        }
+        return false;
+      };
+
       // Resolve the target: own parent, or a relationship-bound Thread.
       let targetSessionId: string | null = null;
       let target: Thread | null = null;
@@ -792,7 +811,8 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           ? (candidate.parent.kind === "thread" && candidate.parent.id === owner.id)
             || (owner.parent.kind === "thread" && owner.parent.id === candidate.id)
             || peerEquals(candidate.parent, owner.parent)
-          : candidate.parent.kind === "session" && candidate.parent.id === ctx.sessionId;
+          : (candidate.parent.kind === "session" && candidate.parent.id === ctx.sessionId)
+            || await isUserResearchBranch(candidate);
         if (!related) {
           throw new HarnessServiceError("denied", `Thread is outside the caller's root-task relationships: ${candidate.id}`);
         }
@@ -805,7 +825,9 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
       // Refresh after waiting for another input operation; its Run and ledger
       // may have changed. The owning actor is rechecked, not accepted from a stale snapshot.
       const currentOwner = await resolveOwningContext(host, ctx);
-      owner = currentOwner.owner;
+      owner = ctx.requestSource === "user" && currentOwner.owner?.purpose === "research-root"
+        ? null
+        : currentOwner.owner;
       assertOwnerTool(owner, "send");
       if (target) {
         target = await registry.getThreadById(workspaceId, target.id);

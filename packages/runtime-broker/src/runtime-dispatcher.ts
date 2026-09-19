@@ -24,6 +24,8 @@ import {
   type SessionWorkspaceBinding,
   parseAgentInputContext,
   type AgentInputContext,
+  isWorkFocusId,
+  type WorkFocusId,
 } from "@piarium/protocol";
 import { PiRuntimeBroker, type PiCatalogMethod } from "./runtime-broker.js";
 
@@ -216,6 +218,14 @@ function optionalName(record: Record<string, unknown>): string | undefined {
   return optionalString(record, "name");
 }
 
+function optionalWorkFocusId(record: Record<string, unknown>): WorkFocusId | undefined {
+  if (record.workFocus === undefined) return undefined;
+  if (!isWorkFocusId(record.workFocus)) {
+    throw new RuntimeDispatchError("invalid_params", "workFocus must be code or research");
+  }
+  return record.workFocus;
+}
+
 function optionalSessionWorkspaceBinding(
   record: Record<string, unknown>,
 ): SessionWorkspaceBinding | undefined {
@@ -392,18 +402,20 @@ async function dispatchRuntimeRequestUnchecked(
       const permissions = optionalPermissionPolicy(input);
       const scope = optionalStringList(input, "scope");
       const tools = optionalStringList(input, "tools");
+      const workFocus = optionalWorkFocusId(input);
       return broker.createSession(
         requireString(input, "cwd"),
         optionalName(input),
         optionalString(input, "parentSession"),
         optionalSessionWorkspaceBinding(input),
-        model === undefined && permissions === undefined && scope === undefined && tools === undefined
+        model === undefined && permissions === undefined && scope === undefined && tools === undefined && workFocus === undefined
           ? undefined
           : {
               ...(model === undefined ? {} : { model }),
               ...(permissions === undefined ? {} : { permissions }),
               ...(scope === undefined ? {} : { scope }),
               ...(tools === undefined ? {} : { tools }),
+              ...(workFocus === undefined ? {} : { workFocus }),
             },
       );
     }
@@ -444,6 +456,12 @@ async function dispatchRuntimeRequestUnchecked(
     }
     case "session.delete": {
       return broker.deleteSession(requireString(input, "sessionId"));
+    }
+    case "session.workFocus.set": {
+      const sessionId = requireString(input, "sessionId");
+      const workFocus = optionalWorkFocusId(input);
+      if (!workFocus) throw new RuntimeDispatchError("invalid_params", "workFocus is required");
+      return broker.setSessionWorkFocus(sessionId, workFocus);
     }
     case "session.snapshot": {
       const sessionId = requireString(input, "sessionId");

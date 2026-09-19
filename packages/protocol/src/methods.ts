@@ -61,6 +61,7 @@ import type {
 } from "./harness-inference.js";
 import type { ModelSelection } from "./harness-settings.js";
 import type { PermissionPolicy } from "./permission-gate.js";
+import type { WorkFocusSelection } from "./work-focus.js";
 
 
 export interface HostMethodMap {
@@ -145,6 +146,16 @@ export interface HostMethodMap {
   "agent.prompt": {
     params: { images?: ImageAttachment[]; inputContext?: AgentInputContext; instructions?: string; sessionId: string; text: string };
     result: { accepted: boolean };
+  };
+  /** Broker-only safe-boundary profile application; absent from the surface method catalog. */
+  "session.workFocus.apply": {
+    params: { generation: number; sessionId: string; selection: WorkFocusSelection };
+    result: { applied: boolean };
+  };
+  /** Broker-only publication after the durable selection commit succeeds. */
+  "session.workFocus.publish": {
+    params: { sessionId: string };
+    result: { published: boolean };
   };
   "agent.queue.clear": {
     params: { sessionId: string };
@@ -342,6 +353,9 @@ export interface HostMethodMap {
       permissions?: PermissionPolicy;
       scope?: string[];
       tools?: string[];
+      workFocus?: WorkFocusSelection;
+      workFocusGeneration?: number;
+      workFocusRole?: import("./work-focus.js").WorkFocusExecutionRole;
     };
     result: SessionSnapshot;
   };
@@ -442,6 +456,9 @@ export interface HostMethodMap {
       scope?: string[];
       tools?: string[];
       workspace?: SessionWorkspaceBinding;
+      workFocus?: WorkFocusSelection;
+      workFocusGeneration?: number;
+      workFocusRole?: import("./work-focus.js").WorkFocusExecutionRole;
     };
     result: SessionSnapshot;
   };

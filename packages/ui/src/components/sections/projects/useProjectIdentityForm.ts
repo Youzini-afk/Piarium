@@ -3,6 +3,7 @@ import { toast } from '@/components/ui';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { useI18n } from '@/lib/i18n';
 import type { ProjectEntry } from '@piarium/application-client';
+import type { WorkFocusId } from '@piarium/protocol';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 
 const HEX_COLOR_PATTERN = /^#(?:[\da-fA-F]{3}|[\da-fA-F]{6})$/;
@@ -24,11 +25,12 @@ export type ProjectIdentitySaveData = {
   color: string | null;
   iconBackground: string | null;
   defaultModel: string | null;
+  defaultWorkFocus: WorkFocusId;
 };
 
 type EditableProject = Pick<
   ProjectEntry,
-  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'iconImage' | 'path'
+  'id' | 'label' | 'icon' | 'color' | 'iconBackground' | 'defaultModel' | 'defaultWorkFocus' | 'iconImage' | 'path'
 >;
 
 export const useProjectIdentityForm = (project: EditableProject | null) => {
@@ -45,6 +47,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
   const [defaultModel, setDefaultModel] = React.useState<string | undefined>(undefined);
+  const [defaultWorkFocus, setDefaultWorkFocus] = React.useState<WorkFocusId>('code');
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -73,6 +76,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       setColor(null);
       setIconBackground(null);
       setDefaultModel(undefined);
+      setDefaultWorkFocus('code');
       return;
     }
     setName(project.label ?? '');
@@ -80,6 +84,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setColor(project.color ?? null);
     setIconBackground(project.iconBackground ?? null);
     setDefaultModel(project.defaultModel);
+    setDefaultWorkFocus(project.defaultWorkFocus ?? 'code');
     setPendingRemoveImageIcon(false);
     clearPendingUploadIcon();
     setPreviewImageFailed(false);
@@ -110,6 +115,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     || color !== (project?.color ?? null)
     || iconBackground !== (project?.iconBackground ?? null)
     || (defaultModel ?? undefined) !== (project?.defaultModel ?? undefined)
+    || defaultWorkFocus !== (project?.defaultWorkFocus ?? 'code')
     || pendingRemoveImageIcon
     || Boolean(pendingUploadIconFile)
   );
@@ -232,11 +238,13 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
       color,
       iconBackground: normalizeProjectIconBackground(willRemoveImageIcon ? null : iconBackground),
       defaultModel: defaultModel ?? null,
+      defaultWorkFocus,
     };
   }, [
     clearPendingUploadIcon,
     color,
     defaultModel,
+    defaultWorkFocus,
     icon,
     iconBackground,
     name,
@@ -263,6 +271,8 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
     setIconBackground,
     defaultModel,
     parsedDefaultModel,
+    defaultWorkFocus,
+    setDefaultWorkFocus,
     handleDefaultModelChange,
     isUploadingIcon,
     isRemovingCustomIcon,

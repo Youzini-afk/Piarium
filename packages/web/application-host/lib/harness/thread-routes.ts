@@ -7,7 +7,8 @@ import { HarnessServiceError } from "./service-error.js";
 
 export interface HarnessThreadRoutesOptions {
   registry: ThreadRegistry;
-  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "deleteUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">;
+  runtime: Pick<ThreadRuntime, "createDiscussion" | "convertDiscussion" | "scopeForSession" | "previewIntegration" | "merge" | "undoIntegration" | "archiveUser" | "deleteUser" | "restoreUser" | "inspectSpace" | "reclaimUser" | "inspectResultHistory" | "releaseResultHistory">
+    & Partial<Pick<ThreadRuntime, "rootScopeForSession">>;
   /**
    * Delivers a directed message through the same `thread.send` routing the Pi
    * tools use; the UI acts as the parent session, never a forged Thread peer.
@@ -168,6 +169,35 @@ export function registerHarnessThreadRoutes(
   app: Express,
   { registry, runtime, sendToThread, requireAuth = noAuth }: HarnessThreadRoutesOptions,
 ): void {
+  const rootScopeForSession = (sessionId: string) => (
+    runtime.rootScopeForSession?.(sessionId) ?? runtime.scopeForSession(sessionId)
+  );
+  const scopeForThread = async (sessionId: string, threadId: string) => {
+    const liveScope = await runtime.scopeForSession(sessionId);
+    if (typeof registry.getThreadById !== "function") return liveScope;
+    const candidate = await registry.getThreadById(liveScope.workspaceId, threadId);
+    if (candidate && candidate.purpose !== "research-root"
+      && candidate.parent.kind === liveScope.parent.kind && candidate.parent.id === liveScope.parent.id) {
+      return liveScope;
+    }
+    const rootScope = await rootScopeForSession(sessionId);
+    const target = await registry.getThreadById(rootScope.workspaceId, threadId);
+    if (!target || target.purpose === "research-root") {
+      throw new HarnessServiceError("not-found", `Thread not found: ${threadId}`);
+    }
+    let parent = target.parent;
+    while (parent.kind === "thread") {
+      const ancestor = await registry.getThreadById(rootScope.workspaceId, parent.id);
+      if (!ancestor) break;
+      if (ancestor.purpose === "research-root"
+        && ancestor.parent.kind === "session" && ancestor.parent.id === sessionId) {
+        return { ...rootScope, parent: target.parent };
+      }
+      parent = ancestor.parent;
+    }
+    throw new HarnessServiceError("denied", `Thread is outside the session's research tree: ${threadId}`);
+  };
+
   app.get("/api/harness/sessions/:sessionId/threads", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     const sessionId = sessionIdOf(request);
@@ -176,15 +206,32 @@ export function registerHarnessThreadRoutes(
       return;
     }
     try {
-      const { workspaceId, parent } = await runtime.scopeForSession(sessionId);
+      const { workspaceId, parent } = await rootScopeForSession(sessionId);
       const includeArchived = request.query.archived === "1" || request.query.archived === "true";
       const threads = (await registry.listThreads(workspaceId, parent))
+        .filter((thread) => thread.purpose !== "research-root")
         .filter((thread) => includeArchived || thread.lifecycle !== "archived");
       const projected = await Promise.all(threads.map(async (thread) => ({
         thread,
         activeRun: await registry.getActiveRun(workspaceId, thread.id),
       })));
-      response.json({ workspaceId, parent, includeArchived, threads: projected });
+      const researchRootThread = (await registry.listThreads(workspaceId, parent, true))
+        .find((thread) => thread.purpose === "research-root") ?? null;
+      const researchRoot = researchRootThread
+        ? { thread: researchRootThread, activeRun: await registry.getActiveRun(workspaceId, researchRootThread.id) }
+        : null;
+      const researchBranches = researchRootThread
+        ? (await registry.listThreadSnapshots(workspaceId, { kind: "thread", id: researchRootThread.id }))
+          .filter(({ thread }) => includeArchived || thread.lifecycle !== "archived")
+        : [];
+      response.json({
+        workspaceId,
+        parent,
+        includeArchived,
+        threads: projected,
+        researchRoot,
+        researchBranches,
+      });
     } catch (error) {
       sendError(response, error, "Unable to read harness threads");
     }
@@ -243,7 +290,7 @@ export function registerHarnessThreadRoutes(
       }
       try {
         const cancellation = requestAbort(request, response);
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         const resultRevision = typeof request.query.resultRevision === "string"
           ? Number(request.query.resultRevision)
           : undefined;
@@ -278,7 +325,7 @@ export function registerHarnessThreadRoutes(
       }
       try {
         const cancellation = requestAbort(request, response);
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         const preview = await runtime.previewIntegration(workspaceId, parent, threadId, {
           ...parseIntegrationBody(request.body),
           signal: cancellation.signal,
@@ -309,7 +356,7 @@ export function registerHarnessThreadRoutes(
       }
       try {
         const cancellation = requestAbort(request, response);
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         const parsed = parseIntegrationBody(request.body);
         const result = await runtime.merge(
           workspaceId,
@@ -347,7 +394,7 @@ export function registerHarnessThreadRoutes(
       try {
         const cancellation = requestAbort(request, response);
         const parsed = parseIntegrationBody({ sourceOwner: request.body?.sourceOwner });
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         const result = await runtime.undoIntegration(workspaceId, parent, threadId, {
           operationId,
           ...(parsed.sourceOwner ? { sourceOwner: parsed.sourceOwner } : {}),
@@ -377,7 +424,7 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
-        const { workspaceId, parent } = await runtime.scopeForSession(sessionId);
+      const { workspaceId, parent } = await rootScopeForSession(sessionId);
         response.json(await runtime.inspectSpace(workspaceId, parent));
       } catch (error) {
         sendError(response, error, "Unable to inspect thread space");
@@ -396,7 +443,7 @@ export function registerHarnessThreadRoutes(
       return;
     }
     try {
-      const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+      const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
       if (action === "archive") {
         const keepWorktree = request.body?.keepWorktree;
         response.json(await runtime.archiveUser(
@@ -429,7 +476,7 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         response.json(await runtime.deleteUser(workspaceId, parent, threadId));
       } catch (error) {
         sendError(response, error, "Unable to delete thread");
@@ -462,7 +509,7 @@ export function registerHarnessThreadRoutes(
           signal: cancellation.signal,
         });
         cancellation.dispose();
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         response.json({
           workspaceId,
           parent,
@@ -482,7 +529,7 @@ export function registerHarnessThreadRoutes(
   app.get("/api/harness/sessions/:sessionId/threads/:threadId/history", requireAuth, async (request, response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
-      const { workspaceId, parent } = await runtime.scopeForSession(sessionIdOf(request));
+      const { workspaceId, parent } = await scopeForThread(sessionIdOf(request), threadIdOf(request));
       response.json(await runtime.inspectResultHistory(workspaceId, parent, threadIdOf(request)));
     } catch (error) {
       sendError(response, error, "Unable to read thread result history");
@@ -492,7 +539,7 @@ export function registerHarnessThreadRoutes(
     response.setHeader("Cache-Control", "no-store");
     try {
       const input = parseHistoryRelease(request.body);
-      const { workspaceId, parent } = await runtime.scopeForSession(sessionIdOf(request));
+      const { workspaceId, parent } = await scopeForThread(sessionIdOf(request), threadIdOf(request));
       response.json(await runtime.releaseResultHistory(workspaceId, parent, threadIdOf(request), input));
     } catch (error) {
       sendError(response, error, "Unable to release thread result history");
@@ -510,7 +557,7 @@ export function registerHarnessThreadRoutes(
         return;
       }
       try {
-        const { workspaceId, parent } = await runtime.scopeForSession(parentSessionId);
+        const { workspaceId, parent } = await scopeForThread(parentSessionId, threadId);
         const thread = await registry.setKeepWorktree(workspaceId, threadId, request.body.keepWorktree);
         if (!thread) {
           response.status(404).json({ error: `Thread not found: ${threadId}` });

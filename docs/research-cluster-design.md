@@ -1,6 +1,6 @@
 # Piarium 科研集群设计
 
-Status: accepted product and architecture design (D-291/D-297); implementation not started
+Status: accepted design (D-291/D-297); phase 7A implemented at D-298, 7B–7F pending
 
 Last updated: 2026-09-19
 
@@ -274,7 +274,7 @@ Workbench Profile 与 Agent Profile 在命名、存储字段和消费者中保�
 动画仅服务于前台切换，后台模型请求、实验进程和任务事件照常推进，不为动画重建 Pi 会话或复制 Document 状态。
 
 用户当前选择的工作台独立于项目、会话和工作侧重。打开另一个项目或对话时保持当前工作台，不根据其侧重、
-历史使用界面或任务内容自动切 Shell。当前实现中按 workspace 解析所选 Profile 的行为须在 7A 调整；
+历史使用界面或任务内容自动切 Shell。7A 已移除按 workspace 解析所选 Profile 的路径；
 项目可以继续保存面板尺寸、打开的资源等工作现场，不能用这些布局偏好覆盖用户当前选择的工作台。
 选择仍由现有工作台配置与 Surface transition controller 管理，不新增另一套科研模式状态。
 
@@ -287,7 +287,7 @@ Workbench Profile 与 Agent Profile 在命名、存储字段和消费者中保�
    当前工作台不参与这条解析链。在科研工作台中新建对话也不暗中强制科研侧重。
 2. 对话保存自身的侧重选择及来源，输入区域能看见当前侧重。修改项目默认只影响之后创建的对话，
    已有对话保持自身配置；用户可以在当前对话明确应用另一侧重或当前项目默认。
-3. 对话中修改侧重作为待应用配置，从下一轮用户请求开始，沿已有 Run/worker 安全切点生效。
+3. 对话中修改侧重作为待应用配置，从下一次新 Run 启动前的安全切点生效；正在执行的 Run 内，steer 和 followUp 队列继续使用原侧重。
    当前执行和已经派发的分支保持启动时的模型、工具、权限、输入与侧重修订；需要新 Run 时沿同一 Thread 建立。
    新配置准备失败时保留原配置并显示实际失败，不能显示已应用却仍执行旧配置。
 4. 侧重选择和研究任务生命周期分开。离开科研侧重不删除研究成果，也不隐式取消在途分支；停止、暂停和继续仍用现有任务动作。

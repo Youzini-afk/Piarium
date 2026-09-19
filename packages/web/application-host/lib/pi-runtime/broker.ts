@@ -44,6 +44,7 @@ export function createWebPiRuntimeBroker({
   packageRoot,
   runtimeGeneration,
   runtimeSource,
+  resolveProjectWorkFocus,
 }: {
   agentDir?: string | undefined;
   admitSessionExecution?: PiSessionExecutionAdmission | undefined;
@@ -60,6 +61,7 @@ export function createWebPiRuntimeBroker({
   packageRoot?: string | undefined;
   runtimeGeneration?: number | undefined;
   runtimeSource?: PiRuntimeBrokerOptions['runtimeSource'] | undefined;
+  resolveProjectWorkFocus?: PiRuntimeBrokerOptions['resolveProjectWorkFocus'] | undefined;
 } = {}): PiRuntimeBroker {
   return new PiRuntimeBroker({
     ...(typeof agentDir === 'string' && agentDir.trim() ? { agentDir: agentDir.trim() } : {}),
@@ -88,5 +90,6 @@ export function createWebPiRuntimeBroker({
       ? { runtimeGeneration }
       : {}),
     ...(runtimeSource ? { runtimeSource } : {}),
+    ...(resolveProjectWorkFocus ? { resolveProjectWorkFocus } : {}),
   });
 }

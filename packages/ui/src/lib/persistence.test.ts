@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 
 import type { RuntimeAPIs, SettingsPayload } from '@piarium/application-client';
+import type { DesktopSettings } from '@/lib/desktop';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { startModelPrefsAutoSave } from '@/lib/modelPrefsAutoSave';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
@@ -224,6 +225,34 @@ describe('updateDesktopSettings', () => {
     expect(saveCalls).toEqual([{ themeVariant: 'dark', fontSize: 14 }]);
     expect(firstResolved).toBe(true);
     expect(secondResolved).toBe(true);
+  });
+
+  test('retains project work focus and model defaults through save and reload', async () => {
+    let persisted: SettingsPayload = {};
+    registerSettingsApi(
+      async (changes) => { persisted = { ...persisted, ...changes }; return persisted; },
+      async () => ({ settings: persisted, source: 'web' }),
+    );
+    const project = {
+      id: 'research-project', path: 'D:/research', label: 'Research',
+      defaultWorkFocus: 'research' as const, defaultModel: 'provider/model',
+    };
+    expect(await updateDesktopSettings({ projects: [project] })).toBe(true);
+    useProjectsStore.setState({ projects: [] });
+    invalidateSettingsCache();
+    const applyProjects = (event: Event) => {
+      useProjectsStore.getState().synchronizeFromSettings((event as CustomEvent<DesktopSettings>).detail);
+    };
+    getWindow().addEventListener('piarium:settings-synced', applyProjects);
+    try {
+      await syncDesktopSettings();
+    } finally {
+      getWindow().removeEventListener('piarium:settings-synced', applyProjects);
+    }
+
+    const restored = useProjectsStore.getState().projects.find((entry) => entry.path === project.path);
+    expect(restored?.defaultWorkFocus).toBe('research');
+    expect(restored?.defaultModel).toBe('provider/model');
   });
 
   test('publishes saving and saved states for an immediate setting update', async () => {

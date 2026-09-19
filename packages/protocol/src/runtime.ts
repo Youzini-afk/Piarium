@@ -14,6 +14,7 @@ import {
 } from "./types.js";
 import type { ProviderAuthResponse } from "./auth.js";
 import type { SessionWorkspaceBinding } from "./types.js";
+import type { WorkFocusId } from "./work-focus.js";
 import type {
   FoundationalPiPackageId,
   FoundationalPiPackageStatusSnapshot,
@@ -110,7 +111,7 @@ type SessionScopedMethodMap = {
  * absent. Catalog operations target either a live session or a broker-owned in-memory workspace
  * context because Pi resources and provider registrations can vary by workspace.
  */
-export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "session.rename"> &
+export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "session.rename" | "session.open"> &
   SessionScopedMethodMap & {
     "command.list": {
       params: RuntimeContextTarget;
@@ -151,8 +152,9 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       result: HostMethodMap["session.list"]["result"][number];
     };
     "session.create": {
-      params: HostMethodMap["session.create"]["params"] & {
+      params: Omit<HostMethodMap["session.create"]["params"], "workFocus" | "workFocusGeneration" | "workFocusRole"> & {
         workspace?: SessionWorkspaceBinding;
+        workFocus?: WorkFocusId;
       };
       result: HostMethodMap["session.create"]["result"];
     };
@@ -160,9 +162,17 @@ export type RuntimeMethodMap = Omit<Pick<HostMethodMap, DirectRuntimeMethod>, "s
       params: { sessionId: string };
       result: { deleted: boolean; sessionId: string };
     };
+    "session.workFocus.set": {
+      params: { sessionId: string; workFocus: WorkFocusId };
+      result: HostMethodMap["session.snapshot"]["result"];
+    };
     "session.entries.preview": {
       params: { cwd?: string; scope?: "all" | "branch"; sessionId: string };
       result: HostMethodMap["session.entries.read"]["result"];
+    };
+    "session.open": {
+      params: Omit<HostMethodMap["session.open"]["params"], "workFocus" | "workFocusGeneration" | "workFocusRole">;
+      result: HostMethodMap["session.open"]["result"];
     };
     "session.rename": {
       params: { name: string; sessionId: string };
@@ -253,6 +263,7 @@ export const RUNTIME_METHODS = [
   "session.tree",
   "session.archive",
   "session.unarchive",
+  "session.workFocus.set",
   "settings.get",
   "settings.update",
 ] as const satisfies readonly (keyof RuntimeMethodMap)[];

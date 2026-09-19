@@ -14,14 +14,12 @@ import { cn } from '@/lib/utils';
 import { usePiariumExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
 import { selectActiveWorkbenchProfile } from '@/lib/extensions/workbench-shell-transition';
-import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { piariumSurfaceRuntime } from '@/lib/extensions/surface-runtime';
 import { resolvePiariumWorkbenchLayout } from '@piarium/extension-contract';
 
 export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ className }) => {
   const { t } = useI18n();
   const catalog = usePiariumExtensionCatalog();
-  const workspaceId = useWorkbenchWorkspaceId();
   const [busy, setBusy] = React.useState(false);
   const workbench = catalog.snapshot?.workbench;
 
@@ -29,7 +27,6 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
   const resolved = resolvePiariumWorkbenchLayout(workbench.document, {
     surface: piariumSurfaceRuntime.surface,
     userId: 'default',
-    ...(workspaceId ? { workspaceId } : {}),
   });
   const activeProfile = workbench.document.profiles.find((profile) => profile.id === resolved.profileId);
   if (!activeProfile || workbench.document.profiles.length < 2) return null;
@@ -38,7 +35,7 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
     if (profileId === resolved.profileId || busy) return;
     setBusy(true);
     try {
-      await selectActiveWorkbenchProfile(profileId, workspaceId, { enableShell: true });
+      await selectActiveWorkbenchProfile(profileId, undefined, { enableShell: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
     } finally {

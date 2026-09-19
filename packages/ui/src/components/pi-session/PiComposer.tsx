@@ -59,6 +59,8 @@ import { PiComposerAgentControl } from './PiComposerAgentControl';
 import type { PiComposerAgentSelection } from '@/lib/pi-runtime/composerAgent';
 import { useMessageHistory } from '@/components/chat/composer/state/useMessageHistory';
 import { projectPiComposerActions } from './piComposerActions';
+import type { WorkFocusId } from '@piarium/protocol';
+import { PiWorkFocusControl } from './PiWorkFocusControl';
 
 interface PiComposerProps {
   active: boolean;
@@ -77,6 +79,7 @@ interface PiComposerProps {
   onChangeImages(value: ImageAttachment[]): void;
   onChangeModel(value: PiComposerModelSelection | undefined): Promise<void> | void;
   onChangeThinkingLevel(value: ThinkingLevel | undefined): Promise<void> | void;
+  onChangeWorkFocus(value: WorkFocusId | undefined): Promise<void> | void;
   onSend(): Promise<void> | void;
   onSendText(value: string): Promise<void> | void;
   selectedModel?: PiComposerModelSelection;
@@ -86,6 +89,9 @@ interface PiComposerProps {
   sessionId?: string | null;
   snapshot?: SessionSnapshot;
   workspace?: SessionWorkspaceBinding;
+  workFocus: WorkFocusId;
+  defaultWorkFocus?: WorkFocusId;
+  inheritedWorkFocus?: boolean;
 }
 
 const attachmentUrl = (attachment: ImageAttachment): string => (
@@ -139,6 +145,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   onChangeImages,
   onChangeModel,
   onChangeThinkingLevel,
+  onChangeWorkFocus,
   onSend,
   onSendText,
   selectedModel,
@@ -148,6 +155,9 @@ export const PiComposer: React.FC<PiComposerProps> = ({
   sessionId,
   snapshot,
   workspace,
+  workFocus,
+  defaultWorkFocus,
+  inheritedWorkFocus,
 }) => {
   const { t } = useI18n();
   const inputRef = React.useRef<ComposerEditorHandle>(null);
@@ -221,6 +231,14 @@ export const PiComposer: React.FC<PiComposerProps> = ({
         onChange={onChangeAgent}
         selectedAgent={selectedAgent}
         sessionId={sessionId}
+      />
+      <PiWorkFocusControl
+        value={workFocus}
+        state={snapshot?.workFocus}
+        projectDefault={defaultWorkFocus}
+        inherited={inheritedWorkFocus}
+        disabled={sending}
+        onChange={onChangeWorkFocus}
       />
     </div>
   );
@@ -663,7 +681,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.leading"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, footerIconButtonClass, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace, workFocus, defaultWorkFocus, inheritedWorkFocus, onChangeWorkFocus }}
               />
               <PiGoalButton footerIconButtonClass={footerIconButtonClass} snapshot={snapshot} />
               {inlineDraftCount > 0 && (
@@ -685,7 +703,7 @@ export const PiComposer: React.FC<PiComposerProps> = ({
               <WorkbenchContributionSlot
                 kind="composer-action"
                 slot="chat.composer.actions.trailing"
-                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace }}
+                props={{ cwd, draft, effectiveModel, effectiveThinkingLevel, images, onChangeAgent, onChangeDraft, onChangeImages, onChangeModel, onChangeThinkingLevel, onSend: submit, selectedAgent, selectedModel, selectedThinkingLevel, sending, sessionId, snapshot, workspace, workFocus, defaultWorkFocus, inheritedWorkFocus, onChangeWorkFocus }}
               />
               <ComposerDictation
                 disabled={sending}

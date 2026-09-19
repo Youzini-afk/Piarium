@@ -467,7 +467,8 @@ workbench layer, while React page composition and official Shell registration li
 `packages/ui/src/workbenches`.
 
 Profile and layout resolution is layered. Layout layers merge `distribution → user → workspace`, and
-profile selection resolves `workspace → user → active`. Shell state is reported truthfully as
+profile selection resolves `user → active`. Project navigation cannot replace the selected shell.
+Workspace-specific layout layers remain. Shell state is reported truthfully as
 `builtin`, `disabled`, `failed`, `missing`, or `ready`. A shell transition stages the candidate and
 commits the selection only after it mounts, so a failed, superseded, or revision-conflicting
 candidate leaves the previous generation active instead of producing a blank window. When no shell is
@@ -477,16 +478,20 @@ and workspace-scoped extension storage; missing and empty documents fall back to
 default without writing it, while malformed or failed reads keep the last valid in-memory document
 and raise a diagnostic rather than overwriting host state.
 
-D-297 is an accepted design change, pending phase 7A: workbench UIUX and Agent work focus have independent
-selection and consumers. Research and later office workbenches use the existing workbench-switching area
-and Motion transition scenes. The current workspace-based profile selection described above will change
-so that navigating projects or conversations keeps the user's chosen shell; workspace-specific editor
-and panel layouts may remain. Project settings supply the default focus captured by new conversations,
-and each conversation can override it. A focus configures prompts, enabled capabilities, tool organization
-and collaboration; changes apply to subsequent user turns at the existing Run/worker configuration boundary.
-In-flight work retains its frozen configuration. Shell changes do not apply Agent settings, launch tasks
-or recreate sessions. Research work remains usable in the IDE, and a research shell can display an ordinary
-coding conversation. The product behavior is specified in [research-cluster-design.md](research-cluster-design.md).
+D-298 implements the first D-297 slice (7A): Research joins Agent/IDE in the existing switcher and Motion
+transition transaction. The Research shell composes shared application chrome and resource panels around
+the actual research-root and branch projection. Work focus lives independently in broker-owned session
+metadata. Creation resolves explicit selection, then the project default, then general/code. Later project
+changes do not overwrite existing sessions. A focus change stages the worker configuration and commits
+durable metadata before publishing it; failure retains the previous active configuration. The next new
+Run applies the selection; the current Run and its queued follow-ups keep their frozen focus.
+
+Research uses the current user Pi session as its principal model. `ResearchRootRuntime` attaches real
+`agent_start`/settle events to Registry Thread/Run records, distinguishing attached roots from spawned
+child sessions. Settling detaches the live binding while retaining results and branches. No hidden main
+session or parallel research catalog exists. Shell changes do not apply focus, call a model or recreate
+sessions. Capability routing, scheduling and research synthesis remain planned in 7B–7F; the product
+design is [research-cluster-design.md](research-cluster-design.md).
 
 Text content has one authority. The application host owns a revisioned document service with
 workspace resolve, read, write, move, delete, an SSE watch, and crash-recovery journals, exposed

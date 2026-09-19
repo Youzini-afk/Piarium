@@ -1,4 +1,5 @@
 import type { PiSessionFeatureState } from "./session-features.js";
+import type { SessionWorkFocusSnapshot } from "./work-focus.js";
 
 // Piarium is pre-release and all product surfaces ship in lockstep. Breaking
 // development changes replace this single contract instead of accumulating
@@ -197,6 +198,8 @@ export interface SessionSummary {
   updatedAt: string;
   workspace?: SessionWorkspaceBinding;
   workspacePersistence?: "pending";
+  /** Present for Piarium-managed sessions after broker metadata projection. */
+  workFocus?: SessionWorkFocusSnapshot;
 }
 
 export interface SessionHeader {
@@ -631,6 +634,8 @@ export interface SessionSnapshot extends SessionRuntimeState {
   thinkingLevel: ThinkingLevel;
   workspace?: SessionWorkspaceBinding;
   workspacePersistence?: "pending";
+  /** Applied and selected Agent work focus; independent of the active Workbench shell. */
+  workFocus?: SessionWorkFocusSnapshot;
 }
 
 export interface SessionStats {

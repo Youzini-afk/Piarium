@@ -7,6 +7,7 @@ import { PROJECT_COLORS, PROJECT_ICONS, PROJECT_COLOR_MAP as COLOR_MAP, ProjectI
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   PROJECT_SETTINGS_CONTROL_WIDTH,
   ProjectSettingsSubsection,
@@ -33,6 +34,8 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
     setIconBackground,
     parsedDefaultModel,
     handleDefaultModelChange,
+    defaultWorkFocus,
+    setDefaultWorkFocus,
     isUploadingIcon,
     isRemovingCustomIcon,
     isDiscoveringIcon,
@@ -85,6 +88,22 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
           onChange={handleDefaultModelChange}
           className={cn('h-8 min-h-8 rounded-md px-3 max-w-48', PROJECT_SETTINGS_CONTROL_WIDTH)}
         />
+      </ProjectSettingsSubsection>
+
+      <ProjectSettingsSubsection
+        title={t('workFocus.projectDefault')}
+        info={t('workFocus.projectDefaultDescription')}
+        settingsItem="projects.default-work-focus"
+      >
+        <Select value={defaultWorkFocus} onValueChange={setDefaultWorkFocus}>
+          <SelectTrigger className={cn('h-8 rounded-md px-3', PROJECT_SETTINGS_CONTROL_WIDTH)} aria-label={t('workFocus.projectDefault')}>
+            <SelectValue>{t(defaultWorkFocus === 'research' ? 'workFocus.research' : 'workFocus.code')}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="code">{t('workFocus.code')}</SelectItem>
+            <SelectItem value="research">{t('workFocus.research')}</SelectItem>
+          </SelectContent>
+        </Select>
       </ProjectSettingsSubsection>
 
       <ProjectSettingsSubsection

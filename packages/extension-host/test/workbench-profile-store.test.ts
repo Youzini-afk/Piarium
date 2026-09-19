@@ -8,6 +8,12 @@ import {
   ExtensionStorageStore,
   WorkbenchProfileStore,
 } from "../src/index.js";
+import {
+  PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID,
+  PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+} from "@piarium/extension-contract";
 
 const directories: string[] = [];
 test.after(async () => Promise.all(directories.splice(0).map((directory) => rm(directory, { force: true, recursive: true }))));
@@ -42,7 +48,7 @@ test("workbench layouts persist replacement choices and retain missing contribut
   );
 });
 
-test("migrates raw filesystem workspace scope ids to canonical workspace ids on the same host", async () => {
+test("migrates raw filesystem workspace layout ids while rejecting workspace profile selection", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-workbench-workspace-id-"));
   directories.push(dataDir);
   const storage = new ExtensionStorageStore(dataDir);
@@ -51,31 +57,34 @@ test("migrates raw filesystem workspace scope ids to canonical workspace ids on 
     storage,
   });
   const canonicalId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const otherHostPath = "D:\\other-host\\project";
-  const written = await store.selectProfile({
+  await store.updateLayout({
     expectedRevision: 0,
-    profileId: "default",
-    scope: "workspace",
-    scopeId: "/workspace/demo",
+    layer: {
+      profileId: "default",
+      references: [],
+      replacementSelections: {},
+      scope: "workspace",
+      scopeId: "/workspace/demo",
+      surface: "web",
+    },
   });
-  assert.equal(written.document.profileSelections.workspaces["/workspace/demo"], "default");
   store.setWorkspaceScopeResolver(async (scopeId) => (
     scopeId === "/workspace/demo" || scopeId === canonicalId ? canonicalId : null
   ));
   const migrated = await store.read();
-  assert.equal(migrated.document.profileSelections.workspaces[canonicalId], "default");
-  assert.equal(migrated.document.profileSelections.workspaces["/workspace/demo"], undefined);
-  const foreign = await store.selectProfile({
-    expectedRevision: migrated.document.revision,
-    profileId: "default",
-    scope: "workspace",
-    scopeId: otherHostPath,
-  });
-  assert.equal(foreign.document.profileSelections.workspaces[otherHostPath], "default");
-  assert.equal(foreign.document.profileSelections.workspaces[canonicalId], "default");
+  assert.equal(migrated.document.layouts.find((layer) => layer.scope === "workspace")?.scopeId, canonicalId);
+  assert.throws(
+    () => store.selectProfile({
+        expectedRevision: migrated.document.revision,
+        profileId: "default",
+        scope: "workspace",
+        scopeId: "/workspace/demo",
+      }),
+    /Profile selection scope is unsupported/,
+  );
 });
 
-test("missing storage keeps the Agent default document without persisting a migration", async () => {
+test("missing storage seeds Agent, IDE, and Research bindings without persisting a migration", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "piarium-workbench-agent-default-"));
   directories.push(dataDir);
   const store = new WorkbenchProfileStore({
@@ -86,8 +95,18 @@ test("missing storage keeps the Agent default document without persisting a migr
   assert.equal(missing.storageState, "missing");
   assert.equal(missing.document.revision, 0);
   assert.equal(missing.document.profiles[0]?.label, "Agent");
-  assert.equal(missing.document.profiles.length, 2);
-  assert.equal(missing.document.layouts.length, 5);
+  assert.deepEqual(missing.document.profiles.map((profile) => profile.id), [
+    "default",
+    "piarium.ide",
+    PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+  ]);
+  assert.equal(missing.document.layouts.length, 8);
+  const shellByProfileSurface = Object.fromEntries(missing.document.layouts.map((layer) => (
+    [`${layer.profileId}:${layer.surface}`, layer.replacementSelections["workbench.shell"]]
+  )));
+  assert.equal(shellByProfileSurface["default:web"], PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface["piarium.ide:web"], PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID);
+  assert.equal(shellByProfileSurface[`${PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID}:web`], PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID);
   const again = await store.read();
   assert.equal(again.storageState, "missing");
   assert.equal(again.document.revision, 0);
@@ -112,7 +131,7 @@ test("migrates persisted Default profiles onto Agent Workspace without replacing
       scopeId: "default",
       surface: "web",
     }],
-    profileSelections: { users: {}, workspaces: {} },
+    profileSelections: { users: {} },
     profiles: [{ id: "default", label: "Default" }],
   });
   const store = new WorkbenchProfileStore({
@@ -155,7 +174,7 @@ test("migrates Agent shells without replacing a chosen IDE shell", async () => {
       scopeId: "piarium.ide",
       surface: "web",
     }],
-    profileSelections: { users: {}, workspaces: {} },
+    profileSelections: { users: {} },
     profiles: [
       { id: "default", label: "Agent" },
       { id: "piarium.ide", label: "IDE" },

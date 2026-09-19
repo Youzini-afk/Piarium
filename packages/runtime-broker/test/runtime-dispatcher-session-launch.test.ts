@@ -39,6 +39,7 @@ describe("runtime dispatcher session launch projection", () => {
       model: { providerId: "openai", modelId: "gpt-test" },
       scope: ["packages/web"],
       tools: ["read", "grep"],
+      workFocus: "research" as const,
     };
 
     await dispatchRuntimeRequest(broker, "session.create", {
@@ -56,8 +57,25 @@ describe("runtime dispatcher session launch projection", () => {
     assert.deepEqual(calls[1]?.[0], {
       cwd: "/workspace",
       sessionId: "child-1",
-      ...launch,
+      model: launch.model,
+      scope: launch.scope,
+      tools: launch.tools,
     });
+  });
+
+  it("routes an explicit session work-focus selection through the broker", async () => {
+    const calls: unknown[][] = [];
+    const broker = {
+      setSessionWorkFocus: async (...args: unknown[]) => {
+        calls.push(args);
+        return snapshot("session-1");
+      },
+    } as unknown as PiRuntimeBroker;
+    await dispatchRuntimeRequest(broker, "session.workFocus.set", {
+      sessionId: "session-1",
+      workFocus: "research",
+    });
+    assert.deepEqual(calls, [["session-1", "research"]]);
   });
 
   it("rejects malformed tool lists before they reach the broker", async () => {

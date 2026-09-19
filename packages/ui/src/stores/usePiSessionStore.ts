@@ -22,6 +22,7 @@ import type {
   JsonValue,
   PiUserMessage,
   AgentInputContext,
+  WorkFocusId,
 } from '@piarium/protocol';
 import type { PiRuntimeClient } from '@piarium/runtime-client';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
@@ -149,6 +150,7 @@ export interface PiSessionStoreState {
     name?: string,
     parentSession?: string,
     workspace?: SessionWorkspaceBinding,
+    workFocus?: WorkFocusId,
   ): Promise<SessionSnapshot>;
   deleteSession(sessionId: string): Promise<boolean>;
   executeCommand(sessionId: string, command: string): Promise<JsonValue>;
@@ -201,6 +203,7 @@ export interface PiSessionStoreState {
   reset(): void;
   selectModel(sessionId: string, model: Pick<ModelDescriptor, 'id' | 'provider'>): Promise<SessionSnapshot>;
   selectThinking(sessionId: string, level: ThinkingLevel): Promise<SessionSnapshot>;
+  selectWorkFocus(sessionId: string, workFocus: WorkFocusId): Promise<SessionSnapshot>;
   saveTimelineCheckpoint(
     sessionId: string,
     entryEpoch: number,
@@ -1105,7 +1108,7 @@ export const createPiSessionStore = (
         }));
       },
 
-      createSession: async (cwd, name, parentSession, workspace) => {
+      createSession: async (cwd, name, parentSession, workspace, workFocus) => {
         const selectionIntent = beginSelectionIntent();
         try {
           const resolvedWorkspace = await canonicalWorkspaceBinding(cwd, workspace);
@@ -1114,6 +1117,7 @@ export const createPiSessionStore = (
             ...(name === undefined ? {} : { name }),
             ...(parentSession === undefined ? {} : { parentSession }),
             ...(resolvedWorkspace === undefined ? {} : { workspace: resolvedWorkspace }),
+            ...(workFocus === undefined ? {} : { workFocus }),
           });
           deletedSessionIds.delete(result.sessionId);
           set((state) => ({
@@ -1647,6 +1651,18 @@ export const createPiSessionStore = (
           provider: model.provider,
           sessionId,
         });
+        set((state) => ({
+          records: upsertRecord(state.records, sessionId, (current) => ({
+            ...current,
+            open: true,
+            snapshot: preserveSnapshotWorkspace(result, current.snapshot),
+          })),
+        }));
+        return result;
+      },
+
+      selectWorkFocus: async (sessionId, workFocus) => {
+        const { result } = await request('session.workFocus.set', { sessionId, workFocus }, undefined, false);
         set((state) => ({
           records: upsertRecord(state.records, sessionId, (current) => ({
             ...current,

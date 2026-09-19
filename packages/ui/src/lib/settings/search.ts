@@ -531,6 +531,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['model', 'new chat', 'project default'],
   },
   {
+    id: 'projects.default-work-focus',
+    page: 'projects',
+    titleKey: 'workFocus.projectDefault',
+    descriptionKey: 'workFocus.projectDefaultDescription',
+    keywords: ['research', 'science', 'coding', 'focus', 'new conversation', '科研', '工作侧重'],
+  },
+  {
     id: 'projects.accent-color',
     page: 'projects',
     titleKey: 'settings.projects.page.field.accentColor',

@@ -64,6 +64,7 @@ const renderTimeline = (
             reload: async () => {},
             setIncludeArchived: () => {},
             threads,
+            researchRoot: null, researchBranches: [], loadError: null,
             workspaceId: 'workspace',
           }}>
             <PiTimelineEntryList
@@ -139,15 +140,17 @@ describe('Pi timeline chat render mode', () => {
       message: { role: 'toolResult', toolCallId: 'tool-1', toolName: 'read', content: [{ type: 'text', text: 'Remember the result' }], isError: false, timestamp: 3 },
     }] as PiSessionEntry[];
     const markerThread: Thread = {
+      purpose: 'task',
       id: 'thread-1', parent: { kind: 'session', id: 'session' }, workspaceId: 'workspace',
       forkPoint: { entryId: 'assistant-entry' }, brief: 'Discuss the answer', preset: null, model: null,
-      manifest: { carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
+      manifest: { workFocus: 'code', carryBlocks: true, concurrency: 12, draftBaselineId: null, scope: [], systemPromptFragment: null, tools: ['read'], worktree: 'none' },
       createdBy: 'user', kind: 'discussion', worktree: null, lifecycle: 'active', attention: 'user',
       waitingFor: { kind: 'user', text: 'Ready' }, integration: 'none', diffStats: null, report: null,
       activeRunId: 'run-1', createdAt: '2026-09-05T00:00:00.000Z', updatedAt: '2026-09-05T00:00:00.000Z', eventSeq: 1, hidden: false,
     };
     const markerRun: ThreadRun = {
       id: 'run-1', threadId: markerThread.id, attempt: 1, runtimeId: 'pi', sessionId: 'child-1',
+      sessionOwner: 'spawned-child',
       workerState: 'running', outcome: null, exitReason: null, tokens: { input: 0, output: 0, cacheRead: 0 },
       costUsd: null, steps: 0, lastToolCall: null, startedAt: markerThread.createdAt,
       lastActivityAt: markerThread.updatedAt, endedAt: null,

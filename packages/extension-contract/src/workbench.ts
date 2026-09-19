@@ -18,12 +18,17 @@ export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID = "default";
 export const PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL = "Agent";
 export const PIARIUM_WORKBENCH_IDE_PROFILE_ID = "piarium.ide";
 export const PIARIUM_WORKBENCH_IDE_PROFILE_LABEL = "IDE";
+export const PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID = "piarium.research";
+export const PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL = "Research";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID = "piarium.builtin.agent-workspace";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SHELL_CONTRIBUTION_ID = "piarium.builtin.agent-workspace.shell";
 export const PIARIUM_BUILTIN_AGENT_WORKSPACE_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
 export const PIARIUM_BUILTIN_IDE_WORKBENCH_EXTENSION_ID = "piarium.builtin.ide-workbench";
 export const PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID = "piarium.builtin.ide-workbench.shell";
 export const PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES: PiariumApplicationSurface[] = ["web", "desktop"];
+export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID = "piarium.builtin.research-workbench";
+export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID = "piarium.builtin.research-workbench.shell";
+export const PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES: PiariumApplicationSurface[] = ["web", "desktop", "mobile"];
 
 export const PIARIUM_WORKBENCH_REPLACEMENT_TARGETS = {
   agents: "agents.workbench",
@@ -321,7 +326,6 @@ export interface PiariumWorkbenchDistributionProfile {
 
 export interface PiariumWorkbenchProfileSelections {
   users: Record<string, string>;
-  workspaces: Record<string, string>;
 }
 
 export interface PiariumWorkbenchProfileDocument {
@@ -350,7 +354,7 @@ export interface PiariumWorkbenchLayoutUpdateRequest {
 export interface PiariumWorkbenchProfileSelectionRequest {
   expectedRevision: number;
   profileId: string;
-  scope: "application" | "user" | "workspace";
+  scope: "application" | "user";
   scopeId?: string;
 }
 
@@ -504,10 +508,9 @@ export const parsePiariumWorkbenchProfileDocument = (value: unknown): PiariumWor
   const knownProfiles = new Set(profiles.map((item) => item.id));
   const profileSelections = {
     users: parseStringMap(selections.users, "profileSelections.users"),
-    workspaces: parseStringMap(selections.workspaces, "profileSelections.workspaces"),
   };
   if (!knownProfiles.has(activeProfileId)) throw new Error("activeProfileId does not name an installed profile");
-  for (const selected of [...Object.values(profileSelections.users), ...Object.values(profileSelections.workspaces)]) {
+  for (const selected of Object.values(profileSelections.users)) {
     if (!knownProfiles.has(selected)) throw new Error(`Profile selection names an unknown profile: ${selected}`);
   }
   for (const layer of layouts) {
@@ -557,7 +560,7 @@ export const parsePiariumWorkbenchProfileSelectionRequest = (value: unknown): Pi
   const raw = record(value);
   if (!raw) throw new Error("Workbench profile selection request must be an object");
   const scope = raw.scope;
-  if (scope !== "application" && scope !== "user" && scope !== "workspace") throw new Error("Profile selection scope is unsupported");
+  if (scope !== "application" && scope !== "user") throw new Error("Profile selection scope is unsupported");
   const scopeId = raw.scopeId === undefined ? undefined : text(raw.scopeId, "scopeId");
   if (scope === "application" && scopeId !== undefined) throw new Error("Application profile selection cannot include scopeId");
   if (scope !== "application" && scopeId === undefined) throw new Error(`${scope} profile selection requires scopeId`);
@@ -655,11 +658,19 @@ export const defaultPiariumWorkbenchProfileDocument = (): PiariumWorkbenchProfil
         PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
       )
     )),
+    ...PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES.map((surface) => (
+      distributionShellLayer(
+        PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+        surface,
+        PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+      )
+    )),
   ],
-  profileSelections: { users: {}, workspaces: {} },
+  profileSelections: { users: {} },
   profiles: [
     { id: PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID, label: PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL },
     { id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL },
+    { id: PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID, label: PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL },
   ],
   revision: 0,
   schemaVersion: PIARIUM_WORKBENCH_PROFILE_SCHEMA_VERSION,
@@ -679,6 +690,10 @@ export const migratePiariumWorkbenchProfileDocument = (
     document.profiles.push({ id: PIARIUM_WORKBENCH_IDE_PROFILE_ID, label: PIARIUM_WORKBENCH_IDE_PROFILE_LABEL });
     changed = true;
   }
+  if (!document.profiles.some((candidate) => candidate.id === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID)) {
+    document.profiles.push({ id: PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID, label: PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL });
+    changed = true;
+  }
   changed = ensureDistributionShellLayouts(
     document,
     PIARIUM_WORKBENCH_DEFAULT_PROFILE_ID,
@@ -691,6 +706,12 @@ export const migratePiariumWorkbenchProfileDocument = (
     PIARIUM_BUILTIN_IDE_WORKBENCH_SURFACES,
     PIARIUM_BUILTIN_IDE_WORKBENCH_SHELL_CONTRIBUTION_ID,
   ) || changed;
+  changed = ensureDistributionShellLayouts(
+    document,
+    PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+    PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SURFACES,
+    PIARIUM_BUILTIN_RESEARCH_WORKBENCH_SHELL_CONTRIBUTION_ID,
+  ) || changed;
   return changed;
 };
 
@@ -702,8 +723,10 @@ export const resolvePiariumWorkbenchLayout = (
   if (!SURFACES.has(context.surface)) throw new Error("Workbench resolution surface is unsupported");
   const userId = text(context.userId, "userId");
   const workspaceId = context.workspaceId?.trim() || undefined;
-  const profileIdValue = (workspaceId ? document.profileSelections.workspaces[workspaceId] : undefined)
-    ?? document.profileSelections.users[userId]
+  // Profile identity is a user choice. `workspaceId` still participates in
+  // project layout layering below, but opening a project/session must not
+  // replace the selected Shell with a workspace-scoped profile.
+  const profileIdValue = document.profileSelections.users[userId]
     ?? document.activeProfileId;
   const layers = document.layouts.filter((layer) => (
     layer.profileId === profileIdValue
@@ -781,15 +804,11 @@ export const resolvePiariumWorkbenchLayoutForProfile = (
     throw new Error(`Workbench profile is not installed: ${selected}`);
   }
   const userId = text(context.userId, "userId");
-  const workspaceId = context.workspaceId?.trim() || undefined;
   const nextDocument: PiariumWorkbenchProfileDocument = {
     ...document,
     activeProfileId: selected,
     profileSelections: {
-      users: workspaceId ? document.profileSelections.users : { ...document.profileSelections.users, [userId]: selected },
-      workspaces: workspaceId
-        ? { ...document.profileSelections.workspaces, [workspaceId]: selected }
-        : document.profileSelections.workspaces,
+      users: { ...document.profileSelections.users, [userId]: selected },
     },
   };
   return resolvePiariumWorkbenchLayout(nextDocument, context);

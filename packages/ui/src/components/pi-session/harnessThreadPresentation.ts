@@ -10,6 +10,8 @@ export interface HarnessThreadProjection {
   parent: ThreadParent;
   includeArchived: boolean;
   threads: HarnessThreadSnapshot[];
+  researchRoot: HarnessThreadSnapshot | null;
+  researchBranches: HarnessThreadSnapshot[];
 }
 
 export type HarnessThreadState =
@@ -119,10 +121,23 @@ export const parseHarnessThreadProjection = (
     throw new Error('Malformed thread list response');
   }
   const includeArchived = options?.includeArchived === true || value.includeArchived === true;
+  const researchRoot = value.researchRoot == null ? null : parseSnapshot(value.researchRoot);
+  if (value.researchBranches !== undefined && !Array.isArray(value.researchBranches)) {
+    throw new Error('Malformed research branch list');
+  }
+  const researchBranches = (Array.isArray(value.researchBranches) ? value.researchBranches : []).map(parseSnapshot);
+  if (researchBranches.some(({ thread }) => (
+    !researchRoot || thread.workspaceId !== value.workspaceId
+      || thread.parent.kind !== 'thread' || thread.parent.id !== researchRoot.thread.id
+  ))) throw new Error('Research branches do not belong to the reported root');
   return {
     workspaceId: value.workspaceId,
     parent: parseParent(value.parent),
     includeArchived,
+    researchRoot,
+    researchBranches: researchBranches.filter((item) => (
+      !item.thread.hidden && (includeArchived || item.thread.lifecycle !== 'archived')
+    )),
     threads: value.threads.map(parseSnapshot).filter((item) => (
       !item.thread.hidden && (includeArchived || item.thread.lifecycle !== 'archived')
     )),
@@ -214,6 +229,8 @@ export const parseHarnessThreadMutation = (value: unknown): HarnessThreadProject
     parent: parseParent(value.parent),
     includeArchived: isRecord(value.thread) && value.thread.lifecycle === 'archived',
     threads: [snapshot],
+    researchRoot: null,
+    researchBranches: [],
     ...snapshot,
   };
 };

@@ -18,6 +18,8 @@ import {
   PIARIUM_WORKBENCH_DEFAULT_PROFILE_LABEL,
   PIARIUM_WORKBENCH_IDE_PROFILE_ID,
   PIARIUM_WORKBENCH_IDE_PROFILE_LABEL,
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID,
+  PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL,
   PIARIUM_WORKBENCH_CONTEXT_KEYS,
   PIARIUM_WORKBENCH_REPLACEMENT_TARGETS,
   PIARIUM_WORKBENCH_SHELL_DATA_CONTRACT,
@@ -69,6 +71,37 @@ test("workbench profile resolution layers distribution, user, and workspace with
     { contributionId: "dev.example.missing", order: 20, region: "right", visible: false },
     { contributionId: "dev.example.panel", size: 360 },
   ]);
+});
+
+test("workbench profile selection is user-scoped while workspace layers remain project-scoped", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  document.profileSelections.users.default = PIARIUM_WORKBENCH_IDE_PROFILE_ID;
+  const resolved = resolvePiariumWorkbenchLayout(document, {
+    surface: "web",
+    userId: "default",
+    workspaceId: "/workspace",
+  });
+  assert.equal(resolved.profileId, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+
+  const candidate = resolvePiariumWorkbenchLayoutForProfile(document, {
+    surface: "web",
+    userId: "default",
+    workspaceId: "/workspace",
+  }, PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
+  assert.equal(candidate.profileId, PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
+  assert.equal(document.profileSelections.users.default, PIARIUM_WORKBENCH_IDE_PROFILE_ID);
+});
+
+test("legacy workspace profile selections are discarded during document parsing", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  const parsed = parsePiariumWorkbenchProfileDocument({
+    ...document,
+    profileSelections: {
+      users: {},
+      workspaces: { "/legacy": PIARIUM_WORKBENCH_IDE_PROFILE_ID },
+    },
+  });
+  assert.deepEqual(parsed.profileSelections, { users: {} });
 });
 
 test("workbench profile documents reject duplicate layer and contribution identities", () => {
@@ -270,6 +303,19 @@ test("distribution includes an optional IDE profile without making it active", (
     PIARIUM_WORKBENCH_IDE_PROFILE_ID,
   );
   assert.equal(mobileIde.replacementSelections[PIARIUM_WORKBENCH_REPLACEMENT_TARGETS.shell], undefined);
+});
+
+test("distribution includes the Research profile and shell on every supported surface", () => {
+  const document = defaultPiariumWorkbenchProfileDocument();
+  assert.ok(document.profiles.some((profile) => (
+    profile.id === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID
+    && profile.label === PIARIUM_WORKBENCH_RESEARCH_PROFILE_LABEL
+  )));
+  const researchLayouts = document.layouts.filter((layer) => layer.profileId === PIARIUM_WORKBENCH_RESEARCH_PROFILE_ID);
+  assert.deepEqual(
+    researchLayouts.map((layer) => layer.surface).sort(),
+    ["desktop", "mobile", "web"],
+  );
 });
 
 test("migrates missing IDE profiles without changing the active Agent selection", () => {

@@ -9,6 +9,9 @@ export interface HarnessThreadStateValue {
   reload(): Promise<void>;
   setIncludeArchived(value: boolean): void;
   threads: HarnessThreadSnapshot[];
+  researchRoot: HarnessThreadSnapshot | null;
+  researchBranches: HarnessThreadSnapshot[];
+  loadError: string | null;
   workspaceId: string;
 }
 
@@ -19,6 +22,9 @@ const EMPTY_STATE: HarnessThreadStateValue = {
   reload: async () => {},
   setIncludeArchived: () => {},
   threads: [],
+  researchRoot: null,
+  researchBranches: [],
+  loadError: null,
   workspaceId: '',
 };
 

@@ -90,6 +90,9 @@ import type {
   HarnessEmbedResult,
   HarnessRerankParams,
   HarnessRerankResult,
+  WorkFocusId,
+  WorkFocusExecutionRole,
+  WorkFocusSelection,
 } from "@piarium/protocol";
 import {
   packageSourceEnabled,
@@ -158,6 +161,7 @@ import {
 } from "./harness/context-preparation.js";
 import { createKnowledgeSuggestionExtension } from "./harness/knowledge-suggestion-extension.js";
 import { createPermissionGateExtension, buildPermissionPolicy } from "./harness/permission-gate-extension.js";
+import { createWorkFocusExtension } from "./harness/work-focus-extension.js";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   HarnessSettingsValidationError,
@@ -649,6 +653,9 @@ export class SessionHost {
   #inputContext: AgentInputContext = { source: "disk" };
   #backgroundInference: BackgroundInferenceRuntime | undefined;
   #inferenceCwd: string | undefined;
+  #workFocus: WorkFocusSelection = { id: "code", source: "product-default" };
+  #workFocusGeneration = 1;
+  #workFocusRole: WorkFocusExecutionRole = "principal";
   readonly #inferenceFetch: typeof fetch | undefined;
 
   constructor(options: SessionHostOptions) {
@@ -745,12 +752,18 @@ export class SessionHost {
     tools?: string[],
     model?: ModelSelection,
     permissions?: PermissionPolicy,
+    workFocus: WorkFocusSelection = { id: "code", source: "product-default" },
+    workFocusGeneration = 1,
+    workFocusRole: WorkFocusExecutionRole = "principal",
   ): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = tools === undefined ? undefined : [...new Set(tools)];
     this.#sessionModelSelection = model === undefined ? undefined : { ...model };
     this.#frozenPermissionOverlay = permissions === undefined
       ? undefined
       : normalizeFrozenHarnessPermissions(permissions);
+    this.#workFocus = structuredClone(workFocus);
+    this.#workFocusGeneration = workFocusGeneration;
+    this.#workFocusRole = workFocusRole;
     await this.#replaceWith(SessionManager.create(
       cwd,
       getSessionDir(cwd, this.#agentDir),
@@ -772,12 +785,18 @@ export class SessionHost {
     tools?: string[];
     model?: ModelSelection;
     permissions?: PermissionPolicy;
+    workFocus?: WorkFocusSelection;
+    workFocusGeneration?: number;
+    workFocusRole?: WorkFocusExecutionRole;
   }): Promise<SessionSnapshot> {
     this.#sessionToolAllowlist = input.tools === undefined ? undefined : [...new Set(input.tools)];
     this.#sessionModelSelection = input.model === undefined ? undefined : { ...input.model };
     this.#frozenPermissionOverlay = input.permissions === undefined
       ? undefined
       : normalizeFrozenHarnessPermissions(input.permissions);
+    this.#workFocus = structuredClone(input.workFocus ?? { id: "code", source: "product-default" });
+    this.#workFocusGeneration = input.workFocusGeneration ?? 1;
+    this.#workFocusRole = input.workFocusRole ?? "principal";
     let sessionFile = input.sessionFile;
     if (!sessionFile && input.sessionId) {
       const sessions = await this.list(input.cwd);
@@ -862,7 +881,35 @@ export class SessionHost {
       steering: [...session.getSteeringMessages()],
       steeringMode: session.steeringMode,
       thinkingLevel: session.thinkingLevel as ThinkingLevel,
+      workFocus: {
+        active: { ...this.#workFocus, generation: this.#workFocusGeneration },
+        selected: { ...this.#workFocus },
+        status: "applied",
+      },
     };
+  }
+
+  applyWorkFocus(sessionId: string, selection: WorkFocusSelection, generation: number): boolean {
+    this.assertSession(sessionId);
+    if (!this.session.isIdle) {
+      throw new HostError(
+        "work_focus_boundary_unavailable",
+        "Work focus can only be applied before a new user run starts",
+        { retryable: true },
+      );
+    }
+    if (this.#workFocus.id === selection.id
+      && this.#workFocus.source === selection.source
+      && this.#workFocusGeneration === generation) return true;
+    this.#workFocus = structuredClone(selection);
+    this.#workFocusGeneration = generation;
+    return true;
+  }
+
+  publishWorkFocus(sessionId: string): boolean {
+    this.assertSession(sessionId);
+    this.#emit("session.snapshot", this.snapshot());
+    return true;
   }
 
   header(sessionId: string): SessionHeader | null {
@@ -3098,6 +3145,14 @@ export class SessionHost {
               factory: createSessionFeaturesExtension(),
               hidden: true,
               name: "piarium-session-features",
+            },
+            {
+              factory: createWorkFocusExtension(
+                (): WorkFocusId => this.#workFocus.id,
+                () => this.#workFocusRole,
+              ),
+              hidden: true,
+              name: "piarium-work-focus",
             },
             {
               factory: createExtensionStateBridgeExtension(this.#emit),

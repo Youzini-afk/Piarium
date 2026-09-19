@@ -31,6 +31,21 @@ broker event stream ──→ HarnessRouter.processEvent()
 
 ## Components
 
+### Research root (`research-root-runtime.ts`, phase 7A)
+
+The research work focus uses the user's existing Pi session and selected model. On a real
+`agent_start`, `ResearchRootRuntime` attaches that session to a durable `research-root` Thread and a
+new Run. It observes broker lifecycle events and records the actual report, transcript range and cost;
+it does not create another model loop. The per-session event tail attaches the root before subsequent
+dispatch requests resolve their parent. Root ownership is `attached-root`; ordinary child sessions are
+`spawned-child`. Settling an attached root drops its live binding without a child-session tombstone,
+and keeps its research branches and results. Child lifecycle code must not close the user's session.
+
+The authenticated session thread projection returns `researchRoot` and `researchBranches` alongside
+ordinary threads. User actions on a retained branch are authorized through its durable research-root
+ancestry after the principal Run settles. Shell mounting is not an execution event. Research capability
+routing, resource scheduling, board updates, experiment adapters and writing loops belong to 7B–7F.
+
 ### HarnessServiceHost (`service-host.ts`)
 
 Global singleton that owns:

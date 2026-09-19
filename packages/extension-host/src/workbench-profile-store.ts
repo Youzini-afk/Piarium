@@ -113,11 +113,7 @@ export class WorkbenchProfileStore {
         throw new Error(`Workbench profile is not installed: ${request.profileId}`);
       }
       if (request.scope === "application") document.activeProfileId = request.profileId;
-      else if (request.scope === "user") document.profileSelections.users[request.scopeId as string] = request.profileId;
-      else {
-        const scopeId = await this.#canonicalScopeId(request.scopeId as string);
-        document.profileSelections.workspaces[scopeId] = request.profileId;
-      }
+      else document.profileSelections.users[request.scopeId as string] = request.profileId;
     });
   }
 
@@ -141,9 +137,6 @@ export class WorkbenchProfileStore {
       for (const [scopeId, selected] of Object.entries(document.profileSelections.users)) {
         if (selected === request.profileId) delete document.profileSelections.users[scopeId];
       }
-      for (const [scopeId, selected] of Object.entries(document.profileSelections.workspaces)) {
-        if (selected === request.profileId) delete document.profileSelections.workspaces[scopeId];
-      }
     });
   }
 
@@ -155,13 +148,6 @@ export class WorkbenchProfileStore {
   async #migrateWorkspaceScopes(document: PiariumWorkbenchProfileDocument): Promise<boolean> {
     if (!this.#resolveWorkspaceScopeId) return false;
     let changed = false;
-    const workspaces: Record<string, string> = {};
-    for (const [scopeId, profileId] of Object.entries(document.profileSelections.workspaces)) {
-      const canonical = await this.#canonicalScopeId(scopeId);
-      if (canonical !== scopeId) changed = true;
-      workspaces[canonical] = profileId;
-    }
-    document.profileSelections.workspaces = workspaces;
     const layouts: PiariumWorkbenchLayoutLayer[] = [];
     for (const layer of document.layouts) {
       if (layer.scope !== "workspace") {

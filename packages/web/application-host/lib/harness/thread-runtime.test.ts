@@ -1288,6 +1288,32 @@ describe("thread runtime", () => {
     expect(sent.at(-1)).toContain("previous worker was interrupted");
   });
 
+  it("does not auto-resume an attached research root as a spawned child after the user session is lost", async () => {
+    const root = await registry.createThread({
+      ...createInput(),
+      parent: PARENT,
+      brief: "Research the anomaly",
+      kind: "discussion",
+      purpose: "research-root",
+      createdBy: "user",
+      autoRun: false,
+      worktree: "none",
+      workFocus: "research",
+      hidden: true,
+    });
+    const run = (await registry.admitRun(WORKSPACE, root.id, "pi", { sessionOwner: "attached-root" })).run;
+    await registry.markRunRunning(WORKSPACE, root.id, run.id, "parent-1");
+    await registry.endRun(WORKSPACE, root.id, run.id, "lost", "host restarted");
+
+    await runtime.resumeLostForParent(WORKSPACE, PARENT);
+    await runtime.drain();
+
+    expect(await registry.listRuns(WORKSPACE, root.id)).toHaveLength(1);
+    expect(await registry.getActiveRun(WORKSPACE, root.id)).toMatchObject({ outcome: "lost", sessionOwner: "attached-root" });
+    expect(sessionAdapter.open).not.toHaveBeenCalledWith(expect.objectContaining({ sessionId: "parent-1" }));
+    expect(sessionAdapter.create).not.toHaveBeenCalled();
+  });
+
   it("restarts a Run that crashed before a child session id was persisted", async () => {
     const input = { ...createInput(), draftBaselineId: "draft-resume" };
     const thread = await registry.createThread(input);

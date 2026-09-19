@@ -5,7 +5,7 @@ import { useProjectsStore } from "./useProjectsStore"
 
 describe("useProjectsStore settings synchronization", () => {
   test("treats a successful empty project snapshot as authoritative", () => {
-    const project = { id: "project-a", path: "/repo", label: "Repo" } as ProjectEntry
+    const project = { id: "project-a", path: "/repo", label: "Repo", defaultWorkFocus: "research" } as ProjectEntry
     useProjectsStore.setState({
       projects: [project],
       activeProjectId: project.id,
@@ -20,7 +20,7 @@ describe("useProjectsStore settings synchronization", () => {
   })
 
   test("preserves an explicit no-workspace selection while projects remain available", () => {
-    const project = { id: "project-a", path: "/repo", label: "Repo" } as ProjectEntry
+    const project = { id: "project-a", path: "/repo", label: "Repo", defaultWorkFocus: "research" } as ProjectEntry
     useProjectsStore.setState({
       projects: [project],
       activeProjectId: project.id,
@@ -35,6 +35,7 @@ describe("useProjectsStore settings synchronization", () => {
     expect(useProjectsStore.getState().projects).toHaveLength(1)
     expect(useProjectsStore.getState().projects[0]?.label).toBe(project.label)
     expect(useProjectsStore.getState().projects[0]?.path).toBe(project.path)
+    expect(useProjectsStore.getState().projects[0]?.defaultWorkFocus).toBe("research")
     expect(useProjectsStore.getState().activeProjectId).toBeNull()
   })
 })

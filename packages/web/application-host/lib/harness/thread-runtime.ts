@@ -82,6 +82,7 @@ export interface ThreadSessionAdapter {
     permissions?: import("@piarium/protocol").PermissionPolicy;
     scope?: string[];
     tools: string[];
+    workFocus: import("@piarium/protocol").WorkFocusId;
     workspaceId: string;
   }): Promise<SessionSnapshot>;
   open(input: {
@@ -91,6 +92,7 @@ export interface ThreadSessionAdapter {
     scope?: string[];
     sessionId: string;
     tools: string[];
+    workFocus: import("@piarium/protocol").WorkFocusId;
     workspaceId: string;
   }): Promise<SessionSnapshot>;
   prompt(sessionId: string, text: string, instructions?: string, images?: import("@piarium/protocol").ImageAttachment[]): Promise<void>;
@@ -1313,7 +1315,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     return { id: sessionId, file: summary.sessionFile, cwd: summary.cwd };
   };
 
-  const scopeForSession = async (sessionId: string): Promise<ThreadSessionScope> => {
+  const rootScopeForSession = async (sessionId: string): Promise<ThreadSessionScope> => {
     let snapshot: SessionSnapshot | null = null;
     let summary: SessionSummary | null = null;
     try {
@@ -1325,12 +1327,25 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         throw snapshotError;
       }
     }
+    const workspace = snapshot?.workspace ?? summary?.workspace;
+    if (workspace?.kind !== "workspace") {
+      throw new ThreadRuntimeError("unavailable", "Discussion threads require a project workspace");
+    }
+    return {
+      workspaceId: workspace.authorityId ?? workspace.id,
+      parent: { kind: "session", id: sessionId },
+      snapshot,
+    };
+  };
+
+  const scopeForSession = async (sessionId: string): Promise<ThreadSessionScope> => {
+    const root = await rootScopeForSession(sessionId);
     const bound = bindingsBySession.get(sessionId);
     if (bound) {
       return {
         workspaceId: bound.workspaceId,
         parent: { kind: "thread", id: bound.threadId },
-        snapshot,
+        snapshot: root.snapshot,
       };
     }
     const persisted = await options.registry.getSessionBinding(sessionId);
@@ -1338,19 +1353,10 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
       return {
         workspaceId: persisted.owningWorkspaceId,
         parent: { kind: "thread", id: persisted.threadId },
-        snapshot,
+        snapshot: root.snapshot,
       };
     }
-    const workspace = snapshot?.workspace ?? summary?.workspace;
-    if (workspace?.kind !== "workspace") {
-      throw new ThreadRuntimeError("unavailable", "Discussion threads require a project workspace");
-    }
-    const workspaceId = workspace.authorityId ?? workspace.id;
-    return {
-      workspaceId,
-      parent: { kind: "session", id: sessionId },
-      snapshot,
-    };
+    return root;
   };
 
   const bind = (binding: RuntimeBinding): void => {
@@ -1949,10 +1955,18 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const frozen = run.frozen;
     // Callers supply identity and any prepared prompt, never a second execution
     // configuration. Dequeue/recovery and direct dispatch use this same snapshot.
-    const { model: _model, permissions: _permissions, scope: _scope, systemPromptFragment: _fragment, ...identity } = input;
+    const {
+      model: _model,
+      permissions: _permissions,
+      scope: _scope,
+      systemPromptFragment: _fragment,
+      workFocus: _workFocus,
+      ...identity
+    } = input;
     input = { ...identity, tools: [...frozen.tools], scope: [...frozen.scope], worktree: frozen.worktree,
       ...(frozen.model ? { model: frozen.model } : {}),
       permissions: normalizeFrozenHarnessPermissions(frozen.permissions),
+      workFocus: frozen.workFocus,
       ...(frozen.systemPromptFragment ? { systemPromptFragment: frozen.systemPromptFragment } : {}),
       ...(run.request?.preparedInput ? { promptText: run.request.preparedInput } : {}),
     };
@@ -2207,6 +2221,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         permissions: normalizeFrozenHarnessPermissions(input.permissions),
         ...(input.scope?.length ? { scope: [...input.scope] } : {}),
         tools: [...input.tools],
+        workFocus: frozen.workFocus,
         workspaceId: runtimeWorkspaceId,
       });
       sessionId = snapshot.sessionId;
@@ -3058,6 +3073,9 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     const threads = await options.registry.listThreads(workspaceId, parent, true);
     for (let thread of threads) {
       let previous = await options.registry.getActiveRun(workspaceId, thread.id);
+      // Attached roots borrow user-owned sessions and resume only on the next
+      // real research prompt; spawned-child recovery must never open one.
+      if (thread.purpose === "research-root" || previous?.sessionOwner === "attached-root") continue;
       if (thread.lifecycle !== "active" || previous?.outcome !== "lost") continue;
       if (resuming.has(thread.id)) continue;
       resuming.add(thread.id);
@@ -3140,6 +3158,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
             ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
             sessionId: previous.sessionId!,
             tools: [...frozen.tools],
+            workFocus: frozen.workFocus,
             workspaceId: runtimeWorkspaceId,
           });
           resumedSessionId = snapshot.sessionId;
@@ -3311,6 +3330,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(thread.manifest.scope.length > 0 ? { scope: [...thread.manifest.scope] } : {}),
           sessionId: currentRun.sessionId,
           tools,
+          workFocus: converted.run.frozen!.workFocus,
           workspaceId: runtimeWorkspaceId,
         });
       } catch (error) {
@@ -4305,13 +4325,14 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
   const deleteThreadSessions = async (workspaceId: string, threadId: string): Promise<string[]> => {
     const sessionIds = new Set<string>();
     for (const run of await options.registry.listRuns(workspaceId, threadId)) {
-      if (run.sessionId) sessionIds.add(run.sessionId);
+      if (run.sessionId && run.sessionOwner === "spawned-child") sessionIds.add(run.sessionId);
     }
     const live = sessionByThread.get(threadId);
     if (live) sessionIds.add(live);
-    const report = (await options.registry.getThreadById(workspaceId, threadId))?.report;
+    const thread = await options.registry.getThreadById(workspaceId, threadId);
+    const report = thread?.report;
     const transcript = report?.transcriptRef.sessionId;
-    if (transcript) sessionIds.add(transcript);
+    if (transcript && thread?.purpose !== "research-root") sessionIds.add(transcript);
     if (sessionIds.size === 0) return [];
     if (!options.deleteSession) {
       throw new ThreadRuntimeError("unavailable", "Session deletion is unavailable; the thread's transcripts would be left behind");
@@ -4610,6 +4631,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
         ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
         sessionId,
         tools: [...frozen.tools],
+        workFocus: frozen.workFocus,
         workspaceId: runtimeWorkspaceId,
       });
       openedSessionId = opened.sessionId;
@@ -5606,6 +5628,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
           ...(frozen.scope.length > 0 ? { scope: [...frozen.scope] } : {}),
           sessionId: retainedSessionId,
           tools: [...frozen.tools],
+          workFocus: frozen.workFocus,
           workspaceId: runtimeWorkspaceId,
         });
         const baselineStats = await options.sessions.stats(snapshot.sessionId).catch((error) => {
@@ -5684,6 +5707,7 @@ export function createThreadRuntime(options: ThreadRuntimeOptions) {
     prepareIsolatedBranch,
     createDiscussion,
     convertDiscussion,
+    rootScopeForSession,
     scopeForSession,
     processEvent,
     resumeLostForParent,

@@ -1,4 +1,4 @@
-import type { ImageAttachment, ModelDescriptor, ThinkingLevel } from '@piarium/protocol';
+import type { ImageAttachment, ModelDescriptor, ThinkingLevel, WorkFocusId } from '@piarium/protocol';
 import { create } from 'zustand';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getRuntimeKey } from '@piarium/application-client';
@@ -14,6 +14,8 @@ export interface PiDraftState {
   text: string;
   /** Explicit next-session thinking level. Undefined means inherit the effective default. */
   thinkingLevel?: ThinkingLevel;
+  /** Explicit new-conversation focus. Omitted means capture the project's default. */
+  workFocus?: WorkFocusId;
 }
 
 interface PiDraftStoreState {
