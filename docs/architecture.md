@@ -1142,7 +1142,7 @@ shapes are built-in extensions selected by profile, and the public authoring sur
 `@piarium/extension-sdk`, `@piarium/extension-react`, and `@piarium/extension-cli` templates. See
 section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md).
 
-### 7.4 Conversational settings and Agent administration (partial, D-306/D-308)
+### 7.4 Conversational settings and Agent administration (partial, D-306/D-310)
 
 [agent-settings-design.md](agent-settings-design.md) defines Stage S in the
 [harness plan](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). The implemented core field slice makes Settings UI and Agent tools share
@@ -1160,11 +1160,13 @@ and revision checks preserve concurrent edits; reset removes an actual override.
 state remain distinct, frozen Run configuration changes only at its legal boundary, and a tool must
 not synchronously reload its own executing session. UI and Agent consumers receive the same owner
 state without a write-back loop. Native permission enforcement and credential ownership remain intact.
-The shared catalog, app/Pi field path, domain-action adapters, client-Surface application, compound
-multi-entry updates and product Skills are wired. Entries without an owner API stay unavailable and
-external login/install round-trips remain untested live; status records the boundary.
+The shared catalog, app/Pi field path, domain-action adapters, authenticated client-Surface application,
+per-owner compound updates and product Skills are wired. A client operation requires exactly one
+authenticated Surface because Harness sessions do not yet carry a Surface binding; entries without an
+owner API stay unavailable, and external login/install round-trips remain untested live. Status records
+these boundaries.
 
-### 7.5 Session follow-ups and triggers (partial, D-307/D-308)
+### 7.5 Session follow-ups and triggers (partial, D-307/D-310)
 
 [agent-follow-up-design.md](agent-follow-up-design.md) defines Stage W. The implemented slice lets Agents register
 conditions and continuation intent against existing sessions/Threads; time, authoritative events and
@@ -1182,11 +1184,13 @@ the existing Rust durable storage boundary. Pi sessions, Thread/Run, processes a
 their owners. Ordinary shell lifetime is not upgraded by persisting a follow-up. Existing GUI/CLI/Markdown
 calendar tasks share trigger management while preserving their new-session target semantics; actual
 run/Goal completion replaces the scheduler's former dispatch-accepted success interpretation.
-Time, experiment, artifact, file, metric, log, external and manual sources, durable occurrence delivery,
-Goal waiting, the session strip, scheduler terminal tracking, managed-remote reattach, target-lifecycle
-settlement, kernel workspace enumeration and calendar-task Agent management (`schedule.*` methods +
-`scheduled_task` tool, workspace-resolved project, loop CAS) are wired. A cross-source `all`/`any`
-composite combinator remains outside the delivered slice; status records the boundary.
+Time, durable experiment, artifact, file, metric, log, external and manual sources, durable occurrence
+delivery, Goal waiting, scheduler terminal tracking, managed-remote reattach, Thread/session lifecycle
+settlement, kernel workspace enumeration and calendar-task Agent management are wired. Literal log reads
+retain cursor overlap, file watches establish a baseline after the watcher is ready, and calendar run-now
+uses the real admission queue. Ordinary shell remains a non-durable 7H source; cross-source `all`/`any`,
+shared external observation, crash-proof transient file/metric edges and a unified active-inform/continue
+receipt remain outside the delivered slice.
 
 ## 8. Recovery model
 

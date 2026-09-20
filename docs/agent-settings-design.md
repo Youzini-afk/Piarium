@@ -1,13 +1,14 @@
 # Piarium 对话式设置与 Agent 管理设计
 
-Status: field catalog, domain actions, client Surfaces, compound updates and product Skills implemented and wired; acceptance corrected at D-308; Stage S remains partial (untested external flows)
+Status: owner-backed field/action/client slices wired and corrected through D-310; Stage S remains partial (multi-Surface targeting and owner operation identities)
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 实施顺序见 [Harness plan 的阶段 S](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
 交付事实见 [Harness status](agent-harness-status.md)，决策见 [D-306](decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
 本文同时定义完整目标和当前实现边界；字段目录、查询/修改、UI 同步、领域动作、客户端 Surface 操作、
-跨 owner 组合更新和 S4 组合指南已经接线，具体事实与未实测边界以 status 为准。
+跨 owner 组合更新和 S4 组合指南已经接线；认证 Surface、逐项 CAS、secret 投影与 scheduler/follow-up 验收修订见 D-310，
+具体事实与剩余边界以 status 为准。
 
 ## 1. 产品目标
 

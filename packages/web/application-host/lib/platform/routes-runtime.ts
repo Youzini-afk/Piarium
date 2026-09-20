@@ -271,6 +271,7 @@ export const createPlatformRoutesRuntime = ({
     registerPiariumEventRoutes(app, {
       getPiariumEventClients,
       writeSseEvent,
+      requireAuth: uiAuthController.requireAuth,
       ...(surfaceBridge ? { surfaceBridge } : {}),
     });
     registerQuotaRoutes(app, { getQuotaProviders });

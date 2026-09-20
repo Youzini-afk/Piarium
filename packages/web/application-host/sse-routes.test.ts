@@ -175,6 +175,7 @@ describe('local SSE routes', () => {
 
     registerPiariumEventRoutes(app, {
       getPiariumEventClients: () => clients,
+      requireAuth: (_req, _res, next) => next(),
       writeSseEvent(res, payload) {
         res.write(`data: ${JSON.stringify(payload)}\n\n`);
       },

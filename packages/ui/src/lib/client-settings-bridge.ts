@@ -25,19 +25,26 @@ import {
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 
 const SURFACE_ID_STORAGE_KEY = 'piarium.client-surface.v1';
+let cachedSurfaceId: string | null = null;
 
 export type ClientSurfaceKind = 'desktop' | 'web' | 'mobile';
 
 /** Stable per-device identity — generated once, persisted locally. */
 export const getClientSurfaceId = (): string => {
+  if (cachedSurfaceId) return cachedSurfaceId;
   try {
     const existing = window.localStorage.getItem(SURFACE_ID_STORAGE_KEY);
-    if (existing) return existing;
+    if (existing) {
+      cachedSurfaceId = existing;
+      return existing;
+    }
     const id = `surface-${crypto.randomUUID()}`;
     window.localStorage.setItem(SURFACE_ID_STORAGE_KEY, id);
+    cachedSurfaceId = id;
     return id;
   } catch {
-    return `surface-${crypto.randomUUID()}`;
+    cachedSurfaceId = `surface-${crypto.randomUUID()}`;
+    return cachedSurfaceId;
   }
 };
 
@@ -63,6 +70,7 @@ export interface ClientSettingsFieldResult {
 interface ClientSettingsRequestEntry {
   id: string;
   values?: Record<string, unknown>;
+  reset?: string[];
 }
 
 /** Real per-entry authority on this surface. */
@@ -109,7 +117,7 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
           const enabled = boolField(values, 'enabled');
           // The main process persists then relaunches — the write itself is
           // the ack'ed fact; the relaunch kills this page right after.
-          void invokeDesktop('desktop_set_vibrancy', { enabled });
+          await invokeDesktop('desktop_set_vibrancy', { enabled });
         },
       }
     : notOnThisSurface('window transparency is a desktop-only window option'),
@@ -218,13 +226,27 @@ const AUTHORITIES: Record<string, ClientSettingAuthority> = {
   },
 };
 
+const CLIENT_DEFAULTS: Record<string, Record<string, unknown>> = {
+  'appearance.window-transparency': { enabled: false },
+  'appearance.dock-badge': { enabled: true },
+  'appearance.file-editor-keymap': { keymap: 'default' },
+  'appearance.terminal-quick-keys': { enabled: false },
+  'chat.subagent-read-only-banner': { enabled: false },
+  'chat.persist-drafts': { enabled: true },
+  'sessions.desktop-launch-at-login': { enabled: false },
+  'remote-instances.direct-hosts': { defaultHostId: null },
+  'voice.playback': { voiceProvider: 'browser', ttsInputMode: 'sanitized' },
+};
+
 /**
  * Handle one `piarium:client-settings-request` envelope. Runs every entry
  * through its real surface authority and posts the per-entry facts back.
  */
 export const handleClientSettingsRequest = async (properties: Record<string, unknown>): Promise<void> => {
   const requestId = typeof properties.requestId === 'string' ? properties.requestId : '';
-  if (!requestId) return;
+  const connectionId = typeof properties.connectionId === 'string' ? properties.connectionId : '';
+  const surfaceId = typeof properties.surfaceId === 'string' ? properties.surfaceId : '';
+  if (!requestId || !connectionId || surfaceId !== getClientSurfaceId()) return;
   const op = properties.op === 'apply' ? 'apply' : 'read';
   const entries = Array.isArray(properties.entries) ? properties.entries as ClientSettingsRequestEntry[] : [];
 
@@ -237,7 +259,15 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
     }
     try {
       if (op === 'apply') {
-        await authority.apply(entry.values ?? {});
+        const values = { ...(entry.values ?? {}) };
+        for (const path of entry.reset ?? []) {
+          const defaults = CLIENT_DEFAULTS[entry.id];
+          if (!defaults || !Object.prototype.hasOwnProperty.call(defaults, path)) {
+            throw new Error(`"${path}" has no surface-owned reset default`);
+          }
+          values[path] = defaults[path];
+        }
+        await authority.apply(values);
       }
       results.push({ id: entry.id, status: 'applied', values: await authority.read() });
     } catch (error) {
@@ -251,7 +281,7 @@ export const handleClientSettingsRequest = async (properties: Record<string, unk
     await runtimeFetch('/api/piarium/client-settings/ack', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requestId, results }),
+      body: JSON.stringify({ requestId, surfaceId, connectionId, results }),
     });
   } catch {
     // The host resolves the request as timed-out/unavailable — honest.

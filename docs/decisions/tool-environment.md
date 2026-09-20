@@ -649,3 +649,31 @@ lastSessionId；设置侧 settings.action + Surface 桥 + items[] + 搜索摘要
 与真实模型链。S 与 W 继续保持 Partial。
 
 状态：已实施 / 定向验证通过 / S 与 W 保持 Partial。
+
+### D-310 · 2026-09-21 · 阶段 S/W 第二轮生产验收与边界收缩
+
+类型：问题与解法 / 实施边界更正
+
+决定：不接受 D-309 的“剩余项收口”作为完成结论。保留其真实 owner 纵切，同时修复认证 Surface、secret 投影、
+compound revision/result、并发 reload、follow-up 观察/恢复和 calendar 状态机中的生产缺陷。S/W 继续为 Partial；
+“全部来源”“按调用方会话解析 Surface”“实验删除已收口”和文件系统级 CAS 等超出现有证据的表述撤回。
+
+原因：验收发现 events/ack 未认证且可由请求选择任意 Surface；跨 owner 共用 revision、重复 path 覆盖和字段失败
+仍可被报成 applied；配置原文可能把凭据送入模型。follow-up 的 external poll 与 deadline 共用 timer，log cursor
+会漏跨追加匹配，file 观察有 scope/ready/reset 缺口，远端首次离线不登记恢复关系。calendar 又存在 partial upsert
+名实不符、once 时区错误、slash Goal 提前成功、run-now 绕过 admission、非原子进程内 loop CAS 和 project status 泄露。
+
+实施：Surface 路由使用 UI auth，并把 ACK 绑定认证主体、Surface 和 connection nonce；多 Surface 在尚无 session 绑定时
+返回 ambiguous。设置 action 输出领域白名单事实，删除假 operation handle；compound 使用 owner/scope 自己的 revision，
+冲突路径和字段失败显式返回。follow-up 分离 timer，修复 log overlap，等待 file watcher ready 并持久 baseline，校验
+workspace scope，delivery 窗口进程内合并并重新 prime；远端重连只 inspect/reconcile。Thread/session lifecycle 可重试，
+未存在的 attempt-delete 入口不再宣称接线。calendar 按任务时区、真实 Goal 终态和同一 admission 运行，Piarium 内
+loop writer 串行 revision 临界区，启动/停止 generation 与 missed-slot 身份完成对账。
+
+影响：更正 settings/follow-up design、plan S/W、status、architecture、roadmap 与 scheduler 模块文档。仍未实现：
+session→Surface 绑定与多 Surface 安全点选、统一耐久 action-operation 域、普通 shell 耐久 source、跨来源 all/any、
+相容外部观察共享，以及无耐久历史的 file/metric 短暂边沿在 Host 崩溃窗口的 exactly-once。active inform 被接受后
+恰逢 Run settle 再转 continue 的两套 receipt 仍缺统一消费证明。跨平台 Surface、真实外部登录/GitHub、完整桌面重启
+和真实模型链继续只是未实测。
+
+状态：生产缺陷已修复 / 定向整合验证通过 / S 与 W 保持 Partial。

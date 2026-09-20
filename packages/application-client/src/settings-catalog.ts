@@ -13,8 +13,8 @@
  *                  written through the Pi `settings.get`/`settings.update`
  *                  protocol with content-hash revisions.
  *  - `client`      Device-local UI state (localStorage/Zustand/Electron bridge).
- *                  Agents can describe these but cannot write them — the field
- *                  belongs to one surface, not the Host.
+ *                  An authenticated Surface applies its own fields and returns
+ *                  the actual result; the Host does not persist a duplicate.
  *  - `action`      The "setting" is really a domain object or operation
  *                  (extensions, providers, MCP, language packs, …). The entry
  *                  points at the real owner surface; reads report status,
@@ -93,6 +93,7 @@ export interface SettingsActionRef {
     | 'service:git' | 'service:tunnel' | 'service:knowledge'
     | 'service:extensions' | 'service:fleet' | 'service:agents'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
+    | 'service:magic-prompts' | 'service:snippets'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
   verbs?: readonly string[];
@@ -1101,7 +1102,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'projects.actions', category: 'projects', owner: 'action',
-    actionRef: { domain: 'service:projects', verbs: ['list-actions', 'run-action'],
+    actionRef: { domain: 'service:projects', verbs: [],
       note: 'per-project automation (open url, ssh forward)' },
     ui: { page: 'projects', titleKey: 'settings.projects.actions.title',
       descriptionKey: 'settings.projects.actions.description',
@@ -1163,8 +1164,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'agents.catalog', category: 'agents', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read'],
-      note: 'agent/workflow definitions are Pi resources; read via resource.*, edit via resource text update' },
+    actionRef: { domain: 'service:agents', verbs: ['list', 'read'],
+      note: 'agent/workflow definitions come from the active agent provider catalog' },
     ui: { page: 'agents', titleKey: 'settings.piarium.agents.catalog.title',
       descriptionKey: 'settings.piarium.agents.description',
       keywords: ['agent', 'subagent', 'workflow', 'role', 'model', 'fallback', 'thinking'] },
@@ -1281,15 +1282,15 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'snippets.create', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['create'],
-      note: 'snippets are Pi resources' },
+    actionRef: { domain: 'service:snippets', verbs: [],
+      note: 'snippets are currently owned by the interactive UI' },
     ui: { page: 'snippets', titleKey: 'settings.snippets.sidebar.actions.create',
       keywords: ['add', 'new snippet'] },
   },
   {
     id: 'snippets.content', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'],
-      note: 'snippet markdown content via the resource authority' },
+    actionRef: { domain: 'service:snippets', verbs: [],
+      note: 'snippet markdown content is currently owned by the interactive UI' },
     ui: { page: 'snippets', titleKey: 'settings.snippets.page.field.content',
       keywords: ['markdown', 'prompt', 'template'] },
   },
@@ -1396,20 +1397,20 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'magic-prompts.visible-prompt', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'],
-      note: 'magic prompt templates are Pi resources' },
+    actionRef: { domain: 'service:magic-prompts', verbs: ['read', 'write'],
+      note: 'magic prompt templates use the Host magic-prompt authority' },
     ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.visiblePrompt',
       keywords: ['prompt text', 'user message', 'template'] },
   },
   {
     id: 'magic-prompts.instructions', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'] },
+    actionRef: { domain: 'service:magic-prompts', verbs: ['read', 'write'] },
     ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.instructions',
       keywords: ['hidden prompt', 'instructions', 'template'] },
   },
   {
     id: 'magic-prompts.reset-overrides', category: 'productivity', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['reset'],
+    actionRef: { domain: 'service:magic-prompts', verbs: ['reset'],
       note: 'restore shipped prompt defaults' },
     ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.actions.resetAllOverrides',
       keywords: ['reset', 'default prompts', 'overrides'] },

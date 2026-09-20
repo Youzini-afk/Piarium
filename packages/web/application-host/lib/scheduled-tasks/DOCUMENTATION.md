@@ -31,7 +31,7 @@ Summarize repository changes since yesterday.
 
 Loop identity is the canonical file path, not its name. A same-named GUI task remains a separate JSON-owned task. Renaming a loop changes the existing loop task in place. A malformed file keeps the last good projection and exposes its parse error; removing the file removes only that projection. Higher-precedence malformed files continue to shadow lower definitions, preventing duplicate execution during an edit or merge conflict.
 
-The list route reconciles disk files before returning tasks, and the runtime watches every discovered `.agents/loops` directory (project ancestors plus the user scope) — a Markdown edit, creation, or deletion triggers a debounced resync without anyone opening the task list. The loop editor and enabled toggle use content revisions, so an agent or editor changing the file concurrently produces a conflict instead of being overwritten. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
+The list route reconciles disk files before returning tasks, and the runtime watches every discovered `.agents/loops` directory (project ancestors plus the user scope) — a Markdown edit, creation, or deletion triggers a debounced resync without anyone opening the task list. Piarium writers serialize the loop revision check with update/delete in one process, so two Agent/UI operations using the same stale revision cannot both succeed. The filesystem has no cross-process compare-and-swap primitive; an unrelated external editor is still checked immediately before atomic rename/unlink but is not claimed as globally locked. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
 
 ## Routes
 
@@ -70,7 +70,7 @@ Agents manage the same authority through `schedule.*` harness methods and the pi
 configured project — an agent cannot manage an arbitrary projectId. Loop reads/writes/enables/removes pass
 the Markdown content revision through as a CAS guard; `schedule.run` waits for the real session settle, so
 the tool uses the harness maximum request timeout and a longer-running task reports timeout while its true
-terminal state lands in `state`.
+terminal state lands in `state`. Manual run-now uses the same global/project admission queue and may run a disabled task; disabling controls future calendar fires, not an explicit invocation. `schedule.status` is scoped to the caller's project, while the existing desktop status route retains its global quit-risk view.
 
 Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/agent-follow-up-design.md):
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing

@@ -75,7 +75,10 @@ export function createSettingsSearchTool(bridge: HostServicesBridge): ToolDefini
           const writable = item.writable ? "" : " (read-only)";
           const summary = item.summary;
           const facts: string[] = [];
+          if (summary?.fieldKind) facts.push(`kind: ${summary.fieldKind}`);
+          if (summary?.options) facts.push(`options: ${summary.options.map((option) => option.value).join("/") || "(none)"}`);
           if (summary?.value !== undefined) facts.push(`now: ${JSON.stringify(summary.value)} (${summary.source ?? "?"})`);
+          else if (summary?.source) facts.push(`now: (unset) (${summary.source})`);
           if (summary?.isSet !== undefined) facts.push(summary.isSet ? "credential: set" : "credential: unset");
           if (summary?.verbs?.length) facts.push(`verbs: ${summary.verbs.join("/")}`);
           if (summary?.surfaces !== undefined) facts.push(`surfaces: ${summary.surfaces}`);
@@ -110,13 +113,16 @@ export function createSettingsReadTool(bridge: HostServicesBridge): ToolDefiniti
         Type.Literal("global"), Type.Literal("project"), Type.Literal("effective"),
       ], { description: "Pi settings only: which layer to read (default effective)" })),
       detail: Type.Optional(Type.Boolean({ description: "Resolve dynamic options, related ids, and help pointers" })),
-      surface: Type.Optional(Type.String({ description: "Client-owned entries only: which connected surface to read; omit to target the only one" })),
     }),
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal) => {
       if (!params.id?.trim()) return invalidParams("settings_read", "id is required");
       try {
-        const result = await bridge.request<"settings.read">("settings.read", params, signal ? { signal } : undefined) as SettingsReadResult;
+        const result = await bridge.request<"settings.read">("settings.read", {
+          id: params.id,
+          ...(params.scope ? { scope: params.scope } : {}),
+          ...(params.detail !== undefined ? { detail: params.detail } : {}),
+        }, signal ? { signal } : undefined) as SettingsReadResult;
         const parts: string[] = [`${result.entry.id} — state: ${result.state}`];
         if (result.reason) parts.push(`reason: ${result.reason}`);
         if (result.fields) {
@@ -179,13 +185,12 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
         { description: "field paths to clear back to default" })),
       expectedRevision: Type.Optional(Type.String(
         { description: "revision from settings_read; conflicting writes are rejected" })),
-      surface: Type.Optional(Type.String({ description: "Client-owned entries: which connected surface applies the change" })),
       items: Type.Optional(Type.Array(Type.Object({
         id: Type.String({ description: "Stable catalog id" }),
         scope: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project")])),
         set: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
         reset: Type.Optional(Type.Array(Type.String())),
-        surface: Type.Optional(Type.String()),
+        expectedRevision: Type.Optional(Type.String({ description: "revision for this item's owning document/scope" })),
       }), { description: "Compound update: several catalog entries in one request; per-item results are returned" })),
     }),
     executionMode: "sequential",
@@ -197,7 +202,22 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
         return invalidParams("settings_update", "provide set and/or reset, or items[]");
       }
       try {
-        const result = await bridge.request<"settings.update">("settings.update", params, signal ? { signal } : undefined) as SettingsUpdateResult;
+        const result = await bridge.request<"settings.update">("settings.update", {
+          id: params.id,
+          ...(params.scope ? { scope: params.scope } : {}),
+          ...(params.set ? { set: params.set } : {}),
+          ...(params.reset ? { reset: params.reset } : {}),
+          ...(params.expectedRevision ? { expectedRevision: params.expectedRevision } : {}),
+          ...(params.items ? {
+            items: params.items.map((item) => ({
+              id: item.id,
+              ...(item.scope ? { scope: item.scope } : {}),
+              ...(item.set ? { set: item.set } : {}),
+              ...(item.reset ? { reset: item.reset } : {}),
+              ...(item.expectedRevision ? { expectedRevision: item.expectedRevision } : {}),
+            })),
+          } : {}),
+        }, signal ? { signal } : undefined) as SettingsUpdateResult;
         const parts = [
           `${result.entry.id} — ${result.status} (scope: ${result.scope}, applies: ${result.appliedAt})`,
           ...result.fields.map((field) =>
@@ -206,6 +226,9 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
         if (result.items?.length) {
           for (const item of result.items) {
             parts.push(`  ${item.id}: ${item.status}${item.error ? ` — ${item.error}` : ""}${item.revision ? ` (rev ${item.revision})` : ""}`);
+            for (const field of item.fields ?? []) {
+              parts.push(`    ${field.path}: ${field.status}${field.error ? ` — ${field.error}` : ""}`);
+            }
           }
         }
         if (result.surface) {
@@ -234,11 +257,11 @@ export function createSettingsActionTool(bridge: HostServicesBridge): ToolDefini
   return defineTool({
     name: "settings_action",
     label: "Settings Action",
-    description: "Invoke a real domain operation on an action-owned catalog entry — provider login/logout/model discovery, MCP server changes, Pi package/resource management, extensions, tunnel, remote instances, language support, runtime updates, git identities, knowledge, and project metadata. Read the entry first for the live verb list; long operations return a pending status with an operation handle.",
+    description: "Invoke a real domain operation on an action-owned catalog entry — provider login/logout/model discovery, MCP server changes, Pi package/resource management, extensions, tunnel, remote instances, language support, runtime updates, git identities, knowledge, and project metadata. Read the entry first for the live verb list; long operations return pending and the real owner-specific status/cancel path.",
     promptSnippet: "settings_action: run a domain operation on an action-owned catalog entry",
     promptGuidelines: [
       "Read the catalog entry first — action.verbs lists what the owner can actually execute right now.",
-      "status pending means the operation is still running; the returned operation id + cancelVerb describe how to observe or cancel it.",
+      "status pending means the owner has not reported completion. Re-read owner status or use its declared cancel verb; an operation object appears only when that owner supplies a real stable handle.",
       "status unavailable means the owner is offline or not wired on this host — never claim the change happened.",
       "Credentials are never returned; auth status is reported as connected/isSet facts only.",
     ],

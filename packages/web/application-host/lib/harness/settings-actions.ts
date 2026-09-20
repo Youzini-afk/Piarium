@@ -38,6 +38,8 @@ export interface ActionInvocation {
 }
 
 export interface SettingsActionAdapter {
+  /** Verbs this adapter implements; catalog declarations are intersected with this list. */
+  verbs: readonly string[];
   describe(ctx: SettingsActionContext, entry: SettingsCatalogEntry): Promise<ActionStatus>;
   invoke(
     ctx: SettingsActionContext,
@@ -181,9 +183,168 @@ const wrapError = (error: unknown): ActionInvocation => ({
   detail: error instanceof Error ? error.message : String(error),
 });
 
+const sanitizeUrl = (value: unknown): unknown => {
+  if (typeof value !== 'string') return value;
+  try {
+    const parsed = new URL(value);
+    parsed.username = '';
+    parsed.password = '';
+    for (const key of [...parsed.searchParams.keys()]) {
+      if (/token|secret|key|password|credential/i.test(key)) parsed.searchParams.set(key, '[present]');
+    }
+    return parsed.toString();
+  } catch {
+    return value;
+  }
+};
+
+const sanitizeProviderDescriptor = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  return {
+    id: value.id,
+    name: value.name,
+    dynamicModels: value.dynamicModels,
+    modelCount: value.modelCount,
+    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
+    ...(isRecord(value.auth) ? {
+      auth: {
+        configured: value.auth.configured === true,
+        ...(typeof value.auth.label === 'string' ? { label: value.auth.label } : {}),
+        ...(typeof value.auth.source === 'string' ? { source: value.auth.source } : {}),
+        ...(Array.isArray(value.auth.methods) ? {
+          methods: value.auth.methods.map((method) => isRecord(method)
+            ? { label: method.label, type: method.type }
+            : method),
+        } : {}),
+      },
+    } : {}),
+  };
+};
+
+const sanitizeProviderConfig = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  const config = isRecord(value.config) ? value.config : null;
+  return {
+    providerId: value.providerId,
+    effectiveScope: value.effectiveScope,
+    locations: value.locations,
+    ...(isRecord(value.auth) ? {
+      auth: {
+        configured: value.auth.configured === true,
+        ...(typeof value.auth.label === 'string' ? { label: value.auth.label } : {}),
+        ...(typeof value.auth.source === 'string' ? { source: value.auth.source } : {}),
+      },
+    } : {}),
+    ...(config ? {
+      config: {
+        id: config.id,
+        name: config.name,
+        api: config.api,
+        authHeader: config.authHeader,
+        ...(config.baseUrl !== undefined ? { baseUrl: sanitizeUrl(config.baseUrl) } : {}),
+        ...(Array.isArray(config.models) ? { models: config.models.map(sanitizeProviderModel) } : {}),
+      },
+    } : {}),
+  };
+};
+
+function sanitizeProviderModel(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  return {
+    id: value.id,
+    ...(value.name !== undefined ? { name: value.name } : {}),
+    ...(value.api !== undefined ? { api: value.api } : {}),
+    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
+    ...(value.contextWindow !== undefined ? { contextWindow: value.contextWindow } : {}),
+    ...(value.cost !== undefined ? { cost: value.cost } : {}),
+    ...(value.input !== undefined ? { input: value.input } : {}),
+    ...(value.maxTokens !== undefined ? { maxTokens: value.maxTokens } : {}),
+    ...(value.reasoning !== undefined ? { reasoning: value.reasoning } : {}),
+    ...(value.thinkingLevelMap !== undefined ? { thinkingLevelMap: value.thinkingLevelMap } : {}),
+  };
+}
+
+const sanitizeProviderModelDiscovery = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  return {
+    providerId: value.providerId,
+    api: value.api,
+    ...(value.baseUrl !== undefined ? { baseUrl: sanitizeUrl(value.baseUrl) } : {}),
+    models: Array.isArray(value.models) ? value.models.map(sanitizeProviderModel) : [],
+  };
+};
+
+const sanitizeMcpSnapshot = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  const catalog = isRecord(value.catalog) ? value.catalog : null;
+  return {
+    provider: isRecord(value.provider) ? {
+      state: value.provider.state,
+      ...(value.provider.bridgeVersion !== undefined ? { bridgeVersion: value.provider.bridgeVersion } : {}),
+      ...(value.provider.issue !== undefined ? { issue: value.provider.issue } : {}),
+    } : value.provider,
+    ...(catalog ? {
+      catalog: {
+        version: catalog.version,
+        sources: Array.isArray(catalog.sources) ? catalog.sources.map((source) => isRecord(source) ? {
+          id: source.id,
+          displayPath: source.displayPath,
+          order: source.order,
+          scope: source.scope,
+          serverNames: source.serverNames,
+          ...(isRecord(source.target) ? {
+            target: { format: source.target.format, path: source.target.path, root: source.target.root },
+          } : {}),
+        } : source) : [],
+        servers: Array.isArray(catalog.servers) ? catalog.servers.map((server) => {
+          if (!isRecord(server) || !isRecord(server.transport)) return server;
+          return {
+            name: server.name,
+            disabled: server.disabled,
+            sourceIds: server.sourceIds,
+            transport: {
+              kind: server.transport.kind,
+              ...(server.transport.command !== undefined ? { command: server.transport.command } : {}),
+              ...(server.transport.socket !== undefined ? { socket: server.transport.socket } : {}),
+              ...(server.transport.url !== undefined ? { url: sanitizeUrl(server.transport.url) } : {}),
+            },
+          };
+        }) : [],
+      },
+    } : {}),
+  };
+};
+
+const sanitizeTextDocument = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  const content = typeof value.content === 'string' ? value.content : undefined;
+  return {
+    ...Object.fromEntries(['exists', 'format', 'path', 'revision', 'root', 'scope'].flatMap((key) => (
+      value[key] === undefined ? [] : [[key, value[key]]]
+    ))),
+    content: { isSet: content !== undefined && content.length > 0, ...(content !== undefined ? { bytes: Buffer.byteLength(content) } : {}) },
+  };
+};
+
+const sanitizePackageDescriptor = (entry: unknown): unknown => isRecord(entry) ? {
+  name: entry.name,
+  enabled: entry.enabled,
+  installed: entry.installed,
+  scope: entry.scope,
+  structured: entry.structured,
+  ...(entry.source !== undefined ? { source: sanitizeUrl(entry.source) } : {}),
+  ...(entry.version !== undefined ? { version: entry.version } : {}),
+  ...(entry.resolvedPath !== undefined ? { resolvedPath: entry.resolvedPath } : {}),
+} : entry;
+
+const sanitizePackageResult = (value: unknown): unknown => Array.isArray(value)
+  ? value.map(sanitizePackageDescriptor)
+  : sanitizePackageDescriptor(value);
+
 /* ── adapters ───────────────────────────────────────────────────────────── */
 
 const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'status', 'read', 'connect', 'login', 'disconnect', 'discover-models', 'models'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
@@ -192,7 +353,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     const connected = list.filter((p) => isRecord(p) && (p.connected === true || p.authenticated === true));
     return {
       summary: `${list.length} providers, ${connected.length} connected`,
-      data: list,
+      data: list.map(sanitizeProviderDescriptor),
     };
   },
   async invoke(ctx, _entry, verb, args) {
@@ -200,31 +361,26 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     try {
       switch (verb) {
         case 'list':
-          return { status: 'applied', data: await deps.requestWorkspace(root, 'provider.list', {}) };
+          return { status: 'applied', data: (await deps.requestWorkspace(root, 'provider.list', {}) as unknown[]).map(sanitizeProviderDescriptor) };
         case 'status': {
           const providerId = needString(args, 'providerId');
           const config = await deps.requestWorkspace(root, 'provider.config.get', { providerId });
-          return { status: 'applied', data: config };
+          return { status: 'applied', data: sanitizeProviderConfig(config) };
         }
         case 'read':
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'provider.config.get', { providerId: needString(args, 'providerId') }),
+            data: sanitizeProviderConfig(await deps.requestWorkspace(root, 'provider.config.get', { providerId: needString(args, 'providerId') })),
           };
         case 'connect':
         case 'login': {
           const providerId = needString(args, 'providerId');
           const type = str(args, 'type') === 'api_key' ? 'api_key' : 'oauth';
-          const result = await deps.requestWorkspace(root, 'provider.login', { providerId, type });
+          await deps.requestWorkspace(root, 'provider.login', { providerId, type });
           return {
             status: 'pending',
-            detail: 'interactive login started — the provider auth prompt is delivered through the session UI',
-            data: result,
-            operation: {
-              id: `provider-login:${providerId}`,
-              state: 'running',
-              detail: 'answer the provider auth prompt; status via provider list',
-            },
+            detail: 'interactive login started — answer the session UI prompt, then recheck provider status/list',
+            data: { providerId, started: true },
           };
         }
         case 'disconnect': {
@@ -233,22 +389,20 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (str(args, 'config') !== undefined || args.deleteConfig === true) {
             return {
               status: 'applied',
-              data: await deps.requestWorkspace(root, 'provider.config.delete', { providerId, scope }),
+              data: sanitizeProviderConfig(await deps.requestWorkspace(root, 'provider.config.delete', { providerId, scope })),
             };
           }
-          return {
-            status: 'applied',
-            data: await deps.requestWorkspace(root, 'provider.logout', { providerId }),
-          };
+          await deps.requestWorkspace(root, 'provider.logout', { providerId });
+          return { status: 'applied', data: { providerId, disconnected: true } };
         }
         case 'discover-models':
         case 'models':
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'provider.models.discover', {
+            data: sanitizeProviderModelDiscovery(await deps.requestWorkspace(root, 'provider.models.discover', {
               providerId: needString(args, 'providerId'),
               ...(isRecord(args.config) ? { config: args.config } : {}),
-            }),
+            })),
           };
         default:
           return unavailable(`verb "${verb}" is not supported by the provider owner`);
@@ -260,6 +414,7 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'reconnect', 'enable', 'disable', 'read', 'write'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
@@ -270,7 +425,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     const servers = Array.isArray(catalog?.servers) ? catalog.servers.length : 0;
     return {
       summary: `provider ${provider ?? 'unknown'}, ${servers} configured servers`,
-      data: snapshot,
+      data: sanitizeMcpSnapshot(snapshot),
       verbs: ['status', 'reconnect', 'read', 'write'],
     };
   },
@@ -279,7 +434,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
     try {
       switch (verb) {
         case 'status':
-          return { status: 'applied', data: await deps.requestWorkspace(root, 'mcp.config.snapshot', {}) };
+          return { status: 'applied', data: sanitizeMcpSnapshot(await deps.requestWorkspace(root, 'mcp.config.snapshot', {})) };
         case 'reconnect': {
           const name = str(args, 'name');
           const command = name ? `/mcp reconnect ${name}` : '/mcp reconnect';
@@ -297,7 +452,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           const snapshot = await deps.requestWorkspace(root, 'mcp.config.snapshot', {});
           const catalog = isRecord(snapshot) && isRecord(snapshot.catalog) ? snapshot.catalog : null;
           const sourceId = str(args, 'sourceId');
-          if (!sourceId) return { status: 'applied', data: snapshot };
+          if (!sourceId) return { status: 'applied', data: sanitizeMcpSnapshot(snapshot) };
           const sources = Array.isArray(catalog?.sources) ? catalog.sources : [];
           const source = sources.find((s: unknown) => isRecord(s) && s.id === sourceId);
           if (!source || !isRecord(source.target)) {
@@ -305,7 +460,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           }
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'config.text.get', source.target as Record<string, unknown>),
+            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.get', source.target as Record<string, unknown>)),
           };
         }
         case 'write': {
@@ -329,11 +484,11 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           }
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'config.text.update', {
+            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.update', {
               ...target,
               content,
               expectedRevision,
-            }),
+            })),
           };
         }
         default:
@@ -346,6 +501,7 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'read', 'write', 'create', 'delete'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
@@ -415,12 +571,13 @@ const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'install', 'remove', 'update', 'read', 'write'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
     const list = await deps.requestWorkspace(root, 'package.list', {}).catch(() => null);
     return Array.isArray(list)
-      ? { summary: `${list.length} packages`, data: list }
+      ? { summary: `${list.length} packages`, data: sanitizePackageResult(list) }
       : { unavailable: 'package list unavailable' };
   },
   async invoke(ctx, entry, verb, args) {
@@ -433,7 +590,7 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
             if (!foundation) return unavailable('foundational package status unavailable');
             return { status: 'applied', data: foundation.status() };
           }
-          return { status: 'applied', data: await deps.requestWorkspace(root, 'package.list', {}) };
+          return { status: 'applied', data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.list', {})) };
         }
         case 'install': {
           if (entry.id === 'plugins.recommended') {
@@ -447,9 +604,8 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
           const result = await deps.requestWorkspace(root, 'package.install', { source, scope });
           return {
             status: 'pending',
-            detail: `package install started for ${source}`,
-            data: result,
-            operation: { id: `package-install:${source}`, state: 'running', detail: 'status via package list' },
+            detail: `package install started for ${source}; recheck package list for completion`,
+            data: sanitizePackageResult(result),
           };
         }
         case 'remove': {
@@ -457,17 +613,16 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
           const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'package.remove', { source, scope }),
+            data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.remove', { source, scope })),
           };
         }
         case 'update':
           return {
             status: 'pending',
-            detail: 'package update started',
-            data: await deps.requestWorkspace(root, 'package.update', {
+            detail: 'package update started; recheck package list for completion',
+            data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.update', {
               ...(str(args, 'source') ? { source: str(args, 'source')! } : {}),
-            }),
-            operation: { id: `package-update:${str(args, 'source') ?? 'all'}`, state: 'running', detail: 'status via package list' },
+            })),
           };
         case 'read':
         case 'write': {
@@ -480,9 +635,9 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
           if (verb === 'read') {
             return {
               status: 'applied',
-              data: await deps.requestWorkspace(root, 'config.text.get', {
+              data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.get', {
                 path, root: rootKind, format: str(args, 'format') ?? 'jsonc',
-              }),
+              })),
             };
           }
           const content = typeof args.content === 'string' ? args.content : undefined;
@@ -496,9 +651,9 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
           }
           return {
             status: 'applied',
-            data: await deps.requestWorkspace(root, 'config.text.update', {
+            data: sanitizeTextDocument(await deps.requestWorkspace(root, 'config.text.update', {
               path, root: rootKind, format: str(args, 'format') ?? 'jsonc', content, expectedRevision,
-            }),
+            })),
           };
         }
         default:
@@ -511,6 +666,7 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
 });
 
 const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'status', 'read'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
@@ -552,6 +708,7 @@ const agentsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const fleetAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'list', 'kill', 'inspect', 'doctor'],
   async describe(ctx) {
     const root = await needWorkspace(ctx, deps).catch(() => null);
     if (!root) return { unavailable: 'requires a workspace-bound session' };
@@ -623,6 +780,7 @@ const sanitizeGitProfile = (profile: import('../git/identity-storage.js').GitIde
 });
 
 const gitAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'list', 'create', 'update', 'delete'],
   async describe() {
     if (!deps.gitIdentities) return { unavailable: 'git identity store unavailable' };
     const profiles = deps.gitIdentities.getProfiles();
@@ -679,6 +837,7 @@ const gitAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['rename', 'set-default-model', 'set-default-work-focus', 'set-color', 'set-icon'],
   async describe() {
     const document = await deps.readAppSettings();
     const projects = Array.isArray(document.projects) ? document.projects : [];
@@ -705,8 +864,11 @@ const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
         return { status: 'applied', detail: 'project updated', data: next[index] };
       };
       switch (verb) {
-        case 'rename':
-          return patchProject({ label: needString(args, 'name') ?? needString(args, 'label') });
+        case 'rename': {
+          const label = str(args, 'name') ?? str(args, 'label');
+          if (!label) throw new HarnessServiceError('invalid-params', 'verb argument "name" or "label" is required');
+          return patchProject({ label });
+        }
         case 'set-default-model':
           return patchProject({ defaultModel: str(args, 'model') ?? null });
         case 'set-default-work-focus':
@@ -731,6 +893,7 @@ const projectsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const remoteInstancesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'revoke'],
   async describe() {
     const clients = deps.remoteClients?.();
     if (!clients) return { unavailable: 'remote client auth service unavailable' };
@@ -839,6 +1002,7 @@ const selectWorkbenchShell = async (
 };
 
 const workbenchExtensionsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'enable', 'disable', 'select', 'clear', 'apply'],
   async describe() {
     const runtime = deps.extensionRuntime?.();
     if (!runtime) return { unavailable: 'extension runtime unavailable' };
@@ -947,6 +1111,7 @@ const workbenchExtensionsAdapter = (deps: SettingsActionDeps): SettingsActionAda
 });
 
 const knowledgeAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['list', 'accept', 'supersede'],
   async describe(ctx) {
     const scope = ctx.caller.workspaceId ? 'workspace' : 'user';
     const store = await deps.knowledgeStore?.(ctx.caller.workspaceId ?? 'user', scope).catch(() => null);
@@ -996,6 +1161,7 @@ const knowledgeAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'prepare', 'cancel'],
   async describe(ctx) {
     const support = deps.languageSupport?.();
     if (!support) return { unavailable: 'language support service unavailable' };
@@ -1021,9 +1187,8 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
           const languageId = needString(args, 'languageId');
           return {
             status: 'pending',
-            detail: `language server preparation started for ${languageId}`,
+            detail: `language server preparation started for ${languageId}; recheck language status for completion`,
             data: await support.prepareServer({ workspaceId, languageId }),
-            operation: { id: `language-prepare:${workspaceId}:${languageId}`, state: 'running', cancelVerb: 'cancel' },
           };
         }
         case 'cancel':
@@ -1044,6 +1209,7 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
 });
 
 const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'install', 'upgrade', 'rediscover', 'activate', 'choose'],
   async describe() {
     const lifecycle = deps.runtimeLifecycle?.();
     if (!lifecycle) return { unavailable: 'runtime lifecycle manager unavailable' };
@@ -1062,15 +1228,13 @@ const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter =
           return { status: 'applied', data: lifecycle.snapshot };
         case 'install':
           return {
-            status: 'pending', detail: 'runtime install started',
+            status: 'pending', detail: 'runtime install started; recheck runtime status for completion',
             data: await lifecycle.install(),
-            operation: { id: 'runtime-install', state: 'running', detail: 'status via runtime status' },
           };
         case 'upgrade':
           return {
-            status: 'pending', detail: 'runtime upgrade started',
+            status: 'pending', detail: 'runtime upgrade started; recheck runtime status for completion',
             data: await lifecycle.upgrade(),
-            operation: { id: 'runtime-upgrade', state: 'running', detail: 'status via runtime status' },
           };
         case 'rediscover':
           return { status: 'applied', data: await lifecycle.refresh() };
@@ -1092,6 +1256,7 @@ const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter =
 });
 
 const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['status', 'start', 'stop'],
   async describe() {
     const tunnel = deps.tunnel?.();
     if (!tunnel) return { unavailable: 'tunnel service unavailable' };
@@ -1122,9 +1287,8 @@ const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (str(args, 'mode')) input.mode = str(args, 'mode');
           return {
             status: 'pending',
-            detail: 'tunnel start requested',
+            detail: 'tunnel start requested; recheck tunnel status for completion',
             data: await tunnel.start(input),
-            operation: { id: 'tunnel-start', state: 'running', detail: 'status via tunnel status' },
           };
         }
         case 'stop':
@@ -1139,6 +1303,7 @@ const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
 });
 
 const magicPromptsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
+  verbs: ['read', 'write', 'reset'],
   async describe() {
     const runtime = deps.magicPrompts?.();
     if (!runtime) return { unavailable: 'magic prompt runtime unavailable' };
@@ -1175,6 +1340,7 @@ const magicPromptsAdapter = (deps: SettingsActionDeps): SettingsActionAdapter =>
 });
 
 const notificationsAdapter = (): SettingsActionAdapter => ({
+  verbs: [],
   async describe() {
     return {
       summary: 'web push subscriptions are per-device and browser-granted',
@@ -1190,6 +1356,15 @@ const notificationsAdapter = (): SettingsActionAdapter => ({
 /* ── registry ───────────────────────────────────────────────────────────── */
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
+  const snippetsAdapter: SettingsActionAdapter = {
+    verbs: [],
+    async describe() {
+      return { unavailable: 'snippets are owned by the interactive UI and have no host action authority' };
+    },
+    async invoke(_ctx, _entry, verb) {
+      return unavailable(`verb "${verb}" is not available through the host snippet owner`);
+    },
+  };
   const adapters = new Map<string, SettingsActionAdapter>([
     ['runtime:providers', providersAdapter(deps)],
     ['runtime:mcp', mcpAdapter(deps)],
@@ -1206,6 +1381,7 @@ export function createSettingsActionRegistry(deps: SettingsActionDeps) {
     ['runtime:runtime-update', runtimeUpdateAdapter(deps)],
     ['service:tunnel', tunnelAdapter(deps)],
     ['service:magic-prompts', magicPromptsAdapter(deps)],
+    ['service:snippets', snippetsAdapter],
     ['service:notifications', notificationsAdapter()],
   ]);
 

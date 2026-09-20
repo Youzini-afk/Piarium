@@ -89,6 +89,25 @@ const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 );
 
+const LOOP_METADATA_FIELDS = [
+  'loopFile',
+  'loopScope',
+  'loopRevision',
+  'loopError',
+  'loopShadowed',
+] as const;
+
+const mergeDefinedRecord = (
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> => {
+  const merged = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value !== undefined) merged[key] = value;
+  }
+  return merged;
+};
+
 const errorCode = (error: unknown): string | null => {
   const record = asRecord(error);
   return typeof record?.code === 'string' ? record.code : null;
@@ -563,13 +582,56 @@ export const createProjectConfigRuntime = (deps: ProjectConfigRuntimeOptions) =>
     return withProjectWriteLock(projectID, async () => {
       const now = Date.now();
       const current = await readProjectConfigFromDisk(projectID);
-      const incomingID = asNonEmptyString(asRecord(taskInput)?.id);
+      const input = asRecord(taskInput);
+      if (!input) throw new Error('task is required');
+      for (const field of LOOP_METADATA_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(input, field)) {
+          throw new Error('Loop metadata is managed by Piarium');
+        }
+      }
+
+      const incomingID = asNonEmptyString(input.id);
       const existingIndex = incomingID
         ? current.scheduledTasks.findIndex((task) => task.id === incomingID)
         : -1;
       const existingTask = existingIndex >= 0 ? current.scheduledTasks[existingIndex] ?? null : null;
 
-      const normalizedTask = normalizeTaskForStorage(taskInput, {
+      if (existingTask?.loopFile) {
+        throw new Error('Loop tasks must be edited through their Markdown file');
+      }
+
+      const schedulePatch = input.schedule === undefined ? null : asRecord(input.schedule);
+      if (input.schedule !== undefined && !schedulePatch) {
+        throw new Error('schedule must be an object');
+      }
+      const executionPatch = input.execution === undefined ? null : asRecord(input.execution);
+      if (input.execution !== undefined && !executionPatch) {
+        throw new Error('execution must be an object');
+      }
+
+      // The public upsert contract is a partial patch for an existing JSON-owned
+      // task. Merge only defined fields before normalization so validation sees
+      // the complete candidate, while runtime state remains scheduler-owned.
+      const candidate = existingTask
+        ? {
+            ...mergeDefinedRecord(existingTask as unknown as Record<string, unknown>, input),
+            schedule: input.schedule === undefined
+              ? existingTask.schedule
+              : mergeDefinedRecord(
+                  existingTask.schedule as unknown as Record<string, unknown>,
+                  schedulePatch ?? {},
+                ),
+            execution: input.execution === undefined
+              ? existingTask.execution
+              : mergeDefinedRecord(
+                  existingTask.execution as unknown as Record<string, unknown>,
+                  executionPatch ?? {},
+                ),
+            state: existingTask.state,
+          }
+        : input;
+
+      const normalizedTask = normalizeTaskForStorage(candidate, {
         now,
         createId: taskIDFactory,
         existingTask,

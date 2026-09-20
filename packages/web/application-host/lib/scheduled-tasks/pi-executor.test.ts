@@ -253,4 +253,35 @@ describe('Pi scheduled task executor', () => {
     await expect(run).resolves.toMatchObject({ sessionID: 'pi-session-multi-turn' });
     expect(forgetCompletion).toHaveBeenCalledWith('pi-session-multi-turn');
   });
+
+  it('keeps a slash-command goal active until its actual terminal state', async () => {
+    const completions: Array<(outcome: SessionSettleOutcome) => void> = [];
+    let goalStatus = 'active';
+    const broker = {
+      createSession: vi.fn(async () => ({ sessionId: 'pi-session-command-goal' })),
+      requestForSession: vi.fn(async (_sessionID: string, method: string) => {
+        if (method === 'session.features.get') return { goal: { status: goalStatus } };
+        return {};
+      }),
+    };
+    const execute = createPiScheduledTaskExecutor({
+      awaitCompletion: () => new Promise((resolve) => { completions.push(resolve); }),
+      broker: broker as unknown as Broker,
+    });
+    let resolved = false;
+    const run = execute({
+      projectPath: 'C:/project/piarium',
+      task: task({ prompt: '/review src', runAsGoal: true }),
+      title: 'Command goal',
+    }).then((result) => { resolved = true; return result; });
+
+    await vi.waitFor(() => expect(completions).toHaveLength(1));
+    completions[0]?.({ settled: true });
+    await vi.waitFor(() => expect(completions).toHaveLength(2));
+    expect(resolved).toBe(false);
+
+    goalStatus = 'complete';
+    completions[1]?.({ settled: true });
+    await expect(run).resolves.toEqual({ dispatchedAsCommand: true, sessionID: 'pi-session-command-goal' });
+  });
 });

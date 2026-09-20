@@ -197,6 +197,65 @@ describe('project-config runtime', () => {
     }
   });
 
+  it('merges defined fields for an existing JSON task before validation', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'Original',
+        enabled: false,
+        schedule: { kind: 'daily', times: ['09:00'], timezone: 'UTC' },
+        execution: {
+          prompt: 'original prompt',
+          providerID: 'openai',
+          modelID: 'gpt-5',
+          thinkingLevel: 'high',
+        },
+      });
+      const patched = await runtime.upsertScheduledTask('project-test', {
+        id: created.task.id,
+        name: 'Renamed',
+        schedule: { timezone: 'Asia/Shanghai' },
+        execution: { prompt: 'updated prompt' },
+      });
+
+      expect(patched.created).toBe(false);
+      expect(patched.task).toMatchObject({
+        id: created.task.id,
+        name: 'Renamed',
+        enabled: false,
+        schedule: { kind: 'daily', times: ['09:00'], timezone: 'Asia/Shanghai' },
+        execution: {
+          prompt: 'updated prompt',
+          providerID: 'openai',
+          modelID: 'gpt-5',
+          thinkingLevel: 'high',
+        },
+      });
+      expect(patched.task.state.createdAt).toBe(created.task.state.createdAt);
+      await expect(runtime.upsertScheduledTask('project-test', {
+        id: created.task.id,
+        schedule: [],
+      })).rejects.toThrow(/schedule must be an object/i);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('rejects loop ownership metadata on the JSON upsert path', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      await expect(runtime.upsertScheduledTask('project-test', {
+        name: 'not-a-loop',
+        enabled: true,
+        schedule: { kind: 'cron', cron: '0 9 * * *', timezone: 'UTC' },
+        execution: { prompt: 'run', providerID: 'openai', modelID: 'gpt-5' },
+        loopFile: '/repo/.agents/loops/injected.md',
+      })).rejects.toThrow(/loop metadata/i);
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('keeps JSON tasks separate and reconciles loops by file identity', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {
@@ -254,10 +313,10 @@ describe('project-config runtime', () => {
       }]);
       const original = requireTask(first[0]);
 
-      await runtime.upsertScheduledTask('project-test', {
-        ...original,
-        id: 'orphan-duplicate',
-      });
+      const configPath = runtime.resolveProjectConfigPath('project-test');
+      const raw = JSON.parse(await readFile(configPath, 'utf8'));
+      raw.scheduledTasks.push({ ...original, id: 'orphan-duplicate' });
+      await writeFile(configPath, JSON.stringify(raw, null, 2), 'utf8');
       const reconciled = await runtime.reconcileLoopTasks('project-test', [{
         definition,
         filePath,

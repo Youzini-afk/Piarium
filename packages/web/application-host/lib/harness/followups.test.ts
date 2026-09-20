@@ -86,6 +86,8 @@ async function fixture(options: {
   seed?: (harness: Harness) => void;
   afterNotify?: (harness: Harness) => void;
   getAttempt?: (harness: Harness, attemptId: string, caller: FollowUpCaller) => Promise<ExperimentAttemptView | null>;
+  watchReady?: Promise<boolean>;
+  continueRun?: (harness: Harness, input: Parameters<FollowUpServiceDeps["continueRun"]>[0]) => Promise<{ runId?: string }>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-followup-"));
   roots.push(root);
@@ -134,6 +136,7 @@ async function fixture(options: {
     },
     continueRun: async (input) => {
       harness.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
+      if (options.continueRun) return options.continueRun(harness, input);
       return { runId: `run-${harness.continued.length}` };
     },
     enqueueContinuation: async (_ws, threadId, continuation) => {
@@ -200,7 +203,7 @@ async function fixture(options: {
       listeners.push(listener);
       harness.fileWatchListeners.set(workspaceId, listeners);
       return {
-        ready: Promise.resolve(true),
+        ready: options.watchReady ?? Promise.resolve(true),
         close: () => {
           const index = listeners.indexOf(listener);
           if (index >= 0) listeners.splice(index, 1);
@@ -916,25 +919,105 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(readyOcc[0]!.facts.size, 1024);
   });
 
-  it("file changed: each durable change re-arms; delete does not count", async () => {
-    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+  it("waits for the document watch to become ready, then snapshots the registration gap", async () => {
+    let releaseReady!: () => void;
+    const watchReady = new Promise<boolean>((resolve) => { releaseReady = () => resolve(true); });
+    const f = await fixture({
+      watchReady,
+      seed: (h) => h.threads.set("t-1", settledThread()),
+    });
+    const registering = f.service.register(caller(), {
+      instruction: "observe a file created while the watch attaches",
+      source: { condition: "exists", kind: "file", path: "out/gap.txt" },
+    });
+    await until(() => (f.harness.fileWatchListeners.get("ws")?.length ?? 0) === 1);
+    f.harness.files.set("ws:out/gap.txt", { exists: true, mtimeMs: 10, size: 3 });
+    releaseReady();
+    const registered = await registering;
+    assert.equal(registered.firedImmediately, true);
+    assert.equal(registered.followUp.status, "delivered");
+    assert.equal(f.harness.continued.length, 1);
+  });
+
+  it("file changed: re-arms across deletion, creation, and content changes", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.files.set("ws:data/input.csv", { exists: true, mtimeMs: 1, size: 1 });
+    } });
     const registered = await f.service.register(caller(), {
       instruction: "react to changes",
       source: { condition: "changed", kind: "file", path: "data/input.csv" },
     });
+    f.harness.files.delete("ws:data/input.csv");
     emitFile(f.harness, "ws", "data/input.csv", "deleted", 1);
-    await pause(120);
-    assert.equal(f.harness.continued.length, 0);
-
-    emitFile(f.harness, "ws", "data/input.csv", "changed", 2);
     await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    const afterDelete = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(afterDelete.occurrences[0]!.facts.exists, false);
+
+    f.harness.files.set("ws:data/input.csv", { exists: true, mtimeMs: 2, size: 2 });
+    emitFile(f.harness, "ws", "data/input.csv", "changed", 2);
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
     assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, "waiting");
 
+    f.harness.files.set("ws:data/input.csv", { exists: true, mtimeMs: 3, size: 3 });
     emitFile(f.harness, "ws", "data/input.csv", "changed", 3);
-    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    await until(() => f.harness.continued.length === 3, 4_000, f.harness.errors);
     const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
-    assert.equal(occurrences.length, 2);
-    assert.equal(occurrences[1]!.facts.sequence, 3);
+    assert.equal(occurrences.length, 3);
+    assert.equal(occurrences[2]!.facts.sequence, 3);
+  });
+
+  it("rechecks every file wait on a pathless reset", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.files.set("ws:data/reset.csv", { exists: true, mtimeMs: 1, size: 1 });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "react after watcher overflow",
+      source: { condition: "changed", kind: "file", path: "data/reset.csv" },
+    });
+    assert.equal(registered.firedImmediately, false);
+    f.harness.files.set("ws:data/reset.csv", { exists: true, mtimeMs: 2, size: 2 });
+    for (const listener of f.harness.fileWatchListeners.get("ws") ?? []) {
+      listener({ generation: 2, kind: "reset", sequence: 1 });
+    }
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    const occurrence = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences[0]!;
+    assert.equal(occurrence.reason, "file-changed");
+    assert.equal(occurrence.facts.generation, 2);
+    assert.equal(occurrence.facts.sequence, 1);
+  });
+
+  it("buffers and coalesces a file change that arrives during re-arming delivery", async () => {
+    let releaseFirst!: () => void;
+    const firstDelivery = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let deliveries = 0;
+    const f = await fixture({
+      seed: (h) => {
+        h.threads.set("t-1", settledThread());
+        h.files.set("ws:data/live.csv", { exists: true, mtimeMs: 1, size: 1 });
+      },
+      continueRun: async () => {
+        deliveries += 1;
+        if (deliveries === 1) await firstDelivery;
+        return { runId: `run-${deliveries}` };
+      },
+    });
+    const registered = await f.service.register(caller(), {
+      instruction: "react to coalesced file changes",
+      source: { condition: "changed", kind: "file", path: "data/live.csv" },
+    });
+    f.harness.files.set("ws:data/live.csv", { exists: true, mtimeMs: 2, size: 2 });
+    emitFile(f.harness, "ws", "data/live.csv", "changed", 2);
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    f.harness.files.set("ws:data/live.csv", { exists: true, mtimeMs: 3, size: 3 });
+    emitFile(f.harness, "ws", "data/live.csv", "changed", 3);
+    await pause(50);
+    releaseFirst();
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.occurrences.length, 2);
+    assert.equal(detail.occurrences[1]!.facts.size, 3);
   });
 
   it("metric source: crossing fires once; steady-true samples do not re-wake", async () => {
@@ -982,6 +1065,34 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(detail.occurrences[1]!.facts.observedAt, 4);
   });
 
+  it("buffers metric transitions during delivery and re-primes before waiting again", async () => {
+    let releaseFirst!: () => void;
+    const firstDelivery = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let deliveries = 0;
+    const f = await fixture({
+      seed: (h) => h.threads.set("t-1", settledThread()),
+      continueRun: async () => {
+        deliveries += 1;
+        if (deliveries === 1) await firstDelivery;
+        return { runId: `run-${deliveries}` };
+      },
+    });
+    const registered = await f.service.register(caller(), {
+      instruction: "observe crossings during delivery",
+      source: { every: true, kind: "metric", machineId: "local", metric: "cpuPercent", predicate: "above", threshold: 90 },
+    });
+    emitSample(f.harness, { machineId: "local", observedAt: 1, usage: { cpuPercent: 95 } });
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    emitSample(f.harness, { machineId: "local", observedAt: 2, usage: { cpuPercent: 20 } });
+    emitSample(f.harness, { machineId: "local", observedAt: 3, usage: { cpuPercent: 96 } });
+    await pause(50);
+    releaseFirst();
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.occurrences.length, 2);
+    assert.equal(detail.occurrences[1]!.facts.observedAt, 3);
+  });
+
   it("log source: incremental match fires with byte offset; eof without match reports exhausted", async () => {
     const f = await fixture({ seed: (h) => {
       h.threads.set("t-1", settledThread());
@@ -1014,6 +1125,47 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(exhaustedOcc[0]!.reason, "log-exhausted");
   });
 
+  it("log source: preserves overlap across appended bytes and read pages", async () => {
+    const boundaryPrefix = `${"x".repeat(256 * 1024 - 2)}RE`;
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.logs.set("attempt-1:stdout", boundaryPrefix);
+    } });
+    const appended = await f.service.register(caller(), {
+      instruction: "match the appended suffix",
+      source: { attemptId: "attempt-1", kind: "log", pattern: "READY" },
+    });
+    f.harness.logs.set("attempt-1:stdout", `${boundaryPrefix}ADY`);
+    emitAttempt(f.harness, "ws", "attempt-1", attemptView({ state: "running" }));
+    await until(async () => (await f.service.get(caller(), { id: appended.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    assert.equal((await f.service.get(caller(), { id: appended.followUp.id })).occurrences[0]!.facts.offset, boundaryPrefix.length - 2);
+
+    // The same literal crossing a 256 KiB reader page must be found in one drain.
+    const paged = await f.service.register(caller(), {
+      instruction: "match across pages",
+      source: { attemptId: "attempt-1", kind: "log", pattern: "READY" },
+    });
+    assert.equal(paged.followUp.status, "delivered");
+    assert.equal((await f.service.get(caller(), { id: paged.followUp.id })).occurrences[0]!.facts.offset, boundaryPrefix.length - 2);
+  });
+
+  it("log source: drains a terminal log beyond the old per-event page cap", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.logs.set("attempt-1:stdout", "");
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "find the late terminal marker",
+      source: { attemptId: "attempt-1", kind: "log", pattern: "READY" },
+    });
+    f.harness.logs.set("attempt-1:stdout", `${"x".repeat(64 * 256 * 1024 + 1)}READY`);
+    emitAttempt(f.harness, "ws", "attempt-1", attemptView({ collection: "done", state: "completed" }));
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const occurrence = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences[0]!;
+    assert.equal(occurrence.reason, "log-match");
+    assert.equal(occurrence.facts.offset, 64 * 256 * 1024 + 1);
+  });
+
   it("external source: adapter match fires; unregistered provider stays honest", async () => {
     const f = await fixture({ seed: (h) => {
       h.threads.set("t-1", settledThread());
@@ -1044,6 +1196,36 @@ describe("follow-up service on the real kernel", () => {
       }),
       /not a registered adapter/,
     );
+  });
+
+  it("external source: polling survives an independent fallback deadline timer", async () => {
+    vi.useFakeTimers();
+    try {
+      let queries = 0;
+      const f = await fixture({ seed: (h) => {
+        h.threads.set("t-1", settledThread());
+        h.external.set("github-pr", {
+          intervalMs: 5_000,
+          query: async () => {
+            queries += 1;
+            return queries === 1
+              ? { facts: {}, matched: false }
+              : { eventId: "github-pr-42-open", facts: { number: 42 }, matched: true };
+          },
+        });
+      } });
+      const registered = await f.service.register(caller(), {
+        instruction: "PR opened",
+        source: { condition: "open", fallbackAt: Date.now() + 60_000, kind: "external", provider: "github-pr" },
+      });
+      assert.equal(registered.followUp.status, "waiting");
+      await vi.advanceTimersByTimeAsync(5_000);
+      const detail = await f.service.get(caller(), { id: registered.followUp.id });
+      assert.ok(queries >= 2);
+      assert.equal(detail.followUp.status, "delivered");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("external source unavailable marks the wait unavailable", async () => {
@@ -1080,13 +1262,31 @@ describe("follow-up service on the real kernel", () => {
       f.service.register(caller(), { instruction: "x", source: { attemptId: "a", kind: "log", pattern: "([", regex: true } }),
       /regular expression/,
     );
+    await assert.rejects(
+      f.service.register(caller({ workspaceScope: ["packages/allowed"] }), {
+        instruction: "scope escape",
+        source: { condition: "exists", kind: "file", path: "packages/private/result.txt" },
+      }),
+      /outside the actor scope/,
+    );
+    const scoped = await f.service.register(caller({ workspaceScope: ["packages/allowed"] }), {
+      instruction: "inside scope",
+      source: { condition: "changed", kind: "file", path: "packages/allowed/result.txt" },
+    });
+    await assert.rejects(
+      f.service.update(caller({ workspaceScope: ["packages/allowed"] }), {
+        id: scoped.followUp.id,
+        source: { condition: "changed", kind: "file", path: "packages/private/result.txt" },
+      }),
+      /outside the actor scope/,
+    );
   });
 
   it("reconcile rebuilds file and metric observers after restart", async () => {
     const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
     const fileWait = await f.service.register(caller(), {
-      instruction: "file appeared",
-      source: { condition: "exists", kind: "file", path: "out/flag" },
+      instruction: "file changed while the observer was down",
+      source: { condition: "changed", kind: "file", path: "out/flag" },
     });
     const metricWait = await f.service.register(caller(), {
       instruction: "cpu hot",
@@ -1147,10 +1347,8 @@ describe("follow-up service on the real kernel", () => {
       externalSource: (provider) => harness2.external.get(provider) ?? null,
       onError: (error) => harness2.errors.push(error),
     });
-    await service2.reconcile("ws");
-
     harness2.files.set("ws:out/flag", { exists: true, mtimeMs: 5, size: 1 });
-    emitFile(harness2, "ws", "out/flag", "created");
+    await service2.reconcile("ws");
     emitSample(harness2, { machineId: "local", observedAt: 10, usage: { cpuPercent: 99 } });
     await until(() => harness2.continued.length === 2, 4_000, harness2.errors);
     service2.dispose();
@@ -1169,6 +1367,7 @@ describe("follow-up service on the real kernel", () => {
   it("settleTarget cancels waits whose thread or session is gone", async () => {
     const f = await fixture({ seed: (h) => {
       h.threads.set("t-1", settledThread());
+      h.threads.set("t-other", { ...settledThread(), id: "t-other" });
       h.goals.set("s-1", { id: "g-1", status: "active" });
     } });
     const threadWait = await f.service.register(caller(), {
@@ -1200,25 +1399,16 @@ describe("follow-up service on the real kernel", () => {
     assert.equal((await f.service.get(caller({ sessionId: "s-other", threadId: "t-other" }), { id: otherWait.followUp.id })).followUp.status, "waiting");
   });
 
-  it("settleTarget marks waits unavailable when their attempt record is gone", async () => {
+  it("reconcile retries durable thread lifecycle settlement after an archive event is missed", async () => {
     const f = await fixture({ seed: (h) => {
       h.threads.set("t-1", settledThread());
-      h.attempts.set("attempt-1", attemptView({ state: "running" }));
     } });
-    const experimentWait = await f.service.register(caller(), {
-      instruction: "experiment done",
-      source: { attemptId: "attempt-1", kind: "experiment" },
-    });
-    const timeWait = await f.service.register(caller(), {
-      instruction: "unrelated timer",
+    const wait = await f.service.register(caller(), {
+      instruction: "must close with its thread",
       source: { at: Date.now() + 60_000, kind: "time" },
     });
-    const settled = await f.service.settleTarget("ws", { kind: "attempt", id: "attempt-1" });
-    assert.equal(settled, 1);
-    assert.equal((await f.service.get(caller(), { id: experimentWait.followUp.id })).followUp.status, "unavailable");
-    assert.equal((await f.service.get(caller(), { id: timeWait.followUp.id })).followUp.status, "waiting");
-    // Nothing was delivered or cancelled through the model path.
-    assert.equal(f.harness.continued.length, 0);
-    assert.equal(f.harness.informs.length, 0);
+    f.harness.threads.get("t-1")!.lifecycle = "archived";
+    await f.service.reconcile("ws");
+    assert.equal((await f.service.get(caller(), { id: wait.followUp.id })).followUp.status, "cancelled");
   });
 });

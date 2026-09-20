@@ -660,6 +660,7 @@ export class SessionHost {
   #contextLastFailure: HarnessContextRuntimeFailure | undefined;
   #settingsSessionReloadPending = false;
   #settingsSessionReloadActive: Promise<void> | null = null;
+  #settingsSessionReloadGeneration = 0;
   // Settings writes commit the file but defer settingsManager.reload() to a
   // settled boundary so an in-flight tool bridge response stays valid. The
   // resolved candidate is kept here so snapshot/context readers observe the
@@ -2876,6 +2877,7 @@ export class SessionHost {
     );
     if (committedContext !== undefined) this.#pendingContextSettings = committedContext;
     if (globalContextSettingChanged) this.#contextLastFailure = undefined;
+    this.#settingsSessionReloadGeneration += 1;
     this.#settingsSessionReloadPending = true;
     // A settings tool executes inside the current agent runner. Reloading that
     // runner before its bridge response returns invalidates the caller after the
@@ -2888,24 +2890,35 @@ export class SessionHost {
     if (this.#settingsSessionReloadActive) return this.#settingsSessionReloadActive;
     if (!this.#settingsSessionReloadPending || !expectedRuntime || this.#runtime !== expectedRuntime) return;
     const apply = async () => {
-      this.#settingsSessionReloadPending = false;
       const settings = expectedRuntime.services.settingsManager;
-      try {
-        await settings.reload();
-        const reloadErrors = settings.drainErrors();
-        if (reloadErrors.length > 0) {
-          throw new HostError(
-            "settings_write_failed",
-            reloadErrors.map((entry) => entry.error.message).join("; "),
-          );
+      while (this.#settingsSessionReloadPending && this.#runtime === expectedRuntime) {
+        const generation = this.#settingsSessionReloadGeneration;
+        this.#settingsSessionReloadPending = false;
+        try {
+          await settings.reload();
+          const reloadErrors = settings.drainErrors();
+          if (reloadErrors.length > 0) {
+            throw new HostError(
+              "settings_write_failed",
+              reloadErrors.map((entry) => entry.error.message).join("; "),
+            );
+          }
+          if (this.#runtime !== expectedRuntime) return;
+          await expectedRuntime.session.reload();
+          if (this.#runtime !== expectedRuntime) return;
+          // A second settings write can commit while either reload is awaiting.
+          // Keep its candidate visible and loop until the latest generation has
+          // crossed this prompt boundary too.
+          if (generation === this.#settingsSessionReloadGeneration) {
+            this.#pendingContextSettings = undefined;
+          } else {
+            this.#settingsSessionReloadPending = true;
+          }
+          this.#emit("session.snapshot", this.snapshot());
+        } catch (error) {
+          if (this.#runtime === expectedRuntime) this.#settingsSessionReloadPending = true;
+          throw error;
         }
-        if (this.#runtime !== expectedRuntime) return;
-        this.#pendingContextSettings = undefined;
-        await expectedRuntime.session.reload();
-        if (this.#runtime === expectedRuntime) this.#emit("session.snapshot", this.snapshot());
-      } catch (error) {
-        if (this.#runtime === expectedRuntime) this.#settingsSessionReloadPending = true;
-        throw error;
       }
     };
     const active = apply().finally(() => {
@@ -3762,6 +3775,7 @@ export class SessionHost {
 
   async #disposeRuntime(): Promise<void> {
     this.#settingsSessionReloadPending = false;
+    this.#settingsSessionReloadGeneration = 0;
     this.#pendingContextSettings = undefined;
     this.#backgroundInference?.dispose();
     this.#backgroundInference = undefined;

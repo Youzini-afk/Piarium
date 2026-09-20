@@ -2335,10 +2335,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
     // Session deletion is a target-gone event: every durable wait bound to the
     // session closes instead of outliving its delivery authority.
-    for (const followUpWorkspaceId of await followUpService.definitionWorkspaces().catch(() => [] as string[])) {
-      await followUpService.settleTarget(followUpWorkspaceId, { kind: 'session', id: sessionId }).catch((error: unknown) => {
-        console.error('[PiariumFollowUp] Session-delete settle failed:', errorMessage(error));
-      });
+    for (const followUpWorkspaceId of await followUpService.definitionWorkspaces()) {
+      // The broker deletes the session only after this coordinator resolves.
+      // Propagate settlement failures so a retry still has the session summary
+      // and delivery authority needed to close durable waits.
+      await followUpService.settleTarget(followUpWorkspaceId, { kind: 'session', id: sessionId });
     }
     if (summary.workspace?.kind !== 'workspace') return;
     const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;

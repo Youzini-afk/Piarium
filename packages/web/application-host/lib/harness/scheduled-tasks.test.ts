@@ -31,7 +31,8 @@ describe('harness scheduled task services', () => {
     const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-harness-schedule-'));
     tempRoots.push(tempRoot);
     const projectPath = path.join(tempRoot, 'project');
-    await mkdir(projectPath, { recursive: true });
+    const secondProjectPath = path.join(tempRoot, 'project-2');
+    await Promise.all([mkdir(projectPath, { recursive: true }), mkdir(secondProjectPath, { recursive: true })]);
 
     const projectConfigRuntime = createProjectConfigRuntime({
       fsPromises: await import('node:fs/promises'),
@@ -45,7 +46,10 @@ describe('harness scheduled task services', () => {
     const runSessions: string[] = [];
     const scheduledTasksRuntime = createScheduledTasksRuntime({
       projectConfigRuntime,
-      listProjects: async () => [{ id: 'project-1', path: projectPath }],
+      listProjects: async () => [
+        { id: 'project-1', path: projectPath },
+        { id: 'project-2', path: secondProjectPath },
+      ],
       executeTask: async () => {
         const sessionID = `sess-${(runSessions.length + 1)}`;
         runSessions.push(sessionID);
@@ -57,7 +61,10 @@ describe('harness scheduled task services', () => {
     const scheduledTaskService = createScheduledTaskService({
       projectConfigRuntime,
       scheduledTasksRuntime,
-      readSettingsFromDisk: async () => ({ projects: [{ id: 'project-1', path: projectPath }] }),
+      readSettingsFromDisk: async () => ({ projects: [
+        { id: 'project-1', path: projectPath },
+        { id: 'project-2', path: secondProjectPath },
+      ] }),
       sanitizeProjects: (value) => (Array.isArray(value) ? value as Array<{ id: string; path: string }> : undefined),
     });
 
@@ -109,7 +116,7 @@ describe('harness scheduled task services', () => {
         | { ok: false; error: { code: string; message: string } };
     };
 
-    return { projectPath, request, runSessions };
+    return { projectConfigRuntime, projectPath, request, runSessions, scheduledTaskService, scheduledTasksRuntime };
   };
 
   it('lists, creates, runs, enables, and removes tasks for the caller project', async () => {
@@ -130,23 +137,39 @@ describe('harness scheduled task services', () => {
     expect(created.result.created).toBe(true);
     const taskId = created.result.task.id;
 
+    const patched = await request('schedule.upsert', { task: { id: taskId, name: 'Renamed digest' } });
+    expect(patched).toMatchObject({
+      ok: true,
+      result: {
+        created: false,
+        task: {
+          name: 'Renamed digest',
+          schedule: { kind: 'daily', times: ['09:30'], timezone: 'UTC' },
+          execution: { prompt: 'Summarize', providerID: 'openai', modelID: 'gpt-4.1' },
+        },
+      },
+    });
+
     const got = await request('schedule.get', { taskId });
-    expect(got).toMatchObject({ ok: true, result: { task: { id: taskId, name: 'Nightly digest' } } });
+    expect(got).toMatchObject({ ok: true, result: { task: { id: taskId, name: 'Renamed digest' } } });
 
     const disabled = await request('schedule.setEnabled', { taskId, enabled: false });
     expect(disabled).toMatchObject({ ok: true, result: { task: { enabled: false } } });
 
-    // A disabled task cannot be run — the service reports it honestly.
-    const skipped = await request('schedule.run', { taskId });
-    expect(skipped).toMatchObject({ ok: false, error: { code: 'not-found' } });
+    // Disabled suppresses calendar firing; an explicit run remains available.
+    const manualWhileDisabled = await request('schedule.run', { taskId });
+    expect(manualWhileDisabled).toMatchObject({
+      ok: true,
+      result: { sessionId: 'sess-1', task: { enabled: false, state: { lastStatus: 'success' } } },
+    });
 
     await request('schedule.setEnabled', { taskId, enabled: true });
     const ran = await request('schedule.run', { taskId });
     if (!ran.ok) throw new Error(ran.error.message);
-    expect(ran.result.sessionId).toBe('sess-1');
+    expect(ran.result.sessionId).toBe('sess-2');
     expect(ran.result.task.state.lastStatus).toBe('success');
-    expect(ran.result.task.state.lastSessionId).toBe('sess-1');
-    expect(runSessions).toEqual(['sess-1']);
+    expect(ran.result.task.state.lastSessionId).toBe('sess-2');
+    expect(runSessions).toEqual(['sess-1', 'sess-2']);
 
     const status = await request('schedule.status', {});
     expect(status).toMatchObject({ ok: true, result: { enabledScheduledTasksCount: 1 } });
@@ -236,5 +259,21 @@ describe('harness scheduled task services', () => {
     };
     const listed = await request('schedule.list', {}, foreign);
     expect(listed).toMatchObject({ ok: false, error: { code: 'unavailable' } });
+  });
+
+  it('scopes schedule.status to the caller project while retaining global UI status', async () => {
+    const { projectConfigRuntime, request, scheduledTaskService, scheduledTasksRuntime } = await fixture();
+    await projectConfigRuntime.upsertScheduledTask('project-2', {
+      name: 'Other project',
+      enabled: true,
+      schedule: { kind: 'daily', time: '09:00', timezone: 'UTC' },
+      execution: { prompt: 'other', providerID: 'openai', modelID: 'gpt-4.1' },
+    });
+    await scheduledTasksRuntime.syncProject('project-2');
+
+    const callerStatus = await request('schedule.status', {});
+    expect(callerStatus).toMatchObject({ ok: true, result: { enabledScheduledTasksCount: 0 } });
+    await scheduledTasksRuntime.syncProject('project-1');
+    expect(await scheduledTaskService.globalStatus()).toMatchObject({ enabledScheduledTasksCount: 1 });
   });
 });

@@ -28,12 +28,16 @@ import type {
 const SURFACE_REQUEST_TIMEOUT_MS = 15_000;
 
 interface SurfaceConnection {
+  authKey: string;
+  connectionId: string;
   res: Response;
   surfaceId: string;
   kind: string;
 }
 
 interface PendingRequest {
+  authKey: string;
+  connectionIds: Set<string>;
   resolve: (value: { surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -48,8 +52,8 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
   const connections = new Map<Response, SurfaceConnection>();
   const pending = new Map<string, PendingRequest>();
 
-  const attach = (res: Response, surfaceId: string, kind: string) => {
-    connections.set(res, { res, surfaceId, kind });
+  const attach = (res: Response, surfaceId: string, kind: string, authKey: string) => {
+    connections.set(res, { authKey, connectionId: randomUUID(), res, surfaceId, kind });
   };
 
   const detach = (res: Response) => {
@@ -60,14 +64,17 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
   const list = (): ClientSurfaceInfo[] => {
     const seen = new Map<string, ClientSurfaceInfo>();
     for (const conn of connections.values()) {
-      if (!seen.has(conn.surfaceId)) seen.set(conn.surfaceId, { id: conn.surfaceId, kind: conn.kind });
+      const identity = `${conn.authKey}\0${conn.surfaceId}`;
+      if (!seen.has(identity)) seen.set(identity, { id: conn.surfaceId, kind: conn.kind });
     }
     return [...seen.values()];
   };
 
-  const failPending = (surfaceId: string, error: Error) => {
+  const failPending = (connection: SurfaceConnection, error: Error) => {
     for (const [id, request] of pending) {
-      if (request.surface.id !== surfaceId) continue;
+      if (request.surface.id !== connection.surfaceId || request.authKey !== connection.authKey) continue;
+      request.connectionIds.delete(connection.connectionId);
+      if (request.connectionIds.size > 0) continue;
       clearTimeout(request.timer);
       pending.delete(id);
       request.reject(error);
@@ -75,18 +82,9 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
   };
 
   const request: ClientSurfaceBridge['request'] = async (op) => {
-    const targets = [...connections.values()].filter((conn) => (
-      op.surfaceId ? conn.surfaceId === op.surfaceId : true
-    ));
+    const targets = [...connections.values()];
     const surfaces = list();
-    if (op.surfaceId) {
-      if (targets.length === 0) {
-        throw new HarnessServiceError(
-          'unavailable',
-          `surface "${op.surfaceId}" is not connected to this host`,
-        );
-      }
-    } else if (surfaces.length === 0) {
+    if (surfaces.length === 0) {
       throw new HarnessServiceError(
         'unavailable',
         'no client surface is connected to this host',
@@ -94,12 +92,14 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
     } else if (surfaces.length > 1) {
       throw new HarnessServiceError(
         'ambiguous',
-        `${surfaces.length} surfaces are connected (${surfaces.map((s) => `${s.kind}:${s.id.slice(0, 8)}`).join(', ')}) — pass surface to choose`,
+        `${surfaces.length} authenticated surfaces are connected (${surfaces.map((s) => `${s.kind}:${s.id.slice(0, 8)}`).join(', ')})`,
       );
     }
-    const surface = surfaces.length === 1
-      ? surfaces[0]!
-      : { id: op.surfaceId!, kind: targets[0]?.kind ?? 'unknown' };
+    const surface = surfaces[0]!;
+    const targetIdentity = targets.find((conn) => conn.surfaceId === surface.id)!;
+    const selectedTargets = targets.filter((conn) => (
+      conn.surfaceId === surface.id && conn.authKey === targetIdentity.authKey
+    ));
     const requestId = `surface-${randomUUID()}`;
     const results = new Promise<{ surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -109,14 +109,22 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
           `surface ${surface.id} did not acknowledge within ${SURFACE_REQUEST_TIMEOUT_MS}ms — connection may have dropped`,
         ));
       }, SURFACE_REQUEST_TIMEOUT_MS);
-      pending.set(requestId, { resolve, reject, timer, surface });
+      pending.set(requestId, {
+        authKey: targetIdentity.authKey,
+        connectionIds: new Set(selectedTargets.map((target) => target.connectionId)),
+        resolve,
+        reject,
+        timer,
+        surface,
+      });
     });
     try {
-      for (const conn of targets) {
+      for (const conn of selectedTargets) {
         writeSseEvent(conn.res, {
           type: 'piarium:client-settings-request',
           properties: {
             requestId,
+            connectionId: conn.connectionId,
             surfaceId: conn.surfaceId,
             op: op.type,
             entries: op.entries,
@@ -135,9 +143,18 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
   };
 
   /** The surface reports the real per-entry outcome. */
-  const ack = (requestId: string, results: ClientSurfaceFieldResult[]) => {
+  const ack = (
+    requestId: string,
+    surfaceId: string,
+    connectionId: string,
+    authKey: string,
+    results: ClientSurfaceFieldResult[],
+  ) => {
     const request = pending.get(requestId);
     if (!request) return false;
+    if (request.surface.id !== surfaceId
+      || request.authKey !== authKey
+      || !request.connectionIds.has(connectionId)) return false;
     clearTimeout(request.timer);
     pending.delete(requestId);
     request.resolve({ surface: request.surface, results });
@@ -149,11 +166,18 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
     const conn = connections.get(res);
     detach(res);
     if (!conn) return;
-    const stillConnected = [...connections.values()].some((other) => other.surfaceId === conn.surfaceId);
+    const stillConnected = [...connections.values()].some((other) => (
+      other.surfaceId === conn.surfaceId && other.authKey === conn.authKey
+    ));
     if (!stillConnected) {
-      failPending(conn.surfaceId, new HarnessServiceError(
+      failPending(conn, new HarnessServiceError(
         'unavailable',
         `surface ${conn.surfaceId} disconnected before acknowledging`,
+      ));
+    } else {
+      failPending(conn, new HarnessServiceError(
+        'unavailable',
+        `surface connection ${conn.connectionId} disconnected before acknowledging`,
       ));
     }
   };

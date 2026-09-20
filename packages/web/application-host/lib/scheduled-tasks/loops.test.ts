@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   LoopRevisionConflictError,
+  deleteLoopFile,
   discoverLoops,
   parseLoopContent,
   readLoopFile,
@@ -119,5 +120,35 @@ describe('Markdown scheduled task loops', () => {
     await expect(writeLoopFile(filePath, validLoop({ name: 'mine' }), {
       expectedRevision: current.revision,
     })).rejects.toBeInstanceOf(LoopRevisionConflictError);
+  });
+
+  it('allows only one concurrent writer to consume a content revision', async () => {
+    const root = await tempRoot();
+    const filePath = path.join(root, 'loop.md');
+    await writeFile(filePath, validLoop());
+    const current = await readLoopFile(filePath);
+
+    const outcomes = await Promise.allSettled([
+      writeLoopFile(filePath, validLoop({ name: 'first' }), { expectedRevision: current.revision }),
+      writeLoopFile(filePath, validLoop({ name: 'second' }), { expectedRevision: current.revision }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+    const rejected = outcomes.find((outcome) => outcome.status === 'rejected');
+    expect(rejected?.status === 'rejected' ? rejected.reason : null).toBeInstanceOf(LoopRevisionConflictError);
+  });
+
+  it('serializes revision-guarded update and delete for the same path', async () => {
+    const root = await tempRoot();
+    const filePath = path.join(root, 'loop.md');
+    await writeFile(filePath, validLoop());
+    const current = await readLoopFile(filePath);
+
+    const outcomes = await Promise.allSettled([
+      writeLoopFile(filePath, validLoop({ name: 'updated' }), { expectedRevision: current.revision }),
+      deleteLoopFile(filePath, { expectedRevision: current.revision }),
+    ]);
+
+    expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
   });
 });

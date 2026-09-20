@@ -1,6 +1,7 @@
 import fsPromises from 'node:fs/promises';
 import path from 'node:path';
 import {
+  deleteLoopFile,
   LoopRevisionConflictError,
   parseLoopContent,
   readLoopFile,
@@ -173,11 +174,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     const { projectID: normalizedProjectID, task } = await findLoopTask(projectID, taskID);
     const revision = asNonEmptyString(expectedRevision) || task.loopRevision;
     try {
-      const current = await readLoopFile(task.loopFile);
-      if (revision && current.revision !== revision) {
-        throw new LoopRevisionConflictError();
-      }
-      await fsPromises.unlink(task.loopFile);
+      await deleteLoopFile(task.loopFile, { expectedRevision: revision });
     } catch (error) {
       if (error instanceof LoopRevisionConflictError) throw new ScheduledTaskError(error.message, 409);
       if (errorCode(error) === 'ENOENT') throw new ScheduledTaskError('Loop file not found', 404);
@@ -193,11 +190,11 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
       throw new ScheduledTaskError('task payload is required', 400);
     }
     if (
-      input.loopFile !== undefined
-      || input.loopScope !== undefined
-      || input.loopRevision !== undefined
-      || input.loopError !== undefined
-      || input.loopShadowed !== undefined
+      Object.prototype.hasOwnProperty.call(input, 'loopFile')
+      || Object.prototype.hasOwnProperty.call(input, 'loopScope')
+      || Object.prototype.hasOwnProperty.call(input, 'loopRevision')
+      || Object.prototype.hasOwnProperty.call(input, 'loopError')
+      || Object.prototype.hasOwnProperty.call(input, 'loopShadowed')
     ) {
       throw new ScheduledTaskError('Loop metadata is managed by Piarium', 400);
     }
@@ -213,7 +210,9 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
       upserted = await projectConfigRuntime.upsertScheduledTask(project.id, input);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to save scheduled task';
-      const invalid = message.toLowerCase().includes('required') || message.toLowerCase().includes('invalid');
+      const invalid = message.toLowerCase().includes('required')
+        || message.toLowerCase().includes('invalid')
+        || message.toLowerCase().includes('must be');
       throw new ScheduledTaskError(message, invalid ? 400 : 500);
     }
     await scheduledTasksRuntime.syncProject(project.id);
@@ -254,7 +253,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     if (result.running || result.queued) {
       throw new ScheduledTaskError(result.error || 'Task already running', 409);
     }
-    if (result.skipped) throw new ScheduledTaskError('Task not found or disabled', 404);
+    if (result.skipped) throw new ScheduledTaskError('Task not found', 404);
     if (!result.ok) {
       throw new ScheduledTaskError(result.error || 'Task run failed', 500, { task: result.task });
     }
@@ -273,7 +272,28 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     return result.task;
   };
 
-  const status = async () => {
+  const status = async (projectID: unknown) => {
+    const project = await findProjectByID(projectID);
+    await scheduledTasksRuntime.syncProject(project.id);
+    if (typeof scheduledTasksRuntime.getProjectStatus === 'function') {
+      return scheduledTasksRuntime.getProjectStatus(project.id);
+    }
+    const tasks = await projectConfigRuntime.listScheduledTasks(project.id);
+    let enabledCount = 0;
+    let runningCount = 0;
+    for (const task of tasks) {
+      if (task?.enabled) enabledCount += 1;
+      if (task?.state?.lastStatus === 'running') runningCount += 1;
+    }
+    return {
+      hasEnabledScheduledTasks: enabledCount > 0,
+      hasRunningScheduledTasks: runningCount > 0,
+      enabledScheduledTasksCount: enabledCount,
+      runningScheduledTasksCount: runningCount,
+    };
+  };
+
+  const globalStatus = async () => {
     if (typeof scheduledTasksRuntime.getStatus === 'function') {
       return scheduledTasksRuntime.getStatus();
     }
@@ -312,6 +332,7 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     setLoopEnabled,
     removeLoopFile,
     status,
+    globalStatus,
   };
 };
 

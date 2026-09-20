@@ -180,7 +180,7 @@ export interface SettingsUpdateItem {
 
 export interface SettingsItemResult {
   id: string;
-  status: "applied" | "pending" | "failed" | "unavailable";
+  status: "applied" | "partial" | "pending" | "failed" | "unavailable";
   fields?: SettingsFieldResult[];
   revision?: string;
   error?: string;

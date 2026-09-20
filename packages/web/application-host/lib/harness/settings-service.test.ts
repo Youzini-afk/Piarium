@@ -121,6 +121,7 @@ function depsWithActions(
     ...base.deps,
     actions: {
       adapterFor: (domain) => domain === "runtime:extensions" ? {
+        verbs: ["list", "install", "remove"],
         describe: async () => ({ summary: "packages", verbs: ["list", "install", "remove"] }),
         invoke: async (_ctx, _entry, verb, _args) => {
           if (opts.fail) return { status: "unavailable", detail: "owner offline" };
@@ -146,13 +147,10 @@ function fakeBridge(
       if (surfaces.length === 0) {
         throw new HarnessServiceError("unavailable", "no client surface is connected to this host");
       }
-      if (!op.surfaceId && surfaces.length > 1) {
-        throw new HarnessServiceError("ambiguous", "several surfaces are connected — pass surface to choose");
+      if (surfaces.length > 1) {
+        throw new HarnessServiceError("ambiguous", "several authenticated surfaces are connected");
       }
-      const surface = surfaces.find((s) => s.id === op.surfaceId) ?? surfaces[0]!;
-      if (op.surfaceId && !surfaces.some((s) => s.id === op.surfaceId)) {
-        throw new HarnessServiceError("unavailable", `surface "${op.surfaceId}" is not connected`);
-      }
+      const surface = surfaces[0]!;
       calls.push(op);
       return {
         surface,
@@ -190,7 +188,7 @@ describe("settings service catalog search", () => {
     assert.equal(result.items[0]?.owner, "pi-settings");
   });
 
-  it("summarizes simple entries with live values and declared verbs", async () => {
+  it("summarizes simple entries without advertising verbs from an unwired owner", async () => {
     const { service } = fixture({
       app: { timeFormatPreference: "24h" },
       clientSurfaces: fakeBridge([], [{ id: "surf-1", kind: "desktop" }]),
@@ -203,7 +201,7 @@ describe("settings service catalog search", () => {
     assert.ok(summary?.options?.some((option) => option.value === "12h"));
 
     const actions = await service.search(caller, { id: "plugins.packages" });
-    assert.ok(actions.items[0]?.summary?.verbs?.includes("list"));
+    assert.deepEqual(actions.items[0]?.summary?.verbs, []);
 
     const client = await service.search(caller, { id: "chat.persist-drafts" });
     assert.equal(client.items[0]?.summary?.surfaces, 1);
@@ -486,13 +484,14 @@ describe("client surface bridge (D-309)", () => {
       service.update(caller, { id: "chat.persist-drafts", set: { enabled: false } }),
       /surfaces are connected|surface to choose/,
     );
-    const targeted = await service.update(caller, {
-      id: "chat.persist-drafts",
-      set: { enabled: false },
-      surface: "surf-2",
-    });
-    assert.equal(targeted.status, "applied");
-    assert.equal(targeted.surface?.id, "surf-2");
+    await assert.rejects(
+      service.update(caller, {
+        id: "chat.persist-drafts",
+        set: { enabled: false },
+        surface: "surf-2",
+      }),
+      (error: unknown) => error instanceof HarnessServiceError && error.harnessCode === "denied",
+    );
   });
 
   it("reads client-owned values back from the surface, not a store", async () => {
@@ -530,6 +529,23 @@ describe("compound settings.update (D-309)", () => {
     assert.ok(result.items?.every((item) => item.status === "applied"));
   });
 
+  it("uses each item's owner revision instead of sharing the compound guard", async () => {
+    const base = baseDeps();
+    const current = settingsDocumentRevision(await base.deps.readAppSettings());
+    const service = createSettingsService(base.deps);
+    const result = await service.update(caller, {
+      id: "appearance.time-format",
+      expectedRevision: "unrelated-top-level-revision",
+      items: [
+        { id: "appearance.time-format", expectedRevision: "stale", set: { timeFormatPreference: "24h" } },
+        { id: "appearance.week-start", expectedRevision: current, set: { weekStartPreference: "monday" } },
+      ],
+    });
+    assert.equal(result.status, "partial");
+    assert.equal(result.items?.find((item) => item.id === "appearance.time-format")?.status, "failed");
+    assert.equal(result.items?.find((item) => item.id === "appearance.week-start")?.status, "applied");
+  });
+
   it("reports per-item status across owners — one failure does not roll back the rest", async () => {
     const applied: unknown[] = [];
     const { service, pi } = fixture({ clientSurfaces: fakeBridge(applied, [{ id: "s1", kind: "web" }]) });
@@ -544,8 +560,8 @@ describe("compound settings.update (D-309)", () => {
     });
     assert.equal(result.status, "partial");
     const byId = result.items ?? [];
-    assert.equal(byId.filter((item) => item.status === "applied").length, 3);
-    assert.equal(byId.filter((item) => item.status === "failed").length, 1);
+    assert.equal(byId.filter((item) => item.status === "applied").length, 2);
+    assert.equal(byId.filter((item) => item.status === "failed").length, 2);
     assert.equal((pi.global.harness as Record<string, unknown>).shell, "wsl");
     assert.equal(pi.updates.length, 1);
   });

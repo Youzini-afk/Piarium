@@ -77,7 +77,7 @@ export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion, forgetC
       const dispatchedAsCommand = prompt.startsWith('/');
       // Register the settle waiter before dispatching so the run's terminal
       // events cannot race past the subscription (D-307 W3.6).
-      let completion = !dispatchedAsCommand && awaitCompletion
+      let completion = awaitCompletion && (!dispatchedAsCommand || runAsGoal)
         ? awaitCompletion(sessionID)
         : null;
       if (dispatchedAsCommand) {

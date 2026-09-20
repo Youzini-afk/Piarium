@@ -356,11 +356,14 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     caller: ExperimentCaller,
   ): Promise<ResolvedExperimentBackend | null> => {
     if (!machine || payloadOf(machine).backend !== "managed-remote") return null;
-    const target = await targetFor(caller.workspaceId, machineId);
-    if (!target) return null;
+    // Bind before probing. If the target is offline on the first resolution,
+    // a later successful refresh still knows which durable workspace to
+    // reconcile. Reconnect recovery only inspects existing job identities.
     const bound = workspaceBindings.get(machineId) ?? new Set<string>();
     bound.add(caller.workspaceId);
     workspaceBindings.set(machineId, bound);
+    const target = await targetFor(caller.workspaceId, machineId);
+    if (!target) return null;
     const client = new ManagedTargetClient(target, fetchImpl);
     const coordinatorPath = encodeURIComponent(options.coordinatorHostId);
     const backend: ExperimentBackend = {

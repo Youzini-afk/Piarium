@@ -33,6 +33,33 @@ export interface DiscoveredLoop extends ParsedLoopContent {
 type FsPromises = typeof fsPromisesDefault;
 type PathModule = typeof pathDefault;
 
+const loopFileLocks = new Map<string, Promise<void>>();
+
+const loopFileLockKey = (filePath: string, path: PathModule): string => {
+  const resolved = path.resolve(filePath);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+};
+
+export const withLoopFileLock = async <Result>(
+  filePath: string,
+  operation: () => Promise<Result>,
+  { path = pathDefault }: { path?: PathModule } = {},
+): Promise<Result> => {
+  const key = loopFileLockKey(filePath, path);
+  const previous = loopFileLocks.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const chained = previous.finally(() => current);
+  loopFileLocks.set(key, chained);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (loopFileLocks.get(key) === chained) loopFileLocks.delete(key);
+  }
+};
+
 const asRecord = (value: unknown): Record<string, unknown> | null => (
   value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 );
@@ -225,7 +252,7 @@ export class LoopRevisionConflictError extends Error {
   }
 }
 
-export const writeLoopFile = async (
+const writeLoopFileUnlocked = async (
   filePath: string,
   content: string,
   { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault }: {
@@ -265,6 +292,20 @@ export const writeLoopFile = async (
   return { content, path: path.resolve(filePath), revision: loopContentRevision(content) };
 };
 
+export const writeLoopFile = async (
+  filePath: string,
+  content: string,
+  options: {
+    expectedRevision?: string | undefined;
+    fsPromises?: Pick<FsPromises, 'copyFile' | 'readFile' | 'rename' | 'unlink' | 'writeFile'>;
+    path?: PathModule;
+  } = {},
+) => withLoopFileLock(
+  filePath,
+  () => writeLoopFileUnlocked(filePath, content, options),
+  options.path ? { path: options.path } : {},
+);
+
 export const setLoopFileEnabled = async (
   filePath: string,
   enabled: unknown,
@@ -274,22 +315,39 @@ export const setLoopFileEnabled = async (
     path?: PathModule;
   } = {},
 ) => {
-  const current = await readLoopFile(filePath, { fsPromises });
-  const parsed = parseLoopContent(current.content);
-  if (!parsed.definition) throw new Error(parsed.error || 'Loop file is invalid');
+  return withLoopFileLock(filePath, async () => {
+    const current = await readLoopFile(filePath, { fsPromises });
+    const parsed = parseLoopContent(current.content);
+    if (!parsed.definition) throw new Error(parsed.error || 'Loop file is invalid');
 
-  const parts = splitMarkdown(current.content);
-  if (!parts.ok) throw new Error(parts.error);
-  const { document } = parseFrontmatter(parts.frontmatterRaw);
-  document.set('enabled', Boolean(enabled));
-  const nextFrontmatter = document.toString({ lineWidth: 0 }).replace(/\r?\n$/, '').replace(/\r?\n/g, parts.eol);
-  const nextContent = `${parts.bom}---${parts.eol}${nextFrontmatter}${parts.eol}---${parts.separator}${parts.bodyRaw}`;
-  return writeLoopFile(filePath, nextContent, {
-    expectedRevision: expectedRevision || current.revision,
-    fsPromises,
-    path,
-  });
+    const parts = splitMarkdown(current.content);
+    if (!parts.ok) throw new Error(parts.error);
+    const { document } = parseFrontmatter(parts.frontmatterRaw);
+    document.set('enabled', Boolean(enabled));
+    const nextFrontmatter = document.toString({ lineWidth: 0 }).replace(/\r?\n$/, '').replace(/\r?\n/g, parts.eol);
+    const nextContent = `${parts.bom}---${parts.eol}${nextFrontmatter}${parts.eol}---${parts.separator}${parts.bodyRaw}`;
+    return writeLoopFileUnlocked(filePath, nextContent, {
+      expectedRevision: expectedRevision || current.revision,
+      fsPromises,
+      path,
+    });
+  }, { path });
 };
+
+export const deleteLoopFile = async (
+  filePath: string,
+  { expectedRevision, fsPromises = fsPromisesDefault, path = pathDefault }: {
+    expectedRevision?: string | undefined;
+    fsPromises?: Pick<FsPromises, 'readFile' | 'unlink'>;
+    path?: PathModule;
+  } = {},
+): Promise<void> => withLoopFileLock(filePath, async () => {
+  const current = await readLoopFile(filePath, { fsPromises });
+  if (expectedRevision && current.revision !== expectedRevision) {
+    throw new LoopRevisionConflictError();
+  }
+  await fsPromises.unlink(filePath);
+}, { path });
 
 const walkLoopFiles = async (directory: string, { fsPromises, path }: {
   fsPromises: Pick<FsPromises, 'readdir' | 'realpath'>;

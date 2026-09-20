@@ -267,13 +267,14 @@ describe("settings tools", () => {
     bridge.dispose();
   });
 
-  it("update forwards compound items and surface selection", async () => {
+  it("update forwards compound item revisions and strips surface selection", async () => {
     const { bridge, requests } = scriptedBridge({
       "settings.update": (params: {
-        items?: { id: string; set?: Record<string, unknown>; surface?: string }[];
+        items?: { id: string; set?: Record<string, unknown>; expectedRevision?: string; surface?: string }[];
       }) => {
         assert.equal(params.items?.length, 2);
-        assert.equal(params.items?.[1]?.surface, "surf-9");
+        assert.equal(params.items?.[1]?.surface, undefined);
+        assert.equal(params.items?.[1]?.expectedRevision, "client-rev");
         return {
           status: "partial",
           entry: searchItem(),
@@ -292,7 +293,7 @@ describe("settings tools", () => {
     const result = await tool.execute("call-a3", {
       items: [
         { id: "appearance.theme", set: { themeVariant: "dark" } },
-        { id: "chat.persist-drafts", set: { enabled: false }, surface: "surf-9" },
+        { id: "chat.persist-drafts", set: { enabled: false }, expectedRevision: "client-rev", surface: "surf-9" },
       ],
     } as never, undefined, undefined, undefined as never);
     const text = JSON.stringify(result.content);

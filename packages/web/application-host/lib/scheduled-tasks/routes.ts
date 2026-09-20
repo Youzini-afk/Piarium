@@ -1,4 +1,4 @@
-import type { Express, Request, Response } from 'express';
+import type { Express, Request, RequestHandler, Response } from 'express';
 import { createScheduledTaskService } from './service.js';
 
 type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
@@ -8,6 +8,7 @@ interface ScheduledTaskRouteDependencies extends ServiceDependencies {
 }
 
 export interface PiariumEventRouteDependencies {
+  requireAuth: RequestHandler;
   getPiariumEventClients: () => Set<Response>;
   writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
   /**
@@ -16,9 +17,9 @@ export interface PiariumEventRouteDependencies {
    * ack route resolves pending client-settings requests.
    */
   surfaceBridge?: {
-    attach(res: Response, surfaceId: string, kind: string): void;
+    attach(res: Response, surfaceId: string, kind: string, authKey: string): void;
     dropConnection(res: Response): void;
-    ack(requestId: string, results: unknown): boolean;
+    ack(requestId: string, surfaceId: string, connectionId: string, authKey: string, results: unknown): boolean;
   };
 }
 
@@ -41,9 +42,15 @@ const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
 export const registerPiariumEventRoutes = (
   app: Express,
-  { getPiariumEventClients, writeSseEvent, surfaceBridge }: PiariumEventRouteDependencies,
+  { getPiariumEventClients, writeSseEvent, surfaceBridge, requireAuth }: PiariumEventRouteDependencies,
 ): void => {
-  app.get('/api/piarium/events', (req, res) => {
+  const authKey = (req: Request): string | null => {
+    const auth = req.piariumAuth;
+    if (auth?.type === 'client') return `client:${auth.clientId}`;
+    if (auth?.type === 'session') return 'session';
+    return null;
+  };
+  app.get('/api/piarium/events', requireAuth, (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -57,8 +64,9 @@ export const registerPiariumEventRoutes = (
     // broadcast-only — the host never invents a client identity.
     const surfaceId = asNonEmptyString(req.query?.surface);
     const surfaceKind = asNonEmptyString(req.query?.kind);
-    if (surfaceId && surfaceBridge) {
-      surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web');
+    const principal = authKey(req);
+    if (surfaceId && surfaceBridge && principal) {
+      surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web', principal);
     }
     try {
       writeSseEvent(res, {
@@ -89,14 +97,17 @@ export const registerPiariumEventRoutes = (
   });
 
   if (surfaceBridge) {
-    app.post('/api/piarium/client-settings/ack', (req, res) => {
+    app.post('/api/piarium/client-settings/ack', requireAuth, (req, res) => {
       const body = asRecord(req.body) ?? {};
       const requestId = asNonEmptyString(body.requestId);
+      const surfaceId = asNonEmptyString(body.surfaceId);
+      const connectionId = asNonEmptyString(body.connectionId);
+      const principal = authKey(req);
       const results = Array.isArray(body.results) ? body.results : [];
-      if (!requestId) {
-        return res.status(400).json({ error: 'requestId is required' });
+      if (!requestId || !surfaceId || !connectionId || !principal) {
+        return res.status(400).json({ error: 'requestId, surfaceId, connectionId and authenticated surface are required' });
       }
-      const resolved = surfaceBridge.ack(requestId, results as never);
+      const resolved = surfaceBridge.ack(requestId, surfaceId, connectionId, principal, results as never);
       if (!resolved) {
         return res.status(404).json({ error: 'no pending client-settings request for this id' });
       }
@@ -264,7 +275,7 @@ export const registerScheduledTaskRoutes = (app: Express, dependencies: Schedule
 
   app.get('/api/piarium/scheduled-tasks/status', async (_req, res) => {
     try {
-      return res.json(await scheduledTaskService.status());
+      return res.json(await scheduledTaskService.globalStatus());
     } catch (error) {
       console.error('[ScheduledTasks] failed to resolve scheduled task status:', error);
       return res.status(500).json({ error: 'Failed to resolve scheduled task status' });

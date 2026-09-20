@@ -15,6 +15,13 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type RunReason = 'manual' | 'scheduled';
 
+interface QueuedTaskRun {
+  projectID: string;
+  reason: RunReason;
+  resolve?: ((result: ScheduledTaskRunResult) => void) | undefined;
+  taskID: string;
+}
+
 interface ScheduledProject {
   id: string;
   path: string;
@@ -254,6 +261,19 @@ export const formatScheduledSessionTitle = (task: {
   return `${trimmedName}${suffix}`;
 };
 
+export const isMissedRecurringSlot = (
+  task: Pick<ScheduledTask, 'schedule'>,
+  scheduledFor: number,
+  wokeAt: number,
+): boolean => {
+  if (task.schedule.kind === 'once') return false;
+  const followingOccurrence = computeNextRunAt({
+    enabled: true,
+    schedule: task.schedule,
+  }, scheduledFor);
+  return followingOccurrence !== null && wokeAt > followingOccurrence;
+};
+
 export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependencies) => {
   const {
     projectConfigRuntime,
@@ -267,6 +287,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
 
   let executeTask = initialExecuteTask;
   let started = false;
+  let lifecycleGeneration = 0;
   const tasksByProject = new Map<string, Map<string, ScheduledTask>>();
   const projectPathByID = new Map<string, string>();
   const timersByTaskKey = new Map<string, ReturnType<typeof setTimeout>>();
@@ -274,7 +295,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   const runningTaskKeys = new Set<string>();
   const runningCountByProject = new Map<string, number>();
   let runningGlobalCount = 0;
-  const queue: Array<{ projectID: string; reason: RunReason; taskID: string }> = [];
+  const queue: QueuedTaskRun[] = [];
 
   const clearTimerForKey = (taskKey: string): void => {
     const timer = timersByTaskKey.get(taskKey);
@@ -291,7 +312,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     }
     for (const task of tasks.values()) {
       clearTimerForKey(buildTaskKey(projectID, task.id));
-      queuedTaskKeys.delete(buildTaskKey(projectID, task.id));
     }
   };
 
@@ -305,6 +325,8 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   };
 
   const scheduleTask = (projectID: string, taskID: string, nextRunAt: number): void => {
+    if (!started) return;
+    const scheduledGeneration = lifecycleGeneration;
     const taskKey = buildTaskKey(projectID, taskID);
     clearTimerForKey(taskKey);
 
@@ -318,6 +340,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     const boundedDelay = Math.min(delay, MAX_TIMER_DELAY_MS);
 
     const timer = setTimeout(async () => {
+      if (!started || scheduledGeneration !== lifecycleGeneration) return;
       if (delay > MAX_TIMER_DELAY_MS) {
         scheduleTask(projectID, taskID, nextRunAt);
         return;
@@ -327,6 +350,25 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       const taskMap = tasksByProject.get(projectID);
       const task = taskMap?.get(taskID);
       if (!task || !task.enabled) {
+        return;
+      }
+      // A timer belongs to one persisted schedule slot. If a resync replaced
+      // that slot, let the current slot's timer own the run. If the event loop
+      // woke after the following valid occurrence, skip that stale occurrence
+      // and compute forward. A late callback before that next occurrence still
+      // owns this slot and runs once.
+      if (task.state.nextRunAt !== nextRunAt) {
+        if (typeof task.state.nextRunAt === 'number' && Number.isFinite(task.state.nextRunAt)) {
+          scheduleTask(projectID, taskID, task.state.nextRunAt);
+        }
+        return;
+      }
+      if (isMissedRecurringSlot(task, nextRunAt, Date.now())) {
+        try {
+          await syncTaskSchedule(projectID, task);
+        } catch (error) {
+          logger.warn?.('[ScheduledTasks] failed to advance a missed recurring slot:', error);
+        }
         return;
       }
       queueTaskRun(projectID, taskID, 'scheduled');
@@ -359,7 +401,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, statePatch);
     if (result.task) {
       updateInMemoryTask(projectID, result.task);
-      if (result.task.enabled && typeof result.task.state.nextRunAt === 'number' && Number.isFinite(result.task.state.nextRunAt)) {
+      if (started && result.task.enabled && typeof result.task.state.nextRunAt === 'number' && Number.isFinite(result.task.state.nextRunAt)) {
         scheduleTask(projectID, result.task.id, result.task.state.nextRunAt);
       }
       return result.task;
@@ -414,7 +456,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     // And a one-time task whose only fire time passed while the host was down
     // catches up once here; recurring kinds skip missed slots and keep the
     // freshly computed nextRunAt.
-    const now = DateTime.local();
+    const nowMs = Date.now();
     for (const task of Array.from(tasksByProject.get(projectID)?.values() || [])) {
       const taskKey = buildTaskKey(projectID, task.id);
       const inFlight = runningTaskKeys.has(taskKey) || queuedTaskKeys.has(taskKey);
@@ -430,10 +472,10 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
           logger.warn?.('[ScheduledTasks] failed to reconcile interrupted run:', error);
         }
       }
-      if (task.enabled && !inFlight && task.schedule?.kind === 'once') {
-        const dueAt = computeOnceDueAt(task.schedule, now.zone);
+      if (started && task.enabled && !inFlight && task.schedule?.kind === 'once') {
+        const dueAt = computeOnceDueAt(task.schedule, task.schedule.timezone);
         const lastRunAt = task.state?.lastRunAt;
-        if (dueAt !== null && dueAt <= now.toMillis() && (lastRunAt === undefined || lastRunAt < dueAt)) {
+        if (dueAt !== null && dueAt <= nowMs && (lastRunAt === undefined || lastRunAt < dueAt)) {
           queueTaskRun(projectID, task.id, 'scheduled');
         }
       }
@@ -487,6 +529,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   };
 
   const refreshLoopWatchers = async (): Promise<void> => {
+    if (!started) return;
     const wanted = new Set<string>();
     for (const projectPath of projectPathByID.values()) {
       for (const entry of await loopDirectoriesFor(projectPath)) {
@@ -521,13 +564,19 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     }
   };
 
-  const queueTaskRun = (projectID: string, taskID: string, reason: RunReason): void => {
+  const queueTaskRun = (
+    projectID: string,
+    taskID: string,
+    reason: RunReason,
+    resolve?: (result: ScheduledTaskRunResult) => void,
+  ): boolean => {
     const taskKey = buildTaskKey(projectID, taskID);
     if (queuedTaskKeys.has(taskKey) || runningTaskKeys.has(taskKey)) {
-      return;
+      return false;
     }
     queuedTaskKeys.add(taskKey);
-    queue.push({ projectID, taskID, reason });
+    queue.push({ projectID, taskID, reason, ...(resolve ? { resolve } : {}) });
+    return true;
   };
 
   const canRunTask = (projectID: string): boolean => {
@@ -597,7 +646,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   const runTask = async (projectID: string, taskID: string, reason: RunReason): Promise<ScheduledTaskRunResult> => {
     const taskMap = tasksByProject.get(projectID);
     const task = taskMap?.get(taskID);
-    if (!task || !task.enabled) {
+    if (!task || (reason === 'scheduled' && !task.enabled)) {
       return { ok: false, skipped: true };
     }
 
@@ -607,6 +656,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     }
 
     runningTaskKeys.add(taskKey);
+    const runGeneration = lifecycleGeneration;
     runningGlobalCount += 1;
     runningCountByProject.set(projectID, (runningCountByProject.get(projectID) || 0) + 1);
 
@@ -690,7 +740,13 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
       if (stateResult.task) {
         updateInMemoryTask(projectID, stateResult.task);
-        if (stateResult.task.enabled && typeof stateResult.task.state.nextRunAt === 'number' && Number.isFinite(stateResult.task.state.nextRunAt)) {
+        if (
+          started
+          && runGeneration === lifecycleGeneration
+          && stateResult.task.enabled
+          && typeof stateResult.task.state.nextRunAt === 'number'
+          && Number.isFinite(stateResult.task.state.nextRunAt)
+        ) {
           scheduleTask(projectID, taskID, stateResult.task.state.nextRunAt);
         }
       }
@@ -729,14 +785,11 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
   };
 
   const pumpQueue = (): void => {
-    if (!started) {
-      return;
-    }
-
     let consumed = false;
     for (let index = 0; index < queue.length; index += 1) {
       const item = queue[index];
       if (!item) continue;
+      if (!started && item.reason === 'scheduled') continue;
       if (!canRunTask(item.projectID)) {
         continue;
       }
@@ -748,9 +801,12 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       queuedTaskKeys.delete(taskKey);
       consumed = true;
 
-      void runTask(item.projectID, item.taskID, item.reason).finally(() => {
-        pumpQueue();
-      });
+      void runTask(item.projectID, item.taskID, item.reason)
+        .then((result) => item.resolve?.(result))
+        .catch((error) => item.resolve?.({ ok: false, status: 'error', error: safeErrorMessage(error) }))
+        .finally(() => {
+          pumpQueue();
+        });
     }
 
     if (!consumed && queue.length > 0) {
@@ -775,21 +831,37 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       };
     }
 
-    return runTask(projectID, taskID, 'manual');
+    const task = tasksByProject.get(projectID)?.get(taskID);
+    if (!task) return { ok: false, skipped: true };
+
+    return new Promise<ScheduledTaskRunResult>((resolve) => {
+      if (!queueTaskRun(projectID, taskID, 'manual', resolve)) {
+        resolve({ ok: false, queued: true, error: 'task is already queued' });
+        return;
+      }
+      pumpQueue();
+    });
   };
 
   const start = async (): Promise<void> => {
     if (started) {
       return;
     }
+    lifecycleGeneration += 1;
     started = true;
-    await syncAllProjects();
+    try {
+      await syncAllProjects();
+    } catch (error) {
+      stop();
+      throw error;
+    }
   };
 
   const stop = (): void => {
     if (!started) {
       return;
     }
+    lifecycleGeneration += 1;
     started = false;
     for (const timer of timersByTaskKey.values()) {
       clearTimeout(timer);
@@ -802,6 +874,9 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     if (loopResyncTimer) {
       clearTimeout(loopResyncTimer);
       loopResyncTimer = undefined;
+    }
+    for (const item of queue) {
+      item.resolve?.({ ok: false, skipped: true, error: 'scheduled task runtime stopped before the run started' });
     }
     queuedTaskKeys.clear();
     queue.length = 0;
@@ -826,6 +901,21 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     };
   };
 
+  const getProjectStatus = (projectID: string) => {
+    let enabledCount = 0;
+    const tasks = tasksByProject.get(projectID);
+    for (const task of tasks?.values() ?? []) {
+      if (task.enabled) enabledCount += 1;
+    }
+    const runningCount = runningCountByProject.get(projectID) ?? 0;
+    return {
+      hasEnabledScheduledTasks: enabledCount > 0,
+      hasRunningScheduledTasks: runningCount > 0,
+      enabledScheduledTasksCount: enabledCount,
+      runningScheduledTasksCount: runningCount,
+    };
+  };
+
   const setExecutor = (nextExecutor: TaskExecutor): void => {
     executeTask = nextExecutor;
   };
@@ -838,5 +928,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     runNow,
     setExecutor,
     getStatus,
+    getProjectStatus,
   };
 };

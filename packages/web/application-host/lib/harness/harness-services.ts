@@ -1322,12 +1322,7 @@ export function registerHarnessServices(
       })),
     });
     router.register("schedule.status", {
-      handle: async (_params, ctx) => {
-        if (!ctx.workspaceId) {
-          throw new HarnessServiceError("unavailable", "scheduled task status requires a workspace-bound caller");
-        }
-        return scheduled.status().catch(mapScheduleError);
-      },
+      handle: async (_params, ctx) => call(ctx, (projectId) => scheduled.status(projectId)),
     });
   }
   if (host.sourceService) {

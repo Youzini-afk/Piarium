@@ -1,15 +1,15 @@
 # Piarium 会话等待、触发与续接设计
 
-Status: all planned source kinds, remote reconciliation, lifecycle settlement, workspace recovery and calendar management implemented and wired; acceptance corrected at D-308; Stage W remains partial (no cross-source all/any combinator)
+Status: durable experiment/artifact/file/metric/log/external sources, remote reconciliation, Thread/session lifecycle, workspace recovery and calendar management wired and corrected through D-310; Stage W remains partial
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 实施顺序见 [Harness plan 阶段 W](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)，交付事实见
 [Harness status](agent-harness-status.md)，决策见 [D-307](decisions/tool-environment.md#d-307--2026-09-20--阶段-w会话等待触发与续接)。
 阶段 W 排在 [阶段 S](agent-settings-design.md) 之后，复用 7G 请求前增量、7H 后台工具与事件等待、7I 实验/远程事实。
-本文同时定义完整目标和当前实现边界；时间、实验、artifact、file、metric、log、external 与 manual 来源，
-远程目标续接、生命周期收口、workspace 枚举恢复和 calendar 任务的 Agent 管理已经接线；跨来源 all/any
-复合算子仍未实现，具体事实以 status 为准。
+本文同时定义完整目标和当前实现边界；时间、耐久 experiment、artifact、file、metric、log、external 与 manual 来源，
+远程目标续接、Thread/session 生命周期、workspace 枚举恢复和 calendar 任务的 Agent 管理已经接线。普通 shell
+仍使用 7H 的非耐久句柄；跨来源 all/any、共享外部观察以及无历史 file/metric 边沿的崩溃恢复仍未实现，具体事实以 status 为准。
 
 ## 1. 用户需求
 
@@ -30,13 +30,13 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 
 | 现有能力 | 入口 | 本阶段需要收口的边界 |
 | --- | --- | --- |
-| 项目定时任务、daily/weekly/once/cron、队列和计时器 | [runtime.ts](../packages/web/application-host/lib/scheduled-tasks/runtime.ts) | 重启重新算下一次，未统一补跑/在途对账；运行统计主要覆盖派发阶段 |
-| 新会话、模型/思考选择、prompt/命令/Goal 启动 | [pi-executor.ts](../packages/web/application-host/lib/scheduled-tasks/pi-executor.ts) | 每次新建会话；agent.prompt 接受启动后即返回，调度成功不等于工作最终完成 |
-| GUI/CLI/Markdown 任务定义 | [scheduled-tasks 模块](../packages/web/application-host/lib/scheduled-tasks/DOCUMENTATION.md) | 已有管理路径，但缺会话域原生管理工具；文件变化主要在启动/列表同步时发现 |
+| 项目定时任务、daily/weekly/once/cron、队列和计时器 | [runtime.ts](../packages/web/application-host/lib/scheduled-tasks/runtime.ts) | 已按任务时区、真实终态、准入、missed slot 和启动/停止 generation 收口；跨进程文件 CAS 不作保证 |
+| 新会话、模型/思考选择、prompt/命令/Goal 启动 | [pi-executor.ts](../packages/web/application-host/lib/scheduled-tasks/pi-executor.ts) | 每次新建会话；普通 prompt 与 slash-command Goal 均等待真实终态 |
+| GUI/CLI/Markdown 任务定义 | [scheduled-tasks 模块](../packages/web/application-host/lib/scheduled-tasks/DOCUMENTATION.md) | Agent 管理接到同一服务；Piarium 内 loop 写者串行 CAS，外部编辑器仍按文件系统事实处理 |
 | Agent prompt 的接受边界 | [session-host.ts](../packages/pi-host/src/session-host.ts) | accepted 代表已开始运行，后续结果必须由事件/真实状态收集 |
 | 后台命令与事件等待 | [Harness 5.9](agent-harness.md#59-并发) | 可在当前工作中等待/读结果，但不等于持久登记后自动恢复已空闲的会话 |
 | Goal 自动续做 | [pi-session-automation 模块](../packages/web/application-host/lib/pi-session-automation/DOCUMENTATION.md) | 需要识别明确等待，避免 settled 后继续审计/唤醒一个正在等外部条件的 Agent |
-| 实验、远程重附着与状态事实 | [research-cluster-design.md](research-cluster-design.md) | 可以提供耐久来源，仍需续接目标、触发消费和模型准入的联动 |
+| 实验、远程重附着与状态事实 | [research-cluster-design.md](research-cluster-design.md) | 已提供耐久来源与重附着；普通 shell 仍不因此获得跨 Host 生存保证 |
 
 已有代码的全局 4/项目 2 调度默认和 30 分钟 watchdog 针对当前派发路径，不能当作真正 Agent/实验执行的完整限制。
 实施时按实际职责清理无效控制、复用运行时准入与真实执行状态；不简单增加超时或为续接另设固定额度。
@@ -45,7 +45,7 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 
 | 场景 | 首选来源 | 程序负责的工作 |
 | --- | --- | --- |
-| 训练、命令、构建结束或失败 | 指定 execution/attempt 的权威终态事件 | 识别退出/成功/失败，给结果和原文入口 |
+| 训练、构建或长执行结束/失败 | 耐久 experiment attempt 的权威终态；短期普通 shell 用 7H wait/output | 识别退出/成功/失败，给结果和原文入口；不把普通 shell 冒充可重启来源 |
 | 文件或产物就绪 | Documents/文件观察或产物收集服务 | 区分文件出现、发生变更与完整产物 ready，不能把开始写入当作完整可读 |
 | 指标达到条件 | 已声明的结构化指标来源 | 读取值、单位、修订/时间并判断明确谓词 |
 | 出现指定日志内容 | 指定执行的原始日志增量 | 沿游标匹配，保留命中范围和来源；不能把任意 ERROR 文本自动当作作业失败 |

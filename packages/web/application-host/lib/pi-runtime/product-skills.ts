@@ -87,8 +87,10 @@ domain actions. Compose, never duplicate authority.
 2. Check provider readiness with \`settings_action\` on \`providers.*\`
    (\`status\`/\`list\` verbs) — a slot pointing at a logged-out provider is a
    real finding to report, not to fix silently.
-3. Write slot assignments via \`settings_update\` (compound \`items[]\` for
-   several roles in one request; same-owner writes are atomic per scope).
+3. The catalog's model groups share the single \`harness.models\` owner path.
+   Merge every intended role into one complete object, then write it through
+   one catalog item with the scope revision. Do not send several compound
+   items for the same path.
 4. For team runs, thread dispatch inherits the run's frozen launch
    configuration — changing slots mid-run applies to the next run.
 

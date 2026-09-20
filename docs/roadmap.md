@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W wired and corrected at D-308, both still partial
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W wired and corrected through D-310, both still partial
 
-Last updated: 2026-09-20
+Last updated: 2026-09-21
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -27,8 +27,8 @@ authoritative record of delivery, and each phase names the design document that 
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
-| S | Conversational settings and Agent administration | Field catalog, domain actions, client Surfaces, compound updates and product Skills wired and corrected (D-306/D-308); untested external flows remain |
-| W | Session waiting, triggers and continuation | All source kinds, remote reconciliation, lifecycle settlement, workspace recovery and calendar Agent management wired and corrected (D-307/D-308); cross-source all/any combinator remains |
+| S | Conversational settings and Agent administration | Owner-backed catalog/actions, authenticated single-Surface application, per-owner compound updates and product Skills wired and corrected (D-306–D-310); multi-Surface targeting and external flows remain |
+| W | Session waiting, triggers and continuation | Durable sources, remote reconciliation, Thread/session lifecycle, workspace recovery and calendar Agent management wired and corrected (D-307–D-310); ordinary-shell durability and composite/shared observation remain |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -109,7 +109,7 @@ deterministic checks handle observation without idle model polling; explicit wai
 Goal auto-continuation. Active/idle targets reuse existing context delivery and session/Thread admission,
 with durable trigger identity, cancellation and recovery. Calendar tasks still support new work, while
 their results must follow actual execution rather than merely dispatch acceptance. See
-[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered source/continuation slice from the remaining sources and lifecycle work.
+[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); harness status separates the delivered durable source/continuation slice from ordinary-shell durability, composite/shared observation and remaining recovery limits.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in
