@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { relative, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { defaultRules, type PermissionAuditRecord, type PermissionInspectParams } from "@piarium/protocol";
 import { createPermissionGateExtension } from "../../src/harness/permission-gate-extension.js";
+
+const workspaceRoot = resolve("permission-gate-workspace");
 
 const inspect = (params: PermissionInspectParams) => ({
   tool: params.tool,
@@ -11,7 +14,7 @@ const inspect = (params: PermissionInspectParams) => ({
   owningWorkspaceId: "owning-ws",
   cwd: "workspace:/",
   paths: params.paths.map((path) => {
-    const resourceId = path.replace(/^[A-Za-z]:[\\/]+workspace[\\/]?/, '').replaceAll('\\', '/');
+    const resourceId = relative(workspaceRoot, path).replaceAll("\\", "/");
     return {
       inputPath: path,
       workspaceId: "execution-ws",
@@ -65,7 +68,7 @@ const ui = (choices: Array<string | undefined> = ["Allow once"]) => {
   return {
     state,
     context: {
-      cwd: "C:/workspace",
+      cwd: workspaceRoot,
       signal: undefined,
       ui: {
         select: async (title: string) => {
@@ -97,7 +100,7 @@ describe("native permission gate integration", () => {
   it("recognizes native research queries and keeps experiment control grants bound to the target", async () => {
     const { bridge, audits } = makeBridge();
     const sourceInfo = { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" };
-    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [
       { name: "experiment", sourceInfo }, { name: "resources", sourceInfo },
     ]);
     const result = ui(["Allow for this session scope", "Deny"]);
@@ -114,7 +117,7 @@ describe("native permission gate integration", () => {
 
   it("is the gate for Pi built-ins and allows maintained read-only actions without prompting", async () => {
     const { bridge, audits } = makeBridge();
-    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("read")]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("read")]);
     const result = ui();
     assert.deepEqual(await call({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), {
       executionPlan: {
@@ -134,8 +137,8 @@ describe("native permission gate integration", () => {
   it("asks for MCP and unknown package tools even when their names look read-only", async () => {
     const { bridge } = makeBridge();
     const result = ui(["Deny", "Deny"]);
-    const mcp = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [mcpTool("read")]);
-    const pkg = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [packageTool("inspect")]);
+    const mcp = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [mcpTool("read")]);
+    const pkg = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [packageTool("inspect")]);
     assert.deepEqual(await mcp({ toolName: "read", input: { path: "src/a.ts" } }, result.context as never), {
       block: true,
       reason: "User denied read",
@@ -150,7 +153,7 @@ describe("native permission gate integration", () => {
   it("remembers only the same normalized source/action/workspace/resource scope", async () => {
     const { bridge, audits } = makeBridge();
     const result = ui(["Allow for this session scope", "Allow once"]);
-    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("edit")]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("edit")]);
     await call({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never);
     await call({ toolName: "edit", input: { path: "src/a.ts" } }, result.context as never);
     await call({ toolName: "edit", input: { path: "src/b.ts" } }, result.context as never);
@@ -163,7 +166,7 @@ describe("native permission gate integration", () => {
   it("does not remember high-risk or incomplete inspections", async () => {
     const { bridge } = makeBridge({ failInspect: true });
     const result = ui(["Allow once", "Allow once"]);
-    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("bash")]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);
     await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never);
     await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never);
     assert.equal(result.state.selectCalls, 2);
@@ -176,7 +179,7 @@ describe("native permission gate integration", () => {
     const edit = harness({
       policy: { mode: "smart", rules: defaultRules("smart") },
       sessionId: "s",
-      cwd: "C:/workspace",
+      cwd: workspaceRoot,
       bridge,
       smartJudge: async () => { judged += 1; return "allow"; },
     }, [builtin("edit")]);
@@ -187,7 +190,7 @@ describe("native permission gate integration", () => {
     const unknown = harness({
       policy: { mode: "smart", rules: defaultRules("smart") },
       sessionId: "s2",
-      cwd: "C:/workspace",
+      cwd: workspaceRoot,
       bridge,
       smartJudge: async () => { judged += 1; return "allow"; },
     }, [packageTool("do_anything")]);
@@ -199,7 +202,7 @@ describe("native permission gate integration", () => {
   it("dialog cancellation blocks rather than passing the call", async () => {
     const { bridge } = makeBridge();
     const result = ui([undefined]);
-    const call = harness({ policy: normal(), sessionId: "s", cwd: "C:/workspace", bridge }, [builtin("bash")]);
+    const call = harness({ policy: normal(), sessionId: "s", cwd: workspaceRoot, bridge }, [builtin("bash")]);
     assert.deepEqual(await call({ toolName: "bash", input: { command: "echo ok" } }, result.context as never), {
       block: true,
       reason: "Permission dialog dismissed for bash",
