@@ -25,6 +25,14 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 已有应用设置、Pi settings/resource 与扩展 API 是复用基础；共用目录、Agent 管理工具、完整 owner 适配和双向同步
 仍待接线，不能标 implemented/wired/proven/default-on。本次仅交付设计、计划与决策，不改变既有 7G–7I 交付范围。
 
+**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），设计已接受，排在 S 之后，尚未实施或验收。**
+设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见
+[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。目标是 Agent 自然登记后续，由时间、事件或程序条件触发，
+在原 session/Thread 续接；明确等待停止 Goal 空转，活跃/空闲投递协调、耐久恢复和轻量 UI 共用既有机制。
+已有项目日历排程、CLI/Markdown、Goal、后台事件等待和实验终态是基础；原 scheduler 在派发接受后就记成功，
+缺真实完成追踪，且原生 follow-up 工具、同目标自动续接和完整触发恢复尚未接通。
+本次只记录源码核对与设计，未新增运行实测，不能把这些缺口写成“仅未实测”或将 W 标为已交付。
+
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。
 

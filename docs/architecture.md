@@ -1162,6 +1162,26 @@ not synchronously reload its own executing session. UI and Agent consumers recei
 state without a write-back loop. Native permission enforcement and credential ownership remain intact.
 This is accepted design, not a claim that existing settings APIs already provide the complete Agent path.
 
+### 7.5 Session follow-ups and triggers (planned, D-307)
+
+[agent-follow-up-design.md](agent-follow-up-design.md) defines Stage W after Stage S. Agents register
+conditions and continuation intent against existing sessions/Threads; time, authoritative events and
+deterministic source checks decide when facts are delivered. Semantic judgment belongs to the resumed
+work at a chosen checkpoint, not a model call for each log chunk or status poll.
+
+Registration may be nonblocking. An explicit waiting action yields model execution and suppresses
+Goal's automatic continuation/audit while preserving the objective and actual process resources.
+Active targets receive facts through existing request preparation/messages; idle targets with continuation
+intent resume through the same broker admission and idempotent delivery path. User input, normal
+continuation and trigger delivery must not start duplicate runs or revive cancelled/deleted targets.
+
+Host policy stores lightweight definitions, source positions and occurrence/delivery identities through
+the existing Rust durable storage boundary. Pi sessions, Thread/Run, processes and experiments retain
+their owners. Ordinary shell lifetime is not upgraded by persisting a follow-up. Existing GUI/CLI/Markdown
+calendar tasks share trigger management while preserving their new-session target semantics; actual
+run/Goal completion replaces the current scheduler's dispatch-accepted success interpretation.
+This section records accepted design only; implementation and verification remain in plan W0–W4/status.
+
 ## 8. Recovery model
 
 Conversation-only rollback remains Pi-native: it branches Pi's append-only session tree and restores

@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; conversational settings and Agent administration planned at D-306
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S settings and Stage W follow-ups planned at D-306/D-307
 
 Last updated: 2026-09-20
 
@@ -28,6 +28,7 @@ authoritative record of delivery, and each phase names the design document that 
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
 | S | Conversational settings and Agent administration | Accepted design (D-306); S0–S4 planned, not implemented |
+| W | Session waiting, triggers and continuation | Accepted design (D-307); W0–W4 follows S, not implemented |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -101,6 +102,14 @@ The implementation sequence is coverage/shared definitions, discovery, mutation/
 UI/runtime synchronization, and Skill/coverage closure. Existing APIs alone do not satisfy this stage;
 saved versus applied state, concurrent edits and local-client versus remote-Host identity remain explicit.
 See [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306); production delivery will be recorded in harness status.
+
+Stage W follows S and is specified in [agent-follow-up-design.md](agent-follow-up-design.md).
+Agents naturally register what to wait for and what to do afterwards. Time, authoritative events and
+deterministic checks handle observation without idle model polling; explicit waiting also suppresses
+Goal auto-continuation. Active/idle targets reuse existing context delivery and session/Thread admission,
+with durable trigger identity, cancellation and recovery. Calendar tasks still support new work, while
+their results must follow actual execution rather than merely dispatch acceptance. See
+[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307); current APIs and background handles do not yet constitute this delivery.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

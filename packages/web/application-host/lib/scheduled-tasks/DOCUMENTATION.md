@@ -40,3 +40,15 @@ The list route reconciles disk files before returning tasks. The loop editor and
 - `POST /api/projects/:projectId/scheduled-tasks/:taskId/run`
 - `GET /api/piarium/scheduled-tasks/status`
 - `GET /api/piarium/events`
+
+## Accepted follow-up design (not implemented)
+
+[Stage W / D-307](../../../../../docs/agent-follow-up-design.md) plans native Agent management and
+same-session/Thread follow-ups triggered by time, events or deterministic source checks. It reuses this
+module's calendar/CLI/Markdown entrypoints, the existing process/experiment sources, and broker admission.
+
+Current completion status is a dispatch boundary: `pi-executor.ts` returns after `agent.prompt` accepts
+the started run, and `runtime.ts` then records success. It does not track final Agent or Goal completion.
+Startup recomputes future schedules, and Markdown reconciliation occurs on startup or explicit sync;
+neither behavior proves durable same-thread continuation or automatic catch-up. W must replace these
+gaps in its production consumers; this documentation does not claim that the follow-up design is shipped.
