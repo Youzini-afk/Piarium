@@ -1,0 +1,148 @@
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { parseHTML } from 'linkedom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runtimeFetch } from '@piarium/application-client';
+import { PiFollowUpsStrip } from './PiFollowUpsStrip';
+import type { PiariumEvent } from '@/lib/piariumEvents';
+
+const mocks = vi.hoisted(() => ({
+  listeners: new Set<(event: PiariumEvent) => void>(),
+  toastErrors: [] as string[],
+  translate: (key: string, params?: Record<string, unknown>) => (
+    params ? `${key}:${JSON.stringify(params)}` : key
+  ),
+}));
+vi.mock('@piarium/application-client', () => ({ runtimeFetch: vi.fn() }));
+vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/ui/toast', () => ({ toast: { error: (message: string) => mocks.toastErrors.push(message) } }));
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
+vi.mock('@/lib/piariumEvents', () => ({
+  subscribePiariumEvents: (listener: (event: PiariumEvent) => void) => {
+    mocks.listeners.add(listener);
+    return () => { mocks.listeners.delete(listener); };
+  },
+}));
+
+const followUp = (over: Record<string, unknown> = {}) => ({
+  createdAt: 1,
+  id: 'fu-1',
+  instruction: 'when the run fails, diagnose and retry the data step',
+  pausedGoal: false,
+  revision: '2',
+  sessionId: 'session-1',
+  source: { attemptId: 'attempt-7', kind: 'experiment' },
+  status: 'waiting',
+  threadId: 'thread-1',
+  updatedAt: 1,
+  waitingSummary: 'Waiting for experiment attempt-7 to reach completed/failed',
+  workspaceId: 'workspace-1',
+  ...over,
+});
+
+const listResponse = (items: unknown[]) =>
+  new Response(JSON.stringify({ followUps: items }), { status: 200 });
+
+const flush = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+};
+
+describe('PiFollowUpsStrip', () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    const { document } = parseHTML('<!doctype html><html><body></body></html>');
+    (globalThis as { document?: unknown }).document = document;
+    (globalThis as { window?: unknown }).window = document.defaultView;
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    mocks.listeners.clear();
+    mocks.toastErrors.length = 0;
+  });
+
+  afterEach(() => {
+    act(() => root?.unmount());
+    container.remove();
+    vi.mocked(runtimeFetch).mockReset();
+  });
+
+  it('renders nothing when the session has no follow-ups', async () => {
+    vi.mocked(runtimeFetch).mockResolvedValue(listResponse([]));
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<PiFollowUpsStrip sessionId="session-1" />);
+    });
+    await flush();
+    expect(container.textContent ?? '').not.toContain('Waiting for');
+  });
+
+  it('shows what the session waits for and what runs next', async () => {
+    vi.mocked(runtimeFetch).mockResolvedValue(listResponse([followUp()]));
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<PiFollowUpsStrip sessionId="session-1" />);
+    });
+    await flush();
+    expect(container.textContent).toContain('Waiting for experiment attempt-7');
+    expect(container.textContent).toContain('diagnose and retry the data step');
+    expect(container.textContent).toContain('chat.followup.status.waiting');
+  });
+
+  it('posts check, fire and cancel to the session-scoped routes', async () => {
+    vi.mocked(runtimeFetch).mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/follow-ups')) return listResponse([followUp()]);
+      if (url.endsWith('/check')) {
+        return new Response(JSON.stringify({ fired: false, followUp: followUp(), observed: {} }), { status: 200 });
+      }
+      return new Response(JSON.stringify({ followUp: followUp(), occurrences: [] }), { status: 200 });
+    });
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<PiFollowUpsStrip sessionId="session-1" />);
+    });
+    await flush();
+
+    const buttons = [...container.querySelectorAll('button')];
+    const byText = (key: string) => buttons.find((b) => b.textContent === `chat.followup.action.${key}`);
+    await act(async () => { byText('check')?.click(); });
+    await flush();
+    expect(vi.mocked(runtimeFetch).mock.calls.some(([url]) => String(url).endsWith('/follow-ups/fu-1/check'))).toBe(true);
+
+    await act(async () => { byText('fire')?.click(); });
+    await flush();
+    expect(vi.mocked(runtimeFetch).mock.calls.some(([url]) => String(url).endsWith('/follow-ups/fu-1/fire'))).toBe(true);
+
+    await act(async () => { byText('cancel')?.click(); });
+    await flush();
+    expect(vi.mocked(runtimeFetch).mock.calls.some(([url]) => String(url).endsWith('/follow-ups/fu-1/cancel'))).toBe(true);
+    expect(mocks.toastErrors).toEqual([]);
+  });
+
+  it('refreshes on a followup fact broadcast, not on unrelated facts', async () => {
+    vi.mocked(runtimeFetch).mockResolvedValue(listResponse([followUp()]));
+    await act(async () => {
+      root = createRoot(container);
+      root.render(<PiFollowUpsStrip sessionId="session-1" />);
+    });
+    await flush();
+    const baseline = vi.mocked(runtimeFetch).mock.calls.length;
+
+    for (const listener of mocks.listeners) {
+      listener({ fact: 'attempt', type: 'harness-experiment-changed', workspaceId: 'workspace-1' });
+    }
+    await flush();
+    expect(vi.mocked(runtimeFetch).mock.calls.length).toBe(baseline);
+
+    for (const listener of mocks.listeners) {
+      listener({ fact: 'followup', type: 'harness-experiment-changed', workspaceId: 'workspace-1' });
+    }
+    await flush();
+    expect(vi.mocked(runtimeFetch).mock.calls.length).toBeGreaterThan(baseline);
+  });
+});

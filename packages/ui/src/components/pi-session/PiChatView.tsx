@@ -56,6 +56,7 @@ import { PiComposer } from './PiComposer';
 import { PiAssistBar } from './PiAssistBar';
 import { PiExtensionUiChrome } from './PiExtensionUiChrome';
 import { PiGoalStrip } from './PiGoalControls';
+import { PiFollowUpsStrip } from './PiFollowUpsStrip';
 import { renderPiComposerSubmission } from './piComposerSubmission';
 import {
   WorkbenchReplacement,
@@ -904,6 +905,7 @@ export const PiChatView: React.FC<PiChatViewProps> = ({
             />
             <div className="px-3 sm:px-5">
               <PiGoalStrip snapshot={snapshot} />
+              <PiFollowUpsStrip sessionId={snapshot.sessionId} />
             </div>
           </>
         ) : null}

@@ -213,7 +213,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
             });
             const typed = result;
             return {
-              content: [{ type: "text", text: typed.text }],
+              content: [{ type: "text", text: `${typed.text}\nTo act when it finishes, register follow_up (source kind "experiment", attemptId "${typed.attempt.attemptId}") — non-blocking; the attempt keeps running.` }],
               details: {
                 specId: typed.spec.specId,
                 attemptId: typed.attempt.attemptId,
@@ -261,7 +261,7 @@ export function createExperimentTool(bridge: HostServicesBridge, _sessionId: str
               ...(params.title !== undefined ? { title: params.title } : {}),
             });
             return {
-              content: [{ type: "text", text: `attempt ${result.attempt.attemptId} reruns ${priorId} — ${result.attempt.state}` }],
+              content: [{ type: "text", text: `attempt ${result.attempt.attemptId} reruns ${priorId} — ${result.attempt.state}. Register follow_up (source kind "experiment", attemptId "${result.attempt.attemptId}") to continue when it finishes — non-blocking.` }],
               details: { attempt: result.attempt, spec: result.spec, retryOfAttemptId: priorId },
             };
           }

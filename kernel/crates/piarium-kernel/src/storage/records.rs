@@ -271,6 +271,32 @@ impl Storage {
                 required("name")?;
                 state_in(&["pending", "available", "failed", "expired"])?;
             }
+            "followup.definition" => {
+                derived("followup.definition")?;
+                same("workspaceId", workspace_id)?;
+                required("sessionId")?;
+                required("instruction")?;
+                if object.get("source").is_none_or(|value| !value.is_object()) {
+                    return Err(KernelError::Operation(
+                        "followup definition requires a source object".to_string(),
+                    ));
+                }
+                state_in(&[
+                    "waiting",
+                    "triggered",
+                    "delivering",
+                    "delivered",
+                    "cancelled",
+                    "superseded",
+                    "unavailable",
+                ])?;
+            }
+            "followup.occurrence" => {
+                derived("followup.occurrence")?;
+                required("followUpId")?;
+                required("reason")?;
+                state_in(&["recorded", "delivering", "delivered", "held", "dropped"])?;
+            }
             "resource.machine" => {
                 derived("resource.machine")?;
                 required("kind")?;
@@ -574,6 +600,14 @@ impl Storage {
             "resource.machine",
             "resource.commitment",
             "resource.sample",
+            "managed.remote.object",
+            "managed.remote.admission",
+            "managed.remote.material",
+            "managed.remote.job",
+            "managed.remote.output",
+            "managed.remote.shell",
+            "followup.definition",
+            "followup.occurrence",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")

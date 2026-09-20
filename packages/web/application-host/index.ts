@@ -101,9 +101,11 @@ import { IntegrationCoordinator } from './lib/harness/working-state/integration-
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@piarium/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
+import { createFollowUpService } from './lib/harness/followups.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
+import { registerHarnessFollowUpRoutes } from './lib/harness/follow-up-routes.js';
 import { registerHarnessThreadRoutes } from './lib/harness/thread-routes.js';
 import { registerHarnessContextRoutes } from './lib/harness/context-routes.js';
 import { registerHarnessKnowledgeCatalogRoutes } from './lib/harness/knowledge-catalog-routes.js';
@@ -191,6 +193,7 @@ import { createPiRuntimeGateway } from './lib/pi-runtime/gateway.js';
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
 import { createScheduledTaskService } from './lib/scheduled-tasks/service.js';
 import { createPiScheduledTaskExecutor } from './lib/scheduled-tasks/pi-executor.js';
+import { createSessionSettleTracker } from './lib/scheduled-tasks/session-settle.js';
 import { createPiSessionAutomationRuntime } from './lib/pi-session-automation/runtime.js';
 import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.js';
 import { parseServeCliOptions } from './lib/platform/cli-options.js';
@@ -1304,7 +1307,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Experiment/resource/source authority (7C/7D, D-300). The service grant is
   // Host-internal — the same trust level as the native process host — so a
   // detached reconciler can inspect, stop and collect jobs after restarts.
-  const broadcastResearchFacts = (workspaceId: string, fact: 'attempt' | 'machine' | 'source') => {
+  const broadcastResearchFacts = (workspaceId: string, fact: 'attempt' | 'machine' | 'source' | 'followup') => {
     for (const client of uiPiariumEventClients) {
       try {
         writeSseEvent(client, {
@@ -1937,6 +1940,64 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       console.error('[HarnessThreads] Runtime failed:', errorMessage(error));
     },
   });
+  // Durable follow-up registrations (D-307): the service owns observation and
+  // delivers occurrences through the real Thread/Run lifecycle — an active run
+  // gets an inform, a settled thread resumes via continueRun, and the shared
+  // budget parks extras as pending continuations. Never a second agent loop.
+  const followUpService = createFollowUpService({
+    client: kernelClient,
+    getThread: (workspaceId, threadId) => threadRegistry.getThreadById(workspaceId, threadId),
+    getActiveRun: (workspaceId, threadId) => threadRegistry.getActiveRun(workspaceId, threadId),
+    continueRun: (input) => threadRuntime!.continueRun(input),
+    enqueueContinuation: (workspaceId, threadId, continuation) => (
+      threadRegistry.enqueueContinuation(workspaceId, threadId, continuation)
+    ),
+    notifySession: async (sessionId, text, messageId) => {
+      const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
+      if (!result.accepted) throw new Error(`Pi session rejected the follow-up inform: ${sessionId}`);
+    },
+    sessionRequest: async (sessionId, text, messageId) => {
+      const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.threadRequest', { sessionId, text, messageId });
+      if (!result.accepted) throw new Error(`Pi session rejected the follow-up trigger: ${sessionId}`);
+    },
+    sessionBusy: async (sessionId) => {
+      const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }).catch(() => null);
+      return Boolean(snapshot && (snapshot.busy === true || snapshot.isStreaming === true));
+    },
+    recordDirectedMessage: (workspaceId, message) => threadRegistry.recordDirectedMessage(workspaceId, message),
+    setFollowUpAttention: async (workspaceId, threadId, waitingFor) => {
+      const thread = await threadRegistry.getThreadById(workspaceId, threadId);
+      if (!thread) return;
+      if (waitingFor === null) {
+        // Never steal a user/permission wait that arrived meanwhile.
+        if (thread.attention === 'followup') {
+          await threadRegistry.setAttention(workspaceId, threadId, 'none', null);
+        }
+        return;
+      }
+      await threadRegistry.setAttention(workspaceId, threadId, 'followup', waitingFor);
+    },
+    requestForSession: (sessionId, method, params) => (
+      piRuntimeBroker.requestForSession(sessionId, method, { sessionId, ...params } as never)
+    ),
+    subscribeAttempts: (listener) => experimentService.subscribeAttempts(listener),
+    getAttempt: async (workspaceId, attemptId) => {
+      const result = await experimentService.get(
+        { workspaceId, executionWorkspaceId: workspaceId },
+        attemptId,
+      ).catch(() => null);
+      return result?.attempt ?? null;
+    },
+    onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
+    onError: (error) => console.error('[PiariumFollowUp]', error.message),
+  });
+  // Rebuild follow-up observers for every workspace with durable
+  // registrations — timers and attempt subscriptions are in-memory only.
+  void (async () => {
+    for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
+      await followUpService.reconcile(workspaceId);
+    }
+  })().catch((error) => console.error('[PiariumFollowUp] Reconcile failed:', errorMessage(error)));
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
     void threadRuntime!.invalidateIntegrationPreviews(workspaceId, resourceIds).catch((error: unknown) => {
       console.error('[HarnessThreads] Integration preview invalidation failed:', errorMessage(error));
@@ -1996,6 +2057,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     experiments: experimentService,
     resources: resourceService,
     sources: sourceService,
+    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
+  });
+  registerHarnessFollowUpRoutes(app, {
+    runtime: threadRuntime,
+    registry: threadRegistry,
+    followUps: followUpService,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
   registerManagedRemoteRoutes(app, {
@@ -2362,6 +2429,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resourceService,
     sourceService,
     settingsService,
+    followUpService,
     managedRemoteTargets,
     readExploreFile: createExploreFileReader(
       documentsAuthority,
@@ -2674,7 +2742,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     console.warn('[Piarium Extensions] Host reconciliation failed:', error?.message || error);
   });
   const unregisterWorkbenchLayoutService = await registerBuiltinWorkbenchLayoutService(extensionRuntime);
-  scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({ broker: piRuntimeBroker }));
+  // Scheduled runs report the real session outcome, not the dispatch receipt:
+  // the executor waits on the Pi event stream until the run settles (D-307).
+  const sessionSettleTracker = createSessionSettleTracker();
+  scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({
+    broker: piRuntimeBroker,
+    awaitCompletion: (sessionId) => sessionSettleTracker.waitForSettled(sessionId),
+  }));
   const sessionNames = new Map<string, string>();
   recoveryTurnCoordinator = createRecoveryTurnCoordinator({
     documents: documentsAuthority,
@@ -2759,6 +2833,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticRuntime.processEvent(event);
     piSessionAutomation.processBrokerEvent(event);
     sessionRuntime.processBrokerEvent(event);
+    sessionSettleTracker.processEvent(event);
     void piWriterTracker.processEvent(event);
     void recoveryTurnCoordinator.processEvent(event);
     void researchRootRuntime.processEvent(event, async () => {
@@ -2830,6 +2905,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
               threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
               experiments: Boolean(harnessServiceHost.experimentService),
               settings: Boolean(harnessServiceHost.settingsService),
+              followUps: Boolean(harnessServiceHost.followUpService),
             }),
           }).catch((error) => {
             console.error('[Harness] Failed to register session shell:', errorMessage(error));

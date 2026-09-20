@@ -31,7 +31,7 @@ Summarize repository changes since yesterday.
 
 Loop identity is the canonical file path, not its name. A same-named GUI task remains a separate JSON-owned task. Renaming a loop changes the existing loop task in place. A malformed file keeps the last good projection and exposes its parse error; removing the file removes only that projection. Higher-precedence malformed files continue to shadow lower definitions, preventing duplicate execution during an edit or merge conflict.
 
-The list route reconciles disk files before returning tasks. The loop editor and enabled toggle use content revisions, so an agent or editor changing the file concurrently produces a conflict instead of being overwritten. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
+The list route reconciles disk files before returning tasks, and the runtime watches every discovered `.agents/loops` directory (project ancestors plus the user scope) — a Markdown edit, creation, or deletion triggers a debounced resync without anyone opening the task list. The loop editor and enabled toggle use content revisions, so an agent or editor changing the file concurrently produces a conflict instead of being overwritten. Unknown frontmatter keys are preserved by enabled toggles. Runtime state is never written into Markdown.
 
 ## Routes
 
@@ -41,14 +41,17 @@ The list route reconciles disk files before returning tasks. The loop editor and
 - `GET /api/piarium/scheduled-tasks/status`
 - `GET /api/piarium/events`
 
-## Accepted follow-up design (not implemented)
+## Completion tracking and follow-ups (D-307)
 
-[Stage W / D-307](../../../../../docs/agent-follow-up-design.md) plans native Agent management and
-same-session/Thread follow-ups triggered by time, events or deterministic source checks. It reuses this
-module's calendar/CLI/Markdown entrypoints, the existing process/experiment sources, and broker admission.
+`pi-executor.ts` no longer treats `agent.prompt` acceptance as success. A session-settle tracker
+(`session-settle.ts`) is registered before dispatch and observes `agent_start`, `agent_end`,
+`agent_settled`, `session.closed`, and `worker.exit`; the run reports success only after the real
+session settles, and goal runs additionally inspect the final goal status — `complete` succeeds,
+`blocked`/`budgetLimited` fail, `paused` with reason `waiting` is an intentional follow-up wait, and
+any other terminal or lost state fails. Failures retain `sessionID` for traceability without writing
+`lastSessionId`.
 
-Current completion status is a dispatch boundary: `pi-executor.ts` returns after `agent.prompt` accepts
-the started run, and `runtime.ts` then records success. It does not track final Agent or Goal completion.
-Startup recomputes future schedules, and Markdown reconciliation occurs on startup or explicit sync;
-neither behavior proves durable same-thread continuation or automatic catch-up. W must replace these
-gaps in its production consumers; this documentation does not claim that the follow-up design is shipped.
+Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/agent-follow-up-design.md):
+the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing
+Thread/Run lifecycle, kernel records, and broker admission. Calendar/Markdown tasks remain distinct
+from session continuation — a loop always creates new work on its own schedule.

@@ -326,7 +326,7 @@ const ancestorDirectories = (startDirectory: string, stopDirectory: string, path
   return result;
 };
 
-export const discoverLoopFiles = async (
+export const loopDirectoriesFor = async (
   projectPath: string | null | undefined,
   {
     fsPromises = fsPromisesDefault,
@@ -334,13 +334,13 @@ export const discoverLoopFiles = async (
     path = pathDefault,
     resolveWorktreeRoot = async (directory) => (await resolveWorktreeTopLevel(directory)).root,
   }: {
-    fsPromises?: Pick<FsPromises, 'readdir' | 'realpath'>;
+    fsPromises?: Pick<FsPromises, 'realpath'>;
     homeDirectory?: string;
     path?: PathModule;
     resolveWorktreeRoot?: (directory: string) => Promise<string>;
   } = {},
-): Promise<Array<{ filePath: string; scope: 'project' | 'user' }>> => {
-  const files: Array<{ filePath: string; scope: 'project' | 'user' }> = [];
+): Promise<Array<{ directory: string; scope: 'project' | 'user' }>> => {
+  const directories: Array<{ directory: string; scope: 'project' | 'user' }> = [];
   if (projectPath) {
     const projectDirectory = await fsPromises.realpath(projectPath).catch(() => path.resolve(projectPath));
     const discoveredWorktreeRoot = await resolveWorktreeRoot(projectDirectory).catch(() => projectDirectory);
@@ -348,13 +348,29 @@ export const discoverLoopFiles = async (
     const worktreeRoot = await fsPromises.realpath(worktreeRootCandidate)
       .catch(() => path.resolve(worktreeRootCandidate));
     for (const ancestor of ancestorDirectories(projectDirectory, worktreeRoot || projectDirectory, path)) {
-      for (const filePath of await walkLoopFiles(path.join(ancestor, '.agents', LOOP_DIRECTORY), { fsPromises, path })) {
-        files.push({ filePath, scope: 'project' });
-      }
+      directories.push({ directory: path.join(ancestor, '.agents', LOOP_DIRECTORY), scope: 'project' });
     }
   }
-  for (const filePath of await walkLoopFiles(path.join(homeDirectory, '.agents', LOOP_DIRECTORY), { fsPromises, path })) {
-    files.push({ filePath, scope: 'user' });
+  directories.push({ directory: path.join(homeDirectory, '.agents', LOOP_DIRECTORY), scope: 'user' });
+  return directories;
+};
+
+export const discoverLoopFiles = async (
+  projectPath: string | null | undefined,
+  options: {
+    fsPromises?: Pick<FsPromises, 'readdir' | 'realpath'>;
+    homeDirectory?: string;
+    path?: PathModule;
+    resolveWorktreeRoot?: (directory: string) => Promise<string>;
+  } = {},
+): Promise<Array<{ filePath: string; scope: 'project' | 'user' }>> => {
+  const fsPromises = options.fsPromises ?? fsPromisesDefault;
+  const path = options.path ?? pathDefault;
+  const files: Array<{ filePath: string; scope: 'project' | 'user' }> = [];
+  for (const { directory, scope } of await loopDirectoriesFor(projectPath, options)) {
+    for (const filePath of await walkLoopFiles(directory, { fsPromises, path })) {
+      files.push({ filePath, scope });
+    }
   }
   return files;
 };

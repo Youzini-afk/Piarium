@@ -547,6 +547,8 @@ export interface HostHandshakeParams {
     harnessWebRead?: boolean;
     /** The application Host provides web search, including its keyless default. */
     harnessWebSearch?: boolean;
+    /** The application Host owns durable follow-up registrations that resume the calling thread/session (D-307). */
+    harnessFollowUps?: boolean;
     workspaceMutationJournal?: boolean;
   };
   clientName: string;

@@ -1,6 +1,8 @@
 import { DateTime } from 'luxon';
 import parser from 'cron-parser';
-import { discoverLoops } from './loops.js';
+import { watch } from 'node:fs';
+import { dirname as pathDirname } from 'node:path';
+import { discoverLoops, loopDirectoriesFor } from './loops.js';
 import type { ScheduledTask } from '../projects/project-config.js';
 import type { createProjectConfigRuntime } from '../projects/project-config.js';
 
@@ -407,6 +409,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       if (nextTask) updateInMemoryTask(projectID, nextTask);
     }
 
+    await refreshLoopWatchers();
     return Array.from(tasksByProject.get(projectID)?.values() || []);
   };
 
@@ -431,6 +434,55 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
 
     for (const projectID of activeProjectIDs) {
       await syncProject(projectID);
+    }
+    await refreshLoopWatchers();
+  };
+
+  // Markdown loop files are an authority surface: edits must reach the
+  // scheduler without someone opening the task list. Watch each discovered
+  // loops directory (project ancestors + user scope) and resync debounced.
+  const loopWatchers = new Map<string, ReturnType<typeof watch>>();
+  let loopResyncTimer: ReturnType<typeof setTimeout> | undefined;
+
+  const onLoopDirectoryEvent = (): void => {
+    if (!started) return;
+    if (loopResyncTimer) clearTimeout(loopResyncTimer);
+    loopResyncTimer = setTimeout(() => {
+      loopResyncTimer = undefined;
+      void syncAllProjects().catch((error) => {
+        logger.warn?.('[ScheduledTasks] Markdown loop resync failed:', error);
+      });
+    }, 250);
+  };
+
+  const refreshLoopWatchers = async (): Promise<void> => {
+    const wanted = new Set<string>();
+    for (const projectPath of projectPathByID.values()) {
+      for (const entry of await loopDirectoriesFor(projectPath)) {
+        wanted.add(entry.directory);
+        // Watching the .agents parent also catches the loops directory being
+        // created for the first time.
+        wanted.add(pathDirname(entry.directory));
+      }
+    }
+    for (const [directory, watcher] of loopWatchers) {
+      if (!wanted.has(directory)) {
+        watcher.close();
+        loopWatchers.delete(directory);
+      }
+    }
+    for (const directory of wanted) {
+      if (loopWatchers.has(directory)) continue;
+      try {
+        const watcher = watch(directory, { persistent: false }, onLoopDirectoryEvent);
+        watcher.on('error', () => {
+          watcher.close();
+          loopWatchers.delete(directory);
+        });
+        loopWatchers.set(directory, watcher);
+      } catch {
+        // Directory does not exist yet; a later sync retries.
+      }
     }
   };
 
@@ -593,7 +645,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       lastStatus: status,
       lastDurationMs: durationMs,
       lastError: status === 'error' ? errorMessage : undefined,
-      lastSessionId: status === 'success' ? sessionID : undefined,
+      lastSessionId: sessionID,
       nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
       updatedAt: finishedAt,
     };
@@ -703,6 +755,14 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       clearTimeout(timer);
     }
     timersByTaskKey.clear();
+    for (const watcher of loopWatchers.values()) {
+      watcher.close();
+    }
+    loopWatchers.clear();
+    if (loopResyncTimer) {
+      clearTimeout(loopResyncTimer);
+      loopResyncTimer = undefined;
+    }
     queuedTaskKeys.clear();
     queue.length = 0;
   };

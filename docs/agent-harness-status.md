@@ -51,13 +51,40 @@ settings-runtime/helpers 既有测试 40 例、UI 搜索测试全绿；applicati
 S4 的组合 Skill 未单独交付文件（技能驻留用户/项目资源目录，目录项 helpRef/actionRef 与工具指引承担渐进披露）；
 远程 Host 上的 app 设置修改作用于该 Host 文档，device-local 项如实不可写。
 
-**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），设计已接受，排在 S 之后，尚未实施或验收。**
+**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），纵切已接线并定向验证，尚未完整验收。**
 设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见
-[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。目标是 Agent 自然登记后续，由时间、事件或程序条件触发，
-在原 session/Thread 续接；明确等待停止 Goal 空转，活跃/空闲投递协调、耐久恢复和轻量 UI 共用既有机制。
-已有项目日历排程、CLI/Markdown、Goal、后台事件等待和实验终态是基础；原 scheduler 在派发接受后就记成功，
-缺真实完成追踪，且原生 follow-up 工具、同目标自动续接和完整触发恢复尚未接通。
-本次只记录源码核对与设计，未新增运行实测，不能把这些缺口写成“仅未实测”或将 W 标为已交付。
+[plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
+
+已接线（W0–W3）：
+
+- 耐久合同：`protocol/src/harness-followups.ts` 定义 definition/occurrence 视图与 register/list/get/update/cancel/check/fire 入参；
+  kernel 新增 `followup.definition`/`followup.occurrence` 记录类型（sessionId+workspaceId 必备，threadId 可选 —— 根会话可登记），
+  同批补上 D-305 漏登记的 `managed.remote.*` 白名单。
+- 服务 `application-host/lib/harness/followups.ts`：登记时先观察再订阅（无丢失边沿）；时间源走绝对到期定时器，
+  实验源订阅 attempt 变更（fallbackAt 后备只触发一次检查 occurrence 并清除，终态等待继续存活）；manual 源经 check/fire。
+  occurrence 先于投递持久化，occurrence id 复用为下游 requestId —— 重启对账以同身份重放 triggered 未完成投递，不重复登记。
+- 投递路由：活跃 Run → `agent.notify` 被动 inform + 耐久 directed message（messageId=occurrenceId 去重）；
+  settled Thread → `continueRun`（requestId 幂等，conflict 时并入活跃运行）；queued → parked continuation；
+  归档/删除 → dropped；根会话 → `agent.threadRequest` 会话级幂等通路。迟到回调不能复活已取消/替换/删除的定义。
+- Goal 等待：`pause: true` 置 goal `paused`/`waiting`、Thread attention `followup` + waitingFor；触发只恢复本登记暂停且
+  仍为 waiting 的 goal；新 Run 准入清理旧 followup 等待。暂停不终止进程/实验/GPU —— 只让出模型执行。
+- Agent 工具 `follow_up`（pi-host）：action 分发、必填校验在 Host 调用前完成、`harnessFollowUps` 能力 +
+  `tools.follow_up` 设置门控。experiment submit/rerun 结果附带简短 follow_up 入口。
+- UI：会话域路由 `follow-up-routes.ts`（list/get + cancel/check/fire/update，session 实际 workspace 作用域、no-store）；
+  `PiFollowUpsStrip` 展示来源/状态/指令/occurrence，check/fire/cancel 分列程序检查与调用 Agent；
+  `piarium:harness-experiment-changed`（fact:'followup'）驱动刷新；九个 locale 键齐备。
+- 原排程修复：`session-settle.ts` 追踪 agent_start/end/settled、session.closed、worker.exit；
+  pi-executor 登记追踪后才派发 `agent.prompt` 并等待真实终态 —— goal complete 为成功，blocked/budgetLimited 为失败，
+  paused+waiting 为有意 follow-up 等待（非失败），其余中止/未完结为失败；失败保留 sessionID、不写 lastSessionId。
+  Markdown 同步：`.agents/loops` 目录（项目祖先链 + 用户域）加 fs.watch 去抖重排，文件编辑不再依赖打开任务列表。
+
+验证：followups 真 kernel 验收 11 例（登记即发/定时/实验订阅/截止后备/取消/重启对账重放）、路由 5 例、
+pi-host follow-up 工具与全量 444 通过、session-settle/pi-executor/runtime/loops 26 例、UI strip 行为 4 例、
+i18n parity 全绿；application-host 与 UI 类型检查干净。
+
+未覆盖/边界：产物/指标/日志/外部状态源暂未实现（合同先交付 time/experiment/manual）；
+受管远程/集群目标上的续接与实验一样缺后端适配器；完整桌面 Host 重启路径未实测；
+calendar 新任务与 follow-up 续接保持明确的不同目标类型。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。

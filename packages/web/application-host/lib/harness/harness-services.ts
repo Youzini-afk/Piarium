@@ -1191,6 +1191,42 @@ export function registerHarnessServices(
       handle: async (params, ctx) => settings.update(caller(ctx), params),
     });
   }
+  if (host.followUpService) {
+    const followUps = host.followUpService;
+    const followUpCaller = async (ctx: HarnessServiceContext): Promise<import("./followups.js").FollowUpCaller> => {
+      const caller = await experimentCaller(ctx);
+      if (!caller.sessionId) {
+        throw new HarnessServiceError("unavailable", "follow-up operations require a session-bound caller");
+      }
+      return {
+        workspaceId: caller.workspaceId,
+        sessionId: caller.sessionId,
+        ...(caller.threadId ? { threadId: caller.threadId } : {}),
+        ...(caller.runId ? { runId: caller.runId } : {}),
+      };
+    };
+    router.register("followup.register", {
+      handle: async (params, ctx) => followUps.register(await followUpCaller(ctx), params),
+    });
+    router.register("followup.list", {
+      handle: async (params, ctx) => followUps.list(await followUpCaller(ctx), params),
+    });
+    router.register("followup.get", {
+      handle: async (params, ctx) => followUps.get(await followUpCaller(ctx), params),
+    });
+    router.register("followup.update", {
+      handle: async (params, ctx) => followUps.update(await followUpCaller(ctx), params),
+    });
+    router.register("followup.cancel", {
+      handle: async (params, ctx) => followUps.cancel(await followUpCaller(ctx), params),
+    });
+    router.register("followup.check", {
+      handle: async (params, ctx) => followUps.check(await followUpCaller(ctx), params),
+    });
+    router.register("followup.fire", {
+      handle: async (params, ctx) => followUps.fire(await followUpCaller(ctx), params),
+    });
+  }
   if (host.sourceService) {
     const sources = host.sourceService;
     router.register("source.register", {

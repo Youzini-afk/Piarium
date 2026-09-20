@@ -1,6 +1,7 @@
 import type { HostMethodParams } from '@piarium/protocol';
 import type { PiRuntimeBroker } from '@piarium/runtime-broker';
 import type { ScheduledTask, ScheduledTaskExecution } from '../projects/project-config.js';
+import type { SessionSettleOutcome } from './session-settle.js';
 
 const buildScheduledInstructions = (execution: ScheduledTaskExecution): string => [
   ...(typeof execution?.agent === 'string' && execution.agent.trim()
@@ -18,8 +19,15 @@ export const buildScheduledPiPrompt = (task: ScheduledExecutionTask): string => 
   return prompt && instructions ? `${prompt}\n\n${instructions}` : prompt;
 };
 
-export const createPiScheduledTaskExecutor = ({ broker }: {
+export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion }: {
   broker: Pick<PiRuntimeBroker, 'createSession' | 'requestForSession'>;
+  /**
+   * Resolves when the session's run actually settles (D-307 W3.6). Without it
+   * the task's status is the dispatch receipt, not the run outcome — callers
+   * that omit it get the historical "accepted means success" behaviour, so
+   * production wiring must always provide one.
+   */
+  awaitCompletion?: (sessionId: string) => Promise<SessionSettleOutcome>;
 }) => {
   if (!broker || typeof broker.createSession !== 'function' || typeof broker.requestForSession !== 'function') {
     throw new Error('A Pi runtime broker is required for scheduled tasks');
@@ -48,7 +56,8 @@ export const createPiScheduledTaskExecutor = ({ broker }: {
       }
 
       const prompt = buildScheduledPiPrompt(task);
-      if (task.execution.runAsGoal === true) {
+      const runAsGoal = task.execution.runAsGoal === true;
+      if (runAsGoal) {
         await broker.requestForSession(sessionID, 'session.features.mutate', {
           mutation: {
             objective: typeof task.execution.prompt === 'string' ? task.execution.prompt.trim() : prompt,
@@ -63,6 +72,11 @@ export const createPiScheduledTaskExecutor = ({ broker }: {
         });
       }
       const dispatchedAsCommand = prompt.startsWith('/');
+      // Register the settle waiter before dispatching so the run's terminal
+      // events cannot race past the subscription (D-307 W3.6).
+      const completion = !dispatchedAsCommand && awaitCompletion
+        ? awaitCompletion(sessionID)
+        : null;
       if (dispatchedAsCommand) {
         await broker.requestForSession(sessionID, 'command.execute', {
           command: prompt,
@@ -75,6 +89,41 @@ export const createPiScheduledTaskExecutor = ({ broker }: {
         });
         if (result.accepted !== true) {
           throw new Error('Pi did not accept the scheduled task prompt');
+        }
+      }
+      // The dispatch receipt is not the result — wait for the actual run to
+      // settle, then report the observed outcome (goal terminal state for
+      // goal runs, turn completion otherwise).
+      if (completion) {
+        const outcome = await completion;
+        if (!outcome.settled) {
+          throw new Error(outcome.error ?? 'the scheduled session ended before the run settled');
+        }
+        if (outcome.aborted) {
+          throw new Error(outcome.error ?? 'the scheduled run was aborted');
+        }
+        if (runAsGoal) {
+          const features = await broker.requestForSession(sessionID, 'session.features.get', { sessionId: sessionID })
+            .catch(() => null);
+          const goal = features && typeof features === 'object'
+            ? (features as { goal?: { status?: string; statusReason?: string } }).goal
+            : undefined;
+          switch (goal?.status) {
+            case 'complete':
+              break;
+            case 'blocked':
+            case 'budgetLimited':
+              throw new Error(`scheduled goal ended ${goal.status}: ${goal.statusReason ?? 'no reason recorded'}`);
+            case 'paused':
+              // A follow-up registration parks the goal deliberately — the
+              // wait is the continuation, not a failure (D-307).
+              if (goal.statusReason === 'waiting') break;
+              throw new Error(`scheduled goal paused: ${goal.statusReason ?? 'no reason recorded'}`);
+            case 'active':
+              throw new Error('scheduled goal was still active after the session settled');
+            default:
+              break;
+          }
         }
       }
 

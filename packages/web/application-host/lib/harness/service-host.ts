@@ -59,7 +59,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean; followUps?: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -95,6 +95,13 @@ export function deriveHarnessCapabilities(
   ) {
     capabilities.add("read.settings");
     if (tools.has("settings_update")) capabilities.add("control.settings");
+  }
+  if (
+    availability.followUps
+    && ["follow_up", "follow_up_check", "follow_up_now"].some((name) => tools.has(name))
+  ) {
+    capabilities.add("read.followup");
+    capabilities.add("control.followup");
   }
   return [...capabilities];
 }
@@ -400,6 +407,8 @@ export interface HarnessServiceHost {
   sourceService: import("./sources.js").SourceService | null;
   /** Agent-facing settings catalog service (D-306). */
   settingsService: import("./settings-service.js").SettingsService | null;
+  /** Durable follow-up registrations and continuation delivery (D-307). */
+  followUpService: import("./followups.js").FollowUpService | null;
   managedRemoteTargets: import("./managed-remote-client.js").ManagedRemoteTargetRegistry | null;
   /** Deliver one terminal shell fact into the same 7G observer used by local PTY commands. */
   observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): void;
@@ -497,6 +506,7 @@ export interface HarnessServiceHostOptions {
   resourceService?: HarnessServiceHost["resourceService"];
   sourceService?: HarnessServiceHost["sourceService"];
   settingsService?: HarnessServiceHost["settingsService"];
+  followUpService?: HarnessServiceHost["followUpService"];
   managedRemoteTargets?: HarnessServiceHost["managedRemoteTargets"];
 }
 
@@ -812,6 +822,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     resourceService: options.resourceService ?? null,
     sourceService: options.sourceService ?? null,
     settingsService: options.settingsService ?? null,
+    followUpService: options.followUpService ?? null,
     managedRemoteTargets: options.managedRemoteTargets ?? null,
     observeShellCompletion,
     commitAgentInputContext,

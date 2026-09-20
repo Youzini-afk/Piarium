@@ -41,6 +41,7 @@ import {
   createSettingsReadTool,
   createSettingsUpdateTool,
 } from "./settings-tools.js";
+import { createFollowUpTool } from "./follow-up-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withToolExecutionResources } from "./tool-execution-resources.js";
@@ -73,6 +74,9 @@ export interface SelectHarnessToolsDeps {
   experimentAvailable?: boolean;
   /** Whether the Host registered the shared settings catalog service (D-306). */
   settingsAvailable?: boolean;
+  /** Whether the Host provides durable follow-up registrations bound to a
+   * thread (D-307). Requires the thread runtime — the continuation target. */
+  followUpAvailable?: boolean;
   /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
@@ -118,6 +122,7 @@ export function selectHarnessTools(
     threadRuntimeAvailable,
     experimentAvailable,
     settingsAvailable,
+    followUpAvailable,
     resolvedPresets,
     resolvedResearchCapabilities,
     getActiveToolNames,
@@ -249,6 +254,14 @@ export function selectHarnessTools(
     }
     if (tools.settings_update !== false) {
       result.push(createSettingsUpdateTool(bridge));
+    }
+  }
+  // Follow-up tool — durable wait + continuation on this thread (D-307).
+  // Requires the thread runtime: the trigger resumes the same thread through
+  // normal admission, which does not exist without it.
+  if (followUpAvailable) {
+    if (tools.follow_up !== false) {
+      result.push(createFollowUpTool(bridge));
     }
   }
   if (

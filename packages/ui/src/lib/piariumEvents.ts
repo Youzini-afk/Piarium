@@ -30,7 +30,7 @@ export type HarnessKnowledgeChangedEvent = {
 export type HarnessExperimentChangedEvent = {
   type: 'harness-experiment-changed';
   workspaceId: string;
-  fact: 'attempt' | 'machine' | 'source';
+  fact: 'attempt' | 'machine' | 'source' | 'followup';
 };
 
 /** Agent-origin settings write landed on a shared authority (D-306). */
@@ -223,7 +223,7 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const properties = getEventProperties(envelope.properties);
     const workspaceId = typeof properties?.workspaceId === 'string' ? properties.workspaceId : '';
     const fact = properties?.fact;
-    if (workspaceId && (fact === 'attempt' || fact === 'machine' || fact === 'source')) {
+    if (workspaceId && (fact === 'attempt' || fact === 'machine' || fact === 'source' || fact === 'followup')) {
       for (const listener of listeners) listener({ type: 'harness-experiment-changed', workspaceId, fact });
     }
     return;

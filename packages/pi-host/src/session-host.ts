@@ -642,6 +642,7 @@ export class SessionHost {
   #harnessThreadRuntimeEnabled = false;
   #harnessExperimentsEnabled = false;
   #harnessSettingsEnabled = false;
+  #harnessFollowUpsEnabled = false;
   #harnessLspNavigationEnabled = false;
   #harnessDocumentReadEnabled = false;
   #harnessDocumentPathOverlayEnabled = false;
@@ -712,6 +713,10 @@ export class SessionHost {
 
   setHarnessSettingsEnabled(enabled: boolean): void {
     this.#harnessSettingsEnabled = enabled;
+  }
+
+  setHarnessFollowUpsEnabled(enabled: boolean): void {
+    this.#harnessFollowUpsEnabled = enabled;
   }
 
   setHarnessLspNavigationEnabled(enabled: boolean): void {
@@ -3492,6 +3497,7 @@ export class SessionHost {
         threadRuntimeAvailable: this.#harnessThreadRuntimeEnabled,
         experimentAvailable: this.#harnessExperimentsEnabled,
         settingsAvailable: this.#harnessSettingsEnabled,
+        followUpAvailable: this.#harnessFollowUpsEnabled && this.#harnessThreadRuntimeEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],

@@ -1246,6 +1246,14 @@ export interface HarnessServiceMap {
   "settings.search": { params: import("./harness-settings-service.js").SettingsSearchParams; result: import("./harness-settings-service.js").SettingsSearchResult };
   "settings.read": { params: import("./harness-settings-service.js").SettingsReadParams; result: import("./harness-settings-service.js").SettingsReadResult };
   "settings.update": { params: import("./harness-settings-service.js").SettingsUpdateParams; result: import("./harness-settings-service.js").SettingsUpdateResult };
+  // Stage W (D-307): durable follow-up registration, triggers, continuation
+  "followup.register": { params: import("./harness-followups.js").FollowUpRegisterParams; result: import("./harness-followups.js").FollowUpRegisterResult };
+  "followup.list": { params: import("./harness-followups.js").FollowUpListParams; result: import("./harness-followups.js").FollowUpListResult };
+  "followup.get": { params: import("./harness-followups.js").FollowUpGetParams; result: import("./harness-followups.js").FollowUpGetResult };
+  "followup.update": { params: import("./harness-followups.js").FollowUpUpdateParams; result: import("./harness-followups.js").FollowUpUpdateResult };
+  "followup.cancel": { params: import("./harness-followups.js").FollowUpCancelParams; result: import("./harness-followups.js").FollowUpGetResult };
+  "followup.check": { params: import("./harness-followups.js").FollowUpCheckParams; result: import("./harness-followups.js").FollowUpCheckResult };
+  "followup.fire": { params: import("./harness-followups.js").FollowUpFireParams; result: import("./harness-followups.js").FollowUpGetResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -1269,6 +1277,8 @@ export type HarnessCapability =
   | "read.web"
   | "read.settings"
   | "control.settings"
+  | "read.followup"
+  | "control.followup"
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
@@ -1339,6 +1349,13 @@ export const HARNESS_METHOD_CAPABILITY = {
   "settings.search": "read.settings",
   "settings.read": "read.settings",
   "settings.update": "control.settings",
+  "followup.register": "control.followup",
+  "followup.list": "read.followup",
+  "followup.get": "read.followup",
+  "followup.update": "control.followup",
+  "followup.cancel": "control.followup",
+  "followup.check": "control.followup",
+  "followup.fire": "control.followup",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1427,6 +1444,13 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "settings.search",
   "settings.read",
   "settings.update",
+  "followup.register",
+  "followup.list",
+  "followup.get",
+  "followup.update",
+  "followup.cancel",
+  "followup.check",
+  "followup.fire",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

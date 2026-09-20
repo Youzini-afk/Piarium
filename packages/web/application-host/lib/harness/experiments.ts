@@ -2643,9 +2643,21 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     queued.clear();
   };
 
+  /**
+   * Observe durable attempt changes (state transitions, collection updates).
+   * Follow-up registrations (D-307) and external triggers subscribe here rather
+   * than polling; listeners receive the projected view, not raw records.
+   */
+  const subscribeAttempts = (
+    listener: (workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => void,
+  ): (() => void) => {
+    sharedRuntime.listeners.add(listener);
+    return () => sharedRuntime.listeners.delete(listener);
+  };
+
   return {
     submit, list, get, logs, cancel, wait, collect, readArtifact, readArtifactPage,
-    stopForThreads, refreshQueue, ensureReconciled,
+    stopForThreads, refreshQueue, ensureReconciled, subscribeAttempts,
     detachObservers,
     dispose: detachObservers,
   };

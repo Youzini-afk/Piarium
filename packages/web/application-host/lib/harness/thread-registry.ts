@@ -371,7 +371,7 @@ const isTokens = (value: unknown): value is ThreadTokens => (
 const isWaitingFor = (value: unknown): value is ThreadWaitingFor | null => (
   value === null
   || (isRecord(value)
-    && (value.kind === "user" || value.kind === "permission" || value.kind === "thread" || value.kind === "experiment")
+    && (value.kind === "user" || value.kind === "permission" || value.kind === "thread" || value.kind === "experiment" || value.kind === "followup")
     && isString(value.text)
     && (value.review === undefined || (value.kind === "thread" && isRecord(value.review)
       && Number.isSafeInteger(value.review.resultRevision) && Number(value.review.resultRevision) > 0
@@ -793,7 +793,7 @@ const parseCatalog = (raw: string, path: string, expectedWorkspaceId?: string): 
       throw new ThreadRegistryError("corrupt", `Thread registry thread points to a missing active run: ${path}`, path);
     }
     if (
-      ((thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || thread.attention === "experiment") && thread.waitingFor === null)
+      ((thread.attention === "user" || thread.attention === "permission" || thread.attention === "thread" || thread.attention === "experiment" || thread.attention === "followup") && thread.waitingFor === null)
       || (thread.waitingFor !== null && thread.attention !== thread.waitingFor.kind)
     ) {
       throw new ThreadRegistryError("corrupt", `Thread registry contains inconsistent attention state: ${path}`, path);
@@ -1734,7 +1734,8 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
       thread.lifecycle = "active";
       // A dependency wait belongs to the preceding execution attempt. Leaving
       // it on a newly admitted Run would make that Run invisible to counting.
-      if (thread.waitingFor?.kind === "thread" || thread.waitingFor?.kind === "experiment") {
+      if (thread.waitingFor?.kind === "thread" || thread.waitingFor?.kind === "experiment"
+        || thread.waitingFor?.kind === "followup") {
         thread.attention = "none";
         thread.waitingFor = null;
       }
@@ -1905,7 +1906,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     const updated = await mutateWorkspace(workspaceId, (catalog) => {
       const thread = findThread(catalog, threadId);
       if (!thread) return { value: null, changed: [], write: false };
-      if ((attention === "user" || attention === "permission" || attention === "thread" || attention === "experiment") && waitingFor === null) {
+      if ((attention === "user" || attention === "permission" || attention === "thread" || attention === "experiment" || attention === "followup") && waitingFor === null) {
         throw new Error(`${attention} attention requires waitingFor details`);
       }
       if (waitingFor !== null && waitingFor.kind !== attention) {
