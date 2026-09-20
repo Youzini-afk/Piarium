@@ -132,7 +132,8 @@ import { createWebFetch, type SsrfPolicy } from './lib/harness/web-fetch.js';
 import { createWebSearchService, resolveConfiguredSearchProvider } from './lib/harness/web-search.js';
 import { registerWebSearchCredentialRoutes } from './lib/harness/web-search-routes.js';
 import { checkSsrf, isSameHost } from './lib/harness/ssrf-policy.js';
-import { readPiAuthFile } from './lib/pi-config/storage.js';
+import { readPiAuthFile, resolvePiAgentDir } from './lib/pi-config/storage.js';
+import { seedProductSkills } from './lib/pi-runtime/product-skills.js';
 
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
@@ -1457,6 +1458,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   void managedRemoteExecution.reconcile().catch((error) => console.error("[PiariumManagedRemote]", error.message));
+  // Seed product skills into the user-scope resource root. Managed-marker
+  // semantics keep user edits authoritative — see product-skills.ts.
+  try {
+    const seeded = seedProductSkills(resolvePiAgentDir());
+    if (seeded.seeded.length || seeded.updated.length) {
+      console.log(`[PiariumSkills] seeded ${seeded.seeded.length}, updated ${seeded.updated.length} product skills`);
+    }
+  } catch (error) {
+    console.warn('[PiariumSkills] seeding skipped:', error instanceof Error ? error.message : error);
+  }
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
   // Global services (output store, path locks, search, diagnostics) plus

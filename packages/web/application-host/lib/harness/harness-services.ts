@@ -1182,7 +1182,7 @@ export function registerHarnessServices(
       sessionId: ctx.sessionId,
     });
     router.register("settings.search", {
-      handle: async (params, _ctx) => settings.search(params),
+      handle: async (params, ctx) => settings.search(caller(ctx), params),
     });
     router.register("settings.read", {
       handle: async (params, ctx) => settings.read(caller(ctx), params),

@@ -1171,7 +1171,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'prompts.editor', category: 'agents', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write'],
+    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write', 'delete'],
       note: 'prompt templates are Pi resources (user/project scope), edited through the resource authority' },
     ui: { page: 'prompts', titleKey: 'settings.piarium.prompts.catalog.title',
       descriptionKey: 'settings.piarium.prompts.description',
@@ -1179,7 +1179,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'skills.editor', category: 'agents', owner: 'action',
-    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write'],
+    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write', 'delete'],
       note: 'skills are Pi resources (agent/user/project/package scope); read-only scopes stay read-only' },
     ui: { page: 'skills', titleKey: 'settings.piarium.skills.catalog.title',
       descriptionKey: 'settings.piarium.skills.description',

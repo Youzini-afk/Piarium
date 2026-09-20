@@ -225,7 +225,7 @@ const validateFieldValue = (field: SettingsFieldSpec, value: unknown): string | 
 };
 
 export interface SettingsService {
-  search(params: SettingsSearchParams): SettingsSearchResult;
+  search(caller: SettingsServiceCaller, params: SettingsSearchParams): Promise<SettingsSearchResult>;
   read(caller: SettingsServiceCaller, params: SettingsReadParams): Promise<SettingsReadResult>;
   update(caller: SettingsServiceCaller, params: SettingsUpdateParams): Promise<SettingsUpdateResult>;
   /** Invoke a domain action on an `action` entry (D-309). */
@@ -233,7 +233,10 @@ export interface SettingsService {
 }
 
 export function createSettingsService(deps: SettingsServiceDeps): SettingsService {
-  const search = (params: SettingsSearchParams): SettingsSearchResult => {
+  const search = async (
+    caller: SettingsServiceCaller,
+    params: SettingsSearchParams,
+  ): Promise<SettingsSearchResult> => {
     const matches = querySettingsCatalog({
       ...(params.query !== undefined ? { query: params.query } : {}),
       ...(params.category !== undefined ? { category: params.category as never } : {}),
@@ -246,13 +249,82 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     for (const entry of matches) {
       categories.set(entry.category, (categories.get(entry.category) ?? 0) + 1);
     }
+    const page = matches.slice(offset, offset + limit);
+    const summaries = await summarizeSearchItems(caller, page);
     return {
-      items: matches.slice(offset, offset + limit).map(toSearchItem),
+      items: page.map((entry, index) => {
+        const item = toSearchItem(entry);
+        const summary = summaries[index];
+        return summary ? { ...item, summary } : item;
+      }),
       total: matches.length,
       categories: [...categories.entries()]
         .map(([category, count]) => ({ category, count }))
         .sort((a, b) => a.category.localeCompare(b.category)),
     };
+  };
+
+  /**
+   * Progressive disclosure for search (S-B): simple entries carry the live
+   * facts needed to decide a write — effective value/source for single-field
+   * app+pi rows, declared verbs for action rows, connected-surface count for
+   * client rows. Owner documents are fetched once per search, never per item.
+   */
+  const summarizeSearchItems = async (
+    caller: SettingsServiceCaller,
+    entries: readonly SettingsCatalogEntry[],
+  ): Promise<(SettingsSearchItem['summary'] | undefined)[]> => {
+    let appDocument: PiariumSettingsDocument | null = null;
+    let piSnapshot: PiSettingsSnapshot | null = null;
+    const needApp = entries.some((entry) => entry.owner === 'app');
+    const needPi = entries.some((entry) => entry.owner === 'pi-settings');
+    if (needApp) appDocument = await deps.readAppSettings().catch(() => null);
+    if (needPi && caller.workspaceId) {
+      const root = await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null);
+      if (root) piSnapshot = await deps.requestPi(root, 'settings.get', {}).catch(() => null);
+    }
+    const surfaceCount = deps.clientSurfaces?.list().length ?? 0;
+    return entries.map((entry) => {
+      const fields = entryFields(entry);
+      const single = fields.length === 1 ? fields[0]! : null;
+      if (entry.owner === 'action') {
+        return { verbs: [...(entry.actionRef?.verbs ?? [])] };
+      }
+      if (entry.owner === 'client') {
+        return { surfaces: surfaceCount };
+      }
+      if (!single) return undefined;
+      const summary: NonNullable<SettingsSearchItem['summary']> = {
+        fieldKind: single.kind,
+        ...(single.options ? { options: single.options.map((o) => ({ value: o.value, ...(o.labelKey ? { label: o.labelKey } : {}) })) } : {}),
+      };
+      if (entry.owner === 'app' && appDocument) {
+        const saved = getPath(appDocument, single.path);
+        if (single.kind === 'secret') {
+          summary.isSet = saved !== undefined && saved !== null && saved !== '';
+        } else {
+          summary.value = saved !== undefined ? saved : single.default;
+          summary.source = saved !== undefined ? 'user' : single.default !== undefined ? 'default' : 'none';
+        }
+        return summary;
+      }
+      if (entry.owner === 'pi-settings' && piSnapshot) {
+        const projectValue = piSnapshot.projectTrusted ? getPath(piSnapshot.project, single.path) : undefined;
+        const globalValue = getPath(piSnapshot.global, single.path);
+        const effective = projectValue ?? globalValue ?? single.default;
+        if (single.kind === 'secret') {
+          summary.isSet = effective !== undefined && effective !== null && effective !== '';
+        } else {
+          summary.value = effective;
+          summary.source = projectValue !== undefined ? 'project'
+            : globalValue !== undefined ? 'user'
+            : single.default !== undefined ? 'default' : 'none';
+        }
+        return summary;
+      }
+      // Owner unreachable — kind/options still help the caller shape a read.
+      return summary;
+    });
   };
 
   const requireEntry = (id: string): SettingsCatalogEntry => {

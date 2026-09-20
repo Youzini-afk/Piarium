@@ -167,27 +167,46 @@ function fakeBridge(
 }
 
 describe("settings service catalog search", () => {
-  it("matches free text against ids, paths, and keywords", () => {
+  it("matches free text against ids, paths, and keywords", async () => {
     const { service } = fixture();
-    const result = service.search({ query: "theme dark" });
+    const result = await service.search(caller, { query: "theme dark" });
     assert.ok(result.total >= 1);
     assert.ok(result.items.some((item) => item.id === "appearance.dark-theme"));
   });
 
-  it("browses by category and paginates", () => {
+  it("browses by category and paginates", async () => {
     const { service } = fixture();
-    const all = service.search({ category: "chat", limit: 100 });
+    const all = await service.search(caller, { category: "chat", limit: 100 });
     assert.ok(all.items.every((item) => item.category === "chat"));
-    const page = service.search({ category: "chat", limit: 3, offset: 0 });
+    const page = await service.search(caller, { category: "chat", limit: 3, offset: 0 });
     assert.equal(page.items.length, 3);
     assert.ok(page.total > 3);
   });
 
-  it("locates a stable id exactly", () => {
+  it("locates a stable id exactly", async () => {
     const { service } = fixture();
-    const result = service.search({ id: "harness.shell" });
+    const result = await service.search(caller, { id: "harness.shell" });
     assert.equal(result.total, 1);
     assert.equal(result.items[0]?.owner, "pi-settings");
+  });
+
+  it("summarizes simple entries with live values and declared verbs", async () => {
+    const { service } = fixture({
+      app: { timeFormatPreference: "24h" },
+      clientSurfaces: fakeBridge([], [{ id: "surf-1", kind: "desktop" }]),
+    });
+    const result = await service.search(caller, { id: "appearance.time-format" });
+    const summary = result.items[0]?.summary;
+    assert.equal(summary?.value, "24h");
+    assert.equal(summary?.source, "user");
+    assert.equal(summary?.fieldKind, "enum");
+    assert.ok(summary?.options?.some((option) => option.value === "12h"));
+
+    const actions = await service.search(caller, { id: "plugins.packages" });
+    assert.ok(actions.items[0]?.summary?.verbs?.includes("list"));
+
+    const client = await service.search(caller, { id: "chat.persist-drafts" });
+    assert.equal(client.items[0]?.summary?.surfaces, 1);
   });
 });
 

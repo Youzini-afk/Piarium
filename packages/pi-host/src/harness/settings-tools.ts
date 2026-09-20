@@ -46,7 +46,8 @@ export function createSettingsSearchTool(bridge: HostServicesBridge): ToolDefini
     promptSnippet: "settings_search: locate a setting by keyword, category, or id",
     promptGuidelines: [
       "Search is scoped: pass a category (appearance, chat, sessions, model, harness, retrieval, web, notifications, git, extensions, agents, …) or free text. Results carry stable ids for settings_read.",
-      "owner \"client\" means a device-local preference the agent can describe but not change; owner \"action\" means the row is a real operation (install, login, connect), not a stored value.",
+      "owner \"client\" applies on a connected surface (summary.surfaces>0 means reachable); owner \"action\" means the row is a real operation (install, login, connect) — invoke it with settings_action using the listed verbs.",
+      "Simple rows already carry the live value and source in summary — you can write directly with settings_update + expectedRevision from settings_read when CAS matters.",
     ],
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "Free-text AND match over ids, paths, and keywords" })),
@@ -72,7 +73,14 @@ export function createSettingsSearchTool(bridge: HostServicesBridge): ToolDefini
         const lines = result.items.map((item) => {
           const paths = item.paths.length > 0 ? ` → ${item.paths.join(", ")}` : "";
           const writable = item.writable ? "" : " (read-only)";
-          return `- ${item.id} [${item.owner}${writable}]${item.apply ? ` apply:${item.apply}` : ""}${paths}${item.note ? ` — ${item.note}` : ""}`;
+          const summary = item.summary;
+          const facts: string[] = [];
+          if (summary?.value !== undefined) facts.push(`now: ${JSON.stringify(summary.value)} (${summary.source ?? "?"})`);
+          if (summary?.isSet !== undefined) facts.push(summary.isSet ? "credential: set" : "credential: unset");
+          if (summary?.verbs?.length) facts.push(`verbs: ${summary.verbs.join("/")}`);
+          if (summary?.surfaces !== undefined) facts.push(`surfaces: ${summary.surfaces}`);
+          const factText = facts.length ? ` — ${facts.join("; ")}` : "";
+          return `- ${item.id} [${item.owner}${writable}]${item.apply ? ` apply:${item.apply}` : ""}${paths}${factText}${item.note ? ` — ${item.note}` : ""}`;
         });
         return {
           content: [{ type: "text", text: `${result.total} match(es):\n${lines.join("\n")}` }],

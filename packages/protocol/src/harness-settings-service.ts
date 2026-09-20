@@ -48,6 +48,26 @@ export interface SettingsSearchItem {
   page: string;
   keywords?: string[];
   note?: string;
+  /**
+   * Live summary for simple entries — enough to decide a change without a
+   * follow-up `settings.read`. Omitted when the owner can't answer cheaply
+   * or the entry needs detail context (multi-field rows, dynamic options).
+   * Secret values never appear — `isSet` only.
+   */
+  summary?: {
+    /** Effective value in force right now. */
+    value?: unknown;
+    source?: "user" | "project" | "default" | "runtime" | "none" | "surface";
+    isSet?: boolean;
+    /** Field kind for single-field entries (boolean/enum/number/…). */
+    fieldKind?: string;
+    /** Declared enum options — dynamic lists still come from settings.read. */
+    options?: { value: string; label?: string }[];
+    /** `action` entries: verbs declared on the catalog entry. */
+    verbs?: string[];
+    /** `client` entries: how many surfaces are connected right now. */
+    surfaces?: number;
+  };
 }
 
 export interface SettingsSearchResult {

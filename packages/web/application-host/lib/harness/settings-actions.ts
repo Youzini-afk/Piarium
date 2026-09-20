@@ -392,6 +392,19 @@ const resourcesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
             }),
           };
         }
+        case 'delete': {
+          const id = needString(args, 'id');
+          let expectedRevision = str(args, 'expectedRevision');
+          if (!expectedRevision) {
+            const current = await deps.requestWorkspace(root, 'resource.get', { kind, id }) as Record<string, unknown>;
+            expectedRevision = typeof current?.revision === 'string' ? current.revision : undefined;
+          }
+          if (!expectedRevision) return { status: 'failed', detail: 'resource has no readable revision — cannot delete safely' };
+          return {
+            status: 'applied',
+            data: await deps.requestWorkspace(root, 'resource.delete', { kind, id, expectedRevision }),
+          };
+        }
         default:
           return unavailable(`verb "${verb}" is not supported by the resource owner`);
       }
