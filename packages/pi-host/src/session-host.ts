@@ -659,6 +659,11 @@ export class SessionHost {
   #contextLastFailure: HarnessContextRuntimeFailure | undefined;
   #settingsSessionReloadPending = false;
   #settingsSessionReloadActive: Promise<void> | null = null;
+  // Settings writes commit the file but defer settingsManager.reload() to a
+  // settled boundary so an in-flight tool bridge response stays valid. The
+  // resolved candidate is kept here so snapshot/context readers observe the
+  // committed values before that deferred reload runs.
+  #pendingContextSettings: HarnessContextSettings | undefined;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
   #backgroundInference: BackgroundInferenceRuntime | undefined;
@@ -2796,6 +2801,7 @@ export class SessionHost {
       : join(this.runtime.cwd, ".pi", "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
     let globalContextSettingChanged = false;
+    let committedContext: HarnessContextSettings | undefined;
     if (typeof set !== "object" || set === null || Array.isArray(set)) {
       throw new HostError("invalid_config", "Configuration set must be an object");
     }
@@ -2836,6 +2842,7 @@ export class SessionHost {
           globalHarness.context,
           globalHarness.memory,
         );
+        committedContext = candidateContext;
         const currentHarness = current.document.harness as Record<string, unknown> | undefined;
         let currentContext: ReturnType<typeof resolveHarnessContextSettings> | undefined;
         try {
@@ -2862,6 +2869,7 @@ export class SessionHost {
       remove,
       expectedRevision,
     );
+    if (committedContext !== undefined) this.#pendingContextSettings = committedContext;
     if (globalContextSettingChanged) this.#contextLastFailure = undefined;
     this.#settingsSessionReloadPending = true;
     // A settings tool executes inside the current agent runner. Reloading that
@@ -2887,6 +2895,7 @@ export class SessionHost {
           );
         }
         if (this.#runtime !== expectedRuntime) return;
+        this.#pendingContextSettings = undefined;
         await expectedRuntime.session.reload();
         if (this.#runtime === expectedRuntime) this.#emit("session.snapshot", this.snapshot());
       } catch (error) {
@@ -3172,6 +3181,7 @@ export class SessionHost {
         ? mergePolicies(this.#frozenPermissionOverlay, livePermissions)
         : livePermissions;
       const contextConfigReader = () => {
+        if (this.#pendingContextSettings !== undefined) return this.#pendingContextSettings;
         const currentHarness = (settingsManager.getGlobalSettings() as {
           harness?: { context?: unknown; memory?: unknown };
         }).harness;
@@ -3746,6 +3756,7 @@ export class SessionHost {
 
   async #disposeRuntime(): Promise<void> {
     this.#settingsSessionReloadPending = false;
+    this.#pendingContextSettings = undefined;
     this.#backgroundInference?.dispose();
     this.#backgroundInference = undefined;
     this.#inferenceCwd = undefined;
