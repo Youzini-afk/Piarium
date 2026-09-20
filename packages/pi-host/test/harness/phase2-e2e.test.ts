@@ -2,7 +2,7 @@
  * Phase 2 e2e integration test — todo and recall tools through the full
  * bridge → router → service → knowledge store chain.
  *
- * Also tests the zone2.assemble and context.retained service handlers.
+ * Also tests request-boundary Zone 2 injection and context.retained.
  */
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -17,7 +17,10 @@ import { openWorkspaceKnowledge } from "../../../web/application-host/lib/knowle
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import { createTodoTool } from "../../src/harness/todo-tool.js";
 import { createRecallTool } from "../../src/harness/recall-tool.js";
-import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { attachContextRequestBoundary } from "../../src/harness/context-request-boundary.js";
+import { createRequestContextInjector } from "../../src/harness/request-context.js";
+import { SessionManager, convertToLlm, type AgentSession, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createAssistantMessageEventStream, type Api, type AssistantMessage, type Context, type Model } from "@earendil-works/pi-ai";
 import type { Zone2Material } from "../../../web/application-host/lib/harness/zone2.js";
 import type { TodoToolDeps } from "../../../web/application-host/lib/harness/todo-tool.js";
 import type { RecallToolDeps } from "../../../web/application-host/lib/harness/recall-tool.js";
@@ -119,11 +122,13 @@ async function executeTool(
   tool: ToolDefinition,
   params: Record<string, unknown>,
 ): Promise<{ text: string; details: unknown }> {
-  const result = await tool.execute("test-call", params as never, undefined, undefined, {
+  const result = await tool.execute(`test-call-${++toolCallSequence}`, params as never, undefined, undefined, {
     sessionManager: { getBranch: () => [] },
   } as never) as { content: Array<{ type: string; text: string }>; details?: unknown };
   return { text: result.content.map((c) => c.text).join("\n"), details: result.details };
 }
+
+let toolCallSequence = 0;
 
 describe("Phase 2 e2e integration", () => {
   it("todo tool → bridge → router → service → store: upsert plan", async () => {
@@ -175,18 +180,61 @@ describe("Phase 2 e2e integration", () => {
     }
   });
 
-  it("zone2.assemble → bridge → router → service: returns assembled content", async () => {
+  it("request boundary → bridge → router → service: injects and retains assembled Zone 2 content", async () => {
     const { workspaceRoot, dataDir, bridge, harnessServiceHost } = await setupP2E2E();
+    let boundary: ReturnType<typeof attachContextRequestBoundary> | undefined;
     try {
-      const result = await bridge.request("zone2.assemble", {
-        sinceTurn: 0,
-        branchEntryIds: [],
+      const model = {
+        provider: "faux", id: "faux-1", api: "openai-completions", contextWindow: 100_000, maxTokens: 400,
+      } as Model<Api>;
+      const manager = SessionManager.inMemory(workspaceRoot);
+      manager.appendMessage({ role: "user", content: "What is the current plan?", timestamp: Date.now() });
+      const outgoing: Context[] = [];
+      const response: AssistantMessage = {
+        role: "assistant", api: model.api, provider: model.provider, model: model.id,
+        content: [{ type: "text", text: "ok" }], stopReason: "stop", timestamp: Date.now(),
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      };
+      const session = {
+        model,
+        sessionId: manager.getSessionId(),
+        sessionManager: manager,
+        agent: {
+          streamFunction: async (_model: Model<Api>, context: Context) => {
+            outgoing.push(structuredClone(context));
+            const stream = createAssistantMessageEventStream();
+            stream.push({ type: "start", partial: response });
+            stream.push({ type: "done", reason: "stop", message: response });
+            return stream;
+          },
+          convertToLlm,
+          state: { systemPrompt: "stable", tools: [], thinkingLevel: "off", messages: manager.buildSessionContext().messages },
+        },
+      } as unknown as AgentSession;
+      boundary = attachContextRequestBoundary(session, {
+        getCompactionSettings: () => ({ enabled: true, reserveTokens: 100, keepRecentTokens: 50 }),
+        observe: () => undefined,
+        compact: async () => { throw new Error("unexpected compaction"); },
+        inject: createRequestContextInjector(bridge),
       });
-      assert.ok(result.content, "zone2.assemble should return non-null content");
-      assert.match(result.content!, /piarium-context/, "zone2 content should contain piarium-context marker");
-      assert.match(result.content!, /plan/, "zone2 content should contain plan section");
-      assert.equal(result.eventCursor, 7);
+      const stream = await session.agent.streamFunction(model, {
+        systemPrompt: "stable",
+        messages: convertToLlm(manager.buildSessionContext().messages),
+      }, {});
+      await stream.result();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const providerMessages = JSON.stringify(outgoing[0]?.messages ?? []);
+      assert.match(providerMessages, /piarium-context/, "assembled Zone 2 content must reach the provider request");
+      assert.match(providerMessages, /plan/, "the current plan must reach the provider request");
+      assert.match(providerMessages, /piarium-status/, "the request boundary must append a transient current roster status");
+      const retained = manager.getBranch().filter((entry) => entry.type === "custom_message");
+      assert.equal(retained.length, 1, "delivered environment content must become one durable receipt");
+      assert.match(JSON.stringify(retained), /piarium-context/);
+      assert.doesNotMatch(JSON.stringify(retained), /piarium-status/, "the current roster must remain request-scoped");
     } finally {
+      boundary?.dispose();
       await harnessServiceHost.dispose();
       try { rmSync(workspaceRoot, { recursive: true, force: true }); } catch { /* Windows */ }
       try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* Windows */ }

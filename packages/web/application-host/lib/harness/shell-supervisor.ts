@@ -909,7 +909,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
 
       return new Promise<ShellExecResult>((resolvePromise, rejectPromise) => {
         outputBuffer = "";
-        let timeout: ReturnType<typeof setTimeout>;
         const detachToBackground = (): void => {
           if (pendingCommand?.token !== token) return;
           clearTimeout(timeout);
@@ -965,7 +964,7 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             executionId: token,
           });
         };
-        timeout = setTimeout(detachToBackground, options.waitMs);
+        const timeout = setTimeout(detachToBackground, options.waitMs);
         const onAbort = (): void => detachToBackground();
 
         pendingCommand = {
@@ -1118,7 +1117,6 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     if (waitMs <= 0 || hasChange()) return;
     await new Promise<void>((resolve, reject) => {
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
       const waiters = shellChangeWaiters.get(shellId) ?? new Set<() => void>();
       shellChangeWaiters.set(shellId, waiters);
       const cleanup = (): void => {
@@ -1137,12 +1135,12 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
       const wake = (): void => finish();
       const onAbort = (): void => finish(new Error("Shell output wait aborted"));
       waiters.add(wake);
+      const timer = setTimeout(wake, waitMs);
       if (signal?.aborted) {
         onAbort();
         return;
       }
       signal?.addEventListener("abort", onAbort, { once: true });
-      timer = setTimeout(wake, waitMs);
       // Close the event-subscription race: output may have arrived between the
       // first check and registering this waiter.
       if (hasChange()) wake();

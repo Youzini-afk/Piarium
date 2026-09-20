@@ -130,7 +130,7 @@ async function setup(options: { transportTimeoutMs?: number; artifactBody?: Buff
 }
 
 async function executeTool(tool: ToolDefinition, params: Record<string, unknown>) {
-  const result = await tool.execute("test-call", params as never, undefined, undefined, undefined as never) as {
+  const result = await tool.execute(`test-call-${++toolCallSequence}`, params as never, undefined, undefined, undefined as never) as {
     content: Array<{ type: string; text: string }>;
     details?: unknown;
     isError?: boolean;
@@ -141,6 +141,8 @@ async function executeTool(tool: ToolDefinition, params: Record<string, unknown>
     isError: result.isError === true,
   };
 }
+
+let toolCallSequence = 0;
 
 describe("Phase 3 Thread/ThreadRun e2e", () => {
   it("returns the reviewed conflict binding to the model and forwards a bound choice", async () => {
@@ -249,19 +251,26 @@ describe("Phase 3 Thread/ThreadRun e2e", () => {
         lastToolCall: { name: "read", at: new Date().toISOString() },
       });
 
-      const active = await harness.bridge.request("zone2.assemble", { sinceTurn: 0, branchEntryIds: [] });
-      assert.match(active.content ?? "", /<threads>/);
-      assert.match(active.content ?? "", new RegExp(`${thread.id}.*running.*2 steps`));
+      const active = await harness.bridge.request("zone2.status", {});
+      assert.equal(active.status, "ready");
+      assert.match(active.content ?? "", /<piarium-status/);
+      assert.match(active.content ?? "", new RegExp(`${thread.id}.*zone2 work.*working`));
 
       await harness.threadRegistry.completeThread(WORKSPACE_ID, thread.id, report("zone2 complete"));
+      const current = await harness.bridge.request("zone2.status", {});
+      assert.equal(current.status, "ready");
+      assert.match(current.content ?? "", new RegExp(`${thread.id}.*success`));
+      assert.doesNotMatch(current.content ?? "", /zone2 complete/, "result bodies stay out of the transient roster");
       const completed = await harness.bridge.request("zone2.assemble", { sinceTurn: 1, branchEntryIds: [] });
-      assert.match(completed.content ?? "", /completed.*conclusion: zone2 complete/);
+      assert.match(completed.content ?? "", /<thread-result[^>]*>conclusion: zone2 complete<\/thread-result>/);
+      assert.ok(completed.deliveryId);
+      await harness.bridge.request("zone2.delivered", { deliveryId: completed.deliveryId });
       const unchanged = await harness.bridge.request("zone2.assemble", { sinceTurn: 2, branchEntryIds: [] });
       assert.equal(unchanged.content, null);
 
       await harness.bridge.request("context.retained", { retainedObservationRefs: [], retainedGit: false });
       const reset = await harness.bridge.request("zone2.assemble", { sinceTurn: 3, branchEntryIds: [] });
-      assert.match(reset.content ?? "", /completed.*conclusion: zone2 complete/);
+      assert.match(reset.content ?? "", /<thread-result[^>]*>conclusion: zone2 complete<\/thread-result>/);
     } finally {
       await harness.dispose();
     }

@@ -20,6 +20,7 @@ import type { Context } from "@earendil-works/pi-ai";
 import type { HostEvent, HostEventData } from "@piarium/protocol";
 import { SessionHost } from "../src/session-host.js";
 import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
+import { persistentProviderMessages, providerRosterMessages } from "./harness/provider-context.js";
 
 // ---------------------------------------------------------------------------
 // Compile-time assertions: verify Pi 0.84.3 hook shapes match what the
@@ -223,8 +224,10 @@ describe("Pi hooks contract (0.84.3)", () => {
       // Prefix property: step 1 messages must be a prefix of step 2 messages.
       // (Step 2 has the same messages as step 1 plus the assistant response
       //  and tool result from step 1.)
-      const msgs1 = capturedContexts[0]!.messages;
-      const msgs2 = capturedContexts[1]!.messages;
+      assert.equal(providerRosterMessages(capturedContexts[0]!).length, 1, "step 1 carries one transient current roster");
+      assert.equal(providerRosterMessages(capturedContexts[1]!).length, 1, "step 2 refreshes one transient current roster");
+      const msgs1 = persistentProviderMessages(capturedContexts[0]!);
+      const msgs2 = persistentProviderMessages(capturedContexts[1]!);
       assert.ok(
         msgs2.length >= msgs1.length,
         "step 2 must have at least as many messages as step 1",

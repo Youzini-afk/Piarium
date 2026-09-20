@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import type { ExperimentResourceRequest } from "@piarium/protocol";
 import type { KernelClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ExperimentCaller, ExperimentContext } from "./experiments.js";
@@ -404,7 +403,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           entries: transfer.entries,
           ...(transfer.cwd ? { cwd: transfer.cwd } : {}),
         };
-        let probeReceipt = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", manifest);
+        const probeReceipt = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", manifest);
         for (const object of probeReceipt.missingObjects) {
           await client.request(`/objects/${encodeURIComponent(object.objectHash)}`, {
             method: "PUT",

@@ -11,6 +11,8 @@ describe("Harness model slots", () => {
     assert.deepEqual(HARNESS_MODEL_ROLES, [
       "explore", "retrievalAgent", "quickImplement", "hardImplement", "frontend",
       "review", "check", "reader", "suggestions", "permissionJudge",
+      "researchInvestigation", "researchExperimentalDesign", "researchFastExploration",
+      "researchHighThroughputExecution",
     ]);
     const main = { providerId: "openai", modelId: "gpt-main" };
     assert.deepEqual(resolveHarnessModelSlot("hardImplement", {}, main), main);

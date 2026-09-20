@@ -37,6 +37,7 @@ import { createTreeSitterStructureProvider } from "../../../web/application-host
 import { createRecoveryFileStore } from "../../../web/application-host/lib/recovery/file-store.test-helper.js";
 import { createInMemoryRecoveryDurablePort } from "../../../web/application-host/lib/recovery/recovery-durable-port.test-helper.js";
 import { SessionHost } from "../../src/session-host.js";
+import { serializedToolResult } from "./provider-context.js";
 
 type Workspace = { workspaceId: string; root: string };
 
@@ -488,7 +489,11 @@ async function createSemanticHarness(options: {
   };
 }
 
-const lastToolMessage = (contexts: Context[]): string => JSON.stringify(contexts.at(-1)?.messages.at(-1) ?? "");
+const lastToolMessage = (contexts: Context[]): string => {
+  const context = contexts.at(-1);
+  if (!context) throw new Error("Expected a provider context after the explore call");
+  return serializedToolResult(context, "explore");
+};
 const exploreDetails = (session: SemanticSession): ExploreSearchResult["details"] => {
   const result = session.toolResults.findLast((tool) => tool.toolName === "explore")?.result as {
     details?: { provenance?: ExploreSearchResult["details"] };

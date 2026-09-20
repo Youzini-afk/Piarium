@@ -47,6 +47,7 @@ ARG TARGETARCH
 # workspace manifest required by the frozen monorepo lockfile.
 COPY package.json bun.lock ./
 COPY bun-patches ./bun-patches
+COPY patches ./patches
 COPY scripts/fix-deprecation.js ./scripts/fix-deprecation.js
 COPY packages/application-client/package.json ./packages/application-client/package.json
 COPY packages/electron/package.json ./packages/electron/package.json

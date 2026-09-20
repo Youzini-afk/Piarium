@@ -153,9 +153,11 @@ async function executeTool(
   tool: ToolDefinition,
   params: Record<string, unknown>,
 ): Promise<string> {
-  const result = await tool.execute("test-call", params as never, undefined, undefined, undefined as never) as { content: Array<{ type: string; text: string }>; details?: unknown };
+  const result = await tool.execute(`test-call-${++toolCallSequence}`, params as never, undefined, undefined, undefined as never) as { content: Array<{ type: string; text: string }>; details?: unknown };
   return result.content.map((c) => c.text).join("\n");
 }
+
+let toolCallSequence = 0;
 
 describe("harness e2e integration", () => {
   it("1. bash pwd outputs workspace root", async () => {

@@ -8,6 +8,7 @@ import type { AgentSessionServices } from "@earendil-works/pi-coding-agent";
 import type { Context } from "@earendil-works/pi-ai";
 import { SessionHost } from "../src/session-host.js";
 import { createHarnessEmit, permissionInspectResult } from "./harness-emit.js";
+import { persistentProviderMessages, providerRosterMessages } from "./harness/provider-context.js";
 
 export interface CapturedPayload {
   system: string;
@@ -171,10 +172,15 @@ describe("Zone 0 stability contract (1.2)", () => {
         assert.equal(JSON.stringify(payloads[i]!.tools), tools0, `tools must be byte-identical at call ${i + 1}`);
       }
 
-      // Prefix property: call k messages must be a prefix of call k+1 messages
+      // Durable history stays prefix-growing. The complete current roster is a
+      // request-scoped tail and is refreshed independently on every call.
       for (let i = 0; i < payloads.length - 1; i++) {
-        const msgs1 = payloads[i]!.messages;
-        const msgs2 = payloads[i + 1]!.messages;
+        const current = capturedContexts[i]!;
+        const next = capturedContexts[i + 1]!;
+        assert.equal(providerRosterMessages(current).length, 1, `call ${i + 1} carries one transient roster`);
+        assert.equal(providerRosterMessages(next).length, 1, `call ${i + 2} carries one transient roster`);
+        const msgs1 = persistentProviderMessages(current);
+        const msgs2 = persistentProviderMessages(next);
         assert.ok(msgs2.length >= msgs1.length, `call ${i + 2} must have >= messages than call ${i + 1}`);
         for (let j = 0; j < msgs1.length; j++) {
           assert.deepEqual(msgs2[j], msgs1[j], `call ${i + 2} message ${j} must equal call ${i + 1} message ${j}`);

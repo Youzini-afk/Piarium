@@ -57,6 +57,7 @@ import { createTreeSitterStructureProvider } from "../../../web/application-host
 import type { HarnessEmbedParams, HarnessEmbedResult, HarnessRerankParams, HarnessRerankResult } from "@piarium/protocol";
 
 import { SessionHost } from "../../src/session-host.js";
+import { serializedToolResult } from "./provider-context.js";
 
 const WORKSPACE_ID = "session-e2e-workspace";
 
@@ -920,10 +921,8 @@ describe("session e2e — context preparation chain", () => {
           requestHistory = false;
           return fauxAssistantMessage([fauxToolCall("history", { query: "ORIGINAL-TASK-MARKER" })]);
         }
-        const last = context.messages.at(-1);
-        if (last?.role === "toolResult" && last.toolName === "history") {
-          historyResult = JSON.stringify(last);
-        }
+        const history = context.messages.findLast((message) => message.role === "toolResult" && message.toolName === "history");
+        if (history) historyResult = JSON.stringify(history);
         return fauxAssistantMessage("Foreground completion.");
       };
       faux.setResponses(Array.from({ length: 24 }, () => respond));
@@ -1028,7 +1027,7 @@ describe("session e2e — native file pagination", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "large.txt" })]),
         (context) => {
-          const serialized = JSON.stringify(context.messages.at(-1));
+          const serialized = serializedToolResult(context, "read");
           assert.ok(serialized.includes("line 1000 — 大文件"), "middle content of the requested native page must survive");
           assert.ok(!serialized.includes("line 8000 — 大文件"), "the native tool owns file pagination");
           assert.doesNotMatch(serialized, /ephemeral, generation/);
@@ -1036,7 +1035,7 @@ describe("session e2e — native file pagination", () => {
           return fauxAssistantMessage([fauxToolCall("read", { path: "large.txt", offset: nextLine, limit: 1 })]);
         },
         (context) => {
-          pagedContext = JSON.stringify(context.messages.at(-1));
+          pagedContext = serializedToolResult(context, "read");
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1065,7 +1064,7 @@ describe("session e2e — fixed surface read", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("read", { path: "draft.ts" })]),
         (context) => {
-          toolResult = JSON.stringify(context.messages.at(-1));
+          toolResult = serializedToolResult(context, "read");
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1175,18 +1174,18 @@ describe("session e2e — fixed surface edit", () => {
           edits: [{ oldText: "B unique-buffer\n", newText: "C unique-buffer\n" }],
         })]),
         (context) => {
-          editResult = JSON.stringify(context.messages.at(-1));
+          editResult = serializedToolResult(context, "edit");
           return fauxAssistantMessage([fauxToolCall("read", { path: "draft.ts" })]);
         },
         (context) => {
-          readResult = JSON.stringify(context.messages.at(-1));
+          readResult = serializedToolResult(context, "read");
           return fauxAssistantMessage([fauxToolCall("edit", {
             path: "draft.ts",
             edits: [{ oldText: "C unique-buffer\n", newText: "E unique-buffer\n" }],
           })]);
         },
         (context) => {
-          editResult = `${editResult}\n${JSON.stringify(context.messages.at(-1))}`;
+          editResult = `${editResult}\n${serializedToolResult(context, "edit")}`;
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1257,11 +1256,11 @@ describe("session e2e — fixed surface find and ls", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("find", { path: "nested", pattern: "*.ts" })]),
         (context) => {
-          findResult = JSON.stringify(context.messages.at(-1));
+          findResult = serializedToolResult(context, "find");
           return fauxAssistantMessage([fauxToolCall("ls", { path: "disk" })]);
         },
         (context) => {
-          lsResult = JSON.stringify(context.messages.at(-1));
+          lsResult = serializedToolResult(context, "ls");
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1339,7 +1338,7 @@ describe("session e2e — session-local web reader", () => {
           return fauxAssistantMessage("The answer is 42.");
         },
         (context) => {
-          finalToolResult = JSON.stringify(context.messages.at(-1));
+          finalToolResult = serializedToolResult(context, "webfetch");
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1401,11 +1400,11 @@ describe("session e2e — default web search", () => {
           allowed_domains: ["docs.example"],
         })]),
         (context) => {
-          finalToolResult = JSON.stringify(context.messages.at(-1));
+          finalToolResult = serializedToolResult(context, "websearch");
           return fauxAssistantMessage([fauxToolCall("webfetch", { url: "https://docs.example/piarium", find: "authority" })]);
         },
         (context) => {
-          pageToolResult = JSON.stringify(context.messages.at(-1));
+          pageToolResult = serializedToolResult(context, "webfetch");
           return fauxAssistantMessage("done");
         },
       ]);
@@ -1492,7 +1491,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("I found the current implementation.");
         },
       ]);
@@ -1563,7 +1562,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("I found the structured unit.");
         },
       ]);
@@ -1616,7 +1615,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("The changed hit was omitted.");
         },
       ]);
@@ -1670,7 +1669,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "needle" })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("The missing hit was omitted.");
         },
       ]);
@@ -1722,7 +1721,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "token", anchors: ["uniqueAnchor"] })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("The anchor hit was first.");
         },
       ]);
@@ -1794,7 +1793,7 @@ describe("session e2e — explore", () => {
           }));
         },
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("The reclaim implementation is in reclaimLease.");
         },
       ]);
@@ -1861,7 +1860,7 @@ describe("session e2e — explore", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("explore", { question: "remote pineapple token" })]),
         (context) => {
-          exploreResult = JSON.stringify(context.messages.at(-1));
+          exploreResult = serializedToolResult(context, "explore");
           return fauxAssistantMessage("Found the remote pineapple.");
         },
       ]);
@@ -2021,7 +2020,7 @@ describe("session e2e — related", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("related", { anchor: "target.ts" })]),
         (context) => {
-          relatedResult = JSON.stringify(context.messages.at(-1));
+          relatedResult = serializedToolResult(context, "related");
           return fauxAssistantMessage("I have the file topology.");
         },
       ]);
@@ -2094,7 +2093,7 @@ describe("session e2e — real LSP diagnostics", () => {
       faux.setResponses([
         () => fauxAssistantMessage([fauxToolCall("diagnostics", { path: resourceId, full: true })]),
         (context) => {
-          diagnosticResult = JSON.stringify(context.messages.at(-1));
+          diagnosticResult = serializedToolResult(context, "diagnostics");
           return fauxAssistantMessage("done");
         },
       ]);

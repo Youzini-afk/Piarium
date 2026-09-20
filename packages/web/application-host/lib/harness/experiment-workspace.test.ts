@@ -10,6 +10,7 @@ import {
   prepareExperimentInput,
   type ExperimentWorkspaceCaller,
 } from "./experiment-workspace.js";
+import { canonicalizePathIdentity, isPathWithinRoot } from "../workspace/path-safety.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
@@ -70,7 +71,8 @@ it("freezes the source before queue time and records the actual capture semantic
   const attempt = await materializeExperimentAttempt(f.client, f.caller, "attempt-queued", input);
   assert.equal(await fs.readFile(path.join(attempt.canonicalRoot, "note.txt"), "utf8"), "before\n");
   assert.equal(await fs.readFile(path.join(attempt.canonicalRoot, "ignored.txt"), "utf8"), "still captured\n");
-  assert.ok(attempt.canonicalRoot.startsWith(path.join(f.storageRoot, "managed", "experiments")));
+  const managedRoot = await canonicalizePathIdentity(path.join(f.storageRoot, "managed", "experiments"));
+  assert.ok(isPathWithinRoot(attempt.canonicalRoot, managedRoot));
   assert.equal(attempt.cwd, "nested");
 });
 
