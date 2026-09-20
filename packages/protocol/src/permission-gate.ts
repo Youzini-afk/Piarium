@@ -7,7 +7,7 @@
 
 export type PermissionMode = "normal" | "accept-edits" | "bypass" | "smart";
 export type PermissionDecision = "allow" | "ask" | "deny";
-export type PermissionAction = "read" | "write" | "process" | "network" | "thread" | "unknown";
+export type PermissionAction = "read" | "write" | "process" | "network" | "thread" | "control" | "unknown";
 export type PermissionToolSourceKind = "harness" | "builtin" | "mcp" | "package" | "sdk" | "unknown";
 
 /** Credential-free identity for the concrete tool implementation selected by Pi. */
@@ -335,6 +335,10 @@ export function defaultRules(mode: PermissionMode, askBefore: Record<string, boo
   for (const [tool, meta] of Object.entries(HARNESS_TOOL_META)) {
     if (tool === "experiment") {
       rules.push({ tool, match: { param: "action", pattern: "^(list|get|logs|artifact|wait)$" }, decision: "allow" });
+    }
+    if (meta.permissionAction === "control") {
+      rules.push({ tool, decision: mode === "bypass" ? "allow" : "ask" });
+      continue;
     }
     const mutation: HarnessToolMutation = meta.mutation;
     if (mutation === "none") {

@@ -37,6 +37,7 @@ export class HarnessSettingsController {
   private confirmed: PiSettingsSnapshot | null = null;
   private pending: HarnessSettingsPatch[] = [];
   private active: Promise<void> | null = null;
+  private refreshRequested = false;
   private listeners = new Set<() => void>();
   private state: HarnessSettingsState = { harness: null, status: 'loading', error: null };
 
@@ -68,21 +69,28 @@ export class HarnessSettingsController {
   };
 
   load = (): Promise<void> => this.drain(!this.confirmed);
+  /** Re-read an owner-originated change while preserving any local pending patch. */
+  refresh = (): Promise<void> => this.drain(true);
 
   private drain(refresh = false): Promise<void> {
+    if (refresh) this.refreshRequested = true;
     if (this.active) return this.active;
     const run = async () => {
       try {
-        if (refresh || !this.confirmed) this.confirmed = await this.transport.read();
-        while (this.pending.length) {
-          const batch = this.pending.slice();
-          const revision = this.confirmed!.globalRevision;
-          if (!revision) throw new Error('Settings revision is unavailable');
-          const next = batch.reduce(patchHarnessSettings, object(this.confirmed!.global?.harness));
-          this.project('saving');
-          this.confirmed = await this.transport.write(next as JsonValue, revision);
-          this.pending.splice(0, batch.length);
-        }
+        do {
+          const shouldRefresh = this.refreshRequested || !this.confirmed;
+          this.refreshRequested = false;
+          if (shouldRefresh) this.confirmed = await this.transport.read();
+          while (this.pending.length) {
+            const batch = this.pending.slice();
+            const revision = this.confirmed!.globalRevision;
+            if (!revision) throw new Error('Settings revision is unavailable');
+            const next = batch.reduce(patchHarnessSettings, object(this.confirmed!.global?.harness));
+            this.project('saving');
+            this.confirmed = await this.transport.write(next as JsonValue, revision);
+            this.pending.splice(0, batch.length);
+          }
+        } while (this.refreshRequested);
         this.project(refresh ? 'idle' : 'saved');
       } catch (error) {
         this.project('error', error instanceof Error ? error.message : String(error));

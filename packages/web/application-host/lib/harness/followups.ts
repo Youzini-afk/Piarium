@@ -49,10 +49,25 @@ const SERVICE_CAPABILITIES = ["storage.read", "storage.write", "storage.maintena
 
 export interface FollowUpCaller {
   workspaceId: string;
+  executionWorkspaceId: string;
   sessionId: string;
   /** Present when the caller's session is bound to a thread; absent on the root session. */
   threadId?: string;
   runId?: string;
+  rootSessionId: string;
+  workspaceScope?: readonly string[];
+  allowedThreadIds: readonly string[];
+}
+
+interface PersistedExperimentCaller {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  sessionId: string;
+  threadId?: string;
+  runId?: string;
+  rootSessionId: string;
+  workspaceScope?: string[];
+  allowedThreadIds: string[];
 }
 
 interface DefinitionPayload {
@@ -65,6 +80,9 @@ interface DefinitionPayload {
   runId?: string;
   instruction: string;
   source: FollowUpSource;
+  /** Original research authority used for every attempt read, including restart recovery. */
+  experimentCaller: PersistedExperimentCaller;
+  pauseRequested: boolean;
   pausedGoal: boolean;
   /** Goal id captured when pause was applied — resume only touches that goal. */
   pausedGoalId?: string;
@@ -95,7 +113,7 @@ export interface FollowUpServiceDeps {
     activeRunId: string | null;
   } | null>;
   /** Active run worker state for delivery routing. */
-  getActiveRun(workspaceId: string, threadId: string): Promise<{ id: string; workerState: string } | null>;
+  getActiveRun(workspaceId: string, threadId: string): Promise<{ id: string; workerState: string; sessionId?: string | null } | null>;
   /** Resume a settled thread through the normal admission path. */
   continueRun(input: {
     workspaceId: string;
@@ -141,7 +159,7 @@ export interface FollowUpServiceDeps {
   /** Experiment source subscription (durable attempt facts). */
   subscribeAttempts?(listener: (workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => void): () => void;
   /** Read the current attempt view for registration-time/check evaluation. */
-  getAttempt?(workspaceId: string, attemptId: string): Promise<ExperimentAttemptView | null>;
+  getAttempt?(caller: PersistedExperimentCaller, attemptId: string): Promise<ExperimentAttemptView | null>;
   onChange?(workspaceId: string): void;
   now?(): number;
   onError?(error: Error): void;
@@ -161,6 +179,82 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const definitionIdFor = (id: string) => `${DEFINITION_PREFIX}${id}`;
 const occurrenceIdFor = (id: string) => `${OCCURRENCE_PREFIX}${id}`;
+
+interface FireGuard {
+  recordRevision: number;
+  sourceIdentity: string;
+}
+
+const sourceIdentityFor = (source: FollowUpSource, reason: string): string => {
+  if (source.kind === "experiment" && reason === "experiment-terminal") {
+    return JSON.stringify({ kind: source.kind, attemptId: source.attemptId, states: source.states ?? null });
+  }
+  return JSON.stringify(source);
+};
+
+const assertOnlyKeys = (value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string) => {
+  const unknown = Object.keys(value).filter((key) => !allowed.has(key));
+  if (unknown.length > 0) {
+    throw new HarnessServiceError("invalid-params", `${label} has unknown field${unknown.length === 1 ? "" : "s"}: ${unknown.join(", ")}`);
+  }
+};
+
+/** Validate and normalize the untrusted wire value at the service boundary. */
+const validateSource = (value: unknown): FollowUpSource => {
+  if (!isRecord(value) || typeof value.kind !== "string") {
+    throw new HarnessServiceError("invalid-params", "source.kind is required (time | experiment | manual)");
+  }
+  if (value.kind === "time") {
+    assertOnlyKeys(value, new Set(["kind", "at", "timezone"]), "time source");
+    if (typeof value.at !== "number" || !Number.isFinite(value.at)) {
+      throw new HarnessServiceError("invalid-params", "time source requires a finite `at` (epoch ms)");
+    }
+    if (value.timezone !== undefined) {
+      if (typeof value.timezone !== "string" || value.timezone.trim().length === 0) {
+        throw new HarnessServiceError("invalid-params", "time source timezone must be a non-empty IANA name");
+      }
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: value.timezone }).format(0);
+      } catch {
+        throw new HarnessServiceError("invalid-params", `invalid IANA timezone "${value.timezone}"`);
+      }
+    }
+    return {
+      kind: "time",
+      at: value.at,
+      ...(value.timezone !== undefined ? { timezone: value.timezone.trim() } : {}),
+    };
+  }
+  if (value.kind === "experiment") {
+    assertOnlyKeys(value, new Set(["kind", "attemptId", "states", "fallbackAt"]), "experiment source");
+    if (typeof value.attemptId !== "string" || value.attemptId.trim().length === 0) {
+      throw new HarnessServiceError("invalid-params", "experiment source requires a non-empty attemptId");
+    }
+    if (value.states !== undefined
+      && (!Array.isArray(value.states)
+        || value.states.some((state) => typeof state !== "string" || state.trim().length === 0))) {
+      throw new HarnessServiceError("invalid-params", "experiment source states must be an array of non-empty strings");
+    }
+    if (value.fallbackAt !== undefined
+      && (typeof value.fallbackAt !== "number" || !Number.isFinite(value.fallbackAt))) {
+      throw new HarnessServiceError("invalid-params", "experiment source fallbackAt must be a finite epoch time");
+    }
+    return {
+      kind: "experiment",
+      attemptId: value.attemptId.trim(),
+      ...(value.states !== undefined ? { states: value.states.map((state) => state.trim()) } : {}),
+      ...(value.fallbackAt !== undefined ? { fallbackAt: value.fallbackAt } : {}),
+    };
+  }
+  if (value.kind === "manual") {
+    assertOnlyKeys(value, new Set(["kind", "note"]), "manual source");
+    if (value.note !== undefined && typeof value.note !== "string") {
+      throw new HarnessServiceError("invalid-params", "manual source note must be a string");
+    }
+    return { kind: "manual", ...(value.note !== undefined ? { note: value.note } : {}) };
+  }
+  throw new HarnessServiceError("invalid-params", `unknown source kind "${value.kind}"`);
+};
 
 const summarizeSource = (source: FollowUpSource): string => {
   switch (source.kind) {
@@ -308,6 +402,24 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     timers.delete(id);
   };
 
+  /** Node clamps larger delays; chain chunks until the authoritative due time. */
+  const scheduleAt = (id: string, dueAt: number, callback: () => Promise<unknown>) => {
+    const scheduleNext = () => {
+      const delay = Math.max(0, Math.min(dueAt - now(), MAX_TIMER_DELAY_MS));
+      const timer = setTimeout(() => {
+        if (timers.get(id) !== timer) return;
+        timers.delete(id);
+        if (dueAt > now()) {
+          scheduleNext();
+          return;
+        }
+        void callback().catch(reportError);
+      }, delay);
+      timers.set(id, timer);
+    };
+    scheduleNext();
+  };
+
   const unwatchAttempt = (attemptId: string, followUpId: string) => {
     const set = attemptWaits.get(attemptId);
     if (!set) return;
@@ -321,10 +433,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const id = payload.id;
     clearTimer(id);
     if (payload.source.kind === "time") {
-      const delay = Math.max(0, Math.min(payload.source.at - now(), MAX_TIMER_DELAY_MS));
-      timers.set(id, setTimeout(() => {
-        void fire(payload.workspaceId, id, "time-due", { dueAt: payload.source.kind === "time" ? payload.source.at : 0 }).catch(reportError);
-      }, delay));
+      const dueAt = payload.source.at;
+      scheduleAt(id, dueAt, () => fire(
+        payload.workspaceId,
+        id,
+        "time-due",
+        { dueAt },
+        `time-${dueAt}`,
+        { recordRevision: record.recordRevision, sourceIdentity: sourceIdentityFor(payload.source, "time-due") },
+      ));
       return;
     }
     if (payload.source.kind === "experiment") {
@@ -337,10 +454,14 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       set.add(id);
       const fallbackAt = payload.source.fallbackAt;
       if (typeof fallbackAt === "number") {
-        const delay = Math.max(0, Math.min(fallbackAt - now(), MAX_TIMER_DELAY_MS));
-        timers.set(id, setTimeout(() => {
-          void fire(payload.workspaceId, id, "deadline", { fallbackAt, stillWaiting: true }).catch(reportError);
-        }, delay));
+        scheduleAt(id, fallbackAt, () => fire(
+          payload.workspaceId,
+          id,
+          "deadline",
+          { fallbackAt, stillWaiting: true },
+          `deadline-${fallbackAt}`,
+          { recordRevision: record.recordRevision, sourceIdentity: sourceIdentityFor(payload.source, "deadline") },
+        ));
       }
     }
   };
@@ -361,10 +482,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const goalPause = async (sessionId: string): Promise<string | undefined> => {
     try {
       const features = await deps.requestForSession(sessionId, "session.features.get", {}) as {
-        goal?: { id?: string; status?: string };
+        goal?: { id?: string; status?: string; statusReason?: string };
       };
-      const goalId = features?.goal?.id;
-      if (!goalId || features?.goal?.status !== "active") return undefined;
+      const goal = features?.goal;
+      const goalId = goal?.id;
+      if (!goalId) return undefined;
+      if (goal.status === "paused" && goal.statusReason === "waiting") {
+        return goalId;
+      }
+      if (goal.status !== "active") return undefined;
       await deps.requestForSession(sessionId, "session.features.mutate", {
         mutation: { type: "goal.update", goalId, status: "paused", statusReason: "waiting" },
       });
@@ -375,9 +501,24 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     }
   };
 
-  const goalResume = async (sessionId: string, goalId: string | undefined): Promise<void> => {
-    if (!goalId) return;
+  const goalResume = async (
+    workspaceId: string,
+    sessionId: string,
+    goalId: string | undefined,
+    completedFollowUpId: string,
+  ): Promise<boolean> => {
+    if (!goalId) return true;
     try {
+      const definitions = await listDefinitions(workspaceId);
+      const stillWaiting = definitions.some((record) => {
+        if (!ACTIVE_STATUSES.has(record.state as FollowUpStatus)) return false;
+        const candidate = payloadOf(record) as unknown as DefinitionPayload;
+        return candidate.id !== completedFollowUpId
+          && candidate.sessionId === sessionId
+          && (candidate.pausedGoalId === goalId
+            || (candidate.pauseRequested === true && !candidate.pausedGoalId));
+      });
+      if (stillWaiting) return true;
       const features = await deps.requestForSession(sessionId, "session.features.get", {}) as {
         goal?: { id?: string; status?: string; statusReason?: string };
       };
@@ -385,13 +526,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       // resurrect a goal the user paused or that settled meanwhile.
       if (features?.goal?.id !== goalId || features.goal.status !== "paused"
         || features.goal.statusReason !== "waiting") {
-        return;
+        return true;
       }
       await deps.requestForSession(sessionId, "session.features.mutate", {
         mutation: { type: "goal.update", goalId, status: "active", statusReason: "resumed" },
       });
+      return true;
     } catch (error) {
       reportError(error);
+      return false;
     }
   };
 
@@ -419,45 +562,71 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       // continuation. Busy gets a passive inform; idle gets the idempotent
       // execution request (its native receipt dedupes restart replays).
       if (await deps.sessionBusy(definition.sessionId).catch(() => false)) {
-        await deps.notifySession(definition.sessionId, task, occurrence.id);
-        return { delivery: "active-inform" as const };
+        try {
+          await deps.notifySession(definition.sessionId, task, occurrence.id);
+        } catch (error) {
+          if (await deps.sessionBusy(definition.sessionId).catch(() => true)) throw error;
+          await deps.sessionRequest(definition.sessionId, task, occurrence.id);
+          return { delivery: "continued" as const };
+        }
+        // The run can settle between the busy snapshot and notification. The
+        // shared message identity makes the idle request a safe handoff when it
+        // no longer has a live request to receive the inform.
+        if (await deps.sessionBusy(definition.sessionId).catch(() => true)) {
+          return { delivery: "active-inform" as const };
+        }
+        await deps.sessionRequest(definition.sessionId, task, occurrence.id);
+        return { delivery: "continued" as const };
       }
       await deps.sessionRequest(definition.sessionId, task, occurrence.id);
       return { delivery: "continued" as const };
     }
-    const thread = await deps.getThread(workspaceId, definition.threadId).catch(() => null);
-    if (!thread || thread.lifecycle === "archived") {
-      return { delivery: "dropped" as const };
-    }
-    const activeRun = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
-    const runActive = activeRun && (activeRun.workerState === "starting" || activeRun.workerState === "running");
-    if (thread.lifecycle === "queued") {
-      await deps.enqueueContinuation(workspaceId, definition.threadId, {
-        mode: "continue",
-        task,
-        requestId: occurrenceIdFor(occurrence.id),
-        from: { kind: "thread", id: definition.threadId },
-        at: new Date(now()).toISOString(),
-      });
-      return { delivery: "parked" };
-    }
-    if (runActive) {
-      // Same occurrence delivered once to the live session AND the ledger —
-      // the message id is the occurrence id so retries dedupe.
-      await deps.notifySession(definition.sessionId, task, occurrence.id);
-      await deps.recordDirectedMessage(workspaceId, {
-        id: occurrence.id,
-        from: { kind: "thread", id: definition.threadId },
-        to: { kind: "thread", id: definition.threadId },
-        kind: "inform",
-        text: task,
-        status: "delivered",
-        runId: activeRun.id,
-        at: new Date(now()).toISOString(),
-      });
-      return { delivery: "active-inform" };
-    }
-    if (thread.lifecycle === "settled" || activeRun?.workerState === "lost") {
+    const isLive = (run: { id: string; workerState: string; sessionId?: string | null } | null): run is { id: string; workerState: string; sessionId?: string | null } =>
+      run !== null && (run.workerState === "starting" || run.workerState === "running");
+    // Snapshot/notify races are resolved against live admission. Repeated
+    // notifications use one message id, while continueRun uses one request id;
+    // both downstream paths are idempotent for this occurrence.
+    while (true) {
+      const thread = await deps.getThread(workspaceId, definition.threadId).catch(() => null);
+      if (!thread || thread.lifecycle === "archived") {
+        return { delivery: "dropped" as const };
+      }
+      if (thread.lifecycle === "queued") {
+        await deps.enqueueContinuation(workspaceId, definition.threadId, {
+          mode: "continue",
+          task,
+          requestId: occurrenceIdFor(occurrence.id),
+          from: { kind: "thread", id: definition.threadId },
+          at: new Date(now()).toISOString(),
+        });
+        return { delivery: "parked" };
+      }
+      const activeRun = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
+      if (isLive(activeRun)) {
+        const activeSessionId = activeRun.sessionId || definition.sessionId;
+        try {
+          await deps.notifySession(activeSessionId, task, occurrence.id);
+        } catch (error) {
+          const afterFailure = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
+          if (isLive(afterFailure) && afterFailure.id === activeRun.id) throw error;
+          continue;
+        }
+        const afterNotify = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
+        if (!isLive(afterNotify) || afterNotify.id !== activeRun.id) {
+          continue;
+        }
+        await deps.recordDirectedMessage(workspaceId, {
+          id: occurrence.id,
+          from: { kind: "thread", id: definition.threadId },
+          to: { kind: "thread", id: definition.threadId },
+          kind: "inform",
+          text: task,
+          status: "delivered",
+          runId: activeRun.id,
+          at: new Date(now()).toISOString(),
+        });
+        return { delivery: "active-inform" };
+      }
       try {
         const result = await deps.continueRun({
           workspaceId,
@@ -472,27 +641,97 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
           ? { delivery: "continued", runId: result.runId }
           : { delivery: "parked" };
       } catch (error) {
-        // A user message or natural continuation may have won admission between
-        // the snapshot and now — merge into the live run instead of forcing a
-        // second one.
         const code = (error as { code?: string }).code;
         if (code === "conflict") {
-          await deps.notifySession(definition.sessionId, task, occurrence.id);
-          await deps.recordDirectedMessage(workspaceId, {
-            id: occurrence.id,
-            from: { kind: "thread", id: definition.threadId },
-            to: { kind: "thread", id: definition.threadId },
-            kind: "inform",
-            text: task,
-            status: "delivered",
-            at: new Date(now()).toISOString(),
-          });
-          return { delivery: "active-inform" };
+          continue;
         }
         throw error;
       }
     }
-    return { delivery: "dropped" as const };
+  };
+
+  const syncFollowUpAttention = async (workspaceId: string, threadId: string): Promise<void> => {
+    const definitions = await listDefinitions(workspaceId);
+    const remaining = definitions
+      .filter((record) => ACTIVE_STATUSES.has(record.state as FollowUpStatus))
+      .map((record) => payloadOf(record) as unknown as DefinitionPayload)
+      .find((candidate) => candidate.threadId === threadId && candidate.pauseRequested === true);
+    await deps.setFollowUpAttention(
+      workspaceId,
+      threadId,
+      remaining ? { kind: "followup", text: remaining.waitingSummary } : null,
+    );
+  };
+
+  /** Deliver an already-recorded occurrence and settle both records with CAS. */
+  const deliverRecordedOccurrence = async (
+    workspaceId: string,
+    followUpId: string,
+    occurrenceRecord: KernelRecordResult,
+  ): Promise<boolean> => {
+    const occurrence = payloadOf(occurrenceRecord) as unknown as OccurrencePayload;
+    let outcome: { delivery: FollowUpOccurrenceDelivery; runId?: string } | null = null;
+    if (occurrenceRecord.state === "delivered" || occurrenceRecord.state === "dropped") {
+      outcome = { delivery: occurrence.delivery ?? "dropped", ...(occurrence.runId ? { runId: occurrence.runId } : {}) };
+    } else {
+      const definitionRecord = await getDefinitionRecord(workspaceId, followUpId);
+      if (!definitionRecord) return false;
+      const definition = payloadOf(definitionRecord) as unknown as DefinitionPayload;
+      try {
+        outcome = await deliver(workspaceId, definition, occurrence);
+      } catch (error) {
+        reportError(error);
+        return false;
+      }
+      try {
+        occurrenceRecord = await putOccurrence(
+          workspaceId,
+          { ...occurrence, delivery: outcome.delivery, ...(outcome.runId ? { runId: outcome.runId } : {}) },
+          outcome.delivery === "dropped" ? "dropped" : "delivered",
+          occurrenceRecord.recordRevision,
+        );
+      } catch (error) {
+        const { scoped } = await recordScope(workspaceId);
+        const current = await scoped.getRecord(workspaceId, occurrenceIdFor(occurrence.id)).catch(() => null);
+        if (!current || (current.state !== "delivered" && current.state !== "dropped")) throw error;
+        occurrenceRecord = current;
+        const currentPayload = payloadOf(current) as unknown as OccurrencePayload;
+        outcome = {
+          delivery: currentPayload.delivery ?? "dropped",
+          ...(currentPayload.runId ? { runId: currentPayload.runId } : {}),
+        };
+      }
+    }
+
+    const latest = await getDefinitionRecord(workspaceId, followUpId);
+    if (!latest) return true;
+    const latestPayload = payloadOf(latest) as unknown as DefinitionPayload;
+    // A later mutation owns the definition; never overwrite its occurrence.
+    if (latestPayload.lastOccurrence?.id !== occurrence.id) return true;
+    const delivered = outcome.delivery !== "dropped";
+    const nextState: FollowUpStatus = outcome.delivery === "dropped"
+      ? "unavailable"
+      : occurrence.reason === "deadline" ? "waiting" : "delivered";
+    const nextPayload: DefinitionPayload = {
+      ...latestPayload,
+      updatedAt: now(),
+      lastOccurrence: {
+        id: occurrence.id,
+        reason: occurrence.reason,
+        at: occurrence.at,
+        delivered,
+      },
+    };
+    await putDefinition(workspaceId, nextPayload, nextState, latest.recordRevision);
+    if (nextState !== "waiting") {
+      disarm(latestPayload);
+      if (latestPayload.threadId) {
+        await syncFollowUpAttention(workspaceId, latestPayload.threadId).catch(reportError);
+      }
+      await goalResume(workspaceId, latestPayload.sessionId, latestPayload.pausedGoalId, followUpId);
+    }
+    changed(workspaceId);
+    return true;
   };
 
   /**
@@ -506,13 +745,21 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     reason: string,
     facts: Record<string, JsonValue>,
     dedupeKey?: string,
-  ): Promise<void> => {
-    await withDefinition(followUpId, async () => {
+    guard?: FireGuard,
+  ): Promise<boolean> => withDefinition(followUpId, async () => {
       const record = await getDefinitionRecord(workspaceId, followUpId);
-      if (!record) return;
+      if (!record) return false;
       const payload = payloadOf(record) as unknown as DefinitionPayload;
       const status = record.state as FollowUpStatus;
-      if (status !== "waiting") return; // cancelled/superseded/delivered — late callbacks cannot revive
+      if (status !== "waiting") return false; // cancelled/superseded/delivered — late callbacks cannot revive
+      if (guard) {
+        const sameRevision = record.recordRevision === guard.recordRevision;
+        const sameSource = sourceIdentityFor(payload.source, reason) === guard.sourceIdentity;
+        const consumedDeadlineOnly = reason === "experiment-terminal"
+          && payload.lastOccurrence?.reason === "deadline"
+          && sameSource;
+        if (!sameSource || (!sameRevision && !consumedDeadlineOnly)) return false;
+      }
       const occurrenceId = `occ-${followUpId}-${reason}-${dedupeKey ?? now()}`;
       const occurrence: OccurrencePayload = {
         id: occurrenceId,
@@ -536,7 +783,6 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
           throw error;
         }
       }
-      const occPayload = payloadOf(occurrenceRecord) as unknown as OccurrencePayload;
       if (reason === "deadline" && payload.source.kind === "experiment") {
         // Backstop fires once; the terminal wait survives — clear fallbackAt so
         // a reconcile does not re-arm the consumed deadline.
@@ -555,43 +801,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         disarm(payload);
       }
       changed(workspaceId);
-      const outcome: { delivery: FollowUpOccurrenceDelivery; runId?: string } = await deliver(
-        workspaceId, payload, occPayload,
-      ).catch((error) => {
-        reportError(error);
-        return { delivery: "dropped" as const };
-      });
-      const delivered = outcome.delivery !== "dropped";
-      await putOccurrence(
-        workspaceId,
-        { ...occPayload, delivery: outcome.delivery, ...(outcome.runId ? { runId: outcome.runId } : {}) },
-        delivered ? "delivered" : "dropped",
-        occurrenceRecord.recordRevision,
-      ).catch(reportError);
-      const refreshed = await getDefinitionRecord(workspaceId, followUpId);
-      if (refreshed) {
-        const refreshedPayload = payloadOf(refreshed) as unknown as DefinitionPayload;
-        const nextPayload: DefinitionPayload = {
-          ...refreshedPayload,
-          updatedAt: now(),
-          lastOccurrence: { id: occurrenceId, reason, at: occPayload.at, delivered },
-        };
-        const nextState: FollowUpStatus = reason === "deadline"
-          ? "waiting"
-          : delivered ? "delivered" : "triggered";
-        await putDefinition(workspaceId, nextPayload, nextState, refreshed.recordRevision).catch(reportError);
-        if (nextState !== "waiting" && refreshedPayload.threadId) {
-          await deps.setFollowUpAttention(workspaceId, refreshedPayload.threadId, null).catch(() => {});
-        }
-        if (nextState !== "waiting") {
-          await goalResume(refreshedPayload.sessionId, refreshedPayload.pausedGoalId);
-        }
-      }
-      changed(workspaceId);
+      await deliverRecordedOccurrence(workspaceId, followUpId, occurrenceRecord);
+      return true;
     });
-  };
 
-  const listDefinitions = async (workspaceId: string): Promise<KernelRecordResult[]> => {
+  async function listDefinitions(workspaceId: string): Promise<KernelRecordResult[]> {
     const { scoped } = await recordScope(workspaceId);
     const records: KernelRecordResult[] = [];
     let cursor: number | undefined;
@@ -604,6 +818,57 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       cursor = page.nextCursor === null ? undefined : page.nextCursor;
     } while (cursor !== undefined);
     return records;
+  }
+
+  const persistedExperimentCaller = (caller: FollowUpCaller): PersistedExperimentCaller => ({
+    workspaceId: caller.workspaceId,
+    executionWorkspaceId: caller.executionWorkspaceId,
+    sessionId: caller.sessionId,
+    ...(caller.threadId ? { threadId: caller.threadId } : {}),
+    ...(caller.runId ? { runId: caller.runId } : {}),
+    rootSessionId: caller.rootSessionId,
+    ...(caller.workspaceScope ? { workspaceScope: [...caller.workspaceScope] } : {}),
+    allowedThreadIds: [...caller.allowedThreadIds],
+  });
+
+  const markUnavailable = async (workspaceId: string, followUpId: string): Promise<void> => {
+    await withDefinition(followUpId, async () => {
+      const record = await getDefinitionRecord(workspaceId, followUpId);
+      if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) return;
+      const payload = payloadOf(record) as unknown as DefinitionPayload;
+      disarm(payload);
+      await putDefinition(workspaceId, { ...payload, updatedAt: now() }, "unavailable", record.recordRevision);
+      if (payload.threadId) await syncFollowUpAttention(workspaceId, payload.threadId).catch(reportError);
+      await goalResume(workspaceId, payload.sessionId, payload.pausedGoalId, followUpId);
+      changed(workspaceId);
+    });
+  };
+
+  const claimRequestedPause = async (
+    workspaceId: string,
+    followUpId: string,
+  ): Promise<KernelRecordResult | null> => withDefinition(followUpId, async () => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) return record;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.pauseRequested !== true || payload.pausedGoalId) return record;
+    const pausedGoalId = await goalPause(payload.sessionId);
+    if (!pausedGoalId) return record;
+    return putDefinition(workspaceId, {
+      ...payload,
+      pausedGoal: true,
+      pausedGoalId,
+      updatedAt: now(),
+    }, record.state as FollowUpStatus, record.recordRevision);
+  });
+
+  const assertLatestOccurrenceSettled = async (workspaceId: string, followUpId: string): Promise<void> => {
+    const current = await getDefinitionRecord(workspaceId, followUpId);
+    if (!current) return;
+    const payload = payloadOf(current) as unknown as DefinitionPayload;
+    if (ACTIVE_STATUSES.has(current.state as FollowUpStatus) && payload.lastOccurrence?.delivered === false) {
+      throw new Error(`follow-up occurrence delivery remains pending: ${payload.lastOccurrence.id}`);
+    }
   };
 
   const register = async (
@@ -614,28 +879,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     if (!instruction) {
       throw new HarnessServiceError("invalid-params", "instruction is required — what should happen when the source fires");
     }
-    const source = params.source;
-    if (!source || !isRecord(source) || typeof source.kind !== "string") {
-      throw new HarnessServiceError("invalid-params", "source.kind is required (time | experiment | manual)");
-    }
+    const source = validateSource(params.source);
     const thread = caller.threadId
       ? await deps.getThread(caller.workspaceId, caller.threadId).catch(() => null)
       : null;
     const parent: ThreadParent | undefined = caller.threadId
       ? (thread?.parent ?? { kind: "session", id: caller.sessionId })
       : undefined;
-    if (source.kind === "time" && (typeof source.at !== "number" || !Number.isFinite(source.at))) {
-      throw new HarnessServiceError("invalid-params", "time source requires a finite `at` (epoch ms)");
-    }
-    if (source.kind === "experiment" && typeof source.attemptId !== "string") {
-      throw new HarnessServiceError("invalid-params", "experiment source requires attemptId");
-    }
     const id = `fu-${randomUUID()}`;
-    let pausedGoalId: string | undefined;
-    if (params.pause === true) {
-      pausedGoalId = await goalPause(caller.sessionId);
-    }
-    const payload: DefinitionPayload = {
+    let payload: DefinitionPayload = {
       id,
       workspaceId: caller.workspaceId,
       sessionId: caller.sessionId,
@@ -644,47 +896,87 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       ...(caller.runId ? { runId: caller.runId } : {}),
       instruction,
       source,
-      pausedGoal: pausedGoalId !== undefined,
-      ...(pausedGoalId ? { pausedGoalId } : {}),
+      experimentCaller: persistedExperimentCaller(caller),
+      pauseRequested: params.pause === true,
+      pausedGoal: false,
       waitingSummary: `Waiting for ${summarizeSource(source)}`,
       createdAt: now(),
       updatedAt: now(),
     };
-    const record = await putDefinition(caller.workspaceId, payload, "waiting");
-    // Registration observes the source *before* subscribing so a condition that
-    // already held during registration still produces an occurrence (no lost
-    // edge between check and subscribe).
-    let firedImmediately = false;
-    if (source.kind === "experiment" && deps.getAttempt) {
-      const attempt = await deps.getAttempt(caller.workspaceId, source.attemptId).catch(() => null);
-      if (attempt === null) {
-        await putDefinition(caller.workspaceId, { ...payload, updatedAt: now() }, "unavailable", record.recordRevision)
-          .catch(reportError);
-      } else {
-        const states = new Set(source.states ?? [...TERMINAL_ATTEMPT_STATES]);
-        if (states.has(attempt.state)) {
-          firedImmediately = true;
-          void fire(caller.workspaceId, id, "experiment-terminal", {
-            attemptId: source.attemptId,
-            state: attempt.state,
-            ...(attempt.exitCode !== undefined ? { exitCode: attempt.exitCode } : {}),
-            atRegistration: true,
-          } as Record<string, JsonValue>, `reg-${record.recordRevision}`).catch(reportError);
-        }
+    // Persist pause intent before mutating the session goal. If the Host dies in
+    // the next window, reconcile can safely complete and claim the pause.
+    let record = await putDefinition(caller.workspaceId, payload, "waiting");
+    if (params.pause === true) {
+      const pausedGoalId = await goalPause(caller.sessionId);
+      if (pausedGoalId) {
+        payload = { ...payload, pausedGoal: true, pausedGoalId, updatedAt: now() };
+        record = await putDefinition(caller.workspaceId, payload, "waiting", record.recordRevision);
       }
     }
-    if (!firedImmediately) {
-      const refreshed = await getDefinitionRecord(caller.workspaceId, id);
-      if (refreshed) arm(refreshed);
-      if (params.pause === true && caller.threadId) {
-        await deps.setFollowUpAttention(caller.workspaceId, caller.threadId, {
-          kind: "followup",
-          text: payload.waitingSummary,
-        }).catch(reportError);
+    if (params.pause === true && caller.threadId) {
+      await syncFollowUpAttention(caller.workspaceId, caller.threadId).catch(reportError);
+    }
+
+    // Install the durable observer before reading the attempt snapshot. An event
+    // in the registration interval queues the same per-definition operation and
+    // is drained below before the result is returned.
+    let firedImmediately = false;
+    if (source.kind === "time") {
+      if (source.at <= now()) {
+        firedImmediately = await fire(caller.workspaceId, id, "time-due", { dueAt: source.at, atRegistration: true }, `time-${source.at}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(source, "time-due"),
+        });
+      } else {
+        arm(record);
       }
+    } else if (source.kind === "experiment") {
+      arm(record);
+      if (!deps.getAttempt) {
+        await markUnavailable(caller.workspaceId, id);
+      } else {
+        let attempt: ExperimentAttemptView | null | undefined;
+        try {
+          attempt = await deps.getAttempt(payload.experimentCaller, source.attemptId);
+        } catch (error) {
+          // A transient read failure leaves the durable observer armed.
+          reportError(error);
+        }
+        if (attempt === null) {
+          await markUnavailable(caller.workspaceId, id);
+        } else if (attempt !== undefined) {
+          const states = new Set(source.states ?? [...TERMINAL_ATTEMPT_STATES]);
+          if (states.has(attempt.state)) {
+            firedImmediately = await fire(caller.workspaceId, id, "experiment-terminal", {
+              attemptId: source.attemptId,
+              state: attempt.state,
+              ...(attempt.exitCode !== undefined ? { exitCode: attempt.exitCode } : {}),
+              atRegistration: true,
+            } as Record<string, JsonValue>, `terminal-${source.attemptId}-${attempt.state}`, {
+              recordRevision: record.recordRevision,
+              sourceIdentity: sourceIdentityFor(source, "experiment-terminal"),
+            });
+          } else if (source.fallbackAt !== undefined && source.fallbackAt <= now()) {
+            firedImmediately = await fire(caller.workspaceId, id, "deadline", {
+              fallbackAt: source.fallbackAt,
+              stillWaiting: true,
+              atRegistration: true,
+            }, `deadline-${source.fallbackAt}`, {
+              recordRevision: record.recordRevision,
+              sourceIdentity: sourceIdentityFor(source, "deadline"),
+            });
+          }
+        }
+      }
+      await withDefinition(id, async () => {});
+    } else {
+      arm(record);
     }
     changed(caller.workspaceId);
     const finalRecord = await getDefinitionRecord(caller.workspaceId, id);
+    if (finalRecord && (payloadOf(finalRecord) as unknown as DefinitionPayload).lastOccurrence) {
+      firedImmediately = true;
+    }
     return {
       followUp: toView(finalRecord ?? record),
       firedImmediately,
@@ -697,23 +989,31 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       throw new HarnessServiceError("not-found", `unknown follow-up "${id}"`);
     }
     const payload = payloadOf(record) as unknown as DefinitionPayload;
-    if (payload.workspaceId !== caller.workspaceId) {
+    const ownsTarget = payload.threadId !== undefined
+      ? caller.threadId === payload.threadId
+      : caller.sessionId === payload.sessionId;
+    if (payload.workspaceId !== caller.workspaceId || !ownsTarget) {
       throw new HarnessServiceError("not-found", `unknown follow-up "${id}"`);
     }
     return { record, payload };
   };
 
   const list = async (caller: FollowUpCaller, params: FollowUpListParams): Promise<FollowUpListResult> => {
+    // Also covers an ad-hoc root workspace that was not present in the Thread
+    // catalog or saved project list during Host startup.
+    await reconcile(caller.workspaceId);
     const records = await listDefinitions(caller.workspaceId);
     const views = records
       .map(toView)
       .filter((view) => params.includeInactive === true || ACTIVE_STATUSES.has(view.status))
-      .filter((view) => view.sessionId === caller.sessionId
-        || (caller.threadId !== undefined && view.threadId === caller.threadId));
+      .filter((view) => view.threadId !== undefined
+        ? caller.threadId === view.threadId
+        : caller.sessionId === view.sessionId);
     return { followUps: views.sort((a, b) => a.createdAt - b.createdAt) };
   };
 
   const get = async (caller: FollowUpCaller, params: FollowUpGetParams): Promise<FollowUpGetResult> => {
+    await reconcile(caller.workspaceId);
     const { record } = await requireDefinition(caller, params.id);
     const { scoped } = await recordScope(caller.workspaceId);
     const occurrences: FollowUpOccurrenceView[] = [];
@@ -733,7 +1033,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   };
 
   const update = async (caller: FollowUpCaller, params: FollowUpUpdateParams): Promise<FollowUpUpdateResult> => {
-    return withDefinition(params.id, async () => {
+    let instruction: string | undefined;
+    if (params.instruction !== undefined) {
+      if (typeof params.instruction !== "string" || params.instruction.trim().length === 0) {
+        throw new HarnessServiceError("invalid-params", "instruction must be a non-empty string");
+      }
+      instruction = params.instruction.trim();
+    }
+    const source = params.source !== undefined ? validateSource(params.source) : undefined;
+    const result = await withDefinition(params.id, async () => {
       const { record, payload } = await requireDefinition(caller, params.id);
       const status = record.state as FollowUpStatus;
       if (!ACTIVE_STATUSES.has(status)) {
@@ -747,26 +1055,82 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       }
       const next: DefinitionPayload = {
         ...payload,
-        ...(params.instruction !== undefined ? { instruction: params.instruction } : {}),
-        ...(params.source !== undefined ? { source: params.source } : {}),
+        ...(instruction !== undefined ? { instruction } : {}),
+        ...(source !== undefined ? {
+          source,
+          experimentCaller: persistedExperimentCaller(caller),
+        } : {}),
         updatedAt: now(),
-        waitingSummary: params.source !== undefined
-          ? `Waiting for ${summarizeSource(params.source)}`
+        waitingSummary: source !== undefined
+          ? `Waiting for ${summarizeSource(source)}`
           : payload.waitingSummary,
       };
       const updated = await putDefinition(caller.workspaceId, next, "waiting", record.recordRevision);
       disarm(payload);
-      arm(updated);
       changed(caller.workspaceId);
-      return { followUp: toView(updated) };
+      return { updated, next };
     });
+    const { updated, next } = result;
+    if (next.source.kind === "time" && next.source.at <= now()) {
+      await fire(caller.workspaceId, params.id, "time-due", { dueAt: next.source.at, via: "update" }, `time-${next.source.at}`, {
+        recordRevision: updated.recordRevision,
+        sourceIdentity: sourceIdentityFor(next.source, "time-due"),
+      });
+    } else if (next.source.kind === "experiment") {
+      arm(updated);
+      if (!deps.getAttempt) {
+        await markUnavailable(caller.workspaceId, params.id);
+      } else {
+        let attempt: ExperimentAttemptView | null;
+        try {
+          attempt = await deps.getAttempt(next.experimentCaller, next.source.attemptId);
+        } catch (error) {
+          reportError(error);
+          const current = await getDefinitionRecord(caller.workspaceId, params.id);
+          return { followUp: toView(current ?? updated) };
+        }
+        if (attempt === null) {
+          await markUnavailable(caller.workspaceId, params.id);
+        } else {
+          const states = new Set(next.source.states ?? [...TERMINAL_ATTEMPT_STATES]);
+          if (states.has(attempt.state)) {
+            await fire(caller.workspaceId, params.id, "experiment-terminal", {
+              attemptId: next.source.attemptId,
+              state: attempt.state,
+              ...(attempt.exitCode !== undefined ? { exitCode: attempt.exitCode } : {}),
+              via: "update",
+            }, `terminal-${next.source.attemptId}-${attempt.state}`, {
+              recordRevision: updated.recordRevision,
+              sourceIdentity: sourceIdentityFor(next.source, "experiment-terminal"),
+            });
+          } else if (next.source.fallbackAt !== undefined && next.source.fallbackAt <= now()) {
+            await fire(caller.workspaceId, params.id, "deadline", {
+              fallbackAt: next.source.fallbackAt,
+              stillWaiting: true,
+              via: "update",
+            }, `deadline-${next.source.fallbackAt}`, {
+              recordRevision: updated.recordRevision,
+              sourceIdentity: sourceIdentityFor(next.source, "deadline"),
+            });
+          }
+        }
+      }
+    } else {
+      arm(updated);
+    }
+    const current = await getDefinitionRecord(caller.workspaceId, params.id);
+    return { followUp: toView(current ?? updated) };
   };
 
   const cancel = async (caller: FollowUpCaller, params: FollowUpCancelParams): Promise<FollowUpGetResult> => {
     await withDefinition(params.id, async () => {
       const { record, payload } = await requireDefinition(caller, params.id);
       const status = record.state as FollowUpStatus;
-      if (!ACTIVE_STATUSES.has(status)) return;
+      if (!ACTIVE_STATUSES.has(status)) {
+        if (payload.threadId) await syncFollowUpAttention(caller.workspaceId, payload.threadId).catch(reportError);
+        await goalResume(caller.workspaceId, payload.sessionId, payload.pausedGoalId, params.id);
+        return;
+      }
       if (params.expectedRevision !== undefined && params.expectedRevision !== String(record.recordRevision)) {
         throw new HarnessServiceError(
           "failed",
@@ -776,9 +1140,9 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       disarm(payload);
       await putDefinition(caller.workspaceId, { ...payload, updatedAt: now() }, "cancelled", record.recordRevision);
       if (payload.threadId) {
-        await deps.setFollowUpAttention(caller.workspaceId, payload.threadId, null).catch(() => {});
+        await syncFollowUpAttention(caller.workspaceId, payload.threadId).catch(reportError);
       }
-      await goalResume(payload.sessionId, payload.pausedGoalId);
+      await goalResume(caller.workspaceId, payload.sessionId, payload.pausedGoalId, params.id);
       changed(caller.workspaceId);
     });
     return get(caller, { id: params.id });
@@ -788,7 +1152,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const evaluate = async (
     caller: FollowUpCaller,
     id: string,
-  ): Promise<{ satisfied: boolean; reason?: string; facts: Record<string, JsonValue> }> => {
+  ): Promise<{ satisfied: boolean; unavailable?: boolean; reason?: string; facts: Record<string, JsonValue>; guard?: FireGuard }> => {
     const { record } = await requireDefinition(caller, id);
     const payload = payloadOf(record) as unknown as DefinitionPayload;
     if (record.state !== "waiting") {
@@ -797,20 +1161,26 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const source = payload.source;
     if (source.kind === "time") {
       const due = source.at <= now();
-      return { satisfied: due, reason: "time-due", facts: { dueAt: source.at, now: now(), due } };
+      return {
+        satisfied: due,
+        reason: "time-due",
+        facts: { dueAt: source.at, now: now(), due },
+        guard: { recordRevision: record.recordRevision, sourceIdentity: sourceIdentityFor(source, "time-due") },
+      };
     }
     if (source.kind === "experiment") {
       const attempt = deps.getAttempt
-        ? await deps.getAttempt(caller.workspaceId, source.attemptId).catch(() => null)
+        ? await deps.getAttempt(payload.experimentCaller, source.attemptId)
         : null;
       if (attempt === null) {
-        return { satisfied: false, facts: { attemptId: source.attemptId, observed: "unavailable" } };
+        return { satisfied: false, unavailable: true, facts: { attemptId: source.attemptId, observed: "unavailable" } };
       }
       const states = new Set(source.states ?? [...TERMINAL_ATTEMPT_STATES]);
       const satisfied = states.has(attempt.state);
       return {
         satisfied,
         reason: "experiment-terminal",
+        guard: { recordRevision: record.recordRevision, sourceIdentity: sourceIdentityFor(source, "experiment-terminal") },
         facts: {
           attemptId: source.attemptId,
           state: attempt.state,
@@ -823,13 +1193,26 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
 
   const check = async (caller: FollowUpCaller, params: FollowUpCheckParams): Promise<FollowUpCheckResult> => {
     const outcome = await evaluate(caller, params.id);
-    if (outcome.satisfied && outcome.reason) {
-      await fire(caller.workspaceId, params.id, outcome.reason, { ...outcome.facts, via: "check" });
+    let fired = false;
+    if (outcome.unavailable) {
+      await markUnavailable(caller.workspaceId, params.id);
+    } else if (outcome.satisfied && outcome.reason) {
+      const dedupeKey = outcome.reason === "time-due"
+        ? `time-${String(outcome.facts.dueAt)}`
+        : undefined;
+      fired = await fire(
+        caller.workspaceId,
+        params.id,
+        outcome.reason,
+        { ...outcome.facts, via: "check" },
+        dedupeKey,
+        outcome.guard,
+      );
     }
     const { record } = await requireDefinition(caller, params.id);
     return {
       followUp: toView(record),
-      fired: outcome.satisfied,
+      fired,
       observed: outcome.facts,
     };
   };
@@ -843,53 +1226,54 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         `revision conflict — re-read and retry (current ${record.recordRevision})`,
       );
     }
-    await fire(caller.workspaceId, params.id, params.reason ?? "invoked-now", { via: "manual" }, `manual-${now()}`);
+    const reason = params.reason ?? "invoked-now";
+    await fire(caller.workspaceId, params.id, reason, { via: "manual" }, `manual-${now()}`, {
+      recordRevision: record.recordRevision,
+      sourceIdentity: sourceIdentityFor((payloadOf(record) as unknown as DefinitionPayload).source, reason),
+    });
     return get(caller, { id: params.id });
   };
 
   // Experiment attempt changes drive experiment-source waits. A terminal
   // attempt fires its waiters once; the occurrence identity dedupes replays.
-  const unsubscribeAttempts = deps.subscribeAttempts?.((workspaceId, attemptId, view) => {
+  const unsubscribeAttempts = deps.subscribeAttempts?.((workspaceId, attemptId, _view) => {
     const waiting = attemptWaits.get(attemptId);
     if (!waiting) return;
-    if (!view) {
-      // The watched attempt record is gone — report honestly instead of
-      // waiting forever.
-      for (const followUpId of [...waiting]) {
-        void withDefinition(followUpId, async () => {
-          const record = await getDefinitionRecord(workspaceId, followUpId);
-          if (!record || record.state !== "waiting") return;
-          const payload = payloadOf(record) as unknown as DefinitionPayload;
-          if (payload.source.kind !== "experiment" || payload.source.attemptId !== attemptId) return;
-          disarm(payload);
-          await putDefinition(workspaceId, { ...payload, updatedAt: now() }, "unavailable", record.recordRevision);
-          changed(workspaceId);
-        }).catch(reportError);
-      }
-      return;
-    }
     for (const followUpId of [...waiting]) {
-      // Not withDefinition here — fire() takes that lock itself and re-reads
-      // the durable record, so a stale view can only produce a replayed
-      // occurrence id, never a double delivery.
       void (async () => {
         const record = await getDefinitionRecord(workspaceId, followUpId);
         if (!record || record.state !== "waiting") return;
         const payload = payloadOf(record) as unknown as DefinitionPayload;
         if (payload.source.kind !== "experiment" || payload.source.attemptId !== attemptId) return;
+        if (!deps.getAttempt) {
+          await markUnavailable(workspaceId, followUpId);
+          return;
+        }
+        // Subscription payloads are only wakeups. Re-read through the
+        // definition's persisted ExperimentCaller so a Host observer never
+        // becomes a maintenance-authority bypass.
+        const observed = await deps.getAttempt(payload.experimentCaller, attemptId);
+        if (observed === null) {
+          await markUnavailable(workspaceId, followUpId);
+          return;
+        }
         const states = new Set(payload.source.states ?? [...TERMINAL_ATTEMPT_STATES]);
-        if (!states.has(view.state)) return;
+        if (!states.has(observed.state)) return;
         await fire(workspaceId, followUpId, "experiment-terminal", {
           attemptId,
-          state: view.state,
-          ...(view.exitCode !== undefined ? { exitCode: view.exitCode } : {}),
-          ...(view.endedAt !== undefined && view.endedAt !== null ? { endedAt: view.endedAt } : {}),
-        } as Record<string, JsonValue>, `attempt-${view.state}-${record.recordRevision}`);
+          state: observed.state,
+          ...(observed.exitCode !== undefined ? { exitCode: observed.exitCode } : {}),
+          ...(observed.endedAt !== undefined && observed.endedAt !== null ? { endedAt: observed.endedAt } : {}),
+        } as Record<string, JsonValue>, `terminal-${attemptId}-${observed.state}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(payload.source, "experiment-terminal"),
+        });
       })().catch(reportError);
     }
   });
 
   const reconciledWorkspaces = new Set<string>();
+  const reconcileOperations = new Map<string, Promise<void>>();
 
   /**
    * Rebuild observers from durable records after a host restart. Overdue time
@@ -899,71 +1283,138 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
    */
   const reconcile = async (workspaceId: string): Promise<void> => {
     if (reconciledWorkspaces.has(workspaceId)) return;
-    reconciledWorkspaces.add(workspaceId);
-    const records = await listDefinitions(workspaceId).catch(() => []);
-    for (const record of records) {
-      const payload = payloadOf(record) as unknown as DefinitionPayload;
-      const status = record.state as FollowUpStatus;
-      if (status === "waiting") {
-        if (payload.source.kind === "time" && payload.source.at <= now()) {
-          void fire(workspaceId, payload.id, "time-due", {
-            dueAt: payload.source.at,
-            delayedByMs: now() - payload.source.at,
-            recoveredAfterRestart: true,
-          }, `restart-${payload.source.at}`).catch(reportError);
+    const existing = reconcileOperations.get(workspaceId);
+    if (existing) return existing;
+    const operation = (async () => {
+      // Do not mark the workspace reconciled until the authoritative list read
+      // and every recovery mutation succeeds; callers may retry a failed pass.
+      const records = await listDefinitions(workspaceId);
+      let sideEffectFailed = false;
+      for (const initialRecord of records) {
+        let record = initialRecord;
+        let payload = payloadOf(record) as unknown as DefinitionPayload;
+        let status = record.state as FollowUpStatus;
+
+        if (!ACTIVE_STATUSES.has(status)) {
+          disarm(payload);
+          if (payload.threadId && payload.pauseRequested === true) {
+            try {
+              await syncFollowUpAttention(workspaceId, payload.threadId);
+            } catch (error) {
+              reportError(error);
+              sideEffectFailed = true;
+            }
+          }
+          if (!await goalResume(workspaceId, payload.sessionId, payload.pausedGoalId, payload.id)) {
+            sideEffectFailed = true;
+          }
           continue;
         }
-        if (payload.source.kind === "experiment" && deps.getAttempt) {
-          const attempt = await deps.getAttempt(workspaceId, payload.source.attemptId).catch(() => null);
+
+        if (payload.pauseRequested === true && !payload.pausedGoalId) {
+          const claimed = await claimRequestedPause(workspaceId, payload.id);
+          if (!claimed) continue;
+          record = claimed;
+          payload = payloadOf(record) as unknown as DefinitionPayload;
+          status = record.state as FollowUpStatus;
+          if (payload.threadId) await syncFollowUpAttention(workspaceId, payload.threadId);
+        }
+
+        if (payload.lastOccurrence && payload.lastOccurrence.delivered === false) {
+          // Deadline occurrences keep observing the terminal attempt while their
+          // own delivery is recovered.
+          if (status === "waiting" && payload.lastOccurrence.reason === "deadline") arm(record);
+          const { scoped } = await recordScope(workspaceId);
+          const occurrenceRecord = await scoped.getRecord(
+            workspaceId,
+            occurrenceIdFor(payload.lastOccurrence.id),
+          );
+          if (!occurrenceRecord) {
+            await markUnavailable(workspaceId, payload.id);
+            continue;
+          }
+          const recovered = await withDefinition(payload.id, () => (
+            deliverRecordedOccurrence(workspaceId, payload.id, occurrenceRecord)
+          ));
+          if (!recovered) throw new Error(`follow-up occurrence delivery remains pending: ${payload.lastOccurrence.id}`);
+          const refreshed = await getDefinitionRecord(workspaceId, payload.id);
+          if (!refreshed) continue;
+          record = refreshed;
+          payload = payloadOf(record) as unknown as DefinitionPayload;
+          status = record.state as FollowUpStatus;
+          if (!ACTIVE_STATUSES.has(status)) continue;
+          if (payload.lastOccurrence?.delivered === false) {
+            throw new Error(`follow-up occurrence did not settle: ${payload.lastOccurrence.id}`);
+          }
+        }
+
+        if (status === "triggered") {
+          // Triggered without an exact pending occurrence cannot be recovered by
+          // guessing from workspace history.
+          await markUnavailable(workspaceId, payload.id);
+          continue;
+        }
+        if (payload.source.kind === "time") {
+          if (payload.source.at <= now()) {
+            const fired = await fire(workspaceId, payload.id, "time-due", {
+              dueAt: payload.source.at,
+              delayedByMs: now() - payload.source.at,
+              recoveredAfterRestart: true,
+            }, `time-${payload.source.at}`, {
+              recordRevision: record.recordRevision,
+              sourceIdentity: sourceIdentityFor(payload.source, "time-due"),
+            });
+            if (fired) await assertLatestOccurrenceSettled(workspaceId, payload.id);
+          } else {
+            arm(record);
+          }
+          continue;
+        }
+        if (payload.source.kind === "experiment") {
+          arm(record);
+          if (!deps.getAttempt) {
+            await markUnavailable(workspaceId, payload.id);
+            continue;
+          }
+          const attempt = await deps.getAttempt(payload.experimentCaller, payload.source.attemptId);
           if (attempt === null) {
-            await putDefinition(workspaceId, { ...payload, updatedAt: now() }, "unavailable", record.recordRevision)
-              .catch(reportError);
+            await markUnavailable(workspaceId, payload.id);
             continue;
           }
           const states = new Set(payload.source.states ?? [...TERMINAL_ATTEMPT_STATES]);
           if (states.has(attempt.state)) {
-            void fire(workspaceId, payload.id, "experiment-terminal", {
+            const fired = await fire(workspaceId, payload.id, "experiment-terminal", {
               attemptId: payload.source.attemptId,
               state: attempt.state,
               recoveredAfterRestart: true,
-            }, `restart-terminal-${attempt.state}`).catch(reportError);
-            continue;
+            }, `terminal-${payload.source.attemptId}-${attempt.state}`, {
+              recordRevision: record.recordRevision,
+              sourceIdentity: sourceIdentityFor(payload.source, "experiment-terminal"),
+            });
+            if (fired) await assertLatestOccurrenceSettled(workspaceId, payload.id);
+          } else if (payload.source.fallbackAt !== undefined && payload.source.fallbackAt <= now()) {
+            const fired = await fire(workspaceId, payload.id, "deadline", {
+              fallbackAt: payload.source.fallbackAt,
+              stillWaiting: true,
+              recoveredAfterRestart: true,
+            }, `deadline-${payload.source.fallbackAt}`, {
+              recordRevision: record.recordRevision,
+              sourceIdentity: sourceIdentityFor(payload.source, "deadline"),
+            });
+            if (fired) await assertLatestOccurrenceSettled(workspaceId, payload.id);
           }
+          continue;
         }
         arm(record);
-      } else if (status === "triggered") {
-        // Occurrence was recorded but delivery did not complete — redeliver the
-        // same occurrence identity (continueRun requestId dedupes downstream).
-        const { scoped } = await recordScope(workspaceId);
-        const occPage = await scoped.listRecords({
-          workspaceId, recordType: "followup.occurrence", pageSize: 128,
-        }).catch(() => ({ records: [] as KernelRecordResult[] }));
-        const pending = occPage.records
-          .map(occurrenceView)
-          .filter((occ) => occ.followUpId === payload.id)
-          .sort((a, b) => b.at - a.at)[0];
-        if (pending) {
-          const occPayload: OccurrencePayload = {
-            id: pending.id,
-            followUpId: pending.followUpId,
-            reason: pending.reason,
-            facts: pending.facts,
-            delivery: pending.delivery,
-            ...(pending.runId ? { runId: pending.runId } : {}),
-            at: pending.at,
-          };
-          void deliver(workspaceId, payload, occPayload).then((outcome) => {
-            void putOccurrence(workspaceId, { ...occPayload, delivery: outcome.delivery, ...(outcome.runId ? { runId: outcome.runId } : {}) },
-              outcome.delivery === "dropped" ? "dropped" : "delivered").catch(reportError);
-            return getDefinitionRecord(workspaceId, payload.id);
-          }).then((latest) => {
-            if (!latest) return;
-            const latestPayload = payloadOf(latest) as unknown as DefinitionPayload;
-            return putDefinition(workspaceId, { ...latestPayload, updatedAt: now() },
-              "delivered", latest.recordRevision).catch(reportError);
-          }).catch(reportError);
-        }
       }
+      if (sideEffectFailed) throw new Error(`follow-up side-effect reconciliation failed for workspace ${workspaceId}`);
+      reconciledWorkspaces.add(workspaceId);
+    })();
+    reconcileOperations.set(workspaceId, operation);
+    try {
+      await operation;
+    } finally {
+      if (reconcileOperations.get(workspaceId) === operation) reconcileOperations.delete(workspaceId);
     }
   };
 

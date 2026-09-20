@@ -5,7 +5,7 @@ import path from 'path';
 import type { PiariumSettingsDocument } from '@piarium/settings-store';
 import { createSettingsRuntime } from './settings-runtime.js';
 
-const createRuntime = async () => {
+const createRuntime = async (syncPresets: (presets: unknown) => Promise<void> = async () => {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'piarium-settings-runtime-'));
   const settingsFilePath = path.join(tempRoot, 'settings.json');
   const runtime = createSettingsRuntime({
@@ -17,7 +17,7 @@ const createRuntime = async () => {
     mergePersistedSettings: (_current, changes) => changes,
     normalizeSettingsPaths: (settings) => ({ settings, changed: false }),
     formatSettingsResponse: (settings) => settings,
-    syncManagedRemoteTunnelConfigWithPresets: async () => {},
+    syncManagedRemoteTunnelConfigWithPresets: syncPresets,
     upsertManagedRemoteTunnelToken: async () => {},
   });
 
@@ -77,6 +77,20 @@ describe('settings runtime', () => {
         activeProjectId: null,
         projects: [project],
       });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('synchronizes the managed tunnel owner when presets are removed', async () => {
+    const synchronized: unknown[] = [];
+    const { runtime, cleanup } = await createRuntime(async (presets) => { synchronized.push(presets); });
+    try {
+      await runtime.persistSettings({ managedRemoteTunnelPresets: [{ id: 'one', name: 'One', hostname: 'one.test' }] });
+      const current = await runtime.readSettingsFromDisk();
+      const revision = (document: PiariumSettingsDocument) => JSON.stringify(document);
+      await runtime.persistSettingsCas({}, ['managedRemoteTunnelPresets'], revision(current), revision);
+      expect(synchronized).toEqual([[{ id: 'one', name: 'One', hostname: 'one.test' }], undefined]);
     } finally {
       await cleanup();
     }

@@ -1658,7 +1658,9 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 ## 阶段 S：对话式设置与 Agent 管理（D-306）
 
-状态：**纵切已接线并定向验证（S0–S3 交付，S4 组合 Skill 未单独交付文件）/ 尚未完整验收**。设计 authority 为
+状态：**核心字段纵切已接线并经 D-308 验收返工 / 阶段仍为 Partial**。S0/S1 的共用目录与查询、
+S2 的 app/Pi 字段修改及 S3 的对应 UI 同步已经接线；领域 action、client Surface 管理、跨 owner 多项操作、
+完整覆盖收口与 S4 组合 Skill 尚未交付。设计 authority 为
 [agent-settings-design.md](agent-settings-design.md)，本节只规定实施责任和完成边界。
 实施现状见 [agent-harness-status.md](agent-harness-status.md) 的 D-306 记录。
 
@@ -1736,7 +1738,8 @@ S0–S4 是同一完整阶段内的实施顺序，不是把剩余设置长期列
 
 ## 阶段 W：会话等待、触发与续接（D-307）
 
-状态：**纵切已接线 / 定向验证通过 / 尚未完整验收**（2026-09-20）。设计 authority 为
+状态：**time/experiment/manual 纵切与 scheduler 终态已接线并经 D-308 验收返工 / 阶段仍为 Partial**
+（2026-09-20）。产物、指标、日志、外部查询来源，远程/集群续接和主动 archive/delete 收口尚未交付。设计 authority 为
 [agent-follow-up-design.md](agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
 原生权限和 scheduler 服务；支持原会话续接，并保留按日历新建工作的用途。
 实施进展与未覆盖边界见 [agent-harness-status.md](agent-harness-status.md) 的 D-307 记录。

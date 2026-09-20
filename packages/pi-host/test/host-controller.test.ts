@@ -281,6 +281,30 @@ describe("HostController", () => {
       const projectSettingsRevision = (settingsBeforeUpdate.result as {
         projectRevision: string;
       }).projectRevision;
+      const globalSettingsRevision = (settingsBeforeUpdate.result as {
+        globalRevision: string;
+      }).globalRevision;
+
+      transport.receive(
+        createRequest("invalid-harness-settings", "settings.update", {
+          expectedRevision: globalSettingsRevision,
+          remove: [],
+          scope: "global",
+          set: {
+            harness: {
+              permissions: {
+                mode: "normal",
+                rules: [{ tool: "bash", decision: "maybe" }],
+              },
+            },
+          },
+        }),
+      );
+      const invalidHarnessSettings = await transport.waitFor((entry) =>
+        isResponse(entry, "invalid-harness-settings"),
+      );
+      assert.ok(invalidHarnessSettings.kind === "response" && !invalidHarnessSettings.ok);
+      assert.match(invalidHarnessSettings.error.message, /invalid decision/);
 
       transport.receive(
         createRequest("plugin-settings", "settings.update", {
@@ -311,8 +335,8 @@ describe("HostController", () => {
       );
       assert.equal(
         (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
-        2,
-        "saving plugin settings reloads extensions so their new configuration takes effect",
+        1,
+        "saving next-run settings does not reload the current session synchronously",
       );
 
       transport.receive(
@@ -359,7 +383,7 @@ describe("HostController", () => {
       );
       assert.equal(
         (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
-        3,
+        2,
         "saving an extension-owned config document reloads extensions",
       );
 
@@ -401,7 +425,7 @@ describe("HostController", () => {
       );
       assert.equal(
         (await readFile(extensionLoadLog, "utf8")).trim().split("\n").length,
-        4,
+        3,
         "saving plugin-owned JSONC reloads extensions",
       );
 

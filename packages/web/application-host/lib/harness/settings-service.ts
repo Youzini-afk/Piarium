@@ -318,8 +318,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       };
     }
     const fields = entryFields(entry);
+    const trustedProject = snapshot.projectTrusted ? snapshot.project : {};
     const pickScope = (path: string, layer: 'global' | 'project') =>
-      getPath(layer === 'global' ? snapshot.global : snapshot.project, path);
+      getPath(layer === 'global' ? snapshot.global : trustedProject, path);
     const values: SettingsFieldValue[] = fields.map((field) => {
       const layer = scope === 'effective' ? undefined : scope;
       const saved = layer ? pickScope(field.path, layer) : undefined;
@@ -337,7 +338,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     // exactly like the running product.
     const merged = mergeHarnessSettings(
       isRecord(snapshot.global.harness) ? snapshot.global.harness as never : {},
-      isRecord(snapshot.project.harness) ? snapshot.project.harness as never : {},
+      isRecord(trustedProject.harness) ? trustedProject.harness as never : {},
     ) as unknown as Record<string, unknown>;
     const effectiveOf = (path: string): { value: unknown; source: 'user' | 'project' | 'default' | 'none' } => {
       const project = pickScope(path, 'project');
@@ -379,6 +380,12 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const detail = params.detail === true;
     switch (entry.owner) {
       case 'app':
+        if (params.scope === 'global' || params.scope === 'project') {
+          throw new HarnessServiceError(
+            'denied',
+            `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
+          );
+        }
         return readApp(entry, detail, caller);
       case 'pi-settings':
         return readPi(entry, params.scope ?? 'effective', detail, caller);
@@ -410,6 +417,12 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
+    if (params.scope !== undefined) {
+      throw new HarnessServiceError(
+        'denied',
+        `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
+      );
+    }
     const fields = entryFields(entry);
     const byPath = new Map(fields.map((field) => [field.path, field]));
     const fieldResults: SettingsFieldResult[] = [];
@@ -435,8 +448,13 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       validSets.push([path, value]);
     }
     for (const path of resetPaths) {
-      if (!byPath.has(path)) {
+      const field = byPath.get(path);
+      if (!field) {
         fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
+        continue;
+      }
+      if (field.kind === 'secret') {
+        fieldResults.push({ path, status: 'failed', error: 'credential fields cannot be reset through this service' });
         continue;
       }
       validResets.push(path);
@@ -574,6 +592,10 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       const field = byPath.get(path);
       if (!field) {
         fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
+        continue;
+      }
+      if (field.kind === 'secret') {
+        fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
         continue;
       }
       if (scope === 'project' && field.scope === 'user') {

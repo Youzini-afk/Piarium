@@ -435,6 +435,27 @@ describe('updateDesktopSettings', () => {
     expect(useUIStore.getState().terminalShell).toBe('bash');
   });
 
+  test('does not let an invalidated in-flight settings load overwrite the refreshed cache', async () => {
+    const staleLoad = deferred<{ settings: SettingsPayload; source: 'web' }>();
+    registerSettingsApi(async () => ({}), () => staleLoad.promise);
+    const firstSync = syncDesktopSettings();
+
+    invalidateSettingsCache();
+    registerSettingsApi(async () => ({}), async () => ({
+      settings: { terminalShell: 'fish' },
+      source: 'web',
+    }));
+    await syncDesktopSettings();
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+
+    staleLoad.resolve({ settings: { terminalShell: 'zsh' }, source: 'web' });
+    await firstSync;
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+
+    await syncDesktopSettings();
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+  });
+
   test('removes browser projections omitted by the next authoritative runtime', async () => {
     getWindow();
     localStorage.clear();

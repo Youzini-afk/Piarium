@@ -170,6 +170,7 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import {
   HarnessSettingsValidationError,
   HarnessInferenceSettingsValidationError,
+  PermissionPolicyValidationError,
   mergeHarnessSettings,
   mergePolicies,
   normalizeFrozenHarnessPermissions,
@@ -656,6 +657,8 @@ export class SessionHost {
   #contextPreparation: ContextPreparationExtension | undefined;
   #contextConfigReader: (() => HarnessContextSettings) | undefined;
   #contextLastFailure: HarnessContextRuntimeFailure | undefined;
+  #settingsSessionReloadPending = false;
+  #settingsSessionReloadActive: Promise<void> | null = null;
   #disposed = false;
   #inputContext: AgentInputContext = { source: "disk" };
   #backgroundInference: BackgroundInferenceRuntime | undefined;
@@ -1325,6 +1328,7 @@ export class SessionHost {
     inputContext: AgentInputContext = { source: "disk" },
   ): Promise<{ accepted: boolean }> {
     this.assertSession(sessionId);
+    await this.#applyPendingSettingsReload();
     const session = this.session;
     const previousContext = this.#inputContext;
     this.#inputContext = inputContext;
@@ -2792,75 +2796,109 @@ export class SessionHost {
       : join(this.runtime.cwd, ".pi", "settings.json");
     const editor = new JsonObjectFileEditor(settingsPath);
     let globalContextSettingChanged = false;
-    if (scope === "global") {
-      if (typeof set !== "object" || set === null || Array.isArray(set)) {
-        throw new HostError("invalid_config", "Configuration set must be an object");
+    if (typeof set !== "object" || set === null || Array.isArray(set)) {
+      throw new HostError("invalid_config", "Configuration set must be an object");
+    }
+    const current = await editor.read();
+    const candidate = applyTopLevelJsonChanges(
+      current.document,
+      set,
+      remove,
+    );
+    try {
+      const [globalDocument, projectDocument] = scope === "global"
+        ? [candidate, settings.isProjectTrusted()
+            ? (await new JsonObjectFileEditor(join(this.runtime.cwd, ".pi", "settings.json")).read()).document
+            : {}]
+        : [(await new JsonObjectFileEditor(join(this.#agentDir, "settings.json")).read()).document, candidate];
+      const globalHarnessValue = globalDocument.harness;
+      const projectHarnessValue = projectDocument.harness;
+      if (globalHarnessValue !== undefined && (
+        typeof globalHarnessValue !== "object" || globalHarnessValue === null || Array.isArray(globalHarnessValue)
+      )) {
+        throw new HarnessSettingsValidationError("harness must be an object");
       }
-      const current = await editor.read();
-      const currentHarness = current.document.harness;
-      const currentHarnessRecord = typeof currentHarness === "object" && currentHarness !== null && !Array.isArray(currentHarness)
-        ? currentHarness as Record<string, unknown>
-        : {};
-      let currentContext: ReturnType<typeof resolveHarnessContextSettings> | undefined;
-      try {
-        currentContext = resolveHarnessContextSettings(
-          currentHarnessRecord.context,
-          currentHarnessRecord.memory,
-        );
-      } catch {
-        // A valid candidate may repair malformed persisted context settings.
+      if (projectHarnessValue !== undefined && (
+        typeof projectHarnessValue !== "object" || projectHarnessValue === null || Array.isArray(projectHarnessValue)
+      )) {
+        throw new HarnessSettingsValidationError("project harness must be an object");
       }
-      const candidate = applyTopLevelJsonChanges(
-        current.document,
-        set,
-        remove,
-      );
-      try {
-        const harness = candidate.harness;
-        if (harness !== undefined && (
-          typeof harness !== "object" || harness === null || Array.isArray(harness)
-        )) {
-          throw new HarnessSettingsValidationError("harness must be an object");
-        }
-        const harnessRecord = typeof harness === "object" && harness !== null && !Array.isArray(harness)
-          ? harness as Record<string, unknown>
-          : {};
-        parseHarnessEmbeddingSettings(harnessRecord.embedding);
-        parseHarnessRerankSettings(harnessRecord.rerank);
+      const globalHarness = (globalHarnessValue ?? {}) as HarnessSettingsInput;
+      const projectHarness = (projectHarnessValue ?? {}) as HarnessSettingsInput;
+      // This is the same merge/validator used to assemble a new Run. It catches
+      // malformed permission rules, context/review values, and scope overlays
+      // before the revisioned editor commits the candidate.
+      mergeHarnessSettings(globalHarness, projectHarness);
+      parseHarnessEmbeddingSettings(globalHarness.embedding);
+      parseHarnessRerankSettings(globalHarness.rerank);
+      if (scope === "global") {
         const candidateContext = resolveHarnessContextSettings(
-          harnessRecord.context,
-          harnessRecord.memory,
+          globalHarness.context,
+          globalHarness.memory,
         );
+        const currentHarness = current.document.harness as Record<string, unknown> | undefined;
+        let currentContext: ReturnType<typeof resolveHarnessContextSettings> | undefined;
+        try {
+          currentContext = resolveHarnessContextSettings(currentHarness?.context, currentHarness?.memory);
+        } catch {
+          // A valid candidate may repair malformed persisted context settings.
+        }
         globalContextSettingChanged = currentContext === undefined
           || currentContext.backgroundPreparation !== candidateContext.backgroundPreparation
           || currentContext.preparationWaterline !== candidateContext.preparationWaterline;
-      } catch (error) {
-        if (
-          error instanceof HarnessSettingsValidationError
-          || error instanceof HarnessInferenceSettingsValidationError
-        ) {
-          throw new HostError("invalid_settings", error.message);
-        }
-        throw error;
       }
+    } catch (error) {
+      if (
+        error instanceof HarnessSettingsValidationError
+        || error instanceof HarnessInferenceSettingsValidationError
+        || error instanceof PermissionPolicyValidationError
+      ) {
+        throw new HostError("invalid_settings", error.message);
+      }
+      throw error;
     }
     await editor.updateRevisioned(
       set,
       remove,
       expectedRevision,
     );
-    await settings.reload();
-    const reloadErrors = settings.drainErrors();
-    if (reloadErrors.length > 0) {
-      throw new HostError(
-        "settings_write_failed",
-        reloadErrors.map((entry) => entry.error.message).join("; "),
-      );
-    }
     if (globalContextSettingChanged) this.#contextLastFailure = undefined;
-    await this.session.reload();
-    this.#emit("session.snapshot", this.snapshot());
+    this.#settingsSessionReloadPending = true;
+    // A settings tool executes inside the current agent runner. Reloading that
+    // runner before its bridge response returns invalidates the caller after the
+    // file has already committed. The pending state is picked up only at
+    // agent_settled / the next prompt boundary.
     return this.#settingsSnapshot();
+  }
+
+  async #applyPendingSettingsReload(expectedRuntime = this.#runtime): Promise<void> {
+    if (this.#settingsSessionReloadActive) return this.#settingsSessionReloadActive;
+    if (!this.#settingsSessionReloadPending || !expectedRuntime || this.#runtime !== expectedRuntime) return;
+    const apply = async () => {
+      this.#settingsSessionReloadPending = false;
+      const settings = expectedRuntime.services.settingsManager;
+      try {
+        await settings.reload();
+        const reloadErrors = settings.drainErrors();
+        if (reloadErrors.length > 0) {
+          throw new HostError(
+            "settings_write_failed",
+            reloadErrors.map((entry) => entry.error.message).join("; "),
+          );
+        }
+        if (this.#runtime !== expectedRuntime) return;
+        await expectedRuntime.session.reload();
+        if (this.#runtime === expectedRuntime) this.#emit("session.snapshot", this.snapshot());
+      } catch (error) {
+        if (this.#runtime === expectedRuntime) this.#settingsSessionReloadPending = true;
+        throw error;
+      }
+    };
+    const active = apply().finally(() => {
+      if (this.#settingsSessionReloadActive === active) this.#settingsSessionReloadActive = null;
+    });
+    this.#settingsSessionReloadActive = active;
+    return active;
   }
 
   #resourceRoots(kind: PiResourceKind): ResourceRoot[] {
@@ -3610,6 +3648,16 @@ export class SessionHost {
           });
         });
       }
+      if (event.type === "agent_settled" && this.#settingsSessionReloadPending) {
+        queueMicrotask(() => {
+          void this.#applyPendingSettingsReload(runtime).catch((error) => {
+            this.#emit("host.error", {
+              code: "settings_reload_failed",
+              message: error instanceof Error ? error.message : String(error),
+            });
+          });
+        });
+      }
       if (
         event.type === "agent_start" ||
         event.type === "agent_end" ||
@@ -3697,6 +3745,7 @@ export class SessionHost {
   }
 
   async #disposeRuntime(): Promise<void> {
+    this.#settingsSessionReloadPending = false;
     this.#backgroundInference?.dispose();
     this.#backgroundInference = undefined;
     this.#inferenceCwd = undefined;

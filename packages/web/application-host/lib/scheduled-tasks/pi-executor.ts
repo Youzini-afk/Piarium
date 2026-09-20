@@ -19,7 +19,7 @@ export const buildScheduledPiPrompt = (task: ScheduledExecutionTask): string => 
   return prompt && instructions ? `${prompt}\n\n${instructions}` : prompt;
 };
 
-export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion }: {
+export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion, forgetCompletion }: {
   broker: Pick<PiRuntimeBroker, 'createSession' | 'requestForSession'>;
   /**
    * Resolves when the session's run actually settles (D-307 W3.6). Without it
@@ -28,6 +28,9 @@ export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion }: {
    * production wiring must always provide one.
    */
   awaitCompletion?: (sessionId: string) => Promise<SessionSettleOutcome>;
+  /** Drops a pending waiter when dispatch fails or the goal reaches a terminal
+   * state before another agent turn starts. */
+  forgetCompletion?: (sessionId: string) => void;
 }) => {
   if (!broker || typeof broker.createSession !== 'function' || typeof broker.requestForSession !== 'function') {
     throw new Error('A Pi runtime broker is required for scheduled tasks');
@@ -74,7 +77,7 @@ export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion }: {
       const dispatchedAsCommand = prompt.startsWith('/');
       // Register the settle waiter before dispatching so the run's terminal
       // events cannot race past the subscription (D-307 W3.6).
-      const completion = !dispatchedAsCommand && awaitCompletion
+      let completion = !dispatchedAsCommand && awaitCompletion
         ? awaitCompletion(sessionID)
         : null;
       if (dispatchedAsCommand) {
@@ -94,41 +97,56 @@ export const createPiScheduledTaskExecutor = ({ broker, awaitCompletion }: {
       // The dispatch receipt is not the result — wait for the actual run to
       // settle, then report the observed outcome (goal terminal state for
       // goal runs, turn completion otherwise).
-      if (completion) {
+      while (completion) {
         const outcome = await completion;
+        completion = null;
         if (!outcome.settled) {
           throw new Error(outcome.error ?? 'the scheduled session ended before the run settled');
         }
         if (outcome.aborted) {
           throw new Error(outcome.error ?? 'the scheduled run was aborted');
         }
-        if (runAsGoal) {
-          const features = await broker.requestForSession(sessionID, 'session.features.get', { sessionId: sessionID })
-            .catch(() => null);
-          const goal = features && typeof features === 'object'
-            ? (features as { goal?: { status?: string; statusReason?: string } }).goal
-            : undefined;
-          switch (goal?.status) {
-            case 'complete':
-              break;
-            case 'blocked':
-            case 'budgetLimited':
-              throw new Error(`scheduled goal ended ${goal.status}: ${goal.statusReason ?? 'no reason recorded'}`);
-            case 'paused':
-              // A follow-up registration parks the goal deliberately — the
-              // wait is the continuation, not a failure (D-307).
-              if (goal.statusReason === 'waiting') break;
-              throw new Error(`scheduled goal paused: ${goal.statusReason ?? 'no reason recorded'}`);
-            case 'active':
-              throw new Error('scheduled goal was still active after the session settled');
-            default:
-              break;
-          }
+        if (!runAsGoal) break;
+
+        // Register the next waiter before inspecting the Goal. Goal automation
+        // reacts to agent_settled asynchronously; otherwise a fast continuation
+        // could start and settle between the status read and the next waiter.
+        const nextCompletion = awaitCompletion ? awaitCompletion(sessionID) : null;
+        const features = await broker.requestForSession(sessionID, 'session.features.get', { sessionId: sessionID })
+          .catch(() => null);
+        const goal = features && typeof features === 'object'
+          ? (features as { goal?: { status?: string; statusReason?: string } }).goal
+          : undefined;
+        switch (goal?.status) {
+          case 'complete':
+            forgetCompletion?.(sessionID);
+            break;
+          case 'blocked':
+          case 'budgetLimited':
+            forgetCompletion?.(sessionID);
+            throw new Error(`scheduled goal ended ${goal.status}: ${goal.statusReason ?? 'no reason recorded'}`);
+          case 'paused':
+            forgetCompletion?.(sessionID);
+            // A follow-up registration parks the goal deliberately — the
+            // wait is the continuation, not a failure (D-307).
+            if (goal.statusReason === 'waiting') break;
+            throw new Error(`scheduled goal paused: ${goal.statusReason ?? 'no reason recorded'}`);
+          case 'active':
+            if (!nextCompletion) {
+              throw new Error('scheduled goal is active but completion tracking is unavailable');
+            }
+            completion = nextCompletion;
+            continue;
+          default:
+            forgetCompletion?.(sessionID);
+            throw new Error('scheduled goal state is unavailable after the run settled');
         }
+        break;
       }
 
       return { dispatchedAsCommand, sessionID };
     } catch (error) {
+      forgetCompletion?.(sessionID);
       if (error && typeof error === 'object' && !('sessionID' in error)) {
         Object.defineProperty(error, 'sessionID', {
           configurable: true,

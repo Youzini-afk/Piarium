@@ -17,6 +17,8 @@ export type HarnessToolMutation = 'none' | 'journaled' | 'process';
 export interface HarnessToolMeta {
   mutation: HarnessToolMutation;
   executionMode: 'parallel' | 'sequential';
+  /** Permission/audit action when mutation alone is not precise enough. */
+  permissionAction?: 'read' | 'control';
 }
 
 export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
@@ -53,6 +55,9 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   experiment: { mutation: 'process', executionMode: 'sequential' },
   resources: { mutation: 'none', executionMode: 'parallel' },
   research_source: { mutation: 'none', executionMode: 'parallel' },
+  settings_search: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
+  settings_read: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
+  settings_update: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
 };
 
 export const toolMutation = (name: string): HarnessToolMutation | 'unknown' => (

@@ -56,4 +56,30 @@ describe('Harness automatic saving', () => {
     await controller.load();
     expect(write.mock.calls[0]![0]).toEqual({ models: { explore: { providerId: 'two', modelId: 'other' } }, web: { domains: { block: ['blocked.test'], allow: [] } }, review: { enabled: false } });
   });
+
+  it('refreshes an externally changed Pi settings snapshot while preserving local state', async () => {
+    const read = vi.fn()
+      .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))
+      .mockResolvedValueOnce(snapshot({ shell: 'wsl' }, 'b'));
+    const controller = new HarnessSettingsController({ read, write: vi.fn() });
+    await controller.load();
+    await controller.refresh();
+    expect(controller.getSnapshot().harness?.shell).toBe('wsl');
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not lose an external refresh that arrives while a save is in flight', async () => {
+    const pendingWrite = deferred<PiSettingsSnapshot>();
+    const read = vi.fn()
+      .mockResolvedValueOnce(snapshot({ shell: 'auto' }, 'a'))
+      .mockResolvedValueOnce(snapshot({ shell: 'wsl', review: { enabled: true } }, 'c'));
+    const controller = new HarnessSettingsController({ read, write: vi.fn(() => pendingWrite.promise) });
+    await controller.load();
+    controller.update({ tools: { grep: false } });
+    const refreshed = controller.refresh();
+    pendingWrite.resolve(snapshot({ shell: 'auto', tools: { grep: false } }, 'b'));
+    await refreshed;
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(controller.getSnapshot().harness).toMatchObject({ shell: 'wsl', review: { enabled: true } });
+  });
 });

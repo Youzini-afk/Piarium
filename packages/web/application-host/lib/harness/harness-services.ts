@@ -1200,9 +1200,13 @@ export function registerHarnessServices(
       }
       return {
         workspaceId: caller.workspaceId,
+        executionWorkspaceId: caller.executionWorkspaceId,
         sessionId: caller.sessionId,
         ...(caller.threadId ? { threadId: caller.threadId } : {}),
         ...(caller.runId ? { runId: caller.runId } : {}),
+        rootSessionId: caller.rootSessionId ?? caller.sessionId,
+        ...(caller.workspaceScope ? { workspaceScope: caller.workspaceScope } : {}),
+        allowedThreadIds: caller.allowedThreadIds ?? [],
       };
     };
     router.register("followup.register", {

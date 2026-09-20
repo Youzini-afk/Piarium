@@ -8,7 +8,6 @@ import type { createProjectConfigRuntime } from '../projects/project-config.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
-const DEFAULT_MAX_RUN_MS = 30 * 60 * 1000;
 const JITTER_MAX_MS = 2_000;
 const TASK_TITLE_MAX_LENGTH = 120;
 const TASK_DUE_SLACK_MS = 5_000;
@@ -48,7 +47,6 @@ interface ScheduledTasksRuntimeDependencies {
   logger?: Pick<Console, 'info' | 'warn'>;
   maxGlobalConcurrency?: number;
   maxProjectConcurrency?: number;
-  maxRunDurationMs?: number;
   projectConfigRuntime: ReturnType<typeof createProjectConfigRuntime>;
 }
 
@@ -263,7 +261,6 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     logger = console,
     maxGlobalConcurrency = DEFAULT_GLOBAL_CONCURRENCY,
     maxProjectConcurrency = DEFAULT_PROJECT_CONCURRENCY,
-    maxRunDurationMs = DEFAULT_MAX_RUN_MS,
   } = deps;
 
   let executeTask = initialExecuteTask;
@@ -461,8 +458,12 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       for (const entry of await loopDirectoriesFor(projectPath)) {
         wanted.add(entry.directory);
         // Watching the .agents parent also catches the loops directory being
-        // created for the first time.
-        wanted.add(pathDirname(entry.directory));
+        // created for the first time. Watching its parent catches the first
+        // creation of .agents itself; both missing directories cannot otherwise
+        // produce an fs.watch event.
+        const agentsDirectory = pathDirname(entry.directory);
+        wanted.add(agentsDirectory);
+        wanted.add(pathDirname(agentsDirectory));
       }
     }
     for (const [directory, watcher] of loopWatchers) {
@@ -503,7 +504,7 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     return projectRunning < maxProjectConcurrency;
   };
 
-  const runTaskWithWatchdog = async (projectID: string, task: ScheduledTask, reason: RunReason) => {
+  const executeScheduledTask = async (projectID: string, task: ScheduledTask, reason: RunReason) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -565,127 +566,122 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
     runningGlobalCount += 1;
     runningCountByProject.set(projectID, (runningCountByProject.get(projectID) || 0) + 1);
 
-    const runStartedAt = Date.now();
-    await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
-      lastRunAt: runStartedAt,
-      lastStatus: 'running',
-      lastError: undefined,
-      updatedAt: runStartedAt,
-    }).then((result) => {
-      if (result.task) {
-        updateInMemoryTask(projectID, result.task);
-      }
-    });
-
-    let status: 'error' | 'success' = 'success';
-    let sessionID: string | undefined;
-    let durationMs = 0;
-    let errorMessage: string | undefined;
-
     try {
-      const runPromise = runTaskWithWatchdog(projectID, task, reason);
-      let timeoutID: ReturnType<typeof setTimeout> | undefined;
-      const timeoutPromise = new Promise<never>((_resolve, reject) => {
-        timeoutID = setTimeout(() => {
-          reject(new Error('scheduled task run timed out'));
-        }, maxRunDurationMs);
-      });
-
-      const result = await Promise.race([runPromise, timeoutPromise]).finally(() => {
-        if (timeoutID) {
-          clearTimeout(timeoutID);
+      const runStartedAt = Date.now();
+      await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, {
+        lastRunAt: runStartedAt,
+        lastStatus: 'running',
+        lastError: undefined,
+        updatedAt: runStartedAt,
+      }).then((result) => {
+        if (result.task) {
+          updateInMemoryTask(projectID, result.task);
         }
       });
-      sessionID = result.sessionID;
-      durationMs = result.durationMs;
-      status = 'success';
-      logger.info?.(
-        '[ScheduledTasks] run completed',
-        { projectID, taskID, status, reason, sessionID, durationMs }
-      );
-    } catch (error) {
-      status = 'error';
-      if (error && typeof error === 'object' && 'sessionID' in error && typeof error.sessionID === 'string') sessionID = error.sessionID;
-      errorMessage = safeErrorMessage(error);
-      logger.warn?.('[ScheduledTasks] run failed', {
-        projectID,
-        taskID,
-        reason,
-        status,
-        error: errorMessage,
-      });
-    }
 
-    const finishedAt = Date.now();
-    if (!durationMs) {
-      durationMs = Math.max(0, finishedAt - runStartedAt);
-    }
-    let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
-    const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
-    if (shouldConsumeOneTimeTask && latestTask?.enabled) {
+      let status: 'error' | 'success' = 'success';
+      let sessionID: string | undefined;
+      let durationMs = 0;
+      let errorMessage: string | undefined;
+
       try {
-        const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
-          ...latestTask,
-          enabled: false,
-        });
-        latestTask = consumed.task || latestTask;
-        updateInMemoryTask(projectID, latestTask);
-      } catch (consumeError) {
-        logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
+        // The executor observes the real Pi session/Goal terminal state. Releasing
+        // the scheduler slot on an arbitrary wall-clock watchdog would permit a
+        // second run while the first session is still doing legitimate work.
+        const result = await executeScheduledTask(projectID, task, reason);
+        sessionID = result.sessionID;
+        durationMs = result.durationMs;
+        status = 'success';
+        logger.info?.(
+          '[ScheduledTasks] run completed',
+          { projectID, taskID, status, reason, sessionID, durationMs }
+        );
+      } catch (error) {
+        status = 'error';
+        if (error && typeof error === 'object' && 'sessionID' in error && typeof error.sessionID === 'string') sessionID = error.sessionID;
+        errorMessage = safeErrorMessage(error);
+        logger.warn?.('[ScheduledTasks] run failed', {
           projectID,
           taskID,
-          error: safeErrorMessage(consumeError),
+          reason,
+          status,
+          error: errorMessage,
         });
       }
-    }
 
-    const nextRunAt = computeNextRunAt(latestTask, finishedAt);
+      const finishedAt = Date.now();
+      if (!durationMs) {
+        durationMs = Math.max(0, finishedAt - runStartedAt);
+      }
+      let latestTask = (tasksByProject.get(projectID)?.get(taskID)) || task;
+      const shouldConsumeOneTimeTask = latestTask?.schedule?.kind === 'once' && reason === 'scheduled';
+      if (shouldConsumeOneTimeTask && latestTask?.enabled) {
+        try {
+          const consumed = await projectConfigRuntime.upsertScheduledTask(projectID, {
+            ...latestTask,
+            enabled: false,
+          });
+          latestTask = consumed.task || latestTask;
+          updateInMemoryTask(projectID, latestTask);
+        } catch (consumeError) {
+          logger.warn?.('[ScheduledTasks] failed to consume one-time task', {
+            projectID,
+            taskID,
+            error: safeErrorMessage(consumeError),
+          });
+        }
+      }
 
-    const statePatch = {
-      lastStatus: status,
-      lastDurationMs: durationMs,
-      lastError: status === 'error' ? errorMessage : undefined,
-      lastSessionId: sessionID,
-      nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
-      updatedAt: finishedAt,
-    };
+      const nextRunAt = computeNextRunAt(latestTask, finishedAt);
 
-    const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
-    if (stateResult.task) {
-      updateInMemoryTask(projectID, stateResult.task);
-      if (stateResult.task.enabled && typeof stateResult.task.state.nextRunAt === 'number' && Number.isFinite(stateResult.task.state.nextRunAt)) {
-        scheduleTask(projectID, taskID, stateResult.task.state.nextRunAt);
+      const statePatch = {
+        lastStatus: status,
+        lastDurationMs: durationMs,
+        lastError: status === 'error' ? errorMessage : undefined,
+        lastSessionId: sessionID,
+        nextRunAt: Number.isFinite(nextRunAt) ? nextRunAt : undefined,
+        updatedAt: finishedAt,
+      };
+
+      const stateResult = await projectConfigRuntime.updateScheduledTaskState(projectID, taskID, statePatch);
+      if (stateResult.task) {
+        updateInMemoryTask(projectID, stateResult.task);
+        if (stateResult.task.enabled && typeof stateResult.task.state.nextRunAt === 'number' && Number.isFinite(stateResult.task.state.nextRunAt)) {
+          scheduleTask(projectID, taskID, stateResult.task.state.nextRunAt);
+        }
+      }
+
+      try {
+        emitTaskRunEvent?.({
+          projectID,
+          taskID,
+          ranAt: finishedAt,
+          status,
+          ...(sessionID ? { sessionID } : {}),
+        });
+      } catch {
+        // Event delivery must not alter the persisted run result.
+      }
+
+      return {
+        ok: status === 'success',
+        status,
+        sessionID,
+        task: stateResult.task || null,
+        error: errorMessage,
+      };
+    } finally {
+      // Persistence/event failures must not permanently consume scheduler
+      // admission after the underlying execution has ended or failed to start.
+      runningTaskKeys.delete(taskKey);
+      runningGlobalCount = Math.max(0, runningGlobalCount - 1);
+      const nextProjectCount = Math.max(0, (runningCountByProject.get(projectID) || 1) - 1);
+      if (nextProjectCount === 0) {
+        runningCountByProject.delete(projectID);
+      } else {
+        runningCountByProject.set(projectID, nextProjectCount);
       }
     }
-
-    try {
-      emitTaskRunEvent?.({
-        projectID,
-        taskID,
-        ranAt: finishedAt,
-        status,
-        ...(sessionID ? { sessionID } : {}),
-      });
-    } catch {
-      // Event delivery must not alter the persisted run result.
-    }
-
-    runningTaskKeys.delete(taskKey);
-    runningGlobalCount = Math.max(0, runningGlobalCount - 1);
-    const nextProjectCount = Math.max(0, (runningCountByProject.get(projectID) || 1) - 1);
-    if (nextProjectCount === 0) {
-      runningCountByProject.delete(projectID);
-    } else {
-      runningCountByProject.set(projectID, nextProjectCount);
-    }
-
-    return {
-      ok: status === 'success',
-      status,
-      sessionID,
-      task: stateResult.task || null,
-      error: errorMessage,
-    };
   };
 
   const pumpQueue = (): void => {

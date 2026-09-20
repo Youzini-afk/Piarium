@@ -103,6 +103,7 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     // client tokens, tunnel tokens) that must never reach the log file.
     console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
     const sanitized = sanitizeSettingsUpdate(changes);
+    const removed = new Set(removals);
     let next = mergePersistedSettings(current, sanitized);
     for (const field of removals) {
       if (Object.prototype.hasOwnProperty.call(next, field)) {
@@ -145,7 +146,8 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
         next = { ...next, activeProjectId: null };
       }
 
-      if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')) {
+      if (Object.prototype.hasOwnProperty.call(sanitized, 'managedRemoteTunnelPresets')
+        || removed.has('managedRemoteTunnelPresets')) {
         await syncManagedRemoteTunnelConfigWithPresets(next.managedRemoteTunnelPresets);
       }
 

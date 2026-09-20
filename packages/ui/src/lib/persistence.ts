@@ -1492,8 +1492,9 @@ type SettingsRuntimeContext = { runtimeKey: string; generation: number };
 
 // Short-lived cache + in-flight dedup for settings fetches to avoid repeated GET calls during startup
 let _settingsRuntimeGeneration = 0;
+let _settingsCacheEpoch = 0;
 let _settingsCache: { value: DesktopSettings | null; at: number; context: SettingsRuntimeContext } | null = null;
-let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext } | null = null;
+let _settingsInflight: { promise: Promise<DesktopSettings | null>; context: SettingsRuntimeContext; epoch: number } | null = null;
 let _pendingSettingsChanges: Partial<DesktopSettings> | null = null;
 let _pendingSettingsContext: SettingsRuntimeContext | null = null;
 let _settingsFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1528,6 +1529,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
   subscribeRuntimeEndpointChanged((detail) => {
     if (detail.runtimeKey === detail.previousRuntimeKey) return;
     _settingsRuntimeGeneration += 1;
+    _settingsCacheEpoch += 1;
     _settingsCache = null;
     _settingsInflight = null;
   });
@@ -1535,48 +1537,52 @@ const ensureSettingsRuntimeLifecycle = (): void => {
 
 const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Promise<DesktopSettings | null> => {
   ensureSettingsRuntimeLifecycle();
+  const epoch = _settingsCacheEpoch;
+  const isCurrentFetch = () => epoch === _settingsCacheEpoch && isSettingsRuntimeContextCurrent(context);
   // Return cached if fresh
   if (_settingsCache && isSameSettingsRuntimeContext(_settingsCache.context, context) && Date.now() - _settingsCache.at < SETTINGS_CACHE_TTL) {
     return _settingsCache.value;
   }
 
   // Dedup concurrent calls
-  if (_settingsInflight && isSameSettingsRuntimeContext(_settingsInflight.context, context)) return _settingsInflight.promise;
+  if (_settingsInflight && _settingsInflight.epoch === epoch
+    && isSameSettingsRuntimeContext(_settingsInflight.context, context)) return _settingsInflight.promise;
 
   const inflight = {
     context,
+    epoch,
     promise: (async (): Promise<DesktopSettings | null> => {
       const runtimeSettings = getRuntimeSettingsAPI();
       if (runtimeSettings) {
         try {
           const result = await runtimeSettings.load();
-          if (!isSettingsRuntimeContextCurrent(context)) return null;
+          if (!isCurrentFetch()) return null;
           const settings = sanitizeWebSettings(result.settings);
           _settingsCache = { value: settings, at: Date.now(), context };
           return settings;
         } catch (error) {
-          if (!isSettingsRuntimeContextCurrent(context)) return null;
+          if (!isCurrentFetch()) return null;
           console.warn('Failed to load shared settings from runtime settings API:', error);
         }
       }
 
-      if (!isSettingsRuntimeContextCurrent(context)) return null;
+      if (!isCurrentFetch()) return null;
       try {
         const response = await runtimeFetch('/api/config/settings', {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        if (!isCurrentFetch()) return null;
         if (!response.ok) {
           return null;
         }
         const data = await response.json().catch(() => null);
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        if (!isCurrentFetch()) return null;
         const settings = sanitizeWebSettings(data);
         _settingsCache = { value: settings, at: Date.now(), context };
         return settings;
       } catch (error) {
-        if (!isSettingsRuntimeContextCurrent(context)) return null;
+        if (!isCurrentFetch()) return null;
         console.warn('Failed to load shared settings from server:', error);
         return null;
       }
@@ -1592,7 +1598,9 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
 /** Invalidate cached settings (call after a successful PUT) */
 export const invalidateSettingsCache = (): void => {
+  _settingsCacheEpoch += 1;
   _settingsCache = null;
+  _settingsInflight = null;
 };
 
 export const syncDesktopSettings = async (): Promise<void> => {

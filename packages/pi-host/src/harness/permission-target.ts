@@ -78,6 +78,7 @@ export function classifyPermissionAction(toolName: string, source: PermissionToo
   if (THREAD_TOOLS.has(toolName)) return "thread";
   if (READ_TOOLS.has(toolName)) return "read";
   const meta = HARNESS_TOOL_META[toolName];
+  if (meta?.permissionAction) return meta.permissionAction;
   if (meta?.mutation === "journaled") return "write";
   if (meta?.mutation === "process") return "process";
   if (meta?.mutation === "none") return "read";

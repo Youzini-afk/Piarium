@@ -1,12 +1,13 @@
 # Piarium 对话式设置与 Agent 管理设计
 
-Status: accepted design / planned Stage S (D-306); not implemented or accepted as a production capability
+Status: core field vertical slice implemented and wired; acceptance corrected at D-308; Stage S remains partial
 
 Last updated: 2026-09-20
 
 实施顺序见 [Harness plan 的阶段 S](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
 交付事实见 [Harness status](agent-harness-status.md)，决策见 [D-306](decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
-本文定义后续目标；已有设置 API、配置编辑器或 Skill 文件能力，不等于本设计已接入 Agent。
+本文同时定义完整目标和当前实现边界；字段目录、查询/修改与 UI 同步已经接线，领域动作、客户端 Surface
+操作和 S4 组合指南仍未完成，具体事实以 status 为准。
 
 ## 1. 产品目标
 

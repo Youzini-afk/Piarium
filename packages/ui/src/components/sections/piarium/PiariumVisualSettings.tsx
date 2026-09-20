@@ -1743,6 +1743,7 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
                                 {shouldShow('expandedTools') && (
                                     <SettingsSection
                                         title={t('settings.piarium.visual.section.showToolsOpenedByDefault')}
+                                        settingsItem="chat.expanded-tools"
                                         divider={showBehaviorDisplaySettings || showBehaviorMessageOptions || behaviorSectionDivider}
                                         contentClassName={SETTINGS_OPTION_STACK_CLASS}
                                     >
@@ -1921,6 +1922,7 @@ export const PiariumVisualSettings: React.FC<PiariumVisualSettingsProps> = ({ vi
                                         onChange={handleFileViewerPreviewChange}
                                         label={t('settings.piarium.defaults.field.openFilesPreview')}
                                         ariaLabel={t('settings.piarium.defaults.field.openFilesPreviewAria')}
+                                        settingsItem="chat.file-viewer-preview"
                                     />
                                 )}
                                 </SettingsSection>

@@ -46,10 +46,12 @@ The list route reconciles disk files before returning tasks, and the runtime wat
 `pi-executor.ts` no longer treats `agent.prompt` acceptance as success. A session-settle tracker
 (`session-settle.ts`) is registered before dispatch and observes `agent_start`, `agent_end`,
 `agent_settled`, `session.closed`, and `worker.exit`; the run reports success only after the real
-session settles, and goal runs additionally inspect the final goal status — `complete` succeeds,
+session settles. Goal runs keep the scheduler identity across successive settled turns until the actual final goal status — `complete` succeeds,
 `blocked`/`budgetLimited` fail, `paused` with reason `waiting` is an intentional follow-up wait, and
 any other terminal or lost state fails. Failures retain `sessionID` for traceability without writing
-`lastSessionId`.
+`lastSessionId`. There is no wall-clock watchdog that releases a task while its Pi session is still running;
+shutdown stops timers/watchers before their dependencies, and the loop watcher observes the nearest existing
+ancestor so creating `.agents/loops` for the first time is discovered.
 
 Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/agent-follow-up-design.md):
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing

@@ -160,7 +160,7 @@ export function isCatalogEntryAvailable(
 
 const modelField = (path: string, scope: 'user' | 'user-or-project'): SettingsFieldSpec => ({
   path, kind: 'string', optionsSource: 'models', scope,
-  note: 'provider/model identifier, e.g. "anthropic/claude-sonnet-4"',
+  note: 'model id; set the paired provider field from the option label when required',
 });
 
 export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
@@ -425,7 +425,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'appearance.interface-font-size', category: 'appearance', owner: 'app',
     fields: [
-      { path: 'fontSize', kind: 'number', min: 10, max: 24, unit: 'px' },
+      { path: 'fontSize', kind: 'number', min: 50, max: 200, integer: true, unit: '%' },
       { path: 'uiFont', kind: 'string', nullable: true, note: 'font family override' },
       { path: 'monoFont', kind: 'string', nullable: true, note: 'monospace font override' },
     ],
@@ -436,7 +436,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.terminal-font-size', category: 'appearance', owner: 'app',
-    field: { path: 'terminalFontSize', kind: 'number', min: 8, max: 32, unit: 'px' },
+    field: { path: 'terminalFontSize', kind: 'number', min: 9, max: 52, integer: true, unit: 'px' },
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.terminalFontSize',
       keywords: ['terminal', 'font', 'text size'] },
@@ -468,8 +468,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'appearance.spacing-density', category: 'appearance', owner: 'app',
     fields: [
-      { path: 'padding', kind: 'number', min: 0, max: 32, unit: 'px' },
-      { path: 'cornerRadius', kind: 'number', min: 0, max: 24, unit: 'px' },
+      { path: 'padding', kind: 'number', min: 50, max: 200, integer: true, unit: '%' },
+      { path: 'cornerRadius', kind: 'number', min: 0, max: 32, integer: true, unit: 'px' },
     ],
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.spacingDensity',
@@ -477,7 +477,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.input-bar-offset', category: 'appearance', owner: 'app',
-    field: { path: 'inputBarOffset', kind: 'number', min: 0, max: 120, unit: 'px' },
+    field: { path: 'inputBarOffset', kind: 'number', min: 0, max: 100, integer: true, unit: 'px' },
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.inputBarOffset',
       descriptionKey: 'settings.piarium.visual.field.inputBarOffsetTooltip',
@@ -486,7 +486,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.auto-save-enabled', category: 'editor', owner: 'app',
-    field: { path: 'autoSaveEnabled', kind: 'boolean' },
+    field: { path: 'autoSaveEnabled', kind: 'boolean', default: true },
     apply: 'immediate',
     ui: { page: 'general', titleKey: 'settings.piarium.visual.field.autoSaveEnabled',
       descriptionKey: 'settings.piarium.visual.field.autoSaveEnabledInfo',
@@ -669,6 +669,16 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['tools', 'files', 'dotfiles'] },
   },
   {
+    id: 'chat.expanded-tools', category: 'chat', owner: 'app',
+    fields: [
+      { path: 'showExpandedBashTools', kind: 'boolean', default: false },
+      { path: 'showExpandedEditTools', kind: 'boolean', default: false },
+    ],
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.showToolsOpenedByDefault',
+      keywords: ['tools', 'bash', 'edit', 'expanded', 'open by default'] },
+  },
+  {
     id: 'chat.changed-files', category: 'chat', owner: 'app',
     field: { path: 'showTurnChangedFiles', kind: 'boolean' },
     apply: 'immediate',
@@ -689,6 +699,13 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
     apply: 'immediate',
     ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showDotfiles',
       keywords: ['hidden files'] },
+  },
+  {
+    id: 'chat.file-viewer-preview', category: 'chat', owner: 'app',
+    field: { path: 'defaultFileViewerPreview', kind: 'boolean', default: false },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.defaults.field.openFilesPreview',
+      keywords: ['files', 'viewer', 'preview', 'open'] },
   },
   {
     id: 'chat.follow-up-behavior', category: 'chat', owner: 'app',

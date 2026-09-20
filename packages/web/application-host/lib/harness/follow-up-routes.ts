@@ -58,8 +58,12 @@ export function registerHarnessFollowUpRoutes(
     });
     return {
       workspaceId: caller.workspaceId,
+      executionWorkspaceId: caller.executionWorkspaceId,
       sessionId: caller.sessionId ?? sessionId,
       ...(caller.threadId ? { threadId: caller.threadId } : {}),
+      rootSessionId: caller.rootSessionId ?? sessionId,
+      ...(caller.workspaceScope ? { workspaceScope: caller.workspaceScope } : {}),
+      allowedThreadIds: caller.allowedThreadIds ?? [],
     };
   };
 

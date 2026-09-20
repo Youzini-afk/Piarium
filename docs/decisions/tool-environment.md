@@ -598,3 +598,29 @@ required 部分；D-241 的 PM 头归类、脚本回显识别内层工具、PM �
 现有 7G/7H/7I 与阶段 S 的交付范围保持，完整生产接线和具体风险证据由后续实施补齐。
 
 状态：设计已接受 / 阶段 S 之后待实施 / 尚未验收。仅有原定时任务、Goal 和后台句柄不能标为完整 W 已交付。
+
+### D-308 · 2026-09-20 · 阶段 S/W 验收返工与完成边界更正
+
+类型：问题与解法 / 实施边界更正
+
+决定：保留 D-306/D-307 已接入的核心纵切，但不接受“两个阶段均已交付”的结论。直接修复设置 owner 与
+follow-up/scheduler 的生产错误，并将 S/W 继续标为 Partial，直到原设计中的领域动作、客户端 Surface、其余触发来源、
+远程续接和生命周期收口实际完成。
+
+原因：验收沿真实消费者发现，设置写入会同步 reload 正在执行工具的 runner，非法 Harness JSON、未信任 project effective、
+secret reset 和错误 scope 可以穿过目录；follow-up 存在跨目标访问、注册丢事件、远期 timer 提前触发、旧 revision 回调、
+Goal 崩溃窗口与 restart CAS 缺口。scheduler 又在第一轮 settle 误判多轮 Goal，并以 30 分钟 watchdog 在真实任务仍运行时
+释放不重叠身份。已有测试通过与“W0–W3”标签不能证明这些契约成立。
+
+实施：设置字段写回在原 owner 写前使用真实 validator，self reload 延迟到安全边界，UI 失效使用 epoch/可排队刷新；
+follow-up 保留真实 caller scope，observer/pause intent 先耐久化，绝对时间分段，occurrence/definition CAS 对账，多个等待共享
+Goal pause 身份；scheduler 跟随真实普通 Run/Goal 终态，删除无取消能力的 watchdog，补 producer shutdown 和 loop 初建 watcher。
+
+考虑过的替代：仅修改报告会留下实际越权、丢唤醒和重复运行；为每个缺陷新增一套平行服务会破坏 owner；继续增加固定超时、
+重试数或全仓测试不能解决状态机。采用原 authority 上的局部契约修复和定向证据。
+
+影响：更正 agent-settings-design、agent-follow-up-design、plan S/W、status、architecture、roadmap 和决策索引；
+S 的 action/client/跨 owner/S4 与 W 的其他 source/remote/archive-delete/完整 Agent scheduler 管理继续是未实现或未接线，
+不能改称仅未实测。
+
+状态：已实施核心返工 / 定向验证通过 / S 与 W 保持 Partial。

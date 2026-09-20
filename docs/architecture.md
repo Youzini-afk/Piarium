@@ -1142,10 +1142,10 @@ shapes are built-in extensions selected by profile, and the public authoring sur
 `@piarium/extension-sdk`, `@piarium/extension-react`, and `@piarium/extension-cli` templates. See
 section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md).
 
-### 7.4 Conversational settings and Agent administration (planned, D-306)
+### 7.4 Conversational settings and Agent administration (partial, D-306/D-308)
 
-[agent-settings-design.md](agent-settings-design.md) defines planned Stage S in the
-[harness plan](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). Settings UI and Agent tools will share
+[agent-settings-design.md](agent-settings-design.md) defines Stage S in the
+[harness plan](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). The implemented core field slice makes Settings UI and Agent tools share
 discovery metadata, validation sources and owner-backed operations across the existing settings surface.
 Application settings, Pi configuration/resources, extensions and client-native behavior retain their
 current authorities; the design does not add a settings database or a second Agent-only writer.
@@ -1160,11 +1160,12 @@ and revision checks preserve concurrent edits; reset removes an actual override.
 state remain distinct, frozen Run configuration changes only at its legal boundary, and a tool must
 not synchronously reload its own executing session. UI and Agent consumers receive the same owner
 state without a write-back loop. Native permission enforcement and credential ownership remain intact.
-This is accepted design, not a claim that existing settings APIs already provide the complete Agent path.
+The shared catalog and app/Pi field path are wired. Domain actions, client-owned Surface changes,
+cross-owner updates and compound Skills remain outside the delivered slice; status records the boundary.
 
-### 7.5 Session follow-ups and triggers (planned, D-307)
+### 7.5 Session follow-ups and triggers (partial, D-307/D-308)
 
-[agent-follow-up-design.md](agent-follow-up-design.md) defines Stage W after Stage S. Agents register
+[agent-follow-up-design.md](agent-follow-up-design.md) defines Stage W. The implemented slice lets Agents register
 conditions and continuation intent against existing sessions/Threads; time, authoritative events and
 deterministic source checks decide when facts are delivered. Semantic judgment belongs to the resumed
 work at a chosen checkpoint, not a model call for each log chunk or status poll.
@@ -1180,7 +1181,9 @@ the existing Rust durable storage boundary. Pi sessions, Thread/Run, processes a
 their owners. Ordinary shell lifetime is not upgraded by persisting a follow-up. Existing GUI/CLI/Markdown
 calendar tasks share trigger management while preserving their new-session target semantics; actual
 run/Goal completion replaces the current scheduler's dispatch-accepted success interpretation.
-This section records accepted design only; implementation and verification remain in plan W0–W4/status.
+Time, experiment and manual sources, durable occurrence delivery, Goal waiting, the session strip and
+scheduler terminal tracking are wired. Artifact/metric/log/external sources, remote continuation and
+full archive/delete lifecycle integration remain in plan W0–W4/status.
 
 ## 8. Recovery model
 

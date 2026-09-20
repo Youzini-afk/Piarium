@@ -73,8 +73,8 @@ describe("follow_up tool", () => {
     });
     assert.equal(isError(result), undefined);
     assert.equal(requests.length, 1);
-    assert.equal(requests[0].method, "followup.register");
-    assert.deepEqual(requests[0].params, {
+    assert.equal(requests[0]!.method, "followup.register");
+    assert.deepEqual(requests[0]!.params, {
       instruction: "when done, summarise",
       source: { attemptId: "attempt-9", fallbackAt: 123, kind: "experiment" },
     });
@@ -138,7 +138,10 @@ describe("follow_up tool", () => {
 describe("follow_up tool selection", () => {
   const deps = {
     bridge: undefined as never,
+    cwd: "C:/workspace",
+    isOpenAIFamily: true,
     sessionId: SESSION,
+    workspaceMutationJournal: undefined,
   };
 
   it("is gated on the host follow-up capability", () => {

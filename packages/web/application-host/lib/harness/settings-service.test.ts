@@ -115,6 +115,12 @@ describe("settings read", () => {
     assert.ok(result.revision);
   });
 
+  it("reports the real fresh-install auto-save default", async () => {
+    const { service } = fixture();
+    const result = await service.read(caller, { id: "appearance.auto-save-enabled" });
+    assert.deepEqual(result.effective, { value: true, source: "default" });
+  });
+
   it("masks secret fields to set/unset status", async () => {
     const { service } = fixture({ app: { desktopUiPassword: "hunter2" } });
     const result = await service.read(caller, { id: "sessions.desktop-ui-password" });
@@ -145,6 +151,19 @@ describe("settings read", () => {
     assert.equal(result.state, "denied");
     assert.ok(result.reason?.includes("trusted"));
     assert.equal(result.revisions?.project, undefined);
+  });
+
+  it("never applies an untrusted project layer to the effective value", async () => {
+    const { service } = fixture({
+      pi: {
+        global: { harness: { web: { domains: { block: ["global.test"] } } } },
+        project: { harness: { web: { domains: { block: ["untrusted.test"] } } } },
+        projectTrusted: false,
+      },
+    });
+    const result = await service.read(caller, { id: "harness.web.domains" });
+    assert.deepEqual(result.effective?.value, { block: ["global.test"] });
+    assert.notEqual(result.effective?.source, "project");
   });
 
   it("reports device-local rows honestly instead of inventing a value", async () => {
@@ -216,6 +235,25 @@ describe("settings update", () => {
     assert.equal(result.status, "applied");
     assert.equal(getApp().fontSize, undefined);
     assert.equal(getApp().uiFont, "Inter");
+  });
+
+  it("rejects pi scopes for app-owned entries and rejects secret resets", async () => {
+    const { service, getApp } = fixture({ app: { desktopUiPassword: "stored" } });
+    await assert.rejects(
+      service.update(caller, {
+        id: "appearance.time-format",
+        scope: "global",
+        set: { timeFormatPreference: "24h" },
+      }),
+      /host-owned/,
+    );
+    const reset = await service.update(caller, {
+      id: "sessions.desktop-ui-password",
+      reset: ["desktopUiPassword"],
+    });
+    assert.equal(reset.status, "failed");
+    assert.equal(getApp().desktopUiPassword, "stored");
+    assert.match(reset.fields[0]?.error ?? "", /cannot be reset/);
   });
 
   it("fails unknown field paths instead of silently dropping them", async () => {

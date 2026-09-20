@@ -7,6 +7,10 @@ import {
   createSettingsUpdateTool,
 } from "../../src/harness/settings-tools.js";
 import { selectHarnessTools } from "../../src/harness/select-tools.js";
+import {
+  classifyPermissionAction,
+  classifyPermissionToolSource,
+} from "../../src/harness/permission-target.js";
 import { DEFAULT_HARNESS_SETTINGS, type HarnessRequestData } from "@piarium/protocol";
 
 const SESSION = "session-1";
@@ -55,6 +59,19 @@ const searchItem = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("settings tools", () => {
+  it("classifies SDK settings tools as harness reads and guarded control", () => {
+    const sdkTool = (name: string) => ({
+      name,
+      sourceInfo: { path: "<sdk>", source: "sdk", scope: "temporary", origin: "top-level" },
+    });
+    const readSource = classifyPermissionToolSource(sdkTool("settings_read"), "settings_read");
+    const updateSource = classifyPermissionToolSource(sdkTool("settings_update"), "settings_update");
+    assert.equal(readSource.kind, "harness");
+    assert.equal(updateSource.kind, "harness");
+    assert.equal(classifyPermissionAction("settings_read", readSource), "read");
+    assert.equal(classifyPermissionAction("settings_update", updateSource), "control");
+  });
+
   it("are only registered when the host advertises the settings service", () => {
     const without = selectHarnessTools(DEFAULT_HARNESS_SETTINGS, { sessionId: SESSION } as never);
     assert.equal(without.some((tool) => tool.name.startsWith("settings_")), false);

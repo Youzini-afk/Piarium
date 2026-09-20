@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   HARNESS_TOOL_META,
+  defaultRules,
   toolExecutionMode,
   toolMutation,
   type HarnessToolMutation,
@@ -52,5 +53,13 @@ describe("harness tool mutation attributes", () => {
     }
     assert.equal(toolExecutionMode("kill_shell"), "sequential");
     assert.equal(toolExecutionMode("get_output"), "parallel");
+  });
+
+  it("classifies settings tools as harness reads or guarded control", () => {
+    assert.equal(HARNESS_TOOL_META.settings_search?.permissionAction, "read");
+    assert.equal(HARNESS_TOOL_META.settings_read?.permissionAction, "read");
+    assert.equal(HARNESS_TOOL_META.settings_update?.permissionAction, "control");
+    assert.equal(toolExecutionMode("settings_update"), "sequential");
+    assert.equal(defaultRules("normal").find((rule) => rule.tool === "settings_update")?.decision, "ask");
   });
 });

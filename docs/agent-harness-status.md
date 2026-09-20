@@ -18,73 +18,51 @@ Last updated: 2026-09-20
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），纵切已接线并定向验证，尚未完整验收。**
+**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），核心字段纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
 [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
 
-已接线（S0–S3）：
+已接线：
 
-- 共用目录 `application-client/src/settings-catalog.ts`：160 条目录项携带稳定 id、类别/页面、i18n 键、关键词、
-  owner（app / pi-settings / client / action）、值规格（类型、可空、枚举/范围、动态选项源）与生效语义
-  （immediate / next-run / restart / manual）。UI 搜索表 `ui/src/lib/settings/search.ts` 改为从目录派生，
-  插件搜索项与可用性谓词保持原有行为。
-- 协议 `protocol/src/harness-settings-service.ts` + `settings.search|read|update` 方法映射与能力
-  `read.settings`/`control.settings`；`settings.update` 走 `control.settings`。
-- Host 服务 `application-host/lib/harness/settings-service.ts`：目录查询/详情/更新，按 owner 路由 —
-  app 字段经 `settingsRuntime.persistSettingsCas`（锁内 CAS + sanitize/merge/领域副作用，隧道预设同步等不旁路）；
-  pi-settings 经 `requestForWorkspace` 的 `settings.get/update`（顶层键分组读-改-写，scope/trust/CAS 由原 authority
-  执行）；client owner 如实返回 device-local 不可写；action owner 返回领域动作指引不落配置值。
-  秘密字段状态只读（isSet），不返回值。成功写入后广播 `piarium:settings-changed`。
-- Agent 工具 `pi-host/src/harness/settings-tools.ts`：`settings_search`/`settings_read`/`settings_update`
-  （update 为 sequential），经 `harnessSettings` 握手能力门控、`HarnessSettings.tools` 逐项开关，
-  错误携带 `{code}`。select-tools/host-controller/broker/service-host 全链路接线。
-- UI 同步：`piarium:settings-changed` 事件 → `App.tsx` 失效缓存并 `syncDesktopSettings()`。
-- 顺带修复真实缺陷：sanitizer 白名单缺 `autoSaveEnabled`、`sessionRetentionAction`、`checkpointRetentionLimit`、
-  `codeBlockLineWrap`、`collapsibleUserMessages`、`editorFontSize`、`fileEditorSettings` —— 这些 DesktopSettings
-  字段此前经 `persistSettings` 写入时被静默丢弃（含 UI 路径），已补白名单规则；`fileEditorKeymap` 实为
-  device-local zustand 字段，目录更正为 owner=client 只读。
+- 共用目录 `application-client/src/settings-catalog.ts` 被 UI 搜索和 Agent `settings_search/read/update` 共用；app 字段走
+  `persistSettingsCas`，Pi 字段走 native `settings.get/update`，保留原 owner、scope、trust 与 revision。
+- secret 只返回 isSet，set/reset 均不能绕过凭据 owner。app owner 拒绝 global/project scope；未信任 project 不进入
+  effective。app removal 与 set 一样执行 tunnel 等领域副作用。
+- Pi settings 候选在写前经过新 Run 使用的 Harness/permission/inference validator。写入中的 custom tool 不同步 reload
+  自身 runner，配置在 `agent_settled` 或下一 prompt 边界应用。
+- 设置工具进入原生权限 source/action 分类；read/search 为 read，update 为 guarded control。app 变更使带 epoch 的缓存失效，
+  Pi settings 变更刷新已打开的 Harness controller，在途保存期间到达的刷新不会丢失。
+- 目录修正已确认的量纲/default/缺项，模型选项读取实际 `model.list`；此前 sanitizer 丢失的 DesktopSettings 字段保留修复。
 
-验证：settings-service 18 例（目录/读/写/CAS 冲突/校验/秘密/动作）、pi-host settings-tools 8 例、
-settings-runtime/helpers 既有测试 40 例、UI 搜索测试全绿；application-client/UI/application-host 类型检查干净。
+定向证据：Web settings/follow-up/scheduler、UI Harness/persistence、Pi Host settings/HostController 与 protocol tool metadata
+的相关行为检查通过；protocol、application-client、Pi Host、UI、Application Host tests 类型检查通过。
 
-未覆盖/边界：运行中会话的 harness 设置在下一轮会话构建时生效（`next-run` 语义与 UI 路径一致，未新增热重载）；
-S4 的组合 Skill 未单独交付文件（技能驻留用户/项目资源目录，目录项 helpRef/actionRef 与工具指引承担渐进披露）；
-远程 Host 上的 app 设置修改作用于该 Host 文档，device-local 项如实不可写。
+未实现/未接线：action owner 目前只返回领域指引，安装、登录、连接、资源/扩展管理尚未全部提供同 owner 的 Agent adapter；
+client owner 仍只读，未通过指定 Surface 操作；一次 update 只处理一个 catalog entry/owner；S4 组合 Skill 未交付；目录仍需
+随真实设置 owner 持续收口，不能据条目数量宣称覆盖完成。运行中 harness 配置按 `next-run` 生效；远程 Host 的 app 设置
+作用于该 Host 文档。
 
-**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），纵切已接线并定向验证，尚未完整验收。**
+**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），time/experiment/manual 纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
 设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见
 [plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
 
-已接线（W0–W3）：
+已接线：
 
-- 耐久合同：`protocol/src/harness-followups.ts` 定义 definition/occurrence 视图与 register/list/get/update/cancel/check/fire 入参；
-  kernel 新增 `followup.definition`/`followup.occurrence` 记录类型（sessionId+workspaceId 必备，threadId 可选 —— 根会话可登记），
-  同批补上 D-305 漏登记的 `managed.remote.*` 白名单。
-- 服务 `application-host/lib/harness/followups.ts`：登记时先观察再订阅（无丢失边沿）；时间源走绝对到期定时器，
-  实验源订阅 attempt 变更（fallbackAt 后备只触发一次检查 occurrence 并清除，终态等待继续存活）；manual 源经 check/fire。
-  occurrence 先于投递持久化，occurrence id 复用为下游 requestId —— 重启对账以同身份重放 triggered 未完成投递，不重复登记。
-- 投递路由：活跃 Run → `agent.notify` 被动 inform + 耐久 directed message（messageId=occurrenceId 去重）；
-  settled Thread → `continueRun`（requestId 幂等，conflict 时并入活跃运行）；queued → parked continuation；
-  归档/删除 → dropped；根会话 → `agent.threadRequest` 会话级幂等通路。迟到回调不能复活已取消/替换/删除的定义。
-- Goal 等待：`pause: true` 置 goal `paused`/`waiting`、Thread attention `followup` + waitingFor；触发只恢复本登记暂停且
-  仍为 waiting 的 goal；新 Run 准入清理旧 followup 等待。暂停不终止进程/实验/GPU —— 只让出模型执行。
-- Agent 工具 `follow_up`（pi-host）：action 分发、必填校验在 Host 调用前完成、`harnessFollowUps` 能力 +
-  `tools.follow_up` 设置门控。experiment submit/rerun 结果附带简短 follow_up 入口。
-- UI：会话域路由 `follow-up-routes.ts`（list/get + cancel/check/fire/update，session 实际 workspace 作用域、no-store）；
-  `PiFollowUpsStrip` 展示来源/状态/指令/occurrence，check/fire/cancel 分列程序检查与调用 Agent；
-  `piarium:harness-experiment-changed`（fact:'followup'）驱动刷新；九个 locale 键齐备。
-- 原排程修复：`session-settle.ts` 追踪 agent_start/end/settled、session.closed、worker.exit；
-  pi-executor 登记追踪后才派发 `agent.prompt` 并等待真实终态 —— goal complete 为成功，blocked/budgetLimited 为失败，
-  paused+waiting 为有意 follow-up 等待（非失败），其余中止/未完结为失败；失败保留 sessionID、不写 lastSessionId。
-  Markdown 同步：`.agents/loops` 目录（项目祖先链 + 用户域）加 fs.watch 去抖重排，文件编辑不再依赖打开任务列表。
+- `follow_up`、UI 会话条目和 Rust `followup.definition/occurrence` 记录接到同一 Host 服务；时间、实验终态/后备和 manual
+  来源可登记、查询、更新、取消、检查和主动触发。
+- definition 操作绑定原 session/Thread，experiment 读取保留真实 `allowedThreadIds`。先持久化 observer/pause intent 再读
+  snapshot；旧 revision callback 不能触发更新后的来源，长于 Node 单次 timer 上限的绝对时间只分段重挂。
+- active→settled 竞争重新走同 occurrence admission；occurrence/definition 以 CAS 收口，暂态失败保留 pending，永久目标
+  丢失转 unavailable。reconcile 读取失败可重试，并对账 Goal/attention。
+- 同一 Goal 的多个等待共享 pause 身份，最后一个结束才恢复。启动恢复枚举 Thread workspace 与配置项目，UI/list 对临时
+  workspace 再补按需 reconcile；Host stop 关闭 scheduler/follow-up producers。
+- 原 scheduler 普通任务等待实际 settle；多轮 Goal 持有调度身份直到真实终态。会让仍运行会话释放不重叠锁的 30 分钟
+  watchdog 已删除；首次创建 `.agents/loops` 可由已存在祖先 watcher 捕获。
 
-验证：followups 真 kernel 验收 11 例（登记即发/定时/实验订阅/截止后备/取消/重启对账重放）、路由 5 例、
-pi-host follow-up 工具与全量 444 通过、session-settle/pi-executor/runtime/loops 26 例、UI strip 行为 4 例、
-i18n parity 全绿；application-host 与 UI 类型检查干净。
-
-未覆盖/边界：产物/指标/日志/外部状态源暂未实现（合同先交付 time/experiment/manual）；
-受管远程/集群目标上的续接与实验一样缺后端适配器；完整桌面 Host 重启路径未实测；
-calendar 新任务与 follow-up 续接保持明确的不同目标类型。
+未实现/未接线：产物、指标、日志、文件 ready 和外部状态源；受管远程/集群续接；Thread archive/delete 与 session 删除时
+主动停用定义的 lifecycle callback；通用 Agent 入口对 calendar task 的创建/修改。没有保存项目或 Thread catalog 的临时
+workspace 依赖打开会话/list 才能发现并 reconcile。完整桌面 Host 重启和真实模型链仍未实测；calendar 新任务与 follow-up
+续接保持不同目标类型。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。

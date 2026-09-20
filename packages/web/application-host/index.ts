@@ -1376,10 +1376,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (source === 'models' && caller.workspaceId) {
         const root = await documentsAuthority.inspectWorkspace(caller.workspaceId).then((ws) => ws.root).catch(() => null);
         if (!root) return null;
-        const providers = await piRuntimeBroker.requestForWorkspace(root, 'provider.list', {}).catch(() => null);
-        return providers?.map((provider) => ({
-          value: provider.id,
-          label: `${provider.name} (${provider.modelCount} models)`,
+        const models = await piRuntimeBroker.requestForWorkspace(root, 'model.list', {}).catch(() => null);
+        return models?.filter((model) => model.available).map((model) => ({
+          value: model.id,
+          label: `${model.name} (${model.provider})`,
         })) ?? null;
       }
       return null;
@@ -1981,21 +1981,33 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       piRuntimeBroker.requestForSession(sessionId, method, { sessionId, ...params } as never)
     ),
     subscribeAttempts: (listener) => experimentService.subscribeAttempts(listener),
-    getAttempt: async (workspaceId, attemptId) => {
-      const result = await experimentService.get(
-        { workspaceId, executionWorkspaceId: workspaceId },
-        attemptId,
-      ).catch(() => null);
-      return result?.attempt ?? null;
+    getAttempt: async (caller, attemptId) => {
+      try {
+        const result = await experimentService.get(caller, attemptId);
+        return result.attempt;
+      } catch (error) {
+        if ((error as { harnessCode?: string }).harnessCode === 'not-found') return null;
+        throw error;
+      }
     },
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
     onError: (error) => console.error('[PiariumFollowUp]', error.message),
   });
-  // Rebuild follow-up observers for every workspace with durable
-  // registrations — timers and attempt subscriptions are in-memory only.
+  // Rebuild follow-up observers for every known Thread workspace and configured
+  // project workspace. Root-session follow-ups do not necessarily have a Thread
+  // catalog, so relying on the registry alone would strand their timers after a
+  // Host restart.
   void (async () => {
-    for (const workspaceId of await threadRegistry.listWorkspaceIds()) {
-      await followUpService.reconcile(workspaceId);
+    const workspaceIds = new Set(await threadRegistry.listWorkspaceIds());
+    const projects = sanitizeProjects((await readSettingsFromDisk()).projects || []) ?? [];
+    for (const project of projects) {
+      const resolved = await documentsAuthority.resolveWorkspace({ path: project.path }).catch(() => null);
+      if (resolved?.workspaceId) workspaceIds.add(resolved.workspaceId);
+    }
+    for (const workspaceId of workspaceIds) {
+      await followUpService.reconcile(workspaceId).catch((error) => {
+        console.error(`[PiariumFollowUp] Reconcile failed for ${workspaceId}:`, errorMessage(error));
+      });
     }
   })().catch((error) => console.error('[PiariumFollowUp] Reconcile failed:', errorMessage(error)));
   observeThreadIntegrationParentChange = (workspaceId, resourceIds) => {
@@ -2748,6 +2760,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   scheduledTasksRuntime.setExecutor(createPiScheduledTaskExecutor({
     broker: piRuntimeBroker,
     awaitCompletion: (sessionId) => sessionSettleTracker.waitForSettled(sessionId),
+    forgetCompletion: (sessionId) => sessionSettleTracker.forget(sessionId),
   }));
   const sessionNames = new Map<string, string>();
   recoveryTurnCoordinator = createRecoveryTurnCoordinator({
@@ -3112,6 +3125,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }),
     isReady: () => Boolean(currentPiRuntimeHandshake()),
     stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
+      // Stop timer/watcher producers before their runtime and storage
+      // dependencies begin shutting down.
+      scheduledTasksRuntime.stop();
+      followUpService.dispose();
       piSessionAutomation.stop();
       experimentService.detachObservers();
       brokerUnsubscribe();
