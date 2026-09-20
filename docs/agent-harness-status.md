@@ -18,7 +18,7 @@ Last updated: 2026-09-20
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），核心字段纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
+**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），字段、领域 action、client Surface 与组合管理纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
 [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
 
@@ -29,20 +29,31 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 - secret 只返回 isSet，set/reset 均不能绕过凭据 owner。app owner 拒绝 global/project scope；未信任 project 不进入
   effective。app removal 与 set 一样执行 tunnel 等领域副作用。
 - Pi settings 候选在写前经过新 Run 使用的 Harness/permission/inference validator。写入中的 custom tool 不同步 reload
-  自身 runner，配置在 `agent_settled` 或下一 prompt 边界应用。
+  自身 runner，配置在 `agent_settled` 或下一 prompt 边界应用；延期 reload 的候选值在提交时被快照，写后立即可读（b97ad78f）。
 - 设置工具进入原生权限 source/action 分类；read/search 为 read，update 为 guarded control。app 变更使带 epoch 的缓存失效，
   Pi settings 变更刷新已打开的 Harness controller，在途保存期间到达的刷新不会丢失。
 - 目录修正已确认的量纲/default/缺项，模型选项读取实际 `model.list`；此前 sanitizer 丢失的 DesktopSettings 字段保留修复。
+- `settings.action` 经 `lib/harness/settings-actions.ts` 的注册表把 catalog `actionRef` 域接到真实 owner API：provider
+  登录/退出/模型列表/凭据状态、MCP CRUD、Pi 包/Skill/prompt 资源、Piarium 扩展安装/启停/删除/状态、语言结构包与
+  LSP 准备/取消/重试/卸载、远程实例与连接状态、Git identity、magic-prompt、知识库与基础包恢复。无 owner API 的条目
+  如实返回 unavailable；凭据只暴露 isSet/状态。动作查询返回实时状态与可用 verbs，不再是静态指引（42ac74de）。
+- client owner 经 `lib/harness/client-surfaces.ts` 的 Surface 桥接线：Surface 通过 SSE 注册身份，Host 从调用方会话
+  解析目标而非信任请求参数；目标离线返回 unavailable、多目标无法确定返回 ambiguous，UI 侧 `client-settings-bridge.ts`
+  应用各 Surface 自有存储并回执 saved/applied/failure（42ac74de）。
+- `settings_update` 支持 `items[]` 组合请求：同 owner 原子批量提交，跨 owner 逐项返回 saved/applied/pending/failed/
+  unavailable，不承诺全局事务也不盲目回滚已完成的副作用；revision/CAS 继续保护并发修改，reset 删除对应范围 override（42ac74de）。
+- `settings_search` 结果携带当前值摘要/类型/scope/可用性等渐进披露信息（8b29c18e）。
+- 产品 Skills 经 `lib/pi-runtime/product-skills.ts` 按发现体系按需种子到 agentDir：引用稳定设置 ID 与 action 入口，
+  当前值/参数/安装状态由工具实时查询，不复制第二份静态 authority（8b29c18e）。
 
 定向证据：Web settings/follow-up/scheduler、UI Harness/persistence、Pi Host settings/HostController 与 protocol tool metadata
-的相关行为检查通过；protocol、application-client、Pi Host、UI、Application Host tests 类型检查通过。
+的相关行为检查通过；settings-service/client-surfaces 聚焦测试覆盖 action 分发、Surface 桥与组合更新；protocol、
+application-client、Pi Host、UI、Application Host tests 类型检查通过。
 
-未实现/未接线：action owner 目前只返回领域指引，安装、登录、连接、资源/扩展管理尚未全部提供同 owner 的 Agent adapter；
-client owner 仍只读，未通过指定 Surface 操作；一次 update 只处理一个 catalog entry/owner；S4 组合 Skill 未交付；目录仍需
-随真实设置 owner 持续收口，不能据条目数量宣称覆盖完成。运行中 harness 配置按 `next-run` 生效；远程 Host 的 app 设置
-作用于该 Host 文档。
+未实现/未接线：个别 catalog 条目在仍无 owner API 的领域保持 unavailable；真实外部登录、付费 provider 安装与跨平台
+Surface 现场未实测。运行中 harness 配置按 `next-run` 生效；远程 Host 的 app 设置作用于该 Host 文档。
 
-**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），time/experiment/manual 纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
+**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），各来源、远程对账、生命周期收口与 calendar 管理纵切已接线并经 D-308 验收返工，阶段仍为 Partial。**
 设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见
 [plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
 
@@ -56,13 +67,29 @@ client owner 仍只读，未通过指定 Surface 操作；一次 update 只处�
   丢失转 unavailable。reconcile 读取失败可重试，并对账 Goal/attention。
 - 同一 Goal 的多个等待共享 pause 身份，最后一个结束才恢复。启动恢复枚举 Thread workspace 与配置项目，UI/list 对临时
   workspace 再补按需 reconcile；Host stop 关闭 scheduler/follow-up producers。
+- artifact/file/metric/log/external 来源接入同一 definition/occurrence admission（b5c90ffc）：artifact 绑定 attempt/artifact
+  identity 区分 terminal 与 collect/ready；file 区分 exists/changed/ready（ready 要求 document authority 无活动写入证据）；
+  metric 走结构化 resource sample 的阈值跨越，断连不算命中；log 经 attempt 日志 artifact 的增量游标不重复消费；external
+  只接受注册的 typed adapter（当前 `github-pr`），事件优先、无事件时由 adapter 做确定性查询。`every` 重挂支持逐 artifact/
+  逐匹配/逐跨越；`fallbackAt` 提供事件+时间后备。
+- 远程/生命周期收口（fdf8e742）：受管远程作业断连不算失败，重连经 `inspect` 重附着而不重提交；日志/指标/artifact 读远端
+  backend authority。Thread archive/delete、session 删除与实验删除主动 settle 相关 definition（cancelled/unavailable、
+  解除 timer/订阅、清 waiting attention、对账 Goal pause），不等未来触发才发现。kernel `storage.list` 按 record type 枚举
+  owning workspace，Host 启动即可发现全部 follow-up workspace，不依赖 Thread catalog、保存项目或打开 UI。
+- calendar 任务的 Agent 管理（c23e9f04）：`schedule.*` harness 方法接到既有 scheduled-task 服务，调用方 workspace 解析到
+  配置项目而非信任请求侧 projectId；list/get/upsert/remove/run/set_enabled/loop.read/loop.update/loop.remove/status 覆盖
+  JSON 任务与 `.agents/loops` Markdown 管理，loop 写入/启停/删除走内容 revision CAS。pi-host `scheduled_task` 工具经
+  `harnessScheduledTasks` 握手能力与 `tools.scheduled_task` 设置门控；`run` 等待真实 session settle（超时请求上限），
+  超时后任务仍在运行、状态经 get 可见。calendar 新工作与 follow-up 续接保持不同目标类型。
+- scheduler 恢复（c23e9f04）：持久化 `running` 但本进程无在途运行的任务对账为 interrupted error，不假装旧 session 仍活；
+  `lastSessionId` 在 session 创建即持久化，中断运行保留可追溯会话指针；overdue 一次性任务恢复后补跑一次（lastRunAt ≥
+  dueAt 不重复），周期任务跳过错过时点按新 nextRunAt 继续；持久化/事件失败经 finally 释放调度 admission，不永久占用。
 - 原 scheduler 普通任务等待实际 settle；多轮 Goal 持有调度身份直到真实终态。会让仍运行会话释放不重叠锁的 30 分钟
   watchdog 已删除；首次创建 `.agents/loops` 可由已存在祖先 watcher 捕获。
 
-未实现/未接线：产物、指标、日志、文件 ready 和外部状态源；受管远程/集群续接；Thread archive/delete 与 session 删除时
-主动停用定义的 lifecycle callback；通用 Agent 入口对 calendar task 的创建/修改。没有保存项目或 Thread catalog 的临时
-workspace 依赖打开会话/list 才能发现并 reconcile。完整桌面 Host 重启和真实模型链仍未实测；calendar 新任务与 follow-up
-续接保持不同目标类型。
+未实现/未接线：跨来源 `all`/`any` 复合条件算子未实现——当前组合限于单来源的事件+时间后备、阈值跨越与 `every` 重挂；
+相容来源的共享程序查询未做去重。普通 shell 仍不因 follow-up 获得跨重启生存保证，丢失时报 source unavailable。完整
+桌面 Host 重启和真实模型链仍未实测。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。

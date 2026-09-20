@@ -1160,8 +1160,9 @@ and revision checks preserve concurrent edits; reset removes an actual override.
 state remain distinct, frozen Run configuration changes only at its legal boundary, and a tool must
 not synchronously reload its own executing session. UI and Agent consumers receive the same owner
 state without a write-back loop. Native permission enforcement and credential ownership remain intact.
-The shared catalog and app/Pi field path are wired. Domain actions, client-owned Surface changes,
-cross-owner updates and compound Skills remain outside the delivered slice; status records the boundary.
+The shared catalog, app/Pi field path, domain-action adapters, client-Surface application, compound
+multi-entry updates and product Skills are wired. Entries without an owner API stay unavailable and
+external login/install round-trips remain untested live; status records the boundary.
 
 ### 7.5 Session follow-ups and triggers (partial, D-307/D-308)
 
@@ -1180,10 +1181,12 @@ Host policy stores lightweight definitions, source positions and occurrence/deli
 the existing Rust durable storage boundary. Pi sessions, Thread/Run, processes and experiments retain
 their owners. Ordinary shell lifetime is not upgraded by persisting a follow-up. Existing GUI/CLI/Markdown
 calendar tasks share trigger management while preserving their new-session target semantics; actual
-run/Goal completion replaces the current scheduler's dispatch-accepted success interpretation.
-Time, experiment and manual sources, durable occurrence delivery, Goal waiting, the session strip and
-scheduler terminal tracking are wired. Artifact/metric/log/external sources, remote continuation and
-full archive/delete lifecycle integration remain in plan W0–W4/status.
+run/Goal completion replaces the scheduler's former dispatch-accepted success interpretation.
+Time, experiment, artifact, file, metric, log, external and manual sources, durable occurrence delivery,
+Goal waiting, the session strip, scheduler terminal tracking, managed-remote reattach, target-lifecycle
+settlement, kernel workspace enumeration and calendar-task Agent management (`schedule.*` methods +
+`scheduled_task` tool, workspace-resolved project, loop CAS) are wired. A cross-source `all`/`any`
+composite combinator remains outside the delivered slice; status records the boundary.
 
 ## 8. Recovery model
 

@@ -624,3 +624,28 @@ S 的 action/client/跨 owner/S4 与 W 的其他 source/remote/archive-delete/�
 不能改称仅未实测。
 
 状态：已实施核心返工 / 定向验证通过 / S 与 W 保持 Partial。
+
+### D-309 · 2026-09-20 · 阶段 S/W 剩余项实施收口
+
+类型：实施 / 交付边界
+
+决定：完成 D-308 留下的 S/W 未接线项。设置侧把 catalog actionRef 域经 `settings-actions.ts` 注册表接到各领域
+真实 owner（provider/MCP/Pi 资源/扩展/语言组件/远程/Git identity 等），client owner 经 `client-surfaces.ts`
+Surface 桥按调用方会话解析目标应用；`settings_update` 支持 items[] 组合请求；`settings_search` 携带实时值摘要；
+产品 Skills 按需种子到 agentDir。follow-up 侧补齐 artifact/file/metric/log/external 来源、受管远程重附着、
+目标生命周期 settleTarget 收口与 kernel `storage.list` 跨 workspace 枚举恢复。scheduler 侧经 `schedule.*` harness
+方法与 pi-host `scheduled_task` 工具暴露 calendar 管理（workspace→project 解析、loop revision CAS、run 等待真实
+settle），并在 syncProject 对账持久化 running 与 overdue 一次性任务补跑。
+
+原因：D-308 明确要求这些项实际完成后才能收口 S/W；本条记录其已接线事实与剩余边界，不提前宣称阶段完成。
+
+实施：协议新增 `harness-scheduled-tasks.ts` 与 `harnessScheduledTasks` 握手能力；HarnessServiceHost 注入
+scheduledTaskService 并注册 schedule.*（workspace→project，错误映射，CAS 透传）；pi-host `scheduled_task` 工具
+受能力与 `tools.scheduled_task` 门控；runtime 对账 stale running→error、once 补跑一次、持久化创建即写
+lastSessionId；设置侧 settings.action + Surface 桥 + items[] + 搜索摘要 + product-skills 种子。
+
+影响：更正 agent-settings-design、agent-follow-up-design、plan S/W、status、architecture、roadmap 与本索引。
+仍未实现：跨来源 all/any 复合算子、相容观察去重；仍未实测：真实外部登录/安装、跨平台 Surface、完整桌面重启
+与真实模型链。S 与 W 继续保持 Partial。
+
+状态：已实施 / 定向验证通过 / S 与 W 保持 Partial。

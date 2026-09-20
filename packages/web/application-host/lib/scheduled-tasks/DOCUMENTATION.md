@@ -49,9 +49,28 @@ The list route reconciles disk files before returning tasks, and the runtime wat
 session settles. Goal runs keep the scheduler identity across successive settled turns until the actual final goal status — `complete` succeeds,
 `blocked`/`budgetLimited` fail, `paused` with reason `waiting` is an intentional follow-up wait, and
 any other terminal or lost state fails. Failures retain `sessionID` for traceability without writing
-`lastSessionId`. There is no wall-clock watchdog that releases a task while its Pi session is still running;
+`lastSessionId`. The session identity is persisted as soon as it is created, so an interrupted run keeps a
+traceable session pointer. There is no wall-clock watchdog that releases a task while its Pi session is still running;
 shutdown stops timers/watchers before their dependencies, and the loop watcher observes the nearest existing
 ancestor so creating `.agents/loops` for the first time is discovered.
+
+## Restart recovery
+
+On each `syncProject` (startup and every resync) the runtime reconciles persisted state it cannot own:
+a task whose `lastStatus` is `running` while nothing is in flight for it is marked `error` ("run interrupted")
+instead of pretending the dead session still runs, and its next slot is recomputed. Missed-time policy is
+explicit: a `once` task whose due time passed while the host was down catches up exactly once
+(`lastRunAt >= dueAt` suppresses repeats, including after a failed run), while recurring kinds skip missed
+slots and keep their freshly computed `nextRunAt`. Queue/running keys dedupe catch-up against in-flight runs.
+
+## Agent management (D-307)
+
+Agents manage the same authority through `schedule.*` harness methods and the pi-host `scheduled_task` tool
+(gated on the `harnessScheduledTasks` handshake capability). The caller's workspace resolves to the
+configured project — an agent cannot manage an arbitrary projectId. Loop reads/writes/enables/removes pass
+the Markdown content revision through as a CAS guard; `schedule.run` waits for the real session settle, so
+the tool uses the harness maximum request timeout and a longer-running task reports timeout while its true
+terminal state lands in `state`.
 
 Native follow-ups are implemented under [Stage W / D-307](../../../../../docs/agent-follow-up-design.md):
 the `follow_up` tool, the durable follow-up service, and session-level waiting UI reuse the existing

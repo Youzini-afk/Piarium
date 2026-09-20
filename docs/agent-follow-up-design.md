@@ -1,14 +1,15 @@
 # Piarium 会话等待、触发与续接设计
 
-Status: time/experiment/manual continuation slice implemented and wired; acceptance corrected at D-308; Stage W remains partial
+Status: all planned source kinds, remote reconciliation, lifecycle settlement, workspace recovery and calendar management implemented and wired; acceptance corrected at D-308; Stage W remains partial (no cross-source all/any combinator)
 
 Last updated: 2026-09-20
 
 实施顺序见 [Harness plan 阶段 W](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)，交付事实见
 [Harness status](agent-harness-status.md)，决策见 [D-307](decisions/tool-environment.md#d-307--2026-09-20--阶段-w会话等待触发与续接)。
 阶段 W 排在 [阶段 S](agent-settings-design.md) 之后，复用 7G 请求前增量、7H 后台工具与事件等待、7I 实验/远程事实。
-本文同时定义完整目标和当前实现边界；时间、实验、manual 续接与 scheduler 真实终态已经接线，其他来源、
-远程目标和完整生命周期收口仍未完成，具体事实以 status 为准。
+本文同时定义完整目标和当前实现边界；时间、实验、artifact、file、metric、log、external 与 manual 来源，
+远程目标续接、生命周期收口、workspace 枚举恢复和 calendar 任务的 Agent 管理已经接线；跨来源 all/any
+复合算子仍未实现，具体事实以 status 为准。
 
 ## 1. 用户需求
 
