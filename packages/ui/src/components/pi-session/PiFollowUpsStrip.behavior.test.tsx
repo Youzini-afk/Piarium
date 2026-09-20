@@ -94,7 +94,7 @@ describe('PiFollowUpsStrip', () => {
   });
 
   it('posts check, fire and cancel to the session-scoped routes', async () => {
-    vi.mocked(runtimeFetch).mockImplementation(async (input, init) => {
+    vi.mocked(runtimeFetch).mockImplementation(async (input, _init) => {
       const url = String(input);
       if (url.endsWith('/follow-ups')) return listResponse([followUp()]);
       if (url.endsWith('/check')) {
