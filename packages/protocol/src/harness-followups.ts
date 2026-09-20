@@ -31,6 +31,73 @@ export type FollowUpSource =
       fallbackAt?: number;
     }
   | {
+      /** Watches collected artifacts of a durable experiment attempt. */
+      kind: "artifact";
+      attemptId: string;
+      /** Bind one durable artifact identity; omit with `name` to watch the set. */
+      artifactId?: string;
+      /** Bind by artifact name/path within the attempt. */
+      name?: string;
+      /**
+       * true: fire once per artifact as it reaches available — the wait
+       * re-arms after delivery. Default: fire once when the bound artifact
+       * (or the collected set, when unbound) is ready, when collection
+       * fails, or when the attempt ends without the artifact.
+       */
+      every?: boolean;
+      fallbackAt?: number;
+    }
+  | {
+      /** Watches a workspace path through the document authority. */
+      kind: "file";
+      /** Workspace-relative path (forward slashes). */
+      path: string;
+      /**
+       * exists  — first durable observation that the path is present.
+       * changed — each durable change after registration.
+       * ready   — the path exists AND the document authority reports no
+       *           active writer/capture on the workspace (writer evidence).
+       */
+      condition: "exists" | "changed" | "ready";
+      fallbackAt?: number;
+    }
+  | {
+      /** Incremental match against an attempt's durable log artifact. */
+      kind: "log";
+      attemptId: string;
+      stream?: "stdout" | "stderr";
+      /** Literal text; with `regex: true` a JavaScript RegExp. */
+      pattern: string;
+      regex?: boolean;
+      /** true: fire per new match; default fires on the first match only. */
+      every?: boolean;
+      fallbackAt?: number;
+    }
+  | {
+      /** Crossing of a structured usage metric on a registered machine. */
+      kind: "metric";
+      machineId: string;
+      /** Structured key: cpuPercent, memoryMb, or gpu:<index>.percent. */
+      metric: string;
+      predicate: "above" | "below";
+      threshold: number;
+      /** true: re-arm and fire on each subsequent crossing. */
+      every?: boolean;
+      fallbackAt?: number;
+    }
+  | {
+      /** Typed external source via a registered, authorized adapter. */
+      kind: "external";
+      /** Registered adapter id — currently only "github-pr". */
+      provider: "github-pr";
+      /** Repository branch; defaults to the caller workspace's branch. */
+      branch?: string;
+      /** Remote name override for github-pr. */
+      remote?: string;
+      condition: "exists" | "open" | "merged" | "closed";
+      fallbackAt?: number;
+    }
+  | {
       /** Fires only through an explicit followup.check or host-side event. */
       kind: "manual";
       /** Free-form source description kept for the audit trail. */

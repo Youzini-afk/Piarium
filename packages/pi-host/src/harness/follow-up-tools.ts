@@ -48,6 +48,16 @@ const describeSource = (source: Record<string, unknown>): string => {
       return `at ${new Date(source.at as number).toISOString()}${typeof source.timezone === "string" ? ` (${source.timezone})` : ""}`;
     case "experiment":
       return `experiment attempt ${source.attemptId}${typeof source.fallbackAt === "number" ? `; check by ${new Date(source.fallbackAt).toISOString()} if still running` : ""}`;
+    case "artifact":
+      return `experiment attempt ${source.attemptId} artifact ${source.artifactId ?? source.name ?? "collection"}${source.every === true ? " (each)" : ""}`;
+    case "file":
+      return `workspace file ${source.path} ${source.condition}`;
+    case "log":
+      return `experiment attempt ${source.attemptId} ${source.stream ?? "stdout"} matching ${source.regex === true ? `/${source.pattern}/` : JSON.stringify(source.pattern)}`;
+    case "metric":
+      return `${source.metric} on ${source.machineId} ${source.predicate} ${source.threshold}${source.every === true ? " (each crossing)" : ""}`;
+    case "external":
+      return `GitHub PR ${source.condition}${typeof source.branch === "string" ? ` on ${source.branch}` : ""}`;
     case "manual":
       return typeof source.note === "string" ? source.note : "explicit trigger only";
     default:
@@ -71,6 +81,48 @@ const sourceSchema = Type.Union([
     fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline — if the attempt is still running then, fire a 'deadline' occurrence instead of waiting silently forever" })),
   }, { description: "Fire when an experiment attempt reaches a terminal state" }),
   Type.Object({
+    kind: Type.Literal("artifact"),
+    attemptId: Type.String({ description: "Attempt id whose artifacts to watch" }),
+    artifactId: Type.Optional(Type.String({ description: "Bind one artifact identity (or use name)" })),
+    name: Type.Optional(Type.String({ description: "Bind by artifact name/path within the attempt" })),
+    every: Type.Optional(Type.Boolean({ description: "true: fire per artifact as it becomes collected (default: once when ready/missing/failed)" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire when an attempt's artifact is collected (or fails/is missing)" }),
+  Type.Object({
+    kind: Type.Literal("file"),
+    path: Type.String({ description: "Workspace-relative path, forward slashes" }),
+    condition: Type.Union([Type.Literal("exists"), Type.Literal("changed"), Type.Literal("ready")], {
+      description: "exists: first durable presence; changed: each durable change; ready: present AND no active writer + stable across a quiet window",
+    }),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire on a workspace file condition through the document authority" }),
+  Type.Object({
+    kind: Type.Literal("log"),
+    attemptId: Type.String({ description: "Attempt id whose durable log to match" }),
+    stream: Type.Optional(Type.Union([Type.Literal("stdout"), Type.Literal("stderr")])),
+    pattern: Type.String({ description: "Literal text (or JS RegExp with regex=true) to match incrementally" }),
+    regex: Type.Optional(Type.Boolean()),
+    every: Type.Optional(Type.Boolean({ description: "true: fire per new match (default: first match only)" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire when the attempt's log matches a pattern — incremental cursor, never rescans" }),
+  Type.Object({
+    kind: Type.Literal("metric"),
+    machineId: Type.String({ description: "Machine id from the resources overview" }),
+    metric: Type.String({ description: "cpuPercent | memoryMb | gpu:<index>.percent | gpu:<index>.memoryMb" }),
+    predicate: Type.Union([Type.Literal("above"), Type.Literal("below")]),
+    threshold: Type.Number(),
+    every: Type.Optional(Type.Boolean({ description: "true: fire on each threshold crossing (default: once)" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire on a usage-metric threshold crossing — steady-true never re-wakes" }),
+  Type.Object({
+    kind: Type.Literal("external"),
+    provider: Type.Literal("github-pr", { description: "Registered adapter id — currently only github-pr" }),
+    branch: Type.Optional(Type.String({ description: "Branch to check (default: workspace checkout branch)" })),
+    remote: Type.Optional(Type.String({ description: "Remote name override (default: origin/tracking)" })),
+    condition: Type.Union([Type.Literal("exists"), Type.Literal("open"), Type.Literal("merged"), Type.Literal("closed")]),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire when a GitHub PR reaches a state — typed adapter, deterministic queries" }),
+  Type.Object({
     kind: Type.Literal("manual"),
     note: Type.Optional(Type.String({ description: "What is being awaited, for the audit trail" })),
   }, { description: "Fire only via check/fire — e.g. a signal the program cannot observe" }),
@@ -81,10 +133,11 @@ export function createFollowUpTool(bridge: HostServicesBridge): ToolDefinition {
     name: "follow_up",
     label: "Follow-up",
     description:
-      "Register a durable follow-up on this conversation: what to wait for (time, an experiment attempt finishing, or an explicit trigger) and what to do when it happens. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
+      "Register a durable follow-up on this conversation: what to wait for and what to do when it happens. Sources: time, experiment terminal, artifact collection, workspace file, log pattern, machine metric crossing, external GitHub PR state, or manual. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
     promptSnippet: "follow_up: durable wait + continuation (register/list/get/update/cancel/check/fire)",
     promptGuidelines: [
-      "Register AFTER the work exists: an experiment source needs the real attemptId from experiment submit, a time source needs a concrete epoch-ms instant you computed.",
+      "Register AFTER the work exists: an experiment/artifact/log source needs the real attemptId from experiment submit, a file source needs a workspace-relative path, a metric source needs a machineId from the resources overview, a time source needs a concrete epoch-ms instant you computed.",
+      "Sources bind real events: artifact fires when collection makes the artifact available (or reports missing/failed); file 'ready' requires no active writer plus a stable stat — a bare file appearing is never 'ready'; metric fires only on threshold crossings, never on a steady-true stream; log matches incrementally by byte cursor.",
       "Registration is non-blocking — keep working unless the user asked you to wait. With pause=true the thread is marked waiting, the goal pauses, and the trigger resumes the run; without it the trigger arrives as a message while you work.",
       "check is a program-side evaluation of the source (is the attempt done yet?) — it fires the follow-up if satisfied but never calls the model. fire invokes you now.",
       "Only a successful register result means the follow-up exists — never promise a trigger for a failed or unconfirmed registration.",

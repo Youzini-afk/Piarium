@@ -391,6 +391,50 @@ export function createResourceService(deps: ResourceServiceDeps) {
   const rememberWorkspace = (workspaceId: string) => {
     if (workspaceId && workspaceId !== RESOURCE_WORKSPACE_ID) knownWorkspaces.add(workspaceId);
   };
+
+  /**
+   * Committed `resource.sample` facts — observers (follow-up metric waits)
+   * react to durable samples rather than probing machines themselves.
+   */
+  const sampleListeners = new Set<(sample: {
+    machineId: string;
+    observedAt: number;
+    usage: {
+      memoryMb?: number;
+      cpuPercent?: number;
+      gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }>;
+    };
+  }) => void>();
+  const emitSample = (record: KernelRecordResult) => {
+    const payload = payloadOf(record);
+    const machineId = str(payload.machineId);
+    const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
+      ? payload.usage as { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> }
+      : {};
+    if (!machineId) return;
+    const sample = { machineId, observedAt: num(payload.observedAt) ?? now(), usage };
+    for (const listener of sampleListeners) {
+      try { listener(sample); } catch { /* observers must not break sampling */ }
+    }
+  };
+  const subscribeSamples = (listener: (sample: {
+    machineId: string;
+    observedAt: number;
+    usage: { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> };
+  }) => void): (() => void) => {
+    sampleListeners.add(listener);
+    return () => { sampleListeners.delete(listener); };
+  };
+  const getMachineSample = async (machineId: string) => {
+    const scoped = await globalContext();
+    const record = await scoped.getRecord(RESOURCE_WORKSPACE_ID, recordIdFor.sample(machineId)).catch(() => null);
+    if (!record) return null;
+    const payload = payloadOf(record);
+    const usage = payload.usage && typeof payload.usage === "object" && !Array.isArray(payload.usage)
+      ? payload.usage as { memoryMb?: number; cpuPercent?: number; gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }> }
+      : {};
+    return { machineId, observedAt: num(payload.observedAt) ?? record.updatedAt ?? now(), usage };
+  };
   const changed = (workspaceId: string) => {
     rememberWorkspace(workspaceId);
     for (const target of knownWorkspaces) {
@@ -581,7 +625,7 @@ export function createResourceService(deps: ResourceServiceDeps) {
     const gpu = await observeGpu();
     const usedMemoryMb = nonNegative(observed.usedMemoryMb);
     if (usedMemoryMb === undefined) throw new Error("local machine probe returned invalid memory usage");
-    return putGlobalRecord({
+    const record = await putGlobalRecord({
       recordId,
       recordType: "resource.sample",
       state: "observed",
@@ -598,6 +642,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
         gpuProbe: gpuProbeRecord(gpu, now()),
       },
     });
+    emitSample(record);
+    return record;
   };
 
   const sampleLocalMachine = (_workspaceId: string): Promise<KernelRecordResult> => {
@@ -1190,6 +1236,8 @@ export function createResourceService(deps: ResourceServiceDeps) {
     listMachines,
     getMachine,
     getMachineRecord,
+    getMachineSample,
+    subscribeSamples,
     getCommitmentAllocation,
     registerMachine,
     list,

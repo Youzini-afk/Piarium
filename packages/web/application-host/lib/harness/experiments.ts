@@ -1338,6 +1338,11 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           });
           running.lastObservationKey = observationKey;
         }
+        if (nextTotals.stdout !== running.totals.stdout || nextTotals.stderr !== running.totals.stderr) {
+          // Durable log bytes grew — wake log-source observers (follow-ups).
+          const record = await getAttemptRecord(ctx, workspaceId, attemptId).catch(() => null);
+          notify(workspaceId, attemptId, record ? attemptView(record) : null);
+        }
         running.totals = nextTotals;
         running.cursor = result.nextCursor;
         if (observation.status === "unknown") {

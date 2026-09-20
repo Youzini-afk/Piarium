@@ -108,6 +108,7 @@ import { createMagicPromptRuntime } from './lib/magic-prompts/runtime.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
 import { getGhCliToken } from './lib/github/gh-cli-credential.js';
+import { getStatus as getGitStatus } from './lib/git/service.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
@@ -2014,6 +2015,85 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // delivers occurrences through the real Thread/Run lifecycle — an active run
   // gets an inform, a settled thread resumes via continueRun, and the shared
   // budget parks extras as pending continuations. Never a second agent loop.
+  // Typed external follow-up sources. "github-pr" resolves the workspace's own
+  // checkout branch/remotes through the authenticated GitHub auth — the wire
+  // carries only a provider id + condition, never a URL or code. The resolver's
+  // response is already credential-free (repo/branch/PR facts only).
+  const followUpExternalSources = {
+    githubPr: {
+      // Deterministic adapter-owned spacing; the resolver itself caches and
+      // honors GitHub rate-limit backoff.
+      intervalMs: 60_000,
+      async query({ workspaceId, source }: {
+        workspaceId: string;
+        source: { branch?: string; remote?: string; condition: 'exists' | 'open' | 'merged' | 'closed' };
+      }) {
+        const workspace = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
+        const directory = workspace?.root;
+        if (!directory) {
+          return { matched: false, unavailable: true, facts: { reason: 'workspace root unknown' } };
+        }
+        const { getOctokitOrNull } = await import('./lib/github/index.js');
+        const octokit = getOctokitOrNull();
+        if (!octokit) {
+          return { matched: false, unavailable: true, facts: { reason: 'github not connected' } };
+        }
+        const branch = source.branch
+          ?? (await getGitStatus(directory).catch(() => null))?.current
+          ?? '';
+        if (!branch) {
+          return { matched: false, unavailable: true, facts: { reason: 'no git branch resolvable' } };
+        }
+        const { resolveGitHubPrStatus } = await import('./lib/github/pr-status.js');
+        const { isGitHubRateLimitError, noteGitHubRateLimit } = await import('./lib/github/rate-limit.js');
+        const status = await resolveGitHubPrStatus({
+          octokit,
+          directory,
+          branch,
+          ...(source.remote ? { remoteName: source.remote } : {}),
+        }).catch((error: unknown) => {
+          if (isGitHubRateLimitError(error)) {
+            noteGitHubRateLimit(error);
+            return null;
+          }
+          throw error;
+        });
+        if (status === null) {
+          return {
+            matched: false,
+            retryAfterMs: 60_000,
+            facts: { reason: 'github rate limited', branch },
+          };
+        }
+        const pr = status.pr;
+        const state = pr === null ? 'none'
+          : pr.merged_at ? 'merged'
+          : pr.state === 'open' ? 'open'
+          : 'closed';
+        const matched = source.condition === 'exists' ? pr !== null
+          : source.condition === 'merged' ? state === 'merged'
+          : source.condition === 'open' ? state === 'open'
+          : state === 'closed';
+        return {
+          matched,
+          ...(pr ? { eventId: `github-pr-${pr.number}-${state}` } : {}),
+          facts: {
+            branch,
+            remote: status.resolvedRemoteName ?? source.remote ?? null,
+            repository: status.repo ? `${status.repo.owner}/${status.repo.repo}` : null,
+            pr: pr === null ? null : {
+              number: pr.number,
+              state,
+              title: pr.title,
+              url: pr.html_url,
+            },
+            condition: source.condition,
+          },
+        };
+      },
+    },
+  };
+
   const followUpService = createFollowUpService({
     client: kernelClient,
     getThread: (workspaceId, threadId) => threadRegistry.getThreadById(workspaceId, threadId),
@@ -2060,6 +2140,51 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         throw error;
       }
     },
+    getExperiment: async (caller, attemptId) => {
+      try {
+        const result = await experimentService.get(caller, attemptId);
+        return { attempt: result.attempt, artifacts: result.artifacts };
+      } catch (error) {
+        if ((error as { harnessCode?: string }).harnessCode === 'not-found') return null;
+        throw error;
+      }
+    },
+    readExperimentLog: (caller, params) => experimentService.logs(caller, params),
+    watchWorkspace: (workspaceId, listener) => {
+      try {
+        const subscription = documentsAuthority.watch(workspaceId, (event) => {
+          listener({
+            kind: event.kind,
+            sequence: event.sequence,
+            generation: event.generation,
+            ...(event.resource ? { path: event.resource.resourceId } : {}),
+          });
+        });
+        return { ready: subscription.ready, close: () => subscription.close() };
+      } catch {
+        return null;
+      }
+    },
+    statWorkspaceFile: async (workspaceId, filePath) => {
+      const workspace = await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null);
+      if (!workspace) return null;
+      const absolute = path.resolve(workspace.root, filePath);
+      const relative = path.relative(workspace.root, absolute);
+      if (relative.startsWith('..') || path.isAbsolute(relative)) return { exists: false };
+      try {
+        const stat = await fs.promises.stat(absolute);
+        return { exists: stat.isFile(), size: stat.size, mtimeMs: stat.mtimeMs };
+      } catch {
+        return { exists: false };
+      }
+    },
+    workspaceHasActiveWriters: async (workspaceId) => {
+      const state = await documentsAuthority.inspectMutation(workspaceId).catch(() => null);
+      return (state?.activeWriters?.length ?? 0) > 0;
+    },
+    subscribeResourceSamples: (listener) => resourceService.subscribeSamples(listener),
+    getResourceSample: (machineId) => resourceService.getMachineSample(machineId),
+    externalSource: (provider) => provider === 'github-pr' ? followUpExternalSources.githubPr : null,
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
     onError: (error) => console.error('[PiariumFollowUp]', error.message),
   });

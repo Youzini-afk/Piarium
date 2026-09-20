@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt, vi } from "vitest";
-import type { ExperimentAttemptView } from "@piarium/protocol";
+import type { ExperimentArtifactView, ExperimentAttemptView } from "@piarium/protocol";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
-import { createFollowUpService, type FollowUpCaller, type FollowUpServiceDeps } from "./followups.js";
+import { createFollowUpService, type FollowUpCaller, type FollowUpExternalSource, type FollowUpResourceSample, type FollowUpServiceDeps } from "./followups.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
@@ -49,8 +49,28 @@ interface Harness {
   busy: Set<string>;
   attempts: Map<string, ExperimentAttemptView | null>;
   attemptListeners: Array<(workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => void>;
+  experiments: Map<string, { attempt: ExperimentAttemptView; artifacts: ExperimentArtifactView[] }>;
+  logs: Map<string, string>;
+  logEof: Map<string, boolean>;
+  files: Map<string, { exists: boolean; size: number; mtimeMs: number }>;
+  fileWatchListeners: Map<string, Array<(event: { kind: string; sequence: number; generation: number; path?: string }) => void>>;
+  activeWriters: Set<string>;
+  samples: Map<string, FollowUpResourceSample>;
+  sampleListeners: Array<(sample: FollowUpResourceSample) => void>;
+  external: Map<string, FollowUpExternalSource>;
   errors: Error[];
 }
+
+const artifactView = (overrides: Partial<ExperimentArtifactView> = {}): ExperimentArtifactView => ({
+  artifactId: "art-1",
+  attemptId: "attempt-1",
+  name: "result.json",
+  kind: "file",
+  state: "available",
+  byteLength: 128,
+  collectedAt: Date.now(),
+  ...overrides,
+});
 
 const attemptView = (overrides: Partial<ExperimentAttemptView> = {}): ExperimentAttemptView => ({
   attemptId: "attempt-1",
@@ -92,6 +112,15 @@ async function fixture(options: {
     busy: new Set(),
     attempts: new Map(),
     attemptListeners: [],
+    experiments: new Map(),
+    logs: new Map(),
+    logEof: new Map(),
+    files: new Map(),
+    fileWatchListeners: new Map(),
+    activeWriters: new Set(),
+    samples: new Map(),
+    sampleListeners: [],
+    external: new Map(),
     errors: [],
   };
   options.seed?.(harness);
@@ -153,6 +182,44 @@ async function fixture(options: {
     getAttempt: async (attemptCaller, attemptId) => options.getAttempt
       ? options.getAttempt(harness, attemptId, attemptCaller)
       : harness.attempts.get(attemptId) ?? null,
+    getExperiment: async (_caller, attemptId) => harness.experiments.get(attemptId) ?? null,
+    readExperimentLog: async (_caller, params) => {
+      const key = `${params.attemptId}:${params.stream ?? "stdout"}`;
+      const bytes = Buffer.from(harness.logs.get(key) ?? "", "utf8");
+      const start = Math.min(Math.max(0, params.offset ?? 0), bytes.length);
+      const slice = bytes.subarray(start, start + (params.maxBytes ?? 64 * 1024));
+      return {
+        text: slice.toString("utf8"),
+        offset: start,
+        nextOffset: start + slice.byteLength,
+        eof: harness.logEof.get(key) === true,
+      };
+    },
+    watchWorkspace: (workspaceId, listener) => {
+      const listeners = harness.fileWatchListeners.get(workspaceId) ?? [];
+      listeners.push(listener);
+      harness.fileWatchListeners.set(workspaceId, listeners);
+      return {
+        ready: Promise.resolve(true),
+        close: () => {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        },
+      };
+    },
+    statWorkspaceFile: async (workspaceId, filePath) => (
+      harness.files.get(`${workspaceId}:${filePath}`) ?? { exists: false }
+    ),
+    workspaceHasActiveWriters: async (workspaceId) => harness.activeWriters.has(workspaceId),
+    subscribeResourceSamples: (listener) => {
+      harness.sampleListeners.push(listener);
+      return () => {
+        const index = harness.sampleListeners.indexOf(listener);
+        if (index >= 0) harness.sampleListeners.splice(index, 1);
+      };
+    },
+    getResourceSample: async (machineId) => harness.samples.get(machineId) ?? null,
+    externalSource: (provider) => harness.external.get(provider) ?? null,
     onError: (error) => harness.errors.push(error),
   };
   const service = createFollowUpService(deps);
@@ -725,5 +792,367 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(detail.occurrences.length, 1);
     service2.dispose();
     service3.dispose();
+  });
+
+  const emitAttempt = (h: Harness, workspaceId: string, attemptId: string, view: ExperimentAttemptView | null) => {
+    for (const listener of h.attemptListeners) listener(workspaceId, attemptId, view);
+  };
+  const emitFile = (h: Harness, workspaceId: string, path: string, kind = "changed", sequence = 1) => {
+    for (const listener of h.fileWatchListeners.get(workspaceId) ?? []) {
+      listener({ generation: 1, kind, path, sequence });
+    }
+  };
+  const emitSample = (h: Harness, sample: FollowUpResourceSample) => {
+    for (const listener of h.sampleListeners) listener(sample);
+  };
+
+  it("artifact source: ready fires with artifact facts; terminal-without-it reports missing", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.experiments.set("attempt-1", {
+        artifacts: [artifactView({ artifactId: "art-pending", state: "pending" })],
+        attempt: attemptView({ collection: "pending", state: "running" }),
+      });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "inspect the artifact",
+      source: { artifactId: "art-pending", attemptId: "attempt-1", kind: "artifact" },
+    });
+    assert.equal(registered.followUp.status, "waiting");
+    assert.equal(registered.firedImmediately, false);
+    assert.equal(f.harness.continued.length, 0);
+
+    // Artifact becomes collected — the attempt wakeup evaluates and fires.
+    const detail = f.harness.experiments.get("attempt-1")!;
+    detail.artifacts = [artifactView({ artifactId: "art-pending", byteLength: 512 })];
+    emitAttempt(f.harness, "ws", "attempt-1", detail.attempt);
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    assert.equal(f.harness.continued.length, 1);
+    const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
+    assert.equal(occurrences.length, 1);
+    assert.equal(occurrences[0]!.reason, "artifact-ready");
+    assert.equal(occurrences[0]!.facts.artifactId, "art-pending");
+    assert.equal(occurrences[0]!.facts.byteLength, 512);
+
+    // A second wait on the same attempt ends honestly when the attempt is
+    // terminal without the bound artifact.
+    detail.artifacts = [];
+    detail.attempt = attemptView({ collection: "done", state: "completed" });
+    const missing = await f.service.register(caller(), {
+      instruction: "artifact never arrived",
+      source: { artifactId: "art-nope", attemptId: "attempt-1", kind: "artifact" },
+    });
+    await until(async () => (await f.service.get(caller(), { id: missing.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const missingOcc = (await f.service.get(caller(), { id: missing.followUp.id })).occurrences;
+    assert.equal(missingOcc[0]!.reason, "artifact-missing");
+  });
+
+  it("artifact every: fires once per collected artifact and closes on collection done", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.experiments.set("attempt-1", {
+        artifacts: [],
+        attempt: attemptView({ collection: "pending", state: "running" }),
+      });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "process each artifact",
+      source: { attemptId: "attempt-1", every: true, kind: "artifact" },
+    });
+    const detail = f.harness.experiments.get("attempt-1")!;
+
+    detail.artifacts = [artifactView({ artifactId: "art-a", name: "a.json" })];
+    emitAttempt(f.harness, "ws", "attempt-1", detail.attempt);
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, "waiting");
+
+    detail.artifacts = [artifactView({ artifactId: "art-a", name: "a.json" }), artifactView({ artifactId: "art-b", name: "b.json" })];
+    emitAttempt(f.harness, "ws", "attempt-1", detail.attempt);
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    // Re-notification of the same artifacts must not double-fire.
+    emitAttempt(f.harness, "ws", "attempt-1", detail.attempt);
+    await pause(150);
+    assert.equal(f.harness.continued.length, 2);
+
+    detail.attempt = attemptView({ collection: "done", state: "completed" });
+    emitAttempt(f.harness, "ws", "attempt-1", detail.attempt);
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
+    assert.deepEqual(occurrences.map((occurrence) => occurrence.reason).sort(), [
+      "artifact-collection-finished", "artifact-ready", "artifact-ready",
+    ]);
+  });
+
+  it("file source: exists fires on a watch event; ready waits for quiet + stability", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const registered = await f.service.register(caller(), {
+      instruction: "report exists",
+      source: { condition: "exists", kind: "file", path: "out/result.json" },
+    });
+    assert.equal(registered.followUp.status, "waiting");
+    assert.equal(f.harness.fileWatchListeners.get("ws")?.length, 1);
+
+    f.harness.files.set("ws:out/result.json", { exists: true, mtimeMs: 1_000, size: 64 });
+    emitFile(f.harness, "ws", "out/result.json", "created");
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    assert.equal(f.harness.continued.length, 1);
+
+    // "ready" must not fire while the document authority reports a writer.
+    f.harness.activeWriters.add("ws");
+    f.harness.files.set("ws:model/checkpoint.bin", { exists: true, mtimeMs: 2_000, size: 1024 });
+    const ready = await f.service.register(caller(), {
+      instruction: "checkpoint ready",
+      source: { condition: "ready", kind: "file", path: "model/checkpoint.bin" },
+    });
+    await pause(1_100); // settle window must not fire under an active writer
+    assert.equal((await f.service.get(caller(), { id: ready.followUp.id })).followUp.status, "waiting");
+    assert.equal(f.harness.continued.length, 1);
+
+    f.harness.activeWriters.delete("ws");
+    emitFile(f.harness, "ws", "model/checkpoint.bin", "changed", 2);
+    await until(async () => (await f.service.get(caller(), { id: ready.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const readyOcc = (await f.service.get(caller(), { id: ready.followUp.id })).occurrences;
+    assert.equal(readyOcc[0]!.reason, "file-ready");
+    assert.equal(readyOcc[0]!.facts.size, 1024);
+  });
+
+  it("file changed: each durable change re-arms; delete does not count", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const registered = await f.service.register(caller(), {
+      instruction: "react to changes",
+      source: { condition: "changed", kind: "file", path: "data/input.csv" },
+    });
+    emitFile(f.harness, "ws", "data/input.csv", "deleted", 1);
+    await pause(120);
+    assert.equal(f.harness.continued.length, 0);
+
+    emitFile(f.harness, "ws", "data/input.csv", "changed", 2);
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, "waiting");
+
+    emitFile(f.harness, "ws", "data/input.csv", "changed", 3);
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
+    assert.equal(occurrences.length, 2);
+    assert.equal(occurrences[1]!.facts.sequence, 3);
+  });
+
+  it("metric source: crossing fires once; steady-true samples do not re-wake", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const registered = await f.service.register(caller(), {
+      instruction: "memory pressure",
+      source: { kind: "metric", machineId: "local", metric: "memoryMb", predicate: "above", threshold: 8_000 },
+    });
+    assert.equal(registered.followUp.status, "waiting");
+
+    emitSample(f.harness, { machineId: "local", observedAt: 1, usage: { memoryMb: 4_000 } });
+    await pause(120);
+    assert.equal(f.harness.continued.length, 0);
+
+    emitSample(f.harness, { machineId: "local", observedAt: 2, usage: { memoryMb: 9_500 } });
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.followUp.status, "delivered");
+    assert.equal(detail.occurrences[0]!.reason, "metric-crossed");
+    assert.equal(detail.occurrences[0]!.facts.value, 9_500);
+  });
+
+  it("metric every: re-arms across crossings but never repeats on a held condition", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const registered = await f.service.register(caller(), {
+      instruction: "each crossing",
+      source: { every: true, kind: "metric", machineId: "local", metric: "cpuPercent", predicate: "above", threshold: 90 },
+    });
+    emitSample(f.harness, { machineId: "local", observedAt: 1, usage: { cpuPercent: 95 } });
+    await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
+    assert.equal((await f.service.get(caller(), { id: registered.followUp.id })).followUp.status, "waiting");
+
+    // Still above — no edge, no wake.
+    emitSample(f.harness, { machineId: "local", observedAt: 2, usage: { cpuPercent: 97 } });
+    await pause(120);
+    assert.equal(f.harness.continued.length, 1);
+
+    // Release then cross again → second occurrence.
+    emitSample(f.harness, { machineId: "local", observedAt: 3, usage: { cpuPercent: 40 } });
+    await pause(80);
+    emitSample(f.harness, { machineId: "local", observedAt: 4, usage: { cpuPercent: 96 } });
+    await until(() => f.harness.continued.length === 2, 4_000, f.harness.errors);
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.occurrences.length, 2);
+    assert.equal(detail.occurrences[1]!.facts.observedAt, 4);
+  });
+
+  it("log source: incremental match fires with byte offset; eof without match reports exhausted", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.logs.set("attempt-1:stdout", "booting\nstill working\n");
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "server is up",
+      source: { attemptId: "attempt-1", kind: "log", pattern: "READY" },
+    });
+    assert.equal(registered.firedImmediately, false);
+    assert.equal(registered.followUp.status, "waiting");
+
+    f.harness.logs.set("attempt-1:stdout", "booting\nstill working\nREADY on :8080\n");
+    emitAttempt(f.harness, "ws", "attempt-1", attemptView({ state: "running" }));
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
+    assert.equal(occurrences.length, 1);
+    assert.equal(occurrences[0]!.reason, "log-match");
+    assert.equal(occurrences[0]!.facts.offset, Buffer.byteLength("booting\nstill working\n"));
+
+    // A wait whose pattern never appears ends honestly at eof.
+    const exhausted = await f.service.register(caller(), {
+      instruction: "never appears",
+      source: { attemptId: "attempt-1", kind: "log", pattern: "NONEXISTENT", stream: "stderr" },
+    });
+    f.harness.logEof.set("attempt-1:stderr", true);
+    emitAttempt(f.harness, "ws", "attempt-1", attemptView({ collection: "done", state: "completed" }));
+    await until(async () => (await f.service.get(caller(), { id: exhausted.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const exhaustedOcc = (await f.service.get(caller(), { id: exhausted.followUp.id })).occurrences;
+    assert.equal(exhaustedOcc[0]!.reason, "log-exhausted");
+  });
+
+  it("external source: adapter match fires; unregistered provider stays honest", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.external.set("github-pr", {
+        intervalMs: 60_000,
+        query: async () => ({
+          eventId: "github-pr-42-merged",
+          facts: { branch: "main", pr: { number: 42, state: "merged" } },
+          matched: true,
+        }),
+      });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "PR merged — continue",
+      source: { condition: "merged", kind: "external", provider: "github-pr" },
+    });
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const occurrences = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences;
+    assert.equal(occurrences[0]!.reason, "external-match");
+    assert.equal(occurrences[0]!.facts.provider, "github-pr");
+
+    // An unregistered provider is rejected at the boundary — no record, no wait.
+    await assert.rejects(
+      f.service.register(caller(), {
+        instruction: "wait on bogus",
+        // @ts-expect-error — invalid provider rejected at the boundary
+        source: { condition: "open", kind: "external", provider: "bogus" },
+      }),
+      /not a registered adapter/,
+    );
+  });
+
+  it("external source unavailable marks the wait unavailable", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.external.set("github-pr", {
+        intervalMs: 60_000,
+        query: async () => ({ facts: { reason: "github not connected" }, matched: false, unavailable: true }),
+      });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "PR check",
+      source: { condition: "open", kind: "external", provider: "github-pr" },
+    });
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "unavailable", 4_000, f.harness.errors);
+    assert.equal(f.harness.continued.length, 0);
+  });
+
+  it("rejects path escapes and invalid source fields at the boundary", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    await assert.rejects(
+      f.service.register(caller(), { instruction: "x", source: { condition: "exists", kind: "file", path: "../escape.txt" } }),
+      /workspace-relative/,
+    );
+    await assert.rejects(
+      f.service.register(caller(), { instruction: "x", source: { condition: "exists", kind: "file", path: "C:\\abs.txt" } }),
+      /workspace-relative/,
+    );
+    await assert.rejects(
+      f.service.register(caller(), { instruction: "x", source: { kind: "metric", machineId: "local", metric: "bogus", predicate: "above", threshold: 1 } }),
+      /metric source metric/,
+    );
+    await assert.rejects(
+      f.service.register(caller(), { instruction: "x", source: { attemptId: "a", kind: "log", pattern: "([", regex: true } }),
+      /regular expression/,
+    );
+  });
+
+  it("reconcile rebuilds file and metric observers after restart", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const fileWait = await f.service.register(caller(), {
+      instruction: "file appeared",
+      source: { condition: "exists", kind: "file", path: "out/flag" },
+    });
+    const metricWait = await f.service.register(caller(), {
+      instruction: "cpu hot",
+      source: { kind: "metric", machineId: "local", metric: "cpuPercent", predicate: "above", threshold: 95 },
+    });
+    assert.equal(fileWait.followUp.status, "waiting");
+    assert.equal(metricWait.followUp.status, "waiting");
+
+    // Restart: a new service instance over the same kernel rebuilds observers.
+    const harness2: Harness = {
+      ...f.harness,
+      attemptListeners: [],
+      continued: [],
+      errors: [],
+      fileWatchListeners: new Map(),
+      informs: [],
+      ledger: [],
+      parked: [],
+      sampleListeners: [],
+      sessionRequests: [],
+    };
+    const service2 = createFollowUpService({
+      client: f.client,
+      getThread: async (_ws, threadId) => harness2.threads.get(threadId) ?? null,
+      getActiveRun: async () => null,
+      continueRun: async (input) => {
+        harness2.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
+        return { runId: "run-2" };
+      },
+      enqueueContinuation: async () => ({}),
+      notifySession: async () => {},
+      sessionRequest: async () => {},
+      sessionBusy: async () => false,
+      recordDirectedMessage: async () => ({}),
+      setFollowUpAttention: async () => ({}),
+      requestForSession: async () => ({}),
+      getExperiment: async (_c, attemptId) => harness2.experiments.get(attemptId) ?? null,
+      readExperimentLog: async (_c, params) => {
+        const key = `${params.attemptId}:${params.stream ?? "stdout"}`;
+        const bytes = Buffer.from(harness2.logs.get(key) ?? "", "utf8");
+        const start = Math.min(Math.max(0, params.offset ?? 0), bytes.length);
+        const slice = bytes.subarray(start, start + (params.maxBytes ?? 64 * 1024));
+        return { eof: harness2.logEof.get(key) === true, nextOffset: start + slice.byteLength, offset: start, text: slice.toString("utf8") };
+      },
+      watchWorkspace: (workspaceId, listener) => {
+        const listeners = harness2.fileWatchListeners.get(workspaceId) ?? [];
+        listeners.push(listener);
+        harness2.fileWatchListeners.set(workspaceId, listeners);
+        return { close: () => { const i = listeners.indexOf(listener); if (i >= 0) listeners.splice(i, 1); }, ready: Promise.resolve(true) };
+      },
+      statWorkspaceFile: async (workspaceId, filePath) => harness2.files.get(`${workspaceId}:${filePath}`) ?? { exists: false },
+      workspaceHasActiveWriters: async (workspaceId) => harness2.activeWriters.has(workspaceId),
+      subscribeResourceSamples: (listener) => {
+        harness2.sampleListeners.push(listener);
+        return () => { const i = harness2.sampleListeners.indexOf(listener); if (i >= 0) harness2.sampleListeners.splice(i, 1); };
+      },
+      getResourceSample: async (machineId) => harness2.samples.get(machineId) ?? null,
+      externalSource: (provider) => harness2.external.get(provider) ?? null,
+      onError: (error) => harness2.errors.push(error),
+    });
+    await service2.reconcile("ws");
+
+    harness2.files.set("ws:out/flag", { exists: true, mtimeMs: 5, size: 1 });
+    emitFile(harness2, "ws", "out/flag", "created");
+    emitSample(harness2, { machineId: "local", observedAt: 10, usage: { cpuPercent: 99 } });
+    await until(() => harness2.continued.length === 2, 4_000, harness2.errors);
+    service2.dispose();
   });
 });
