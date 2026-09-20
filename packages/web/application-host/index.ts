@@ -1353,6 +1353,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     kernel: kernelClient,
     resources: resourceService,
     readSettings: async () => await readSettingsFromDisk() as unknown as Record<string, unknown>,
+    // A reconnected target re-attaches to its durable jobs — the attempt
+    // records already carry the backend job identity, so the experiment
+    // reconcile inspects and re-polls rather than resubmitting.
+    onTargetReachable: (workspaceId) => {
+      void experimentService.ensureReconciled(workspaceId).catch((error: unknown) => {
+        console.error("[PiariumManagedTarget] Post-reconnect reconcile failed:", errorMessage(error));
+      });
+    },
     onError: (error) => console.error("[PiariumManagedTarget]", error.message),
   });
   const sourceService = createSourceService({
@@ -1560,6 +1568,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
           console.error('[HarnessThreads] Evidence ownership reconciliation failed:', errorMessage(error));
         });
       }
+      if (thread.lifecycle === 'archived') {
+        void followUpService.settleTarget(workspaceId, { kind: 'thread', id: thread.id }).catch((error: unknown) => {
+          console.error('[PiariumFollowUp] Archive settle failed:', errorMessage(error));
+        });
+      }
     },
     onThreadDone: (workspaceId, parent, threadId, report) => {
       broadcastGlobalUiEvent?.({
@@ -1583,6 +1596,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         console.error('[HarnessThreads] Lost-run resume after freed admission failed:', errorMessage(error));
       });
     },
+    onThreadRemoved: (workspaceId, threadId) => (
+      followUpService.settleTarget(workspaceId, { kind: 'thread', id: threadId })
+        .then(() => undefined)
+        .catch((error: unknown) => {
+          console.error('[PiariumFollowUp] Thread-removal settle failed:', errorMessage(error));
+        })
+    ),
   });
   const threadRegistryStartup = await threadRegistry.reconcileAfterHostRestart();
   for (const failure of threadRegistryStartup.failures) {
@@ -2188,18 +2208,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
     onError: (error) => console.error('[PiariumFollowUp]', error.message),
   });
-  // Rebuild follow-up observers for every known Thread workspace and configured
-  // project workspace. Root-session follow-ups do not necessarily have a Thread
-  // catalog, so relying on the registry alone would strand their timers after a
-  // Host restart.
+  // Rebuild follow-up observers for every workspace that owns durable
+  // definitions. The kernel record store enumerates them directly — recovery
+  // does not depend on the Thread catalog, saved projects, or an open UI, and
+  // one failing workspace does not block the rest.
   void (async () => {
-    const workspaceIds = new Set(await threadRegistry.listWorkspaceIds());
-    const projects = sanitizeProjects((await readSettingsFromDisk()).projects || []) ?? [];
-    for (const project of projects) {
-      const resolved = await documentsAuthority.resolveWorkspace({ path: project.path }).catch(() => null);
-      if (resolved?.workspaceId) workspaceIds.add(resolved.workspaceId);
-    }
-    for (const workspaceId of workspaceIds) {
+    for (const workspaceId of await followUpService.definitionWorkspaces()) {
       await followUpService.reconcile(workspaceId).catch((error) => {
         console.error(`[PiariumFollowUp] Reconcile failed for ${workspaceId}:`, errorMessage(error));
       });
@@ -2319,6 +2333,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       }
     }
     await threadRegistry.archiveThreadsForDeletedSessionAcrossWorkspaces(sessionId);
+    // Session deletion is a target-gone event: every durable wait bound to the
+    // session closes instead of outliving its delivery authority.
+    for (const followUpWorkspaceId of await followUpService.definitionWorkspaces().catch(() => [] as string[])) {
+      await followUpService.settleTarget(followUpWorkspaceId, { kind: 'session', id: sessionId }).catch((error: unknown) => {
+        console.error('[PiariumFollowUp] Session-delete settle failed:', errorMessage(error));
+      });
+    }
     if (summary.workspace?.kind !== 'workspace') return;
     const workspaceId = summary.workspace.authorityId ?? summary.workspace.id;
     await threadRegistry.cancelAllForParent(

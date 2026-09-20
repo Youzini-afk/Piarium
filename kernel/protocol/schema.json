@@ -48,6 +48,7 @@
     "storage.record.put": "KernelRecordPutParams",
     "storage.record.get": "KernelRecordGetParams",
     "storage.record.list": "KernelRecordListParams",
+    "storage.record.workspaces": "KernelRecordWorkspacesParams",
     "storage.record.release": "KernelRecordReleaseParams",
     "working.result.put": "KernelWorkingResultPutParams",
     "working.result.get": "KernelWorkingResultGetParams",
@@ -222,6 +223,7 @@
       "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},
     "KernelRecordReleaseParams": {"fields": {"operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordId": {"type": "string"}}},
+    "KernelRecordWorkspacesParams": {"fields": {"recordType": {"type": "string"}}},
     "KernelWorkingDiffStats": {"fields": {"files": {"type": "number"}, "insertions": {"type": "number"}, "deletions": {"type": "number"}}},
     "KernelWorkingResultDocument": {"fields": {
       "resultRevision": {"type": "number"}, "branchId": {"type": "string"}, "parentRef": {"type": "string", "optional": true},
@@ -518,6 +520,7 @@
     "storage.record.put": "publish a typed durable product record and its object references",
     "storage.record.get": "read a durable product record by identity",
     "storage.record.list": "page durable product records by workspace and owner identity",
+    "storage.record.workspaces": "enumerate owning workspaces of a record type for Host recovery",
     "storage.record.release": "release a durable product record and its object references",
     "working.result.put": "publish a root-bound working result",
     "working.result.get": "read a root-bound working result",

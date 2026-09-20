@@ -963,6 +963,42 @@ impl Storage {
         )
     }
 
+    /// Enumerate the owning workspaces for a record type. Cross-workspace by
+    /// design so a restarted Host can rediscover every durable wait/execution
+    /// intent without relying on a Thread catalog or saved project list; the
+    /// maintenance capability gate keeps actor-scoped grants out.
+    pub(super) fn domain_record_workspaces(
+        &self,
+        params_value: &Value,
+        grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        let record_type = params_value
+            .get("recordType")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| KernelError::Operation("recordType is required".to_string()))?;
+        let grant = self.load_grant(grant_id)?;
+        if !grant.capabilities.contains("storage.maintenance")
+            && !grant.capabilities.contains("storage.admin")
+            && !grant.capabilities.contains("recovery.maintenance")
+        {
+            return Err(KernelError::Authorization(
+                "record workspace enumeration requires a maintenance grant".to_string(),
+            ));
+        }
+        let mut workspace_ids = Vec::new();
+        for row in self
+            .conn
+            .prepare(
+                "SELECT DISTINCT workspace_id FROM domain_records WHERE record_type = ?1 ORDER BY workspace_id",
+            )?
+            .query_map(params![record_type], |row| row.get::<_, String>(0))?
+        {
+            workspace_ids.push(row?);
+        }
+        Ok(json!({ "workspaceIds": workspace_ids }))
+    }
+
     pub(super) fn domain_record_release(
         &mut self,
         params_value: &Value,

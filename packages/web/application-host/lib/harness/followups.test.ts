@@ -1155,4 +1155,70 @@ describe("follow-up service on the real kernel", () => {
     await until(() => harness2.continued.length === 2, 4_000, harness2.errors);
     service2.dispose();
   });
+
+  it("definitionWorkspaces enumerates owning workspaces through the kernel", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    assert.deepEqual(await f.service.definitionWorkspaces(), []);
+    await f.service.register(caller(), {
+      instruction: "later",
+      source: { at: Date.now() + 60_000, kind: "time" },
+    });
+    assert.deepEqual(await f.service.definitionWorkspaces(), ["ws"]);
+  });
+
+  it("settleTarget cancels waits whose thread or session is gone", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.goals.set("s-1", { id: "g-1", status: "active" });
+    } });
+    const threadWait = await f.service.register(caller(), {
+      instruction: "thread wait",
+      pause: true,
+      source: { at: Date.now() + 60_000, kind: "time" },
+    });
+    const sessionWait = await f.service.register(sessionCaller(), {
+      instruction: "session wait",
+      source: { at: Date.now() + 60_000, kind: "time" },
+    });
+    const otherWait = await f.service.register(
+      caller({ sessionId: "s-other", threadId: "t-other" }),
+      { instruction: "other wait", source: { at: Date.now() + 60_000, kind: "time" } },
+    );
+    assert.equal(f.harness.goals.get("s-1")?.status, "paused");
+
+    const settledThreads = await f.service.settleTarget("ws", { kind: "thread", id: "t-1" });
+    assert.equal(settledThreads, 1);
+    assert.equal((await f.service.get(caller(), { id: threadWait.followUp.id })).followUp.status, "cancelled");
+    // The goal this registration paused is resumed; the other wait survives.
+    assert.equal(f.harness.goals.get("s-1")?.status, "active");
+    assert.equal(f.harness.attention.at(-1)?.waitingFor, null);
+    assert.equal((await f.service.get(caller(), { id: sessionWait.followUp.id })).followUp.status, "waiting");
+
+    const settledSessions = await f.service.settleTarget("ws", { kind: "session", id: "s-1" });
+    assert.equal(settledSessions, 1);
+    assert.equal((await f.service.get(caller(), { id: sessionWait.followUp.id })).followUp.status, "cancelled");
+    assert.equal((await f.service.get(caller({ sessionId: "s-other", threadId: "t-other" }), { id: otherWait.followUp.id })).followUp.status, "waiting");
+  });
+
+  it("settleTarget marks waits unavailable when their attempt record is gone", async () => {
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.attempts.set("attempt-1", attemptView({ state: "running" }));
+    } });
+    const experimentWait = await f.service.register(caller(), {
+      instruction: "experiment done",
+      source: { attemptId: "attempt-1", kind: "experiment" },
+    });
+    const timeWait = await f.service.register(caller(), {
+      instruction: "unrelated timer",
+      source: { at: Date.now() + 60_000, kind: "time" },
+    });
+    const settled = await f.service.settleTarget("ws", { kind: "attempt", id: "attempt-1" });
+    assert.equal(settled, 1);
+    assert.equal((await f.service.get(caller(), { id: experimentWait.followUp.id })).followUp.status, "unavailable");
+    assert.equal((await f.service.get(caller(), { id: timeWait.followUp.id })).followUp.status, "waiting");
+    // Nothing was delivered or cancelled through the model path.
+    assert.equal(f.harness.continued.length, 0);
+    assert.equal(f.harness.informs.length, 0);
+  });
 });

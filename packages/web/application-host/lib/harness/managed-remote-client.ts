@@ -55,6 +55,12 @@ export interface ManagedRemoteTargetRegistryOptions {
   resources: ResourceService;
   readSettings(): Promise<Record<string, unknown>>;
   fetch?: typeof fetch;
+  /**
+   * A managed target that was unreachable (or never probed) answered an
+   * identity probe again. Consumers re-attach — never resubmit — durable
+   * remote jobs by re-running their reconcile for the listed workspaces.
+   */
+  onTargetReachable?(workspaceId: string, machineId: string): void;
   onError?: (error: Error) => void;
 }
 
@@ -133,6 +139,8 @@ const configuredHosts = (settings: Record<string, unknown>): ConfiguredHost[] =>
 export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRegistryOptions) {
   const fetchImpl = options.fetch ?? fetch;
   const targets = new Map<string, ManagedTarget>();
+  /** machineId → workspaces whose callers resolved that machine's backend. */
+  const workspaceBindings = new Map<string, Set<string>>();
   let refreshPromise: Promise<void> | null = null;
   const report = (error: unknown) => options.onError?.(error instanceof Error ? error : new Error(String(error)));
 
@@ -229,8 +237,16 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           target: prior.target,
         }).catch(report);
       }
+      const reachable = [...next.keys()].filter((machineId) => !targets.has(machineId));
       targets.clear();
       for (const [machineId, target] of next) targets.set(machineId, target);
+      // Re-attach, never resubmit: a reconnected target resolves the same
+      // backend identity, so the owning service reconciles its durable jobs.
+      for (const machineId of reachable) {
+        for (const workspaceId of workspaceBindings.get(machineId) ?? []) {
+          try { options.onTargetReachable?.(workspaceId, machineId); } catch (error) { report(error); }
+        }
+      }
     })().finally(() => { refreshPromise = null; });
     return refreshPromise;
   };
@@ -342,6 +358,9 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
     if (!machine || payloadOf(machine).backend !== "managed-remote") return null;
     const target = await targetFor(caller.workspaceId, machineId);
     if (!target) return null;
+    const bound = workspaceBindings.get(machineId) ?? new Set<string>();
+    bound.add(caller.workspaceId);
+    workspaceBindings.set(machineId, bound);
     const client = new ManagedTargetClient(target, fetchImpl);
     const coordinatorPath = encodeURIComponent(options.coordinatorHostId);
     const backend: ExperimentBackend = {

@@ -102,6 +102,9 @@ impl Storage {
             "storage.record.list" => {
                 storage.domain_record_list(authorized_params, grant_id.unwrap_or(""))
             }
+            "storage.record.workspaces" => {
+                storage.domain_record_workspaces(authorized_params, grant_id.unwrap_or(""))
+            }
             "storage.record.release" => idempotent(storage, method, authorized_params, |storage| {
                 storage.domain_record_release(authorized_params, grant_id.unwrap_or(""))
             }),

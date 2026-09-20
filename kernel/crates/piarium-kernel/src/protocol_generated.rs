@@ -369,6 +369,12 @@ pub(crate) struct KernelRecordListParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelRecordWorkspacesParams {
+    pub(crate) record_type: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecordReleaseParams {
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
@@ -1291,6 +1297,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "storage.record.list" => serde_json::from_value::<KernelRecordListParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "storage.record.workspaces" => {
+            serde_json::from_value::<KernelRecordWorkspacesParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "storage.record.release" => {
             serde_json::from_value::<KernelRecordReleaseParams>(params.clone())
                 .map(|_| ())

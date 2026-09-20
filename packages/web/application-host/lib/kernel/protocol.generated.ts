@@ -47,6 +47,7 @@ export type KernelMethod =
   | "storage.record.put"
   | "storage.record.get"
   | "storage.record.list"
+  | "storage.record.workspaces"
   | "storage.record.release"
   | "working.result.put"
   | "working.result.get"
@@ -446,6 +447,10 @@ export interface KernelRecordReleaseParams {
   operationId: string;
   workspaceId: string;
   recordId: string;
+}
+
+export interface KernelRecordWorkspacesParams {
+  recordType: string;
 }
 
 export interface KernelWorkingDiffStats {
@@ -1246,6 +1251,7 @@ export type KernelMethodParams = {
   "storage.record.put": KernelRecordPutParams;
   "storage.record.get": KernelRecordGetParams;
   "storage.record.list": KernelRecordListParams;
+  "storage.record.workspaces": KernelRecordWorkspacesParams;
   "storage.record.release": KernelRecordReleaseParams;
   "working.result.put": KernelWorkingResultPutParams;
   "working.result.get": KernelWorkingResultGetParams;
@@ -1652,6 +1658,15 @@ export type KernelRequest =
       id: string;
       method: "storage.record.list";
       params: KernelRecordListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "storage.record.workspaces";
+      params: KernelRecordWorkspacesParams;
       epoch?: string;
       grantId?: string;
     }

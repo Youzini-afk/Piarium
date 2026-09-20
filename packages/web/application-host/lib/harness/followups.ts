@@ -2474,6 +2474,76 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     }
   };
 
+  /** attemptId bound by experiment-family sources; undefined for the rest. */
+  const sourceAttemptId = (source: FollowUpSource): string | undefined => (
+    source.kind === "experiment" || source.kind === "artifact" || source.kind === "log"
+      ? source.attemptId
+      : undefined
+  );
+
+  /**
+   * Owning workspaces of every durable definition — the kernel record store is
+   * the single authority, so recovery does not depend on the Thread catalog,
+   * saved projects, or an open UI surface. A Host-level maintenance grant sees
+   * workspace ids only; definition reads stay scoped per workspace.
+   */
+  const definitionWorkspaces = async (): Promise<string[]> => {
+    const grant = await deps.client.issueGrant({
+      grantId: `followup:enumerate:${randomUUID()}`,
+      capabilities: [...SERVICE_CAPABILITIES],
+      owningWorkspace: null,
+      executionWorkspace: null,
+      pathScopes: [],
+    });
+    const result = await deps.client.recordWorkspaces({ recordType: "followup.definition" }, grant);
+    return result.workspaceIds;
+  };
+
+  /**
+   * Lifecycle settling (W-B): when a target disappears — thread archived or
+   * deleted, session deleted, attempt record released — active definitions
+   * pointing at it are durably closed instead of waiting for a trigger that
+   * can no longer deliver. Threads/sessions cancel the intent; a removed
+   * attempt marks the source unavailable. Never touches the underlying
+   * experiment job.
+   */
+  const settleTarget = async (
+    workspaceId: string,
+    target: { kind: "thread" | "session" | "attempt"; id: string },
+  ): Promise<number> => {
+    const records = await listDefinitions(workspaceId);
+    let settled = 0;
+    for (const record of records) {
+      if (!ACTIVE_STATUSES.has(record.state as FollowUpStatus)) continue;
+      const payload = payloadOf(record) as unknown as DefinitionPayload;
+      const gone =
+        (target.kind === "thread" && payload.threadId === target.id)
+        || (target.kind === "session" && payload.sessionId === target.id)
+        || (target.kind === "attempt" && sourceAttemptId(payload.source) === target.id);
+      if (!gone) continue;
+      await withDefinition(payload.id, async () => {
+        const fresh = await getDefinitionRecord(workspaceId, payload.id);
+        if (!fresh || !ACTIVE_STATUSES.has(fresh.state as FollowUpStatus)) return;
+        const freshPayload = payloadOf(fresh) as unknown as DefinitionPayload;
+        const nextState: FollowUpStatus = target.kind === "attempt" ? "unavailable" : "cancelled";
+        disarm(freshPayload);
+        await putDefinition(
+          workspaceId,
+          { ...freshPayload, updatedAt: now() },
+          nextState,
+          fresh.recordRevision,
+        );
+        settled += 1;
+        if (freshPayload.threadId) {
+          await syncFollowUpAttention(workspaceId, freshPayload.threadId).catch(reportError);
+        }
+        await goalResume(workspaceId, freshPayload.sessionId, freshPayload.pausedGoalId, freshPayload.id);
+      });
+    }
+    if (settled > 0) changed(workspaceId);
+    return settled;
+  };
+
   return {
     register,
     list,
@@ -2483,6 +2553,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     check,
     fire: fireNow,
     reconcile,
+    definitionWorkspaces,
+    settleTarget,
     dispose: () => {
       unsubscribeAttempts?.();
       unsubscribeSamples?.();

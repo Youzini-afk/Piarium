@@ -1267,6 +1267,19 @@ export class KernelClient {
     return this.requestRaw<KernelRecordListResult>("storage.record.list", params, { signal, grant });
   }
 
+  /**
+   * Owning workspaces of a record type (cross-workspace enumeration for Host
+   * recovery). Requires a maintenance-capable grant without an owning
+   * workspace binding.
+   */
+  async recordWorkspaces(params: KernelMethodParams["storage.record.workspaces"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ workspaceIds: string[] }> {
+    const result = await this.requestRaw<{ workspaceIds?: unknown }>("storage.record.workspaces", params, { signal, grant });
+    const ids = result && Array.isArray(result.workspaceIds)
+      ? result.workspaceIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    return { workspaceIds: ids };
+  }
+
   async releaseRecord(params: KernelMethodParams["storage.record.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("storage.record.release", params, { signal, grant });
   }
