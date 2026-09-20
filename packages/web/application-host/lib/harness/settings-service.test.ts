@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import type { PiariumSettingsDocument } from "@piarium/settings-store";
 import type { PiSettingsSnapshot } from "@piarium/protocol";
-import { createSettingsService, settingsDocumentRevision, type SettingsServiceDeps } from "./settings-service.js";
+import { createSettingsService, settingsDocumentRevision, type ClientSurfaceBridge, type SettingsServiceDeps } from "./settings-service.js";
+import type { SettingsActionRegistry } from "./settings-actions.js";
+import { HarnessServiceError } from "./service-error.js";
 
 /**
  * Focused contract tests for the shared-catalog settings service (D-306).
@@ -29,35 +31,64 @@ function makePiSnapshot(fixture: PiFixture): PiSettingsSnapshot {
   };
 }
 
+function basePersistFactory(getApp: () => PiariumSettingsDocument, setApp: (doc: PiariumSettingsDocument) => void) {
+  return async (changes: Record<string, unknown>, removals: readonly string[], expectedRevision: string | undefined) => {
+    const appDocument = getApp();
+    const revision = settingsDocumentRevision(appDocument);
+    if (expectedRevision !== undefined && expectedRevision !== revision) {
+      return { conflict: true, revision, document: appDocument };
+    }
+    const next: PiariumSettingsDocument = structuredClone(appDocument);
+    for (const [key, value] of Object.entries(changes)) {
+      next[key] = value;
+    }
+    for (const key of removals) {
+      delete next[key];
+    }
+    setApp(next);
+    return { conflict: false, revision: settingsDocumentRevision(next), document: next };
+  };
+}
+
+function baseDeps() {
+  let appDocument: PiariumSettingsDocument = {};
+  const pi: PiFixture = { global: {}, project: {}, projectTrusted: true, updates: [] };
+  const deps: SettingsServiceDeps = {
+    readAppSettings: async () => structuredClone(appDocument),
+    persistAppSettings: basePersistFactory(() => appDocument, (doc) => { appDocument = doc; }),
+    requestPi: async (_cwd, method, params) => {
+      if (method === "settings.get") return makePiSnapshot(pi);
+      const update = params as PiFixture["updates"][number];
+      pi.updates.push(update);
+      const layer = update.scope === "project" ? pi.project : pi.global;
+      for (const [key, value] of Object.entries(update.set)) layer[key] = value;
+      for (const key of update.remove) delete layer[key];
+      return makePiSnapshot(pi);
+    },
+    resolveWorkspaceRoot: async () => "/repo/workspace",
+  };
+  return { deps, pi, getApp: () => appDocument };
+}
+
 function fixture(overrides: {
   app?: PiariumSettingsDocument;
   pi?: Partial<PiFixture>;
   onChanged?: SettingsServiceDeps["onChanged"];
+  clientSurfaces?: ClientSurfaceBridge;
+  actions?: SettingsActionRegistry;
 } = {}) {
-  let appDocument: PiariumSettingsDocument = overrides.app ?? {};
+  const base = baseDeps();
+  let appDocument: PiariumSettingsDocument = overrides.app ?? base.getApp();
   const pi: PiFixture = {
-    global: overrides.pi?.global ?? {},
-    project: overrides.pi?.project ?? {},
+    global: overrides.pi?.global ?? base.pi.global,
+    project: overrides.pi?.project ?? base.pi.project,
     projectTrusted: overrides.pi?.projectTrusted ?? true,
     updates: [],
   };
   const deps: SettingsServiceDeps = {
+    ...base.deps,
     readAppSettings: async () => structuredClone(appDocument),
-    persistAppSettings: async (changes, removals, expectedRevision) => {
-      const revision = settingsDocumentRevision(appDocument);
-      if (expectedRevision !== undefined && expectedRevision !== revision) {
-        return { conflict: true, revision, document: appDocument };
-      }
-      const next: PiariumSettingsDocument = structuredClone(appDocument);
-      for (const [key, value] of Object.entries(changes)) {
-        next[key] = value;
-      }
-      for (const key of removals) {
-        delete next[key];
-      }
-      appDocument = next;
-      return { conflict: false, revision: settingsDocumentRevision(next), document: next };
-    },
+    persistAppSettings: basePersistFactory(() => appDocument, (doc) => { appDocument = doc; }),
     requestPi: async (_cwd, method, params) => {
       if (method === "settings.get") {
         return makePiSnapshot(pi);
@@ -73,10 +104,66 @@ function fixture(overrides: {
       }
       return makePiSnapshot(pi);
     },
-    resolveWorkspaceRoot: async () => "/repo/workspace",
     ...(overrides.onChanged ? { onChanged: overrides.onChanged } : {}),
+    ...(overrides.clientSurfaces ? { clientSurfaces: overrides.clientSurfaces } : {}),
+    ...(overrides.actions ? { actions: overrides.actions } : {}),
   };
   return { service: createSettingsService(deps), pi, getApp: () => appDocument };
+}
+
+/** Minimal real-adapter registry wired to the same fake Pi channel. */
+function depsWithActions(
+  calls: { method: string; params: unknown }[],
+  opts: { fail?: boolean } = {},
+): SettingsServiceDeps {
+  const base = baseDeps();
+  return {
+    ...base.deps,
+    actions: {
+      adapterFor: (domain) => domain === "runtime:extensions" ? {
+        describe: async () => ({ summary: "packages", verbs: ["list", "install", "remove"] }),
+        invoke: async (_ctx, _entry, verb, _args) => {
+          if (opts.fail) return { status: "unavailable", detail: "owner offline" };
+          if (verb === "list") {
+            calls.push({ method: "package.list", params: {} });
+            return { status: "applied", data: [] };
+          }
+          return { status: "unavailable", detail: `verb ${verb} not wired` };
+        },
+      } : null,
+    } as SettingsActionRegistry,
+  };
+}
+
+/** Surface bridge stub: applies like a connected surface would. */
+function fakeBridge(
+  calls: unknown[],
+  surfaces: { id: string; kind: string }[],
+): ClientSurfaceBridge {
+  return {
+    list: () => surfaces,
+    request: async (op) => {
+      if (surfaces.length === 0) {
+        throw new HarnessServiceError("unavailable", "no client surface is connected to this host");
+      }
+      if (!op.surfaceId && surfaces.length > 1) {
+        throw new HarnessServiceError("ambiguous", "several surfaces are connected — pass surface to choose");
+      }
+      const surface = surfaces.find((s) => s.id === op.surfaceId) ?? surfaces[0]!;
+      if (op.surfaceId && !surfaces.some((s) => s.id === op.surfaceId)) {
+        throw new HarnessServiceError("unavailable", `surface "${op.surfaceId}" is not connected`);
+      }
+      calls.push(op);
+      return {
+        surface,
+        results: op.entries.map((entry) => ({
+          id: entry.id,
+          status: "applied" as const,
+          values: entry.values ?? { enabled: false },
+        })),
+      };
+    },
+  };
 }
 
 describe("settings service catalog search", () => {
@@ -292,15 +379,155 @@ describe("settings update", () => {
     assert.equal((pi.global.harness as Record<string, unknown>).shell, "wsl");
   });
 
-  it("refuses to fake device-local and action entries", async () => {
+  it("keeps client and action entries honest when their channel is missing", async () => {
     const { service } = fixture();
     await assert.rejects(
       service.update(caller, { id: "appearance.language", set: { locale: "fr" } }),
-      /device-local/,
+      /device-local.*surface channel|surface channel/,
     );
     await assert.rejects(
       service.update(caller, { id: "plugins.packages", set: { anything: true } }),
-      /domain action/,
+      /settings\.action/,
     );
+  });
+});
+
+describe("settings actions (D-309)", () => {
+  it("routes a declared verb to the domain adapter and returns owner state", async () => {
+    const calls: { method: string; params: unknown }[] = [];
+    const withActions = createSettingsService(depsWithActions(calls));
+    const result = await withActions.action(caller, {
+      id: "plugins.packages",
+      verb: "list",
+    });
+    assert.equal(result.status, "applied");
+    assert.deepEqual(calls.map((call) => call.method), ["package.list"]);
+  });
+
+  it("denies undeclared verbs without touching the owner", async () => {
+    const calls: { method: string; params: unknown }[] = [];
+    const withActions = createSettingsService(depsWithActions(calls));
+    const result = await withActions.action(caller, {
+      id: "plugins.packages",
+      verb: "obliterate",
+    });
+    assert.equal(result.status, "denied");
+    assert.equal(calls.length, 0);
+  });
+
+  it("reports unavailable when the owner adapter cannot reach its service", async () => {
+    const withActions = createSettingsService(depsWithActions([], { fail: true }));
+    const result = await withActions.action(caller, {
+      id: "plugins.packages",
+      verb: "list",
+    });
+    assert.equal(result.status, "unavailable");
+  });
+
+  it("read surfaces the live verb list and owner summary", async () => {
+    const withActions = createSettingsService(depsWithActions([]));
+    const result = await withActions.read(caller, { id: "plugins.packages", detail: true });
+    assert.equal(result.state, "action");
+    assert.ok(result.action?.verbs?.includes("list"));
+  });
+});
+
+describe("client surface bridge (D-309)", () => {
+  it("applies a client-owned field on the single connected surface", async () => {
+    const applied: { entries: { id: string; values?: Record<string, unknown> }[] }[] = [];
+    const { service } = fixture({
+      clientSurfaces: fakeBridge(applied, [{ id: "surf-1", kind: "desktop" }]),
+    });
+    const result = await service.update(caller, {
+      id: "chat.persist-drafts",
+      set: { enabled: false },
+    });
+    assert.equal(result.status, "applied");
+    assert.equal(applied[0]?.entries[0]?.id, "chat.persist-drafts");
+    assert.deepEqual(applied[0]?.entries[0]?.values, { enabled: false });
+    assert.equal(result.surface?.id, "surf-1");
+  });
+
+  it("reports unavailable when no surface is connected", async () => {
+    const { service } = fixture({ clientSurfaces: fakeBridge([], []) });
+    await assert.rejects(
+      service.update(caller, { id: "chat.persist-drafts", set: { enabled: false } }),
+      /no client surface/,
+    );
+  });
+
+  it("refuses to guess when several surfaces are connected", async () => {
+    const { service } = fixture({
+      clientSurfaces: fakeBridge([], [
+        { id: "surf-1", kind: "desktop" },
+        { id: "surf-2", kind: "web" },
+      ]),
+    });
+    await assert.rejects(
+      service.update(caller, { id: "chat.persist-drafts", set: { enabled: false } }),
+      /surfaces are connected|surface to choose/,
+    );
+    const targeted = await service.update(caller, {
+      id: "chat.persist-drafts",
+      set: { enabled: false },
+      surface: "surf-2",
+    });
+    assert.equal(targeted.status, "applied");
+    assert.equal(targeted.surface?.id, "surf-2");
+  });
+
+  it("reads client-owned values back from the surface, not a store", async () => {
+    const { service } = fixture({
+      clientSurfaces: fakeBridge([], [{ id: "surf-1", kind: "web" }]),
+    });
+    const result = await service.read(caller, { id: "chat.persist-drafts" });
+    assert.equal(result.state, "ok");
+    assert.equal(result.revision, "surface:surf-1");
+  });
+});
+
+describe("compound settings.update (D-309)", () => {
+  it("commits same-owner app items in one CAS write", async () => {
+    let persistCalls = 0;
+    const base = baseDeps();
+    const inner = base.deps.persistAppSettings;
+    const withCounting = createSettingsService({
+      ...base.deps,
+      persistAppSettings: (changes, removals, expectedRevision) => {
+        persistCalls += 1;
+        return inner(changes, removals, expectedRevision);
+      },
+    });
+    const result = await withCounting.update(caller, {
+      id: "appearance.time-format",
+      items: [
+        { id: "appearance.time-format", set: { timeFormatPreference: "24h" } },
+        { id: "appearance.week-start", set: { weekStartPreference: "monday" } },
+      ],
+    });
+    assert.equal(result.status, "applied");
+    assert.equal(persistCalls, 1);
+    assert.equal(result.items?.length, 2);
+    assert.ok(result.items?.every((item) => item.status === "applied"));
+  });
+
+  it("reports per-item status across owners — one failure does not roll back the rest", async () => {
+    const applied: unknown[] = [];
+    const { service, pi } = fixture({ clientSurfaces: fakeBridge(applied, [{ id: "s1", kind: "web" }]) });
+    const result = await service.update(caller, {
+      id: "appearance.time-format",
+      items: [
+        { id: "appearance.time-format", set: { timeFormatPreference: "12h" } },
+        { id: "harness.shell", scope: "global", set: { "harness.shell": "wsl" } },
+        { id: "chat.persist-drafts", set: { enabled: true } },
+        { id: "appearance.time-format", set: { timeFormatPreference: "stardate" } },
+      ],
+    });
+    assert.equal(result.status, "partial");
+    const byId = result.items ?? [];
+    assert.equal(byId.filter((item) => item.status === "applied").length, 3);
+    assert.equal(byId.filter((item) => item.status === "failed").length, 1);
+    assert.equal((pi.global.harness as Record<string, unknown>).shell, "wsl");
+    assert.equal(pi.updates.length, 1);
   });
 });

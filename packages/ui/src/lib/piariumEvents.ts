@@ -1,6 +1,7 @@
 import { getRuntimeUrlResolver } from '@piarium/application-client';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import type { Thread, ThreadParent, ThreadRun } from '@piarium/protocol';
+import { clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
 
 type StreamReadyEvent = {
   type: 'stream-ready';
@@ -33,12 +34,12 @@ export type HarnessExperimentChangedEvent = {
   fact: 'attempt' | 'machine' | 'source' | 'followup';
 };
 
-/** Agent-origin settings write landed on a shared authority (D-306). */
+/** Agent-origin settings write landed on a shared authority (D-306 / D-309). */
 export type SettingsChangedEvent = {
   type: 'settings-changed';
-  owner: 'app' | 'pi-settings';
+  owner: 'app' | 'pi-settings' | 'client';
   ids: string[];
-  scope: 'host' | 'global' | 'project';
+  scope: 'host' | 'global' | 'project' | 'client';
   revision: string;
 };
 
@@ -178,6 +179,12 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     return;
   }
 
+  if (envelope.type === 'piarium:client-settings-request') {
+    const properties = getEventProperties(envelope.properties);
+    if (properties) void handleClientSettingsRequest(properties);
+    return;
+  }
+
   if (envelope.type === 'piarium:session-created') {
     const properties = getEventProperties(envelope.properties);
     const sessionId = typeof properties?.sessionId === 'string' ? properties.sessionId : '';
@@ -237,8 +244,8 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const ids = Array.isArray(properties?.ids)
       ? properties.ids.filter((id): id is string => typeof id === 'string')
       : [];
-    if ((owner === 'app' || owner === 'pi-settings')
-      && (scope === 'host' || scope === 'global' || scope === 'project')
+    if ((owner === 'app' || owner === 'pi-settings' || owner === 'client')
+      && (scope === 'host' || scope === 'global' || scope === 'project' || scope === 'client')
       && revision) {
       for (const listener of listeners) listener({
         type: 'settings-changed', owner, ids, scope, revision,
@@ -306,7 +313,9 @@ const connect = () => {
 
   cleanupSource();
 
-  const source = new EventSource(getRuntimeUrlResolver().sse('/api/piarium/events'));
+  // The surface query makes this connection individually addressable for
+  // client-owned settings requests (Stage S).
+  const source = new EventSource(getRuntimeUrlResolver().sse('/api/piarium/events', clientSurfaceQuery()));
   source.onopen = () => {
     resetHeartbeatTimer();
   };

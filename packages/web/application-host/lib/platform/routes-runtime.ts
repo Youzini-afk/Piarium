@@ -65,6 +65,7 @@ export interface PlatformRouteDependencies {
   fsPromises: typeof fsPromisesModule;
   getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
   getPiariumEventClients: PiariumEventDependencies['getPiariumEventClients'];
+  surfaceBridge?: PiariumEventDependencies['surfaceBridge'];
   languageSupervisor?: LanguageRouteDependencies['language'];
   languageSupport?: import('../language-support/runtime.js').LanguageSupportRuntime;
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
@@ -175,6 +176,7 @@ export const createPlatformRoutesRuntime = ({
       openFilesystemPath,
       getPiariumEventClients,
       writeSseEvent,
+      surfaceBridge,
       reloadRuntimeConfiguration = async () => {},
       extensionCatalog,
       extensionPackages,
@@ -266,7 +268,11 @@ export const createPlatformRoutesRuntime = ({
       scheduledTasksRuntime,
       scheduledTaskService,
     });
-    registerPiariumEventRoutes(app, { getPiariumEventClients, writeSseEvent });
+    registerPiariumEventRoutes(app, {
+      getPiariumEventClients,
+      writeSseEvent,
+      ...(surfaceBridge ? { surfaceBridge } : {}),
+    });
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });
     registerWalkthroughRoutes(app, { getWalkthroughService });

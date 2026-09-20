@@ -1190,6 +1190,9 @@ export function registerHarnessServices(
     router.register("settings.update", {
       handle: async (params, ctx) => settings.update(caller(ctx), params),
     });
+    router.register("settings.action", {
+      handle: async (params, ctx) => settings.action(caller(ctx), params),
+    });
   }
   if (host.followUpService) {
     const followUps = host.followUpService;

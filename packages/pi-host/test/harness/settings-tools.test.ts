@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { HostServicesBridge } from "../../src/harness/host-services-bridge.js";
 import {
+  createSettingsActionTool,
   createSettingsReadTool,
   createSettingsSearchTool,
   createSettingsUpdateTool,
@@ -83,6 +84,7 @@ describe("settings tools", () => {
     assert.ok(names.includes("settings_search"));
     assert.ok(names.includes("settings_read"));
     assert.ok(names.includes("settings_update"));
+    assert.ok(names.includes("settings_action"));
   });
 
   it("respect the harness tools gate", () => {
@@ -213,6 +215,90 @@ describe("settings tools", () => {
     } as never, undefined, undefined, undefined as never);
     const text = JSON.stringify(result.content);
     assert.match(text, /revision conflict/);
+    bridge.dispose();
+  });
+
+  it("action forwards the verb to the owner and reports operation handles", async () => {
+    const { bridge, requests } = scriptedBridge({
+      "settings.action": (params: { id: string; verb: string; args?: Record<string, unknown> }) => {
+        assert.equal(params.id, "providers.connect");
+        assert.equal(params.verb, "login");
+        assert.equal(params.args?.providerId, "openai");
+        return {
+          entry: searchItem({ id: "providers.connect", owner: "action" }),
+          verb: "login",
+          status: "pending",
+          detail: "browser flow opened",
+          operation: { id: "op-42", state: "running", cancelVerb: "cancel-login" },
+        };
+      },
+    });
+    const tool = createSettingsActionTool(bridge);
+    const result = await tool.execute("call-a1", {
+      id: "providers.connect",
+      verb: "login",
+      args: { providerId: "openai" },
+    } as never, undefined, undefined, undefined as never);
+    const text = JSON.stringify(result.content);
+    assert.match(text, /pending/);
+    assert.match(text, /op-42/);
+    assert.match(text, /cancel-login/);
+    assert.equal(requests[0]!.method, "settings.action");
+    assert.ok(!isError(result));
+    bridge.dispose();
+  });
+
+  it("action marks denied/unavailable outcomes without claiming success", async () => {
+    const { bridge } = scriptedBridge({
+      "settings.action": () => ({
+        entry: searchItem({ id: "providers.connect", owner: "action" }),
+        verb: "obliterate",
+        status: "denied",
+        detail: "verb is not advertised for this entry",
+      }),
+    });
+    const tool = createSettingsActionTool(bridge);
+    const result = await tool.execute("call-a2", {
+      id: "providers.connect",
+      verb: "obliterate",
+    } as never, undefined, undefined, undefined as never);
+    assert.equal(isError(result), true);
+    assert.match(JSON.stringify(result.content), /denied/);
+    bridge.dispose();
+  });
+
+  it("update forwards compound items and surface selection", async () => {
+    const { bridge, requests } = scriptedBridge({
+      "settings.update": (params: {
+        items?: { id: string; set?: Record<string, unknown>; surface?: string }[];
+      }) => {
+        assert.equal(params.items?.length, 2);
+        assert.equal(params.items?.[1]?.surface, "surf-9");
+        return {
+          status: "partial",
+          entry: searchItem(),
+          scope: "host",
+          fields: [],
+          appliedAt: "immediate",
+          items: [
+            { id: "appearance.theme", status: "applied" },
+            { id: "chat.persist-drafts", status: "unavailable", error: "surface offline" },
+          ],
+          surface: { id: "surf-9", kind: "web", results: [{ path: "enabled", status: "applied" }] },
+        };
+      },
+    });
+    const tool = createSettingsUpdateTool(bridge);
+    const result = await tool.execute("call-a3", {
+      items: [
+        { id: "appearance.theme", set: { themeVariant: "dark" } },
+        { id: "chat.persist-drafts", set: { enabled: false }, surface: "surf-9" },
+      ],
+    } as never, undefined, undefined, undefined as never);
+    const text = JSON.stringify(result.content);
+    assert.match(text, /appearance\.theme/);
+    assert.match(text, /surf-9/);
+    assert.equal(requests[0]!.method, "settings.update");
     bridge.dispose();
   });
 

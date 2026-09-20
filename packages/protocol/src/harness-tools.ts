@@ -58,6 +58,7 @@ export const HARNESS_TOOL_META: Readonly<Record<string, HarnessToolMeta>> = {
   settings_search: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
   settings_read: { mutation: 'none', executionMode: 'parallel', permissionAction: 'read' },
   settings_update: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
+  settings_action: { mutation: 'none', executionMode: 'sequential', permissionAction: 'control' },
 };
 
 export const toolMutation = (name: string): HarnessToolMutation | 'unknown' => (

@@ -23,19 +23,24 @@ import {
 } from '@piarium/application-client';
 import type {
   PiSettingsSnapshot,
+  SettingsActionParams,
+  SettingsActionResult,
   SettingsFieldResult,
   SettingsFieldValue,
+  SettingsItemResult,
   SettingsReadParams,
   SettingsReadResult,
   SettingsSearchItem,
   SettingsSearchParams,
   SettingsSearchResult,
+  SettingsUpdateItem,
   SettingsUpdateParams,
   SettingsUpdateResult,
 } from '@piarium/protocol';
 import { mergeHarnessSettings } from '@piarium/protocol';
 import { HarnessServiceError } from './service-error.js';
 import type { PiariumSettingsDocument } from '@piarium/settings-store';
+import type { ActionInvocation, ActionStatus, SettingsActionRegistry } from './settings-actions.js';
 
 export interface SettingsServiceCaller {
   workspaceId: string | null;
@@ -69,13 +74,52 @@ export interface SettingsServiceDeps {
     source: string,
     caller: SettingsServiceCaller,
   ): Promise<{ value: string; label?: string }[] | null>;
+  /** Domain-action adapters for `action` entries (Stage S). */
+  actions?: SettingsActionRegistry;
+  /**
+   * Targeted surface bridge for `client` entries. Absent = no live surface
+   * channel — client entries report `unavailable` honestly.
+   */
+  clientSurfaces?: ClientSurfaceBridge;
   /** Fires once per successful write with the affected catalog ids. */
   onChanged?(change: {
-    owner: 'app' | 'pi-settings';
+    owner: 'app' | 'pi-settings' | 'client';
     ids: string[];
-    scope: 'host' | 'global' | 'project';
+    scope: 'host' | 'global' | 'project' | 'client';
     revision: string;
   }): void;
+}
+
+/** A connected UI surface that owns device-local settings. */
+export interface ClientSurfaceInfo {
+  id: string;
+  kind: 'desktop' | 'web' | 'mobile' | string;
+}
+
+export interface ClientSurfaceFieldResult {
+  id: string;
+  status: 'applied' | 'failed' | 'unavailable';
+  error?: string;
+  /** Current values after apply/read (surface-reported fact). */
+  values?: Record<string, unknown>;
+}
+
+export interface ClientSurfaceBridge {
+  /** Connected surfaces the host can address individually. */
+  list(): ClientSurfaceInfo[];
+  /**
+   * Read or apply client-owned fields on one surface. The bridge resolves the
+   * target: explicit `surfaceId`, or the single connected surface. Several
+   * candidates without a selector = `ambiguous`; none = `unavailable`.
+   */
+  request(op: {
+    type: 'read' | 'apply';
+    entries: { id: string; values?: Record<string, unknown> }[];
+    surfaceId?: string;
+  }): Promise<{
+    surface: ClientSurfaceInfo;
+    results: ClientSurfaceFieldResult[];
+  }>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -184,6 +228,8 @@ export interface SettingsService {
   search(params: SettingsSearchParams): SettingsSearchResult;
   read(caller: SettingsServiceCaller, params: SettingsReadParams): Promise<SettingsReadResult>;
   update(caller: SettingsServiceCaller, params: SettingsUpdateParams): Promise<SettingsUpdateResult>;
+  /** Invoke a domain action on an `action` entry (D-309). */
+  action(caller: SettingsServiceCaller, params: SettingsActionParams): Promise<SettingsActionResult>;
 }
 
 export function createSettingsService(deps: SettingsServiceDeps): SettingsService {
@@ -390,87 +436,269 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       case 'pi-settings':
         return readPi(entry, params.scope ?? 'effective', detail, caller);
       case 'client':
-        return {
-          state: 'unavailable',
-          entry: toSearchItem(entry),
-          reason: 'device-local preference owned by the connected surface — change it in that client\'s settings UI',
-        };
+        return readClient(entry, caller, params);
       case 'action':
       default:
-        return {
-          state: 'action',
-          entry: toSearchItem(entry),
-          ...(entry.actionRef ? {
-            action: {
-              domain: entry.actionRef.domain,
-              ...(entry.actionRef.verbs ? { verbs: [...entry.actionRef.verbs] } : {}),
-              ...(entry.actionRef.note ? { note: entry.actionRef.note } : {}),
-            },
-          } : {}),
-          ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
-        };
+        return readAction(entry, caller, detail);
     }
   };
 
-  const updateApp = async (
+  /**
+   * `client` entries live on the connected surface. A read asks the surface
+   * for its own current values — when no single surface is addressable the
+   * result stays honestly `unavailable`/`denied` instead of guessing.
+   */
+  const readClient = async (
     entry: SettingsCatalogEntry,
     caller: SettingsServiceCaller,
-    params: SettingsUpdateParams,
-  ): Promise<SettingsUpdateResult> => {
-    if (params.scope !== undefined) {
-      throw new HarnessServiceError(
-        'denied',
-        `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
-      );
-    }
-    const fields = entryFields(entry);
-    const byPath = new Map(fields.map((field) => [field.path, field]));
-    const fieldResults: SettingsFieldResult[] = [];
-    const setEntries = Object.entries(params.set ?? {});
-    const resetPaths = params.reset ?? [];
-    const validSets: [string, unknown][] = [];
-    const validResets: string[] = [];
-    for (const [path, value] of setEntries) {
-      const field = byPath.get(path);
-      if (!field) {
-        fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
-        continue;
-      }
-      if (field.kind === 'secret') {
-        fieldResults.push({ path, status: 'failed', error: 'credential fields cannot be written through this service' });
-        continue;
-      }
-      const problem = validateFieldValue(field, value);
-      if (problem) {
-        fieldResults.push({ path, status: 'failed', error: problem });
-        continue;
-      }
-      validSets.push([path, value]);
-    }
-    for (const path of resetPaths) {
-      const field = byPath.get(path);
-      if (!field) {
-        fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
-        continue;
-      }
-      if (field.kind === 'secret') {
-        fieldResults.push({ path, status: 'failed', error: 'credential fields cannot be reset through this service' });
-        continue;
-      }
-      validResets.push(path);
-    }
-    if (validSets.length === 0 && validResets.length === 0) {
+    params: SettingsReadParams,
+  ): Promise<SettingsReadResult> => {
+    const bridge = deps.clientSurfaces;
+    if (!bridge) {
       return {
-        status: 'failed',
+        state: 'unavailable',
         entry: toSearchItem(entry),
-        scope: 'host',
-        fields: fieldResults,
-        appliedAt: entry.apply ?? 'immediate',
+        reason: 'device-local preference owned by the connected surface — no surface channel is registered on this host',
       };
     }
-    // Nested paths (fileEditorSettings.*) collapse into their top-level key —
-    // the persist pipeline merges whole top-level objects, so a partial nested
-    // write must read-modify-write its root inside the CAS revision.
+    let response;
+    try {
+      response = await bridge.request({
+        type: 'read',
+        entries: [{ id: entry.id }],
+        ...(params.surface ? { surfaceId: params.surface } : {}),
+      });
+    } catch (error) {
+      const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
+      return {
+        state: code === 'ambiguous' ? 'denied' : 'unavailable',
+        entry: toSearchItem(entry),
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const result = response.results.find((item) => item.id === entry.id);
+    if (!result || result.status === 'unavailable') {
+      return {
+        state: 'unavailable',
+        entry: toSearchItem(entry),
+        reason: result?.error ?? `surface ${response.surface.id} does not own ${entry.id}`,
+      };
+    }
+    if (result.status === 'failed') {
+      return {
+        state: 'malformed',
+        entry: toSearchItem(entry),
+        reason: result.error ?? 'surface failed to read the value',
+      };
+    }
+    const values = result.values ?? {};
+    const paths = Object.keys(values);
+    return {
+      state: 'ok',
+      entry: toSearchItem(entry),
+      fields: paths.map((path) => ({ path, kind: 'json', saved: values[path], isSet: values[path] !== undefined })),
+      ...(paths.length === 1
+        ? { effective: { value: values[paths[0]!], source: 'user' as const } }
+        : {}),
+      revision: `surface:${response.surface.id}`,
+    };
+  };
+
+  /**
+   * `action` entries describe a live domain surface. The adapter reports the
+   * owner's real state and the verbs it can execute right now; without an
+   * adapter the entry keeps its static pointer (still honest — not claimed).
+   */
+  const readAction = async (
+    entry: SettingsCatalogEntry,
+    caller: SettingsServiceCaller,
+    detail: boolean,
+  ): Promise<SettingsReadResult> => {
+    const adapter = deps.actions?.adapterFor(entry.actionRef?.domain) ?? null;
+    const staticBlock = entry.actionRef
+      ? {
+          domain: entry.actionRef.domain,
+          ...(entry.actionRef.verbs ? { verbs: [...entry.actionRef.verbs] } : {}),
+          ...(entry.actionRef.note ? { note: entry.actionRef.note } : {}),
+        }
+      : undefined;
+    if (!adapter) {
+      return {
+        state: 'action',
+        entry: toSearchItem(entry),
+        ...(staticBlock ? { action: staticBlock } : {}),
+        reason: 'no owner adapter is wired for this domain on this host',
+        ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
+      };
+    }
+    const status: ActionStatus = await adapter.describe(
+      { caller, workspaceRoot: caller.workspaceId ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null) : null },
+      entry,
+    ).catch((error: unknown): ActionStatus => ({
+      unavailable: error instanceof Error ? error.message : String(error),
+    }));
+    if (status.unavailable) {
+      return {
+        state: 'unavailable',
+        entry: toSearchItem(entry),
+        ...(staticBlock ? { action: { ...staticBlock, status: status.unavailable } } : {}),
+        reason: status.unavailable,
+        ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
+      };
+    }
+    return {
+      state: 'action',
+      entry: toSearchItem(entry),
+      action: {
+        domain: entry.actionRef?.domain ?? 'unknown',
+        verbs: status.verbs ?? (entry.actionRef?.verbs ? [...entry.actionRef.verbs] : []),
+        ...(entry.actionRef?.note ? { note: entry.actionRef.note } : {}),
+        ...(status.summary ? { status: status.summary } : {}),
+        ...(detail && status.data !== undefined ? { data: status.data } : {}),
+      },
+      ...(detail && entry.helpRef ? { help: entry.helpRef } : {}),
+    };
+  };
+
+  const invokeAction = async (
+    caller: SettingsServiceCaller,
+    params: SettingsActionParams,
+  ): Promise<SettingsActionResult> => {
+    const entry = requireEntry(params.id);
+    if (entry.owner !== 'action' || !entry.actionRef) {
+      throw new HarnessServiceError('denied', `"${entry.id}" is not a domain action entry (owner=${entry.owner})`);
+    }
+    const adapter = deps.actions?.adapterFor(entry.actionRef.domain) ?? null;
+    if (!adapter) {
+      return {
+        status: 'unavailable',
+        entry: toSearchItem(entry),
+        verb: params.verb,
+        detail: `no owner adapter is wired for ${entry.actionRef.domain}`,
+      };
+    }
+    const declared = entry.actionRef.verbs ?? [];
+    if (declared.length > 0 && !declared.includes(params.verb) && params.verb !== 'status') {
+      return {
+        status: 'denied',
+        entry: toSearchItem(entry),
+        verb: params.verb,
+        detail: `verb "${params.verb}" is not declared on ${entry.id} — declared: ${declared.join(', ') || '(none)'}`,
+      };
+    }
+    const workspaceRoot = caller.workspaceId
+      ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null)
+      : null;
+    const outcome: ActionInvocation = await adapter.invoke(
+      { caller, workspaceRoot },
+      entry,
+      params.verb,
+      params.args ?? {},
+    ).catch((error: unknown): ActionInvocation => ({
+      status: 'failed' as const,
+      detail: error instanceof Error ? error.message : String(error),
+    }));
+    return {
+      status: outcome.status,
+      entry: toSearchItem(entry),
+      verb: params.verb,
+      ...(outcome.detail !== undefined ? { detail: outcome.detail } : {}),
+      ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+      ...(outcome.operation ? { operation: outcome.operation } : {}),
+    };
+  };
+
+  /** One validated write spec — a single catalog entry plus its fields. */
+  interface AppWrite {
+    entry: SettingsCatalogEntry;
+    set: Record<string, unknown>;
+    reset: string[];
+  }
+
+  /**
+   * Commit one or more app-owner write specs in a single CAS transaction.
+   * Per-item field validation decides membership; once at least one valid
+   * field exists the merged change lands atomically — an item with zero valid
+   * fields fails on its own without blocking the others.
+   */
+  const updateAppBatch = async (
+    caller: SettingsServiceCaller,
+    writes: AppWrite[],
+    expectedRevision?: string,
+  ): Promise<{
+    items: SettingsItemResult[];
+    revision?: string;
+    effective?: Record<string, unknown>;
+    document?: PiariumSettingsDocument;
+  }> => {
+    const itemResults: SettingsItemResult[] = [];
+    const validSets: [string, unknown][] = [];
+    const validResets: string[] = [];
+    const validEntryIds: string[] = [];
+    const allFields: SettingsFieldSpec[] = [];
+    for (const write of writes) {
+      const byPath = new Map(entryFields(write.entry).map((field) => [field.path, field]));
+      const fieldResults: SettingsFieldResult[] = [];
+      const itemSets: [string, unknown][] = [];
+      const itemResets: string[] = [];
+      for (const [path, value] of Object.entries(write.set)) {
+        const field = byPath.get(path);
+        if (!field) {
+          fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${write.entry.id}` });
+          continue;
+        }
+        if (field.kind === 'secret') {
+          fieldResults.push({ path, status: 'failed', error: 'credential fields cannot be written through this service' });
+          continue;
+        }
+        const problem = validateFieldValue(field, value);
+        if (problem) {
+          fieldResults.push({ path, status: 'failed', error: problem });
+          continue;
+        }
+        itemSets.push([path, value]);
+      }
+      for (const path of write.reset) {
+        const field = byPath.get(path);
+        if (!field) {
+          fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${write.entry.id}` });
+          continue;
+        }
+        if (field.kind === 'secret') {
+          fieldResults.push({ path, status: 'failed', error: 'credential fields cannot be reset through this service' });
+          continue;
+        }
+        itemResets.push(path);
+      }
+      if (itemSets.length === 0 && itemResets.length === 0) {
+        itemResults.push({
+          id: write.entry.id,
+          status: 'failed',
+          fields: fieldResults,
+          error: 'no valid fields to write',
+        });
+        continue;
+      }
+      validSets.push(...itemSets);
+      validResets.push(...itemResets);
+      validEntryIds.push(write.entry.id);
+      allFields.push(...entryFields(write.entry));
+      itemResults.push({
+        id: write.entry.id,
+        status: 'applied',
+        fields: [
+          ...itemSets.map(([path]): SettingsFieldResult => ({ path, status: 'applied' })),
+          ...itemResets.map((path): SettingsFieldResult => ({ path, status: 'applied' })),
+          ...fieldResults,
+        ],
+      });
+    }
+    if (validSets.length === 0 && validResets.length === 0) {
+      return { items: itemResults };
+    }
+    // Nested paths collapse into their top-level key — the persist pipeline
+    // merges whole top-level objects, so a partial nested write must
+    // read-modify-write its root inside the CAS revision.
     const current = await deps.readAppSettings();
     const changes: Record<string, unknown> = {};
     const removals: string[] = [];
@@ -506,55 +734,89 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const outcome = await deps.persistAppSettings(
       changes,
       removals,
-      params.expectedRevision ?? settingsDocumentRevision(current),
+      expectedRevision ?? settingsDocumentRevision(current),
     );
     if (outcome.conflict) {
-      for (const [path] of validSets) {
-        fieldResults.push({ path, status: 'failed', error: `revision conflict — re-read and retry (current ${outcome.revision})` });
+      for (const item of itemResults) {
+        if (item.status !== 'applied') continue;
+        item.status = 'failed';
+        item.error = `revision conflict — re-read and retry (current ${outcome.revision})`;
+        for (const field of item.fields ?? []) {
+          if (field.status === 'applied') {
+            field.status = 'failed';
+            field.error = `revision conflict — re-read and retry (current ${outcome.revision})`;
+          }
+        }
       }
-      for (const path of validResets) {
-        fieldResults.push({ path, status: 'failed', error: `revision conflict — re-read and retry (current ${outcome.revision})` });
-      }
-      return {
-        status: 'failed',
-        entry: toSearchItem(entry),
-        scope: 'host',
-        fields: fieldResults,
-        appliedAt: entry.apply ?? 'immediate',
-        revision: outcome.revision,
-      };
+      return { items: itemResults, revision: outcome.revision };
     }
-    for (const [path] of validSets) fieldResults.push({ path, status: 'applied' });
-    for (const path of validResets) fieldResults.push({ path, status: 'applied' });
     const effective: Record<string, unknown> = {};
-    for (const field of fields) {
+    for (const field of allFields) {
       if (field.kind === 'secret') continue;
       const value = getPath(outcome.document, field.path);
       effective[field.path] = value !== undefined ? value : field.default;
     }
     deps.onChanged?.({
       owner: 'app',
-      ids: [entry.id],
+      ids: validEntryIds,
       scope: 'host',
       revision: outcome.revision,
     });
-    return {
-      status: fieldResults.some((result) => result.status === 'failed') ? 'partial' : 'applied',
-      entry: toSearchItem(entry),
-      scope: 'host',
-      fields: fieldResults,
-      revision: outcome.revision,
-      appliedAt: entry.apply ?? 'immediate',
-      effective,
-    };
+    for (const item of itemResults) {
+      if (item.status === 'applied') item.revision = outcome.revision;
+    }
+    void caller;
+    return { items: itemResults, revision: outcome.revision, effective, document: outcome.document };
   };
 
-  const updatePi = async (
+  const updateApp = async (
     entry: SettingsCatalogEntry,
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
-    const scope = params.scope ?? 'global';
+    if (params.scope !== undefined) {
+      throw new HarnessServiceError(
+        'denied',
+        `"${entry.id}" is host-owned; global/project scope is only valid for pi-settings entries`,
+      );
+    }
+    const { items, revision, effective } = await updateAppBatch(
+      caller,
+      [{ entry, set: params.set ?? {}, reset: params.reset ?? [] }],
+      params.expectedRevision,
+    );
+    const item = items[0]!;
+    const fields = item.fields ?? [];
+    return {
+      status: item.status === 'applied'
+        ? (fields.some((f) => f.status === 'failed') ? 'partial' : 'applied')
+        : 'failed',
+      entry: toSearchItem(entry),
+      scope: 'host',
+      fields,
+      ...(revision ? { revision } : {}),
+      appliedAt: entry.apply ?? 'immediate',
+      ...(effective ? { effective } : {}),
+    };
+  };
+
+  interface PiWrite {
+    entry: SettingsCatalogEntry;
+    set: Record<string, unknown>;
+    reset: string[];
+  }
+
+  /**
+   * Commit one or more pi-owner write specs at one scope in a single
+   * `settings.update` call — the Pi authority's revision CAS covers the merged
+   * top-level keys atomically.
+   */
+  const updatePiBatch = async (
+    caller: SettingsServiceCaller,
+    scope: 'global' | 'project',
+    writes: PiWrite[],
+    expectedRevision?: string,
+  ): Promise<{ items: SettingsItemResult[]; revision?: string; effective?: Record<string, unknown> }> => {
     if (!caller.workspaceId) {
       throw new HarnessServiceError('unavailable', 'pi-settings updates require a workspace-bound session');
     }
@@ -562,60 +824,77 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     if (!root) {
       throw new HarnessServiceError('unavailable', `cannot resolve workspace root for ${caller.workspaceId}`);
     }
-    const fields = entryFields(entry);
-    const byPath = new Map(fields.map((field) => [field.path, field]));
-    const fieldResults: SettingsFieldResult[] = [];
+    const itemResults: SettingsItemResult[] = [];
     const set: Record<string, unknown> = {};
     const remove: string[] = [];
-    for (const [path, value] of Object.entries(params.set ?? {})) {
-      const field = byPath.get(path);
-      if (!field) {
-        fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
+    const validEntryIds: string[] = [];
+    for (const write of writes) {
+      const byPath = new Map(entryFields(write.entry).map((field) => [field.path, field]));
+      const fieldResults: SettingsFieldResult[] = [];
+      const itemSetPaths: string[] = [];
+      const itemResetPaths: string[] = [];
+      for (const [path, value] of Object.entries(write.set)) {
+        const field = byPath.get(path);
+        if (!field) {
+          fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${write.entry.id}` });
+          continue;
+        }
+        if (field.kind === 'secret') {
+          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
+          continue;
+        }
+        if (scope === 'project' && field.scope === 'user') {
+          fieldResults.push({ path, status: 'failed', error: `"${path}" is user-owned and cannot be written at project scope` });
+          continue;
+        }
+        const problem = validateFieldValue(field, value);
+        if (problem) {
+          fieldResults.push({ path, status: 'failed', error: problem });
+          continue;
+        }
+        itemSetPaths.push(path);
+        set[path] = value;
+      }
+      for (const path of write.reset) {
+        const field = byPath.get(path);
+        if (!field) {
+          fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${write.entry.id}` });
+          continue;
+        }
+        if (field.kind === 'secret') {
+          fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
+          continue;
+        }
+        if (scope === 'project' && field.scope === 'user') {
+          fieldResults.push({ path, status: 'failed', error: `"${path}" is user-owned and cannot be reset at project scope` });
+          continue;
+        }
+        itemResetPaths.push(path);
+        remove.push(path);
+      }
+      if (itemSetPaths.length === 0 && itemResetPaths.length === 0) {
+        itemResults.push({
+          id: write.entry.id, status: 'failed', fields: fieldResults, error: 'no valid fields to write',
+        });
         continue;
       }
-      if (field.kind === 'secret') {
-        fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
-        continue;
-      }
-      if (scope === 'project' && field.scope === 'user') {
-        fieldResults.push({ path, status: 'failed', error: `"${path}" is user-owned and cannot be written at project scope` });
-        continue;
-      }
-      const problem = validateFieldValue(field, value);
-      if (problem) {
-        fieldResults.push({ path, status: 'failed', error: problem });
-        continue;
-      }
-      set[path] = value;
-    }
-    for (const path of params.reset ?? []) {
-      const field = byPath.get(path);
-      if (!field) {
-        fieldResults.push({ path, status: 'failed', error: `field "${path}" is not part of ${entry.id}` });
-        continue;
-      }
-      if (field.kind === 'secret') {
-        fieldResults.push({ path, status: 'failed', error: 'credential references are managed by Pi auth, not this service' });
-        continue;
-      }
-      if (scope === 'project' && field.scope === 'user') {
-        fieldResults.push({ path, status: 'failed', error: `"${path}" is user-owned and cannot be reset at project scope` });
-        continue;
-      }
-      remove.push(path);
+      validEntryIds.push(write.entry.id);
+      itemResults.push({
+        id: write.entry.id,
+        status: 'applied',
+        fields: [
+          ...itemSetPaths.map((path): SettingsFieldResult => ({ path, status: 'applied' })),
+          ...itemResetPaths.map((path): SettingsFieldResult => ({ path, status: 'applied' })),
+          ...fieldResults,
+        ],
+      });
     }
     if (Object.keys(set).length === 0 && remove.length === 0) {
-      return {
-        status: 'failed',
-        entry: toSearchItem(entry),
-        scope,
-        fields: fieldResults,
-        appliedAt: entry.apply ?? 'next-run',
-      };
+      return { items: itemResults };
     }
     // CAS: the pi authority pins the revision of the target scope file.
     let snapshot = await deps.requestPi(root, 'settings.get', {});
-    const expected = params.expectedRevision
+    const expected = expectedRevision
       ?? (scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision);
     // settings.update applies top-level keys only — nested paths
     // (harness.shell, …) are grouped into a read-modify-write of their root
@@ -623,11 +902,8 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const layer = scope === 'project' ? snapshot.project : snapshot.global;
     const rootSets = new Map<string, Record<string, unknown>>();
     for (const [path, value] of Object.entries(set)) {
+      if (!path.includes('.')) continue;
       const rootKey = path.split('.')[0]!;
-      if (!path.includes('.')) {
-        set[path] = value; // already top-level — handled below
-        continue;
-      }
       const currentRoot = getPath(layer, rootKey);
       const rootObject = rootSets.get(rootKey)
         ?? (isRecord(currentRoot) ? structuredClone(currentRoot) : {});
@@ -667,27 +943,246 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       throw new HarnessServiceError('failed', error instanceof Error ? error.message : String(error));
     });
     snapshot = updated;
-    for (const path of Object.keys(set)) fieldResults.push({ path, status: 'applied' });
-    for (const path of remove) fieldResults.push({ path, status: 'applied' });
+    const revision = scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision;
     const effective: Record<string, unknown> = {};
     for (const path of [...Object.keys(set), ...remove]) {
-      const layer = scope === 'project' ? snapshot.project : snapshot.global;
-      effective[path] = getPath(layer, path);
+      const nextLayer = scope === 'project' ? snapshot.project : snapshot.global;
+      effective[path] = getPath(nextLayer, path);
     }
     deps.onChanged?.({
       owner: 'pi-settings',
-      ids: [entry.id],
+      ids: validEntryIds,
       scope,
-      revision: scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision,
+      revision,
     });
+    for (const item of itemResults) {
+      if (item.status === 'applied') item.revision = revision;
+    }
+    return { items: itemResults, revision, effective };
+  };
+
+  const updatePi = async (
+    entry: SettingsCatalogEntry,
+    caller: SettingsServiceCaller,
+    params: SettingsUpdateParams,
+  ): Promise<SettingsUpdateResult> => {
+    const scope = params.scope ?? 'global';
+    const { items, revision, effective } = await updatePiBatch(
+      caller,
+      scope,
+      [{ entry, set: params.set ?? {}, reset: params.reset ?? [] }],
+      params.expectedRevision,
+    );
+    const item = items[0]!;
+    const fields = item.fields ?? [];
     return {
-      status: fieldResults.some((result) => result.status === 'failed') ? 'partial' : 'applied',
+      status: item.status === 'applied'
+        ? (fields.some((f) => f.status === 'failed') ? 'partial' : 'applied')
+        : 'failed',
       entry: toSearchItem(entry),
       scope,
-      fields: fieldResults,
-      revision: scope === 'project' ? snapshot.projectRevision : snapshot.globalRevision,
+      fields,
+      ...(revision ? { revision } : {}),
       appliedAt: entry.apply ?? 'next-run',
-      effective,
+      ...(effective ? { effective } : {}),
+    };
+  };
+
+  /**
+   * `client` entries apply on the connected surface through the targeted
+   * bridge — the surface's own store writes the value and reports the fact.
+   */
+  const updateClient = async (
+    entry: SettingsCatalogEntry,
+    caller: SettingsServiceCaller,
+    params: SettingsUpdateParams | SettingsUpdateItem,
+  ): Promise<SettingsUpdateResult> => {
+    const bridge = deps.clientSurfaces;
+    if (!bridge) {
+      throw new HarnessServiceError(
+        'unavailable',
+        `"${entry.id}" is device-local and no surface channel is registered on this host`,
+      );
+    }
+    let response;
+    try {
+      response = await bridge.request({
+        type: 'apply',
+        entries: [{
+          id: entry.id,
+          values: {
+            ...(params.set ?? {}),
+            ...(params.reset ?? []).reduce<Record<string, unknown>>((acc, path) => {
+              acc[path] = null;
+              return acc;
+            }, {}),
+          },
+        }],
+        ...(params.surface ? { surfaceId: params.surface } : {}),
+      });
+    } catch (error) {
+      const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
+      throw new HarnessServiceError(
+        code === 'ambiguous' ? 'denied' : 'unavailable',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const result = response.results.find((item) => item.id === entry.id);
+    const status = result?.status ?? 'unavailable';
+    deps.onChanged?.({
+      owner: 'client',
+      ids: [entry.id],
+      scope: 'client',
+      revision: `surface:${response.surface.id}`,
+    });
+    return {
+      status: status === 'applied' ? 'applied' : status === 'failed' ? 'failed' : 'failed',
+      entry: toSearchItem(entry),
+      scope: 'client',
+      fields: [{ path: entry.id, status: status === 'applied' ? 'applied' : 'failed', ...(result?.error ? { error: result.error } : {}) }],
+      appliedAt: entry.apply ?? 'immediate',
+      surface: {
+        id: response.surface.id,
+        kind: response.surface.kind,
+        results: (result ? [{ path: entry.id, status, ...(result.error ? { error: result.error } : {}) }] : []),
+      },
+      revision: `surface:${response.surface.id}`,
+    };
+  };
+
+  /**
+   * Compound update: validate every item, then execute per owner group.
+   * Same-owner app items land in one CAS write; pi-settings merge per scope;
+   * client items go to the resolved surface in one request; action entries
+   * are reported as needing `settings.action`. Per-item results keep partial
+   * success visible — no fake global transaction is implied.
+   */
+  const updateCompound = async (
+    caller: SettingsServiceCaller,
+    params: SettingsUpdateParams,
+  ): Promise<SettingsUpdateResult> => {
+    const items = params.items ?? [];
+    const itemResults: SettingsItemResult[] = [];
+    const appWrites: { entry: SettingsCatalogEntry; set: Record<string, unknown>; reset: string[] }[] = [];
+    const piByScope = new Map<'global' | 'project', { entry: SettingsCatalogEntry; set: Record<string, unknown>; reset: string[] }[]>();
+    const clientBySurface = new Map<
+      string | undefined,
+      { entry: SettingsCatalogEntry; values: Record<string, unknown> }[]
+    >();
+
+    for (const item of items) {
+      const entry = getSettingsCatalogEntry(item.id);
+      if (!entry) {
+        itemResults.push({ id: item.id, status: 'failed', error: `unknown settings id "${item.id}"` });
+        continue;
+      }
+      switch (entry.owner) {
+        case 'app':
+          appWrites.push({ entry, set: item.set ?? {}, reset: item.reset ?? [] });
+          break;
+        case 'pi-settings': {
+          const scope = item.scope ?? 'global';
+          const list = piByScope.get(scope) ?? [];
+          list.push({ entry, set: item.set ?? {}, reset: item.reset ?? [] });
+          piByScope.set(scope, list);
+          break;
+        }
+        case 'client': {
+          const surfaceKey = item.surface ?? params.surface;
+          const list = clientBySurface.get(surfaceKey) ?? [];
+          list.push({
+            entry,
+            values: {
+              ...(item.set ?? {}),
+              ...(item.reset ?? []).reduce<Record<string, unknown>>((acc, path) => {
+                acc[path] = null;
+                return acc;
+              }, {}),
+            },
+          });
+          clientBySurface.set(surfaceKey, list);
+          break;
+        }
+        case 'action':
+        default:
+          itemResults.push({
+            id: item.id,
+            status: 'failed',
+            error: `"${item.id}" is a domain action — invoke it through settings.action`,
+          });
+      }
+    }
+
+    if (appWrites.length > 0) {
+      const batch = await updateAppBatch(
+        caller,
+        appWrites,
+        params.expectedRevision,
+      );
+      itemResults.push(...batch.items);
+    }
+    for (const [scope, writes] of piByScope) {
+      const batch = await updatePiBatch(caller, scope, writes, params.expectedRevision);
+      itemResults.push(...batch.items);
+    }
+    for (const [surfaceKey, clientEntries] of clientBySurface) {
+      const bridge = deps.clientSurfaces;
+      if (!bridge) {
+        for (const { entry } of clientEntries) {
+          itemResults.push({ id: entry.id, status: 'unavailable', error: 'no surface channel is registered on this host' });
+        }
+        continue;
+      }
+      try {
+        const response = await bridge.request({
+          type: 'apply',
+          entries: clientEntries.map(({ entry, values }) => ({ id: entry.id, values })),
+          ...(surfaceKey ? { surfaceId: surfaceKey } : {}),
+        });
+        for (const { entry } of clientEntries) {
+          const result = response.results.find((item) => item.id === entry.id);
+          itemResults.push({
+            id: entry.id,
+            status: result?.status === 'applied' ? 'applied' : result?.status === 'failed' ? 'failed' : 'unavailable',
+            ...(result?.error ? { error: result.error } : {}),
+          });
+        }
+        deps.onChanged?.({
+          owner: 'client',
+          ids: clientEntries.map(({ entry }) => entry.id),
+          scope: 'client',
+          revision: `surface:${response.surface.id}`,
+        });
+      } catch (error) {
+        for (const { entry } of clientEntries) {
+          itemResults.push({
+            id: entry.id,
+            status: 'unavailable',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+
+    const firstKnown = getSettingsCatalogEntry(items[0]?.id ?? params.id)
+      ?? items.map((item) => getSettingsCatalogEntry(item.id)).find((entry) => entry !== undefined);
+    if (!firstKnown && itemResults.length === 0) {
+      throw new HarnessServiceError('not-found', 'compound update had no known settings ids');
+    }
+    const failed = itemResults.filter((item) => item.status === 'failed' || item.status === 'unavailable');
+    return {
+      status: itemResults.length === 0
+        ? 'failed'
+        : failed.length === itemResults.length
+          ? 'failed'
+          : failed.length > 0 ? 'partial' : 'applied',
+      entry: firstKnown
+        ? toSearchItem(firstKnown)
+        : { id: items[0]?.id ?? params.id, category: '', owner: 'app', titleKey: '', paths: [], writable: false, page: '' },
+      scope: 'host',
+      fields: [],
+      appliedAt: 'immediate',
+      items: itemResults,
     };
   };
 
@@ -695,6 +1190,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
+    if (params.items && params.items.length > 0) {
+      return updateCompound(caller, params);
+    }
     const entry = requireEntry(params.id);
     switch (entry.owner) {
       case 'app':
@@ -702,14 +1200,17 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       case 'pi-settings':
         return updatePi(entry, caller, params);
       case 'client':
-        throw new HarnessServiceError('denied', `"${entry.id}" is device-local — it can only be changed on the surface that owns it`);
+        return updateClient(entry, caller, params);
       case 'action':
       default:
-        throw new HarnessServiceError('denied', `"${entry.id}" is a domain action (${entry.actionRef?.domain ?? 'unknown'}), not a stored field — invoke the owning domain operation`);
+        throw new HarnessServiceError(
+          'denied',
+          `"${entry.id}" is a domain action (${entry.actionRef?.domain ?? 'unknown'}) — invoke it through settings.action`,
+        );
     }
   };
 
-  return { search, read, update };
+  return { search, read, update, action: invokeAction };
 }
 
 export { listSettingsCategories };

@@ -102,6 +102,12 @@ import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/dur
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@piarium/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
+import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
+import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
+import { createMagicPromptRuntime } from './lib/magic-prompts/runtime.js';
+import * as gitIdentityStorage from './lib/git/identity-storage.js';
+import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
+import { getGhCliToken } from './lib/github/gh-cli-credential.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
@@ -485,6 +491,12 @@ const {
   emitDesktopNotification,
   broadcastUiNotification,
 } = notificationEmitterRuntime;
+const clientSurfaceBridge = createClientSurfaceBridge({ writeSseEvent });
+const magicPromptRuntime = createMagicPromptRuntime({
+  filePath: path.join(PIARIUM_DATA_DIR, 'magic-prompts.json'),
+  fsPromises,
+  path,
+});
 broadcastGlobalUiEvent = createGlobalUiEventBroadcaster({
   sseClients: uiNotificationClients,
   writeSseEvent,
@@ -1357,6 +1369,51 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Agent-facing settings authority (D-306). Reads/writes go through the real
   // owners — the app settings store and the Pi settings protocol — so the
   // catalog the agent sees is the same one the settings UI edits.
+  const settingsActionRegistry = createSettingsActionRegistry({
+    requestWorkspace: (cwd, method, params) => piRuntimeBroker.requestForWorkspace(cwd, method as never, params as never),
+    requestSession: (sessionId, method, params) => piRuntimeBroker.requestForSession(sessionId, method as never, params as never),
+    resolveWorkspaceRoot: async (workspaceId) => (
+      await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
+    )?.root ?? null,
+    extensionRuntime: () => extensionRuntime,
+    tunnel: () => tunnelRuntimeContext?.tunnelService ?? null,
+    remoteClients: () => remoteClientAuthRuntime,
+    languageSupport: () => languageSupportRuntime,
+    runtimeLifecycle: () => piRuntimeLifecycle,
+    magicPrompts: () => magicPromptRuntime,
+    foundational: () => ({
+      status: () => piRuntimeBroker.foundationalPackageStatus(),
+      restore: (ids) => piRuntimeBroker.restoreFoundationalPackages(
+        ids as Parameters<typeof piRuntimeBroker.restoreFoundationalPackages>[0],
+      ),
+    }),
+    knowledgeStore: async (workspaceId, scope) => (
+      scope === 'user'
+        ? getUserKnowledgeStore().catch(() => null)
+        : getKnowledgeStoreForWorkspace(workspaceId).catch(() => null)
+    ),
+    gitIdentities: gitIdentityStorage,
+    surfaceHint: () => {
+      const surfaces = clientSurfaceBridge.list();
+      return surfaces.length === 1 ? surfaces[0]!.kind : null;
+    },
+    gitHubAuthStatus: async () => ({
+      connected: Boolean(getGitHubAuth()?.accessToken),
+      accounts: getGitHubAuthAccounts(),
+      ghCli: {
+        available: getGhCliToken() !== null,
+        disabled: isGhCliDisabled(),
+        active: isGhCliActive(),
+      },
+    }),
+    readAppSettings: () => readSettingsFromDisk(),
+    persistAppSettings: (changes, removals, expectedRevision) => settingsRuntime.persistSettingsCas(
+      changes,
+      removals,
+      expectedRevision,
+      settingsDocumentRevision,
+    ),
+  });
   const settingsService = createSettingsService({
     readAppSettings: () => readSettingsFromDisk(),
     persistAppSettings: (changes, removals, expectedRevision) => settingsRuntime.persistSettingsCas(
@@ -1369,6 +1426,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     resolveWorkspaceRoot: async (workspaceId) => (
       await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
     )?.root ?? null,
+    actions: settingsActionRegistry,
+    clientSurfaces: clientSurfaceBridge,
     resolveOptions: async (source, caller) => {
       if (source === 'thinking-levels') {
         return THINKING_LEVELS.map((level) => ({ value: level }));
@@ -3032,6 +3091,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(typeof options.openFilesystemPath === 'function' ? { openFilesystemPath: options.openFilesystemPath } : {}),
     getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
+    surfaceBridge: clientSurfaceBridge,
     extensionCatalog,
     extensionPackages,
     extensionRuntime,

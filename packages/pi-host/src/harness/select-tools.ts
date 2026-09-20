@@ -40,6 +40,7 @@ import {
   createSettingsSearchTool,
   createSettingsReadTool,
   createSettingsUpdateTool,
+  createSettingsActionTool,
 } from "./settings-tools.js";
 import { createFollowUpTool } from "./follow-up-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
@@ -254,6 +255,9 @@ export function selectHarnessTools(
     }
     if (tools.settings_update !== false) {
       result.push(createSettingsUpdateTool(bridge));
+    }
+    if (tools.settings_action !== false) {
+      result.push(createSettingsActionTool(bridge));
     }
   }
   // Follow-up tool — durable wait + continuation on this thread (D-307).

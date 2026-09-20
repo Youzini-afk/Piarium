@@ -72,6 +72,8 @@ export interface SettingsReadParams {
   scope?: SettingsValueScope;
   /** Include options, related entries, notes and help references. */
   detail?: boolean;
+  /** `client` entries: which connected surface to read; omit to target the only one. */
+  surface?: string;
 }
 
 export interface SettingsReadResult {
@@ -101,7 +103,16 @@ export interface SettingsReadResult {
   /** Progressive-disclosure help pointer for complex entries. */
   help?: string;
   /** Owning domain action description for `action` entries. */
-  action?: { domain: string; verbs?: string[]; note?: string };
+  action?: {
+    domain: string;
+    /** Verbs actually invocable right now (owner reported; catalog fallback). */
+    verbs?: string[];
+    note?: string;
+    /** Live one-line state summary reported by the owner. */
+    status?: string;
+    /** Structured owner state (lists, snapshots) when the owner provides it. */
+    data?: unknown;
+  };
   /** Human-readable reason for denied/malformed/unavailable states. */
   reason?: string;
 }
@@ -123,6 +134,36 @@ export interface SettingsUpdateParams {
   reset?: string[];
   /** CAS guard: revision previously returned by `settings.read`. */
   expectedRevision?: string;
+  /**
+   * `client` entries only: which connected surface applies the change.
+   * Omit to target the only connected surface; several candidates make the
+   * write return `ambiguous` instead of guessing.
+   */
+  surface?: string;
+  /**
+   * Compound update: several catalog entries in one request. Each item shares
+   * the update semantics of a single-entry call; same-owner app fields commit
+   * atomically, cross-owner items execute in order and report per-item status.
+   * When present, `id` still identifies the first item's entry.
+   */
+  items?: SettingsUpdateItem[];
+}
+
+export interface SettingsUpdateItem {
+  id: string;
+  scope?: "global" | "project";
+  set?: Record<string, unknown>;
+  reset?: string[];
+  expectedRevision?: string;
+  surface?: string;
+}
+
+export interface SettingsItemResult {
+  id: string;
+  status: "applied" | "pending" | "failed" | "unavailable";
+  fields?: SettingsFieldResult[];
+  revision?: string;
+  error?: string;
 }
 
 export interface SettingsFieldResult {
@@ -132,8 +173,8 @@ export interface SettingsFieldResult {
 }
 
 export interface SettingsUpdateResult {
-  /** Overall outcome; `partial` = some fields failed within one owner. */
-  status: "applied" | "partial" | "failed";
+  /** Overall outcome; `partial` = some fields/items failed within one owner or batch. */
+  status: "applied" | "partial" | "failed" | "pending";
   entry: SettingsSearchItem;
   scope: "host" | "global" | "project" | "client" | "action";
   fields: SettingsFieldResult[];
@@ -145,4 +186,49 @@ export interface SettingsUpdateResult {
   effective?: Record<string, unknown>;
   /** Domain-action result for `action` entries. */
   actionResult?: { verb: string; detail?: string };
+  /** Per-item outcomes for compound `items` updates. */
+  items?: SettingsItemResult[];
+  /**
+   * `client` entries: which surface acknowledged the apply, plus per-surface
+   * facts (applied / failed / unavailable). Absent when no surface answered.
+   */
+  surface?: {
+    id: string;
+    kind: string;
+    results: { path: string; status: "applied" | "failed" | "unavailable"; error?: string }[];
+  };
+}
+
+/**
+ * `settings.action` — invoke a real domain operation on an `owner:"action"`
+ * catalog entry (provider login, package install, tunnel start, …).
+ */
+export interface SettingsActionParams {
+  /** Stable catalog id. */
+  id: string;
+  /** One of the entry's advertised verbs (`settings.read` reports live verbs). */
+  verb: string;
+  /** Verb arguments: providerId, source, name, content, expectedRevision, … */
+  args?: Record<string, unknown>;
+}
+
+export interface SettingsActionOperation {
+  /** Stable operation identity for later status checks. */
+  id: string;
+  state: "running" | "succeeded" | "failed" | "cancelled";
+  /** How to observe or cancel the operation (verb + args hint). */
+  cancelVerb?: string;
+  detail?: string;
+}
+
+export interface SettingsActionResult {
+  status: "applied" | "pending" | "failed" | "unavailable" | "denied";
+  entry: SettingsSearchItem;
+  verb: string;
+  /** Human-readable outcome. */
+  detail?: string;
+  /** Structured state the owner returned (lists, status snapshots). */
+  data?: unknown;
+  /** Long-running operations expose their real handle here. */
+  operation?: SettingsActionOperation;
 }

@@ -1246,6 +1246,7 @@ export interface HarnessServiceMap {
   "settings.search": { params: import("./harness-settings-service.js").SettingsSearchParams; result: import("./harness-settings-service.js").SettingsSearchResult };
   "settings.read": { params: import("./harness-settings-service.js").SettingsReadParams; result: import("./harness-settings-service.js").SettingsReadResult };
   "settings.update": { params: import("./harness-settings-service.js").SettingsUpdateParams; result: import("./harness-settings-service.js").SettingsUpdateResult };
+  "settings.action": { params: import("./harness-settings-service.js").SettingsActionParams; result: import("./harness-settings-service.js").SettingsActionResult };
   // Stage W (D-307): durable follow-up registration, triggers, continuation
   "followup.register": { params: import("./harness-followups.js").FollowUpRegisterParams; result: import("./harness-followups.js").FollowUpRegisterResult };
   "followup.list": { params: import("./harness-followups.js").FollowUpListParams; result: import("./harness-followups.js").FollowUpListResult };
@@ -1349,6 +1350,7 @@ export const HARNESS_METHOD_CAPABILITY = {
   "settings.search": "read.settings",
   "settings.read": "read.settings",
   "settings.update": "control.settings",
+  "settings.action": "control.settings",
   "followup.register": "control.followup",
   "followup.list": "read.followup",
   "followup.get": "read.followup",
@@ -1444,6 +1446,7 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "settings.search",
   "settings.read",
   "settings.update",
+  "settings.action",
   "followup.register",
   "followup.list",
   "followup.get",
@@ -1458,7 +1461,7 @@ export function isHarnessMethod(value: unknown): value is HarnessMethod {
 }
 
 export type HarnessError = {
-  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed";
+  code: "unavailable" | "timeout" | "invalid-params" | "not-found" | "expired" | "denied" | "forbidden" | "failed" | "ambiguous";
   message: string;
   retryable?: boolean;
 };

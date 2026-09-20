@@ -335,6 +335,12 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   // ── Appearance ───────────────────────────────────────────────────────────
   {
     id: 'appearance.language', category: 'appearance', owner: 'client',
+    field: { path: 'locale', kind: 'enum',
+      options: [
+        { value: 'en' }, { value: 'fr' }, { value: 'zh-CN' }, { value: 'zh-TW' },
+        { value: 'uk' }, { value: 'es' }, { value: 'pt-BR' }, { value: 'ko' },
+        { value: 'pl' }, { value: 'ja' },
+      ] },
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.appearance.language.label',
       descriptionKey: 'settings.appearance.language.description',
@@ -379,6 +385,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.window-transparency', category: 'appearance', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean',
+      note: 'persisted then applied on the next desktop window creation — the surface relaunches' },
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.macVibrancy',
       descriptionKey: 'settings.piarium.visual.field.macVibrancyHint',
@@ -387,6 +395,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.dock-badge', category: 'appearance', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean' },
     apply: 'immediate',
     ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.dockBadge',
       descriptionKey: 'settings.piarium.visual.field.dockBadgeHint',
@@ -501,6 +510,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.file-editor-keymap', category: 'editor', owner: 'client',
+    field: { path: 'keymap', kind: 'enum', options: [{ value: 'default' }, { value: 'vim' }] },
     apply: 'immediate',
     ui: { page: 'general', titleKey: 'settings.piarium.visual.field.fileEditorKeymap',
       keywords: ['editor', 'vim', 'keymap'] },
@@ -516,6 +526,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'appearance.terminal-quick-keys', category: 'terminal', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean' },
     apply: 'immediate',
     ui: { page: 'general', titleKey: 'settings.piarium.visual.field.terminalQuickKeys',
       descriptionKey: 'settings.piarium.visual.field.terminalQuickKeysTooltip',
@@ -651,6 +662,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'chat.subagent-read-only-banner', category: 'chat', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean' },
     apply: 'immediate',
     ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.allowPromptingSubagentSessions',
       keywords: ['subagent', 'read only', 'prompt', 'banner'] },
@@ -718,6 +730,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'chat.persist-drafts', category: 'chat', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean' },
     apply: 'immediate',
     ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.persistDraftMessages',
       keywords: ['draft', 'message'] },
@@ -836,6 +849,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'sessions.desktop-launch-at-login', category: 'sessions', owner: 'client',
+    field: { path: 'enabled', kind: 'boolean' },
     apply: 'manual',
     ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.launchAtLogin',
       descriptionKey: 'settings.piarium.desktopNetwork.field.launchAtLoginDescription',
@@ -1105,6 +1119,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'remote-instances.direct-hosts', category: 'remote', owner: 'client',
+    field: { path: 'defaultHostId', kind: 'string', nullable: true,
+      note: 'hosts themselves are added by pairing; the writable field is the default selection' },
     apply: 'immediate',
     ui: { page: 'remote-instances', titleKey: 'settings.remoteInstances.direct.title',
       descriptionKey: 'settings.remoteInstances.direct.description',
@@ -1210,18 +1226,22 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'extensions.workbench', category: 'extensions', owner: 'action',
     actionRef: { domain: 'service:extensions', verbs: ['list'],
-      note: 'workbench profile/shell selection is per-surface UI state' },
+      note: 'workbench profile/shell state lives in the host workbench document, resolved per surface' },
     ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.title',
       keywords: ['profile', 'shell', 'layout', 'workbench', 'ide'] },
   },
   {
-    id: 'extensions.workbench.profile', category: 'extensions', owner: 'client',
+    id: 'extensions.workbench.profile', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'service:extensions', verbs: ['select'],
+      note: 'profile selection persists in the host workbench document (user scope) — select applies after the shell proves ready' },
     apply: 'immediate',
     ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.profile',
       keywords: ['profile', 'agent', 'ide', 'layout'] },
   },
   {
-    id: 'extensions.workbench.shell', category: 'extensions', owner: 'client',
+    id: 'extensions.workbench.shell', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'service:extensions', verbs: ['select', 'clear'],
+      note: 'shell replacement is a workbench layout layer keyed by surface — select writes it, clear restores the profile default' },
     apply: 'immediate',
     ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.selectedShell',
       keywords: ['shell', 'recovery', 'enable', 'disable'] },
@@ -1405,6 +1425,15 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'voice.playback', category: 'voice', owner: 'client',
+    fields: [
+      { path: 'voiceProvider', kind: 'enum',
+        options: [
+          { value: 'browser' }, { value: 'local' }, { value: 'openai' },
+          { value: 'openai-compatible' }, { value: 'say' },
+        ] },
+      { path: 'ttsInputMode', kind: 'enum',
+        options: [{ value: 'sanitized' }, { value: 'raw' }, { value: 'summarized' }] },
+    ],
     apply: 'immediate',
     ui: { page: 'voice', titleKey: 'settings.voice.page.section.playbackAndSummary',
       keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'] },

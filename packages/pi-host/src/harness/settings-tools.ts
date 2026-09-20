@@ -3,6 +3,7 @@ import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import { HarnessRequestError } from "./host-services-bridge.js";
 import type {
+  SettingsActionResult,
   SettingsReadResult,
   SettingsSearchResult,
   SettingsUpdateResult,
@@ -92,7 +93,7 @@ export function createSettingsReadTool(bridge: HostServicesBridge): ToolDefiniti
     promptSnippet: "settings_read: current value, effective source, and revision for one setting id",
     promptGuidelines: [
       "Read before writing when the value may have changed — the returned revision enables conflict-safe updates.",
-      "state distinguishes ok / denied / malformed / unavailable / action / no-value; unavailable device-local rows are still describable but never writable.",
+      "state distinguishes ok / denied / malformed / unavailable / action / no-value; action rows report live owner state and verbs — invoke them with settings_action.",
       "Credential fields report set/unset status only — secret material is never returned.",
     ],
     parameters: Type.Object({
@@ -101,6 +102,7 @@ export function createSettingsReadTool(bridge: HostServicesBridge): ToolDefiniti
         Type.Literal("global"), Type.Literal("project"), Type.Literal("effective"),
       ], { description: "Pi settings only: which layer to read (default effective)" })),
       detail: Type.Optional(Type.Boolean({ description: "Resolve dynamic options, related ids, and help pointers" })),
+      surface: Type.Optional(Type.String({ description: "Client-owned entries only: which connected surface to read; omit to target the only one" })),
     }),
     executionMode: "parallel",
     execute: async (_toolCallId, params, signal) => {
@@ -130,6 +132,8 @@ export function createSettingsReadTool(bridge: HostServicesBridge): ToolDefiniti
         if (result.related?.length) parts.push(`related: ${result.related.join(", ")}`);
         if (result.action) {
           parts.push(`action domain: ${result.action.domain}${result.action.verbs?.length ? ` verbs: ${result.action.verbs.join(", ")}` : ""}${result.action.note ? ` — ${result.action.note}` : ""}`);
+          if (result.action.status) parts.push(`action status: ${result.action.status}`);
+          if (result.action.data !== undefined) parts.push(`action state: ${JSON.stringify(result.action.data)}`);
         }
         if (result.help) parts.push(`help: ${result.help}`);
         return {
@@ -147,16 +151,18 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
   return defineTool({
     name: "settings_update",
     label: "Settings Update",
-    description: "Change or reset settings by stable id. set maps field paths to values; reset removes overrides at that scope. All declared fields are validated against the owner contract — invalid fields fail loudly instead of being dropped. Pass expectedRevision from settings_read to guard against concurrent user edits.",
-    promptSnippet: "settings_update: set or reset fields on a catalog id (CAS via expectedRevision)",
+    description: "Change or reset settings by stable id — single entry via set/reset, or several entries at once via items[]. All declared fields are validated against the owner contract — invalid fields fail loudly instead of being dropped. Pass expectedRevision from settings_read to guard against concurrent user edits.",
+    promptSnippet: "settings_update: set or reset fields on catalog ids (CAS via expectedRevision; items[] for compound changes)",
     promptGuidelines: [
       "Pi settings accept scope \"global\" (default) or \"project\" — project writes require a trusted workspace and cannot carry user-owned fields like harness.models or web credentials.",
       "appliedAt reports when the change takes effect: immediate, next-run (frozen session/tool config), restart, or manual. Never claim a restarted or applied effect the owner did not perform.",
       "status \"partial\" means some fields failed — report exactly which and why.",
-      "Action entries (install, connect, login) cannot be faked with a config write; the update call returns the real action target.",
+      "items[] runs a compound update: same-owner fields commit atomically, cross-owner items report per-item status — never claim a global rollback that did not happen.",
+      "Client-owned entries apply on a connected surface (pass surface to choose when several are connected); offline surfaces report unavailable, never assumed-applied.",
+      "Action entries (install, connect, login) are invoked with settings_action, not written as fields.",
     ],
     parameters: Type.Object({
-      id: Type.String({ description: "Stable catalog id" }),
+      id: Type.String({ description: "Stable catalog id (first item's id for compound updates)" }),
       scope: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project")],
         { description: "Pi settings only: which file to write (default global)" })),
       set: Type.Optional(Type.Record(Type.String(), Type.Unknown(),
@@ -165,21 +171,41 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
         { description: "field paths to clear back to default" })),
       expectedRevision: Type.Optional(Type.String(
         { description: "revision from settings_read; conflicting writes are rejected" })),
+      surface: Type.Optional(Type.String({ description: "Client-owned entries: which connected surface applies the change" })),
+      items: Type.Optional(Type.Array(Type.Object({
+        id: Type.String({ description: "Stable catalog id" }),
+        scope: Type.Optional(Type.Union([Type.Literal("global"), Type.Literal("project")])),
+        set: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+        reset: Type.Optional(Type.Array(Type.String())),
+        surface: Type.Optional(Type.String()),
+      }), { description: "Compound update: several catalog entries in one request; per-item results are returned" })),
     }),
     executionMode: "sequential",
     execute: async (_toolCallId, params, signal) => {
-      if (!params.id?.trim()) return invalidParams("settings_update", "id is required");
-      if (!params.set && !params.reset?.length) {
-        return invalidParams("settings_update", "provide set and/or reset");
+      if (!params.id?.trim() && !params.items?.length) {
+        return invalidParams("settings_update", "id is required for a single update; compound updates pass items[]");
+      }
+      if (!params.set && !params.reset?.length && !params.items?.length) {
+        return invalidParams("settings_update", "provide set and/or reset, or items[]");
       }
       try {
         const result = await bridge.request<"settings.update">("settings.update", params, signal ? { signal } : undefined) as SettingsUpdateResult;
-        const lines = result.fields.map((field) =>
-          `  ${field.path}: ${field.status}${field.error ? ` — ${field.error}` : ""}`);
         const parts = [
           `${result.entry.id} — ${result.status} (scope: ${result.scope}, applies: ${result.appliedAt})`,
-          ...lines,
+          ...result.fields.map((field) =>
+            `  ${field.path}: ${field.status}${field.error ? ` — ${field.error}` : ""}`),
         ];
+        if (result.items?.length) {
+          for (const item of result.items) {
+            parts.push(`  ${item.id}: ${item.status}${item.error ? ` — ${item.error}` : ""}${item.revision ? ` (rev ${item.revision})` : ""}`);
+          }
+        }
+        if (result.surface) {
+          parts.push(`surface: ${result.surface.kind}:${result.surface.id}`);
+          for (const surfaceResult of result.surface.results) {
+            parts.push(`  ${surfaceResult.path}: ${surfaceResult.status}${surfaceResult.error ? ` — ${surfaceResult.error}` : ""}`);
+          }
+        }
         if (result.revision) parts.push(`revision: ${result.revision}`);
         if (result.effective) {
           parts.push(`effective now: ${JSON.stringify(result.effective)}`);
@@ -191,6 +217,50 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
         };
       } catch (error) {
         return errorResult("settings_update", error);
+      }
+    },
+  });
+}
+
+export function createSettingsActionTool(bridge: HostServicesBridge): ToolDefinition {
+  return defineTool({
+    name: "settings_action",
+    label: "Settings Action",
+    description: "Invoke a real domain operation on an action-owned catalog entry — provider login/logout/model discovery, MCP server changes, Pi package/resource management, extensions, tunnel, remote instances, language support, runtime updates, git identities, knowledge, and project metadata. Read the entry first for the live verb list; long operations return a pending status with an operation handle.",
+    promptSnippet: "settings_action: run a domain operation on an action-owned catalog entry",
+    promptGuidelines: [
+      "Read the catalog entry first — action.verbs lists what the owner can actually execute right now.",
+      "status pending means the operation is still running; the returned operation id + cancelVerb describe how to observe or cancel it.",
+      "status unavailable means the owner is offline or not wired on this host — never claim the change happened.",
+      "Credentials are never returned; auth status is reported as connected/isSet facts only.",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Stable catalog id of an owner:action entry" }),
+      verb: Type.String({ description: "One of the entry's advertised verbs" }),
+      args: Type.Optional(Type.Record(Type.String(), Type.Unknown(),
+        { description: "Verb arguments — e.g. providerId, source, name, content, expectedRevision" })),
+    }),
+    executionMode: "sequential",
+    execute: async (_toolCallId, params, signal) => {
+      if (!params.id?.trim()) return invalidParams("settings_action", "id is required");
+      if (!params.verb?.trim()) return invalidParams("settings_action", "verb is required");
+      try {
+        const result = await bridge.request<"settings.action">("settings.action", params, signal ? { signal } : undefined) as SettingsActionResult;
+        const parts = [`${result.entry.id} ${result.verb} — ${result.status}`];
+        if (result.detail) parts.push(result.detail);
+        if (result.operation) {
+          parts.push(`operation: ${result.operation.id} (${result.operation.state})${result.operation.cancelVerb ? ` — cancel via "${result.operation.cancelVerb}"` : ""}`);
+        }
+        if (result.data !== undefined) {
+          parts.push(JSON.stringify(result.data));
+        }
+        return {
+          content: [{ type: "text", text: parts.join("\n") }],
+          isError: result.status === "failed" || result.status === "denied",
+          details: { result: result as unknown as Record<string, unknown> },
+        };
+      } catch (error) {
+        return errorResult("settings_action", error);
       }
     },
   });

@@ -10,6 +10,16 @@ interface ScheduledTaskRouteDependencies extends ServiceDependencies {
 export interface PiariumEventRouteDependencies {
   getPiariumEventClients: () => Set<Response>;
   writeSseEvent: (res: Response, event: { properties: Record<string, unknown>; type: string }) => void;
+  /**
+   * Optional surface bridge (Stage S): when present, `?surface=<id>&kind=<kind>`
+   * on the events stream registers a targetable surface connection, and the
+   * ack route resolves pending client-settings requests.
+   */
+  surfaceBridge?: {
+    attach(res: Response, surfaceId: string, kind: string): void;
+    dropConnection(res: Response): void;
+    ack(requestId: string, results: unknown): boolean;
+  };
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -31,7 +41,7 @@ const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
 export const registerPiariumEventRoutes = (
   app: Express,
-  { getPiariumEventClients, writeSseEvent }: PiariumEventRouteDependencies,
+  { getPiariumEventClients, writeSseEvent, surfaceBridge }: PiariumEventRouteDependencies,
 ): void => {
   app.get('/api/piarium/events', (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -42,6 +52,14 @@ export const registerPiariumEventRoutes = (
 
     const clients = getPiariumEventClients();
     clients.add(res);
+    // A surface that identifies itself becomes individually addressable for
+    // client-owned settings applies (Stage S). Anonymous connections stay
+    // broadcast-only — the host never invents a client identity.
+    const surfaceId = asNonEmptyString(req.query?.surface);
+    const surfaceKind = asNonEmptyString(req.query?.kind);
+    if (surfaceId && surfaceBridge) {
+      surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web');
+    }
     try {
       writeSseEvent(res, {
         type: 'piarium:event-stream-ready',
@@ -60,13 +78,31 @@ export const registerPiariumEventRoutes = (
       } catch {
         clearInterval(heartbeat);
         clients.delete(res);
+        surfaceBridge?.dropConnection(res);
       }
     }, 25_000);
     req.on('close', () => {
       clearInterval(heartbeat);
       clients.delete(res);
+      surfaceBridge?.dropConnection(res);
     });
   });
+
+  if (surfaceBridge) {
+    app.post('/api/piarium/client-settings/ack', (req, res) => {
+      const body = asRecord(req.body) ?? {};
+      const requestId = asNonEmptyString(body.requestId);
+      const results = Array.isArray(body.results) ? body.results : [];
+      if (!requestId) {
+        return res.status(400).json({ error: 'requestId is required' });
+      }
+      const resolved = surfaceBridge.ack(requestId, results as never);
+      if (!resolved) {
+        return res.status(404).json({ error: 'no pending client-settings request for this id' });
+      }
+      return res.json({ ok: true });
+    });
+  }
 };
 
 export const registerScheduledTaskRoutes = (app: Express, dependencies: ScheduledTaskRouteDependencies): void => {
