@@ -314,6 +314,12 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     if (typeof candidate.collapsibleThinkingBlocks === 'boolean') {
       result.collapsibleThinkingBlocks = candidate.collapsibleThinkingBlocks;
     }
+    if (typeof candidate.collapsibleUserMessages === 'boolean') {
+      result.collapsibleUserMessages = candidate.collapsibleUserMessages;
+    }
+    if (typeof candidate.codeBlockLineWrap === 'boolean') {
+      result.codeBlockLineWrap = candidate.codeBlockLineWrap;
+    }
     if (typeof candidate.showTextJustificationActivity === 'boolean') {
       result.showTextJustificationActivity = candidate.showTextJustificationActivity;
     }
@@ -376,6 +382,15 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     }
     if (typeof candidate.autoDeleteEnabled === 'boolean') {
       result.autoDeleteEnabled = candidate.autoDeleteEnabled;
+    }
+    if (typeof candidate.autoSaveEnabled === 'boolean') {
+      result.autoSaveEnabled = candidate.autoSaveEnabled;
+    }
+    if (candidate.sessionRetentionAction === 'archive' || candidate.sessionRetentionAction === 'delete') {
+      result.sessionRetentionAction = candidate.sessionRetentionAction;
+    }
+    if (typeof candidate.checkpointRetentionLimit === 'number' && Number.isFinite(candidate.checkpointRetentionLimit)) {
+      result.checkpointRetentionLimit = Math.max(0, Math.round(candidate.checkpointRetentionLimit));
     }
     if (typeof candidate.autoDeleteAfterDays === 'number' && Number.isFinite(candidate.autoDeleteAfterDays)) {
       const normalizedDays = Math.max(1, Math.min(365, Math.round(candidate.autoDeleteAfterDays)));
@@ -587,6 +602,17 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     }
     if (typeof candidate.terminalFontSize === 'number' && Number.isFinite(candidate.terminalFontSize)) {
       result.terminalFontSize = Math.max(9, Math.min(52, Math.round(candidate.terminalFontSize)));
+    }
+    if (typeof candidate.editorFontSize === 'number' && Number.isFinite(candidate.editorFontSize)) {
+      result.editorFontSize = Math.max(8, Math.min(32, Math.round(candidate.editorFontSize)));
+    }
+    if (
+      candidate.fileEditorSettings !== undefined
+      && typeof candidate.fileEditorSettings === 'object'
+      && candidate.fileEditorSettings !== null
+      && !Array.isArray(candidate.fileEditorSettings)
+    ) {
+      result.fileEditorSettings = { ...candidate.fileEditorSettings } as SettingsRecord['fileEditorSettings'];
     }
     if (typeof candidate.terminalShell === 'string') {
       const shell = candidate.terminalShell.trim().toLowerCase();

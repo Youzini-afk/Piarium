@@ -33,6 +33,15 @@ export type HarnessExperimentChangedEvent = {
   fact: 'attempt' | 'machine' | 'source';
 };
 
+/** Agent-origin settings write landed on a shared authority (D-306). */
+export type SettingsChangedEvent = {
+  type: 'settings-changed';
+  owner: 'app' | 'pi-settings';
+  ids: string[];
+  scope: 'host' | 'global' | 'project';
+  revision: string;
+};
+
 type ScheduledTaskRanEvent = {
   type: 'scheduled-task-ran';
   projectId: string;
@@ -52,7 +61,7 @@ type SessionCreatedEvent = {
   dispatchedAsCommand: boolean;
 };
 
-export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent;
+export type PiariumEvent = StreamReadyEvent | ScheduledTaskRanEvent | SessionCreatedEvent | HarnessThreadChangedEvent | HarnessBlocksChangedEvent | HarnessKnowledgeChangedEvent | HarnessExperimentChangedEvent | SettingsChangedEvent;
 type Listener = (event: PiariumEvent) => void;
 
 let eventSource: EventSource | null = null;
@@ -216,6 +225,24 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
     const fact = properties?.fact;
     if (workspaceId && (fact === 'attempt' || fact === 'machine' || fact === 'source')) {
       for (const listener of listeners) listener({ type: 'harness-experiment-changed', workspaceId, fact });
+    }
+    return;
+  }
+
+  if (envelope.type === 'piarium:settings-changed') {
+    const properties = getEventProperties(envelope.properties);
+    const owner = properties?.owner;
+    const scope = properties?.scope;
+    const revision = typeof properties?.revision === 'string' ? properties.revision : '';
+    const ids = Array.isArray(properties?.ids)
+      ? properties.ids.filter((id): id is string => typeof id === 'string')
+      : [];
+    if ((owner === 'app' || owner === 'pi-settings')
+      && (scope === 'host' || scope === 'global' || scope === 'project')
+      && revision) {
+      for (const listener of listeners) listener({
+        type: 'settings-changed', owner, ids, scope, revision,
+      });
     }
     return;
   }

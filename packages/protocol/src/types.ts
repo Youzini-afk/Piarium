@@ -535,6 +535,8 @@ export interface HostHandshakeParams {
     harnessThreads?: boolean;
     /** The application Host registered the experiment/resource/source services (7C/7D). */
     harnessExperiments?: boolean;
+    /** The application Host registered the shared settings catalog service (D-306). */
+    harnessSettings?: boolean;
     /** The application Host can serve LSP navigation tools. */
     harnessLspNavigation?: boolean;
     /** The application Host can resolve native Pi reads against editor drafts. */

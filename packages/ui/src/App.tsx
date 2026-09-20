@@ -58,6 +58,8 @@ import { isMobileAppRuntime, useMobileAppViewport } from '@/lib/mobileAppRuntime
 import { PiAppEffects } from '@/apps/PiAppEffects';
 import { PiInteractionHost } from '@/components/pi-session/PiInteractionHost';
 import { resetAppForRuntimeEndpointChange } from '@/apps/runtimeEndpointReset';
+import { subscribePiariumEvents } from '@/lib/piariumEvents';
+import { invalidateSettingsCache, syncDesktopSettings } from '@/lib/persistence';
 import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { useWideChatLayoutClass } from '@/hooks/useWideChatLayoutClass';
@@ -241,6 +243,17 @@ function App({ apis }: AppProps) {
       resetAppForRuntimeEndpointChange(detail);
       appReadyDispatchedRef.current = false;
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
+    });
+  }, []);
+
+  // Agent-originated settings writes (D-306): the Host broadcasts
+  // piarium:settings-changed after the owning authority persists; refresh the
+  // shared document so UI state never sits on a stale copy.
+  React.useEffect(() => {
+    return subscribePiariumEvents((event) => {
+      if (event.type !== 'settings-changed' || event.owner !== 'app') return;
+      invalidateSettingsCache();
+      void syncDesktopSettings();
     });
   }, []);
 

@@ -99,7 +99,8 @@ import { createWorkingBranchWriteServices } from './lib/harness/working-state/wo
 import { acquireVirtualWriteTicket, VirtualWriteGate } from './lib/harness/working-state/virtual-write-gate.js';
 import { IntegrationCoordinator } from './lib/harness/working-state/integration-coordinator.js';
 import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/durable-file-operation.js';
-import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, type SessionSnapshot } from '@piarium/protocol';
+import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@piarium/protocol';
+import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createVerificationCoordinator } from './lib/harness/verification-coordinator.js';
 import { createKernelClient, type KernelClient } from './lib/kernel/kernel-client.js';
 import { registerHarnessExperimentRoutes } from './lib/harness/experiment-routes.js';
@@ -1350,6 +1351,49 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onAttemptChanged: (workspaceId) => broadcastResearchFacts(workspaceId, 'attempt'),
     resolveBackend: (ctx, machineId, machine, caller) => managedRemoteTargets!.resolveBackend(ctx, machineId, machine, caller),
   });
+  // Agent-facing settings authority (D-306). Reads/writes go through the real
+  // owners — the app settings store and the Pi settings protocol — so the
+  // catalog the agent sees is the same one the settings UI edits.
+  const settingsService = createSettingsService({
+    readAppSettings: () => readSettingsFromDisk(),
+    persistAppSettings: (changes, removals, expectedRevision) => settingsRuntime.persistSettingsCas(
+      changes,
+      removals,
+      expectedRevision,
+      settingsDocumentRevision,
+    ),
+    requestPi: (cwd, method, params) => piRuntimeBroker.requestForWorkspace(cwd, method, params as never),
+    resolveWorkspaceRoot: async (workspaceId) => (
+      await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
+    )?.root ?? null,
+    resolveOptions: async (source, caller) => {
+      if (source === 'thinking-levels') {
+        return THINKING_LEVELS.map((level) => ({ value: level }));
+      }
+      if (source === 'models' && caller.workspaceId) {
+        const root = await documentsAuthority.inspectWorkspace(caller.workspaceId).then((ws) => ws.root).catch(() => null);
+        if (!root) return null;
+        const providers = await piRuntimeBroker.requestForWorkspace(root, 'provider.list', {}).catch(() => null);
+        return providers?.map((provider) => ({
+          value: provider.id,
+          label: `${provider.name} (${provider.modelCount} models)`,
+        })) ?? null;
+      }
+      return null;
+    },
+    onChanged: (change) => {
+      for (const client of uiPiariumEventClients) {
+        try {
+          writeSseEvent(client, {
+            type: 'piarium:settings-changed',
+            properties: change,
+          });
+        } catch {
+          uiPiariumEventClients.delete(client);
+        }
+      }
+    },
+  });
   void managedRemoteExecution.reconcile().catch((error) => console.error("[PiariumManagedRemote]", error.message));
   const workspaceContentSearch = createWorkspaceContentSearch({ documents: documentsAuthority, compute: nativeCompute });
   // ── Harness service host ──────────────────────────────────────────
@@ -2317,6 +2361,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     experimentService,
     resourceService,
     sourceService,
+    settingsService,
     managedRemoteTargets,
     readExploreFile: createExploreFileReader(
       documentsAuthority,
@@ -2784,6 +2829,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
               documentPathOverlay: true,
               threadRuntime: Boolean(harnessServiceHost.threadRegistry && harnessServiceHost.threadSpawnSession),
               experiments: Boolean(harnessServiceHost.experimentService),
+              settings: Boolean(harnessServiceHost.settingsService),
             }),
           }).catch((error) => {
             console.error('[Harness] Failed to register session shell:', errorMessage(error));

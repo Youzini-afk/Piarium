@@ -1175,6 +1175,22 @@ export function registerHarnessServices(
       handle: async (_params, ctx) => resources.list((await experimentCaller(ctx)).workspaceId),
     });
   }
+  if (host.settingsService) {
+    const settings = host.settingsService;
+    const caller = (ctx: HarnessServiceContext) => ({
+      workspaceId: ctx.workspaceId,
+      sessionId: ctx.sessionId,
+    });
+    router.register("settings.search", {
+      handle: async (params, _ctx) => settings.search(params),
+    });
+    router.register("settings.read", {
+      handle: async (params, ctx) => settings.read(caller(ctx), params),
+    });
+    router.register("settings.update", {
+      handle: async (params, ctx) => settings.update(caller(ctx), params),
+    });
+  }
   if (host.sourceService) {
     const sources = host.sourceService;
     router.register("source.register", {

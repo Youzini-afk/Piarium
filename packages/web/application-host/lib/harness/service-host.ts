@@ -59,7 +59,7 @@ interface SessionEntry {
 
 export function deriveHarnessCapabilities(
   activeTools: readonly string[],
-  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean },
+  availability: { documentRead?: boolean; documentPathOverlay?: boolean; threadRuntime: boolean; experiments?: boolean; settings?: boolean },
 ): readonly HarnessCapability[] {
   const tools = new Set(activeTools);
   const capabilities = new Set<HarnessCapability>([
@@ -88,6 +88,13 @@ export function deriveHarnessCapabilities(
     capabilities.add("read.experiment");
     if (tools.has("experiment")) capabilities.add("control.experiment");
     if (tools.has("research_source")) capabilities.add("write.research-source");
+  }
+  if (
+    availability.settings
+    && ["settings_search", "settings_read", "settings_update"].some((name) => tools.has(name))
+  ) {
+    capabilities.add("read.settings");
+    if (tools.has("settings_update")) capabilities.add("control.settings");
   }
   return [...capabilities];
 }
@@ -391,6 +398,8 @@ export interface HarnessServiceHost {
   experimentService: import("./experiments.js").ExperimentService | null;
   resourceService: import("./resources.js").ResourceService | null;
   sourceService: import("./sources.js").SourceService | null;
+  /** Agent-facing settings catalog service (D-306). */
+  settingsService: import("./settings-service.js").SettingsService | null;
   managedRemoteTargets: import("./managed-remote-client.js").ManagedRemoteTargetRegistry | null;
   /** Deliver one terminal shell fact into the same 7G observer used by local PTY commands. */
   observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): void;
@@ -487,6 +496,7 @@ export interface HarnessServiceHostOptions {
   experimentService?: HarnessServiceHost["experimentService"];
   resourceService?: HarnessServiceHost["resourceService"];
   sourceService?: HarnessServiceHost["sourceService"];
+  settingsService?: HarnessServiceHost["settingsService"];
   managedRemoteTargets?: HarnessServiceHost["managedRemoteTargets"];
 }
 
@@ -801,6 +811,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     experimentService: options.experimentService ?? null,
     resourceService: options.resourceService ?? null,
     sourceService: options.sourceService ?? null,
+    settingsService: options.settingsService ?? null,
     managedRemoteTargets: options.managedRemoteTargets ?? null,
     observeShellCompletion,
     commitAgentInputContext,

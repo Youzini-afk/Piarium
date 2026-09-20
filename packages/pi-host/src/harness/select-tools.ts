@@ -36,6 +36,11 @@ import {
   createResourcesTool,
   createResearchSourceTool,
 } from "./experiment-tools.js";
+import {
+  createSettingsSearchTool,
+  createSettingsReadTool,
+  createSettingsUpdateTool,
+} from "./settings-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withToolExecutionResources } from "./tool-execution-resources.js";
@@ -66,6 +71,8 @@ export interface SelectHarnessToolsDeps {
   /** Whether the Host registered experiment/resource/source services (7C/7D).
    * When false, the experiment tool family is not registered. */
   experimentAvailable?: boolean;
+  /** Whether the Host registered the shared settings catalog service (D-306). */
+  settingsAvailable?: boolean;
   /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
@@ -110,6 +117,7 @@ export function selectHarnessTools(
     webSearchAvailable,
     threadRuntimeAvailable,
     experimentAvailable,
+    settingsAvailable,
     resolvedPresets,
     resolvedResearchCapabilities,
     getActiveToolNames,
@@ -228,6 +236,19 @@ export function selectHarnessTools(
     }
     if (tools.research_source !== false) {
       result.push(createResearchSourceTool(bridge, sessionId));
+    }
+  }
+  // Settings tools — the shared catalog service (D-306). One family covers
+  // search/read/update; the catalog itself stays out of the prompt.
+  if (settingsAvailable) {
+    if (tools.settings_search !== false) {
+      result.push(createSettingsSearchTool(bridge));
+    }
+    if (tools.settings_read !== false) {
+      result.push(createSettingsReadTool(bridge));
+    }
+    if (tools.settings_update !== false) {
+      result.push(createSettingsUpdateTool(bridge));
     }
   }
   if (

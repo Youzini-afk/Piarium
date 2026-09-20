@@ -71,6 +71,7 @@ export function createWebPiRuntimeBroker({
         harnessDocumentRead,
         harnessDocumentPathOverlay,
         harnessExperiments: true,
+        harnessSettings: true,
         harnessLspNavigation: true,
         harnessThreads: true,
         harnessWebRead,

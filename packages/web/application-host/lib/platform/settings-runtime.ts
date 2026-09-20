@@ -94,15 +94,22 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
     return (await Promise.all(validations)).filter((p) => p !== null);
   };
 
-  const persistSettings = async (
+  const applyPersistedChanges = async (
+    current: PiariumSettingsDocument,
     changes: PiariumSettingsDocument,
+    removals: readonly string[],
   ): Promise<PiariumSettingsDocument> => {
-    const next = await updateSettingsOnDisk(async (current) => {
-      // Log field names only — changes can carry credentials (UI password,
-      // client tokens, tunnel tokens) that must never reach the log file.
-      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
-      const sanitized = sanitizeSettingsUpdate(changes);
-      let next = mergePersistedSettings(current, sanitized);
+    // Log field names only — changes can carry credentials (UI password,
+    // client tokens, tunnel tokens) that must never reach the log file.
+    console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
+    const sanitized = sanitizeSettingsUpdate(changes);
+    let next = mergePersistedSettings(current, sanitized);
+    for (const field of removals) {
+      if (Object.prototype.hasOwnProperty.call(next, field)) {
+        next = { ...next };
+        delete next[field];
+      }
+    }
 
       const normalizedState = normalizeSettingsPaths(next);
       if (normalizedState.changed) {
@@ -173,13 +180,48 @@ export const createSettingsRuntime = (deps: SettingsRuntimeDependencies) => {
       }
 
       return next;
-    });
+  };
+
+  const persistSettings = async (
+    changes: PiariumSettingsDocument,
+  ): Promise<PiariumSettingsDocument> => {
+    const next = await updateSettingsOnDisk((current) => applyPersistedChanges(current, changes, []));
     return formatSettingsResponse(next);
+  };
+
+  /**
+   * CAS variant for the agent-facing settings service (D-306): the caller's
+   * expectedRevision is checked inside the store lock so concurrent UI writes
+   * are never silently overwritten. `null` revision signals a conflict — the
+   * document is left untouched.
+   */
+  const persistSettingsCas = async (
+    changes: PiariumSettingsDocument,
+    removals: readonly string[],
+    expectedRevision: string | undefined,
+    revisionOf: (document: PiariumSettingsDocument) => string,
+  ): Promise<{ conflict: boolean; document: PiariumSettingsDocument; revision: string }> => {
+    return settingsStore.transact(async (current): Promise<{
+      document?: PiariumSettingsDocument;
+      write?: boolean;
+      result: { conflict: boolean; document: PiariumSettingsDocument; revision: string };
+    }> => {
+      const revision = revisionOf(current);
+      if (expectedRevision !== undefined && expectedRevision !== revision) {
+        return { write: false, result: { conflict: true, document: current, revision } };
+      }
+      const next = await applyPersistedChanges(current, changes, removals);
+      return {
+        document: next,
+        result: { conflict: false, document: next, revision: revisionOf(next) },
+      };
+    });
   };
 
   return {
     readSettingsFromDisk,
     updateSettingsOnDisk,
     persistSettings,
+    persistSettingsCas,
   };
 };

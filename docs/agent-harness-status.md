@@ -18,12 +18,38 @@ Last updated: 2026-09-20
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），设计已接受，尚未实施或验收。**
+**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），纵切已接线并定向验证，尚未完整验收。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
-[plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。目标是现有大部分设置可由 Agent 查询、理解和修改，
-与设置页共用 authority、真实生效状态及同步；查询工具渐进披露实时信息，Skill 按需提供组合方法。
-已有应用设置、Pi settings/resource 与扩展 API 是复用基础；共用目录、Agent 管理工具、完整 owner 适配和双向同步
-仍待接线，不能标 implemented/wired/proven/default-on。本次仅交付设计、计划与决策，不改变既有 7G–7I 交付范围。
+[plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
+
+已接线（S0–S3）：
+
+- 共用目录 `application-client/src/settings-catalog.ts`：160 条目录项携带稳定 id、类别/页面、i18n 键、关键词、
+  owner（app / pi-settings / client / action）、值规格（类型、可空、枚举/范围、动态选项源）与生效语义
+  （immediate / next-run / restart / manual）。UI 搜索表 `ui/src/lib/settings/search.ts` 改为从目录派生，
+  插件搜索项与可用性谓词保持原有行为。
+- 协议 `protocol/src/harness-settings-service.ts` + `settings.search|read|update` 方法映射与能力
+  `read.settings`/`control.settings`；`settings.update` 走 `control.settings`。
+- Host 服务 `application-host/lib/harness/settings-service.ts`：目录查询/详情/更新，按 owner 路由 —
+  app 字段经 `settingsRuntime.persistSettingsCas`（锁内 CAS + sanitize/merge/领域副作用，隧道预设同步等不旁路）；
+  pi-settings 经 `requestForWorkspace` 的 `settings.get/update`（顶层键分组读-改-写，scope/trust/CAS 由原 authority
+  执行）；client owner 如实返回 device-local 不可写；action owner 返回领域动作指引不落配置值。
+  秘密字段状态只读（isSet），不返回值。成功写入后广播 `piarium:settings-changed`。
+- Agent 工具 `pi-host/src/harness/settings-tools.ts`：`settings_search`/`settings_read`/`settings_update`
+  （update 为 sequential），经 `harnessSettings` 握手能力门控、`HarnessSettings.tools` 逐项开关，
+  错误携带 `{code}`。select-tools/host-controller/broker/service-host 全链路接线。
+- UI 同步：`piarium:settings-changed` 事件 → `App.tsx` 失效缓存并 `syncDesktopSettings()`。
+- 顺带修复真实缺陷：sanitizer 白名单缺 `autoSaveEnabled`、`sessionRetentionAction`、`checkpointRetentionLimit`、
+  `codeBlockLineWrap`、`collapsibleUserMessages`、`editorFontSize`、`fileEditorSettings` —— 这些 DesktopSettings
+  字段此前经 `persistSettings` 写入时被静默丢弃（含 UI 路径），已补白名单规则；`fileEditorKeymap` 实为
+  device-local zustand 字段，目录更正为 owner=client 只读。
+
+验证：settings-service 18 例（目录/读/写/CAS 冲突/校验/秘密/动作）、pi-host settings-tools 8 例、
+settings-runtime/helpers 既有测试 40 例、UI 搜索测试全绿；application-client/UI/application-host 类型检查干净。
+
+未覆盖/边界：运行中会话的 harness 设置在下一轮会话构建时生效（`next-run` 语义与 UI 路径一致，未新增热重载）；
+S4 的组合 Skill 未单独交付文件（技能驻留用户/项目资源目录，目录项 helpRef/actionRef 与工具指引承担渐进披露）；
+远程 Host 上的 app 设置修改作用于该 Host 文档，device-local 项如实不可写。
 
 **D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），设计已接受，排在 S 之后，尚未实施或验收。**
 设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见

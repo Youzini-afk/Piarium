@@ -1242,6 +1242,10 @@ export interface HarnessServiceMap {
   "resource.list": { params: Record<string, never>; result: import("./harness-experiments.js").ResourceListResult };
   "source.register": { params: import("./harness-experiments.js").SourceRegisterParams; result: import("./harness-experiments.js").SourceRegisterResult };
   "source.list": { params: import("./harness-experiments.js").SourceListParams; result: import("./harness-experiments.js").SourceListResult };
+  // Stage S (D-306): conversational settings backed by the shared catalog
+  "settings.search": { params: import("./harness-settings-service.js").SettingsSearchParams; result: import("./harness-settings-service.js").SettingsSearchResult };
+  "settings.read": { params: import("./harness-settings-service.js").SettingsReadParams; result: import("./harness-settings-service.js").SettingsReadResult };
+  "settings.update": { params: import("./harness-settings-service.js").SettingsUpdateParams; result: import("./harness-settings-service.js").SettingsUpdateResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -1263,6 +1267,8 @@ export type HarnessCapability =
   | "read.document"
   | "read.search"
   | "read.web"
+  | "read.settings"
+  | "control.settings"
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
@@ -1330,6 +1336,9 @@ export const HARNESS_METHOD_CAPABILITY = {
   "resource.list": "read.experiment",
   "source.register": "write.research-source",
   "source.list": "read.experiment",
+  "settings.search": "read.settings",
+  "settings.read": "read.settings",
+  "settings.update": "control.settings",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1415,6 +1424,9 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "resource.list",
   "source.register",
   "source.list",
+  "settings.search",
+  "settings.read",
+  "settings.update",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

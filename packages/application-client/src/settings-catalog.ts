@@ -1,0 +1,1580 @@
+/**
+ * Shared settings catalog (D-306 / Stage S).
+ *
+ * One UI-independent descriptor list consumed by both the settings-page search
+ * (`packages/ui`) and the agent-facing `settings_*` tools served by the
+ * Application Host (`packages/web`). It describes *what exists* and *who owns
+ * it* — it never stores values itself.
+ *
+ * Owners:
+ *  - `app`         Piarium settings document (settings.json in PIARIUM_DATA_DIR),
+ *                  written through the settings runtime's serialized store.
+ *  - `pi-settings` Pi `settings.json` (global agent dir + trusted project file),
+ *                  written through the Pi `settings.get`/`settings.update`
+ *                  protocol with content-hash revisions.
+ *  - `client`      Device-local UI state (localStorage/Zustand/Electron bridge).
+ *                  Agents can describe these but cannot write them — the field
+ *                  belongs to one surface, not the Host.
+ *  - `action`      The "setting" is really a domain object or operation
+ *                  (extensions, providers, MCP, language packs, …). The entry
+ *                  points at the real owner surface; reads report status,
+ *                  writes go through the domain's own authority, never a config
+ *                  field that merely looks like state.
+ */
+
+export type SettingsOwnerKind = 'app' | 'pi-settings' | 'client' | 'action';
+
+export type SettingsCategory =
+  | 'appearance' | 'notifications' | 'chat' | 'sessions' | 'editor' | 'terminal'
+  | 'model' | 'harness' | 'retrieval' | 'web' | 'extensions' | 'agents'
+  | 'git' | 'tunnel' | 'projects' | 'usage' | 'voice' | 'runtime'
+  | 'providers' | 'knowledge' | 'language' | 'remote' | 'productivity';
+
+export type SettingsValueKind =
+  | 'boolean' | 'number' | 'enum' | 'string' | 'string-list' | 'json' | 'secret';
+
+/** Dynamic option sets the owning surface can resolve at read time. */
+export type SettingsOptionSource =
+  | 'models'          // provider/model pairs the host can enumerate
+  | 'thinking-levels' // effort variants for the current default model
+  | 'themes'          // UI theme ids — resolved by the UI, host returns source name
+  | 'locales'         // installed UI locales
+  | 'git-identities'; // configured git identity profiles
+
+export interface SettingsFieldSpec {
+  /** Document key (`app`) or dot path (`pi-settings`, e.g. `harness.shell`). */
+  path: string;
+  kind: SettingsValueKind;
+  options?: readonly { value: string; labelKey?: string }[];
+  optionsSource?: SettingsOptionSource;
+  min?: number;
+  max?: number;
+  integer?: boolean;
+  unit?: string;
+  /** Value may be explicitly cleared (null/delete) rather than set. */
+  nullable?: boolean;
+  multiline?: boolean;
+  maxLength?: number;
+  /** Free-form note surfaced to agents (units, format, caveats). */
+  note?: string;
+  /**
+   * `pi-settings` scope rule. `user` = global file only; `user-or-project`
+   * = writable at either scope. User-owned fields silently dropped into a
+   * project file are rejected by the owner, so the catalog refuses them
+   * up front.
+   */
+  scope?: 'user' | 'user-or-project';
+  /** Removing the field restores this default (shown, not applied blindly). */
+  default?: unknown;
+}
+
+export interface SettingsAvailability {
+  /** Desktop shell required (or forbidden when false). */
+  desktop?: boolean;
+  /** Desktop shell connected to its own local host. */
+  desktopLocal?: boolean;
+  /** Web/mobile surface (non-desktop shell). */
+  web?: boolean;
+  /** Mobile form factor required (or forbidden when false). */
+  mobile?: boolean;
+  /** Host OS constraint. */
+  platform?: 'mac' | 'windows' | 'linux' | 'not-mac';
+}
+
+export interface SettingsActionRef {
+  /**
+   * Owning domain surface the real operation lives on. `runtime:*` methods are
+   * Pi runtime calls; `service:*` are Application Host services; `tool:*`
+   * entries defer to an existing agent tool; `page:*` is UI-only management.
+   */
+  domain:
+    | 'runtime:extensions' | 'runtime:resources' | 'runtime:providers'
+    | 'runtime:mcp' | 'runtime:language-support' | 'runtime:runtime-update'
+    | 'service:git' | 'service:tunnel' | 'service:knowledge'
+    | 'service:extensions' | 'service:fleet' | 'service:agents'
+    | 'service:notifications' | 'service:projects' | 'service:remote-instances'
+    | 'tool:resource' | 'tool:extension' | 'page:ui';
+  /** What the agent can actually do without opening the UI. */
+  verbs?: readonly string[];
+  note?: string;
+}
+
+export interface SettingsCatalogEntry {
+  /** Stable identifier — also the settings-page focus target. */
+  id: string;
+  category: SettingsCategory;
+  owner: SettingsOwnerKind;
+  /** Single-path field. */
+  field?: SettingsFieldSpec;
+  /** Multi-path group — update accepts a subset of `fields`. */
+  fields?: readonly SettingsFieldSpec[];
+  /** Non-field entries: the domain action this row points at. */
+  actionRef?: SettingsActionRef;
+  /**
+   * How a saved change reaches the running product. `immediate` = live once
+   * saved; `next-run` = applied when the owning run/session starts;
+   * `restart` = needs a host/surface restart; `manual` = requires a user or
+   * domain action the catalog cannot perform.
+   */
+  apply?: 'immediate' | 'next-run' | 'restart' | 'manual';
+  /** Pointer for `settings_read(detail)` — doc anchor or resource hint. */
+  helpRef?: string;
+  ui: {
+    page: string;
+    titleKey: string;
+    descriptionKey?: string;
+    keywords?: readonly string[];
+    availability?: SettingsAvailability;
+  };
+}
+
+export interface SettingsCatalogContext {
+  isDesktop: boolean;
+  isWeb: boolean;
+  isMobile: boolean;
+  isDesktopLocalOrigin: boolean;
+  isMac: boolean;
+  isWindows: boolean;
+  isLinux: boolean;
+}
+
+export function isCatalogEntryAvailable(
+  availability: SettingsAvailability | undefined,
+  ctx: SettingsCatalogContext,
+): boolean {
+  if (!availability) return true;
+  if (availability.desktop === true && !ctx.isDesktop) return false;
+  if (availability.desktop === false && ctx.isDesktop) return false;
+  if (availability.desktopLocal === true && !ctx.isDesktopLocalOrigin) return false;
+  if (availability.web === true && !(ctx.isWeb && !ctx.isDesktop)) return false;
+  if (availability.mobile === true && !ctx.isMobile) return false;
+  if (availability.mobile === false && ctx.isMobile) return false;
+  switch (availability.platform) {
+    case 'mac': return ctx.isMac;
+    case 'windows': return ctx.isWindows;
+    case 'linux': return ctx.isLinux;
+    case 'not-mac': return ctx.isWindows || ctx.isLinux || !ctx.isMac;
+    default: return true;
+  }
+}
+
+const modelField = (path: string, scope: 'user' | 'user-or-project'): SettingsFieldSpec => ({
+  path, kind: 'string', optionsSource: 'models', scope,
+  note: 'provider/model identifier, e.g. "anthropic/claude-sonnet-4"',
+});
+
+export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
+  // ── Harness (pi-settings owner) ──────────────────────────────────────────
+  {
+    id: 'harness.tools', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.tools', kind: 'json', scope: 'user-or-project',
+      note: 'Record<toolName, boolean> enablement map; absent tools use the assembled default set' },
+    apply: 'next-run',
+    helpRef: 'docs/agent-settings-design.md#harness',
+    ui: { page: 'harness-tools', titleKey: 'settings.page.harness.section.tools',
+      keywords: ['bash', 'grep', 'apply_patch', 'diagnostics', 'tools'] },
+  },
+  {
+    id: 'harness.shell', category: 'harness', owner: 'pi-settings',
+    fields: [
+      { path: 'harness.shell', kind: 'enum', scope: 'user-or-project',
+        options: [
+          { value: 'auto' }, { value: 'git-bash' }, { value: 'powershell' }, { value: 'wsl' },
+        ], default: 'auto' },
+      { path: 'harness.bash.waitMs', kind: 'number', scope: 'user-or-project',
+        min: 0, integer: true, unit: 'ms', default: 10000,
+        note: 'foreground wait before the shell tool returns a background handle' },
+    ],
+    apply: 'next-run',
+    ui: { page: 'harness-tools', titleKey: 'settings.page.harness.shell.label',
+      descriptionKey: 'settings.page.harness.bash.waitMs.description',
+      keywords: ['shell', 'powershell', 'wsl', 'background'] },
+  },
+  {
+    id: 'harness.output', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.output.visibleBytes', kind: 'number', scope: 'user-or-project',
+      min: 1024, integer: true, unit: 'bytes', default: 32768 },
+    apply: 'next-run',
+    ui: { page: 'harness-tools', titleKey: 'settings.page.harness.section.output',
+      keywords: ['bytes', 'output', 'KiB'] },
+  },
+  {
+    id: 'harness.permissions.mode', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.permissions.mode', kind: 'enum', scope: 'user-or-project',
+      options: [
+        { value: 'normal' }, { value: 'accept-edits' }, { value: 'smart' }, { value: 'bypass' },
+      ], default: 'normal' },
+    apply: 'next-run',
+    ui: { page: 'harness-permissions', titleKey: 'settings.page.harness.permissions.mode.label',
+      keywords: ['smart', 'approval', 'bypass', 'permission'] },
+  },
+  {
+    id: 'harness.permissions.rules', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.permissions.rules', kind: 'json', scope: 'user-or-project',
+      note: 'PermissionRule[] — ordered allow/deny/ask patterns; validated by Pi' },
+    apply: 'next-run',
+    helpRef: 'permission rules are validated by the Pi settings owner; invalid entries are rejected',
+    ui: { page: 'harness-permissions', titleKey: 'settings.harness.rules.title',
+      keywords: ['allow', 'deny', 'ask', 'regex', 'rules'] },
+  },
+  {
+    id: 'harness.models.retrieval', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.models', kind: 'json', scope: 'user',
+      note: 'role → {providerId, modelId}; retrieval roles: explore, retrievalAgent' },
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.harness.models.retrieval',
+      keywords: ['explore', 'retrievalAgent', 'model'] },
+  },
+  {
+    id: 'harness.models.execution', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.models', kind: 'json', scope: 'user',
+      note: 'role → {providerId, modelId}; execution roles: quickImplement, hardImplement, frontend' },
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.harness.models.execution',
+      keywords: ['quickImplement', 'hardImplement', 'frontend', 'model'] },
+  },
+  {
+    id: 'harness.models.research', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.models', kind: 'json', scope: 'user',
+      note: 'role → {providerId, modelId}; research roles: researchInvestigation, researchExperimentalDesign, researchFastExploration, researchHighThroughputExecution' },
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.harness.models.research',
+      keywords: ['investigation', 'experimental design', 'fast exploration', 'high throughput', 'research', 'model'] },
+  },
+  {
+    id: 'harness.models.assistance', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.models', kind: 'json', scope: 'user',
+      note: 'role → {providerId, modelId}; assistance roles: review, check, reader, suggestions, permissionJudge' },
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.harness.models.assistance',
+      keywords: ['review', 'check', 'reader', 'suggestions', 'permissionJudge', 'model'] },
+  },
+  {
+    id: 'harness.review', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.review', kind: 'json', scope: 'user',
+      note: '{enabled: boolean, gate: boolean} — user-owned automatic review of child results',
+      default: { enabled: false, gate: false } },
+    apply: 'next-run',
+    ui: { page: 'harness-models', titleKey: 'settings.page.harness.section.review',
+      keywords: ['review', 'gate'] },
+  },
+  {
+    id: 'harness.context', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.context', kind: 'json', scope: 'user',
+      note: '{backgroundPreparation: boolean, preparationWaterline: 0<n<1} — user-owned background compaction prep',
+      default: { backgroundPreparation: true, preparationWaterline: 0.75 } },
+    apply: 'next-run',
+    ui: { page: 'harness-context', titleKey: 'settings.page.harness.context.backgroundPreparation',
+      keywords: ['compaction', 'context'] },
+  },
+  {
+    id: 'harness.embedding', category: 'retrieval', owner: 'pi-settings',
+    field: { path: 'harness.embedding', kind: 'json', scope: 'user',
+      note: 'dedicated embedding backend {provider, model, endpoint?, credentialRef?}; user-owned' },
+    apply: 'next-run',
+    ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.embedding',
+      keywords: ['embedding', 'MiniLM', 'vector'] },
+  },
+  {
+    id: 'harness.rerank', category: 'retrieval', owner: 'pi-settings',
+    field: { path: 'harness.rerank', kind: 'json', scope: 'user',
+      note: 'dedicated rerank backend; user-owned' },
+    apply: 'next-run',
+    ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.rerank',
+      keywords: ['rerank', 'ranking'] },
+  },
+  {
+    id: 'harness.web.search', category: 'web', owner: 'pi-settings',
+    field: { path: 'harness.web.search', kind: 'json', scope: 'user',
+      note: '{provider: brave|exa|tavily|jina|searxng, endpoint?, credentialRef?} — credentialRef names a Pi auth.json entry; secret material is never returned' },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.section.web',
+      keywords: ['brave', 'tavily', 'exa', 'jina', 'searxng', 'API key', 'search'] },
+  },
+  {
+    id: 'harness.web.render', category: 'web', owner: 'pi-settings',
+    field: { path: 'harness.web.render', kind: 'boolean', scope: 'user',
+      note: 'browser rendering access for webfetch; user-owned' },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.render',
+      keywords: ['browser', 'webfetch', 'render'] },
+  },
+  {
+    id: 'harness.web.domains', category: 'web', owner: 'pi-settings',
+    field: { path: 'harness.web.domains', kind: 'json', scope: 'user-or-project',
+      note: '{allow?: string[], block: string[]} — project scope can only narrow the user policy' },
+    apply: 'next-run',
+    ui: { page: 'harness-web', titleKey: 'settings.page.harness.web.domains.title',
+      keywords: ['domain', 'allow', 'block'] },
+  },
+  {
+    id: 'harness.dispatch', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.dispatch', kind: 'json', scope: 'user-or-project',
+      note: '{concurrency: number, askBefore: Record<string, boolean>} child-run dispatch policy' },
+    apply: 'next-run',
+    ui: { page: 'harness-tools', titleKey: 'settings.page.harness.section.tools',
+      keywords: ['concurrency', 'dispatch', 'ask before', 'child'] },
+  },
+  {
+    id: 'harness.worktree', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.worktree', kind: 'json', scope: 'user-or-project',
+      note: '{setup?, setupTimeoutMs?, copyIgnored?, shareDependencies?, reclaimIdle?, budget?}' },
+    apply: 'next-run',
+    ui: { page: 'projects', titleKey: 'settings.projects.page.section.worktree',
+      keywords: ['worktree', 'setup commands', 'bootstrap'] },
+  },
+  {
+    id: 'harness.knowledge.retention', category: 'harness', owner: 'pi-settings',
+    field: { path: 'harness.knowledge', kind: 'json', scope: 'user-or-project',
+      note: '{eventRetentionDays: number, autoAcceptSuggestions: {workspace, user}}' },
+    apply: 'next-run',
+    ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.workspace',
+      keywords: ['knowledge', 'retention', 'suggestions'] },
+  },
+
+  // ── Appearance ───────────────────────────────────────────────────────────
+  {
+    id: 'appearance.language', category: 'appearance', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.appearance.language.label',
+      descriptionKey: 'settings.appearance.language.description',
+      keywords: ['locale', 'translation', 'ui language'] },
+  },
+  {
+    id: 'appearance.time-format', category: 'appearance', owner: 'app',
+    field: { path: 'timeFormatPreference', kind: 'enum',
+      options: [{ value: 'auto' }, { value: '12h' }, { value: '24h' }] },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.timeFormat',
+      keywords: ['clock', '12h', '24h'] },
+  },
+  {
+    id: 'appearance.week-start', category: 'appearance', owner: 'app',
+    field: { path: 'weekStartPreference', kind: 'enum',
+      options: [{ value: 'auto' }, { value: 'sunday' }, { value: 'monday' }] },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.weekStartsOn',
+      keywords: ['calendar', 'monday', 'sunday'] },
+  },
+  {
+    id: 'appearance.light-theme', category: 'appearance', owner: 'app',
+    fields: [
+      { path: 'useSystemTheme', kind: 'boolean',
+        note: 'follow the OS appearance; light/dark ids pick the variants' },
+      { path: 'lightThemeId', kind: 'string', optionsSource: 'themes' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.lightTheme',
+      keywords: ['theme', 'color', 'light mode'] },
+  },
+  {
+    id: 'appearance.dark-theme', category: 'appearance', owner: 'app',
+    fields: [
+      { path: 'themeVariant', kind: 'enum', options: [{ value: 'light' }, { value: 'dark' }] },
+      { path: 'darkThemeId', kind: 'string', optionsSource: 'themes' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.darkTheme',
+      keywords: ['theme', 'color', 'dark mode'] },
+  },
+  {
+    id: 'appearance.window-transparency', category: 'appearance', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.macVibrancy',
+      descriptionKey: 'settings.piarium.visual.field.macVibrancyHint',
+      keywords: ['transparent', 'transparency', 'vibrancy', 'blur', 'macos', 'opaque'],
+      availability: { desktopLocal: true } },
+  },
+  {
+    id: 'appearance.dock-badge', category: 'appearance', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.dockBadge',
+      descriptionKey: 'settings.piarium.visual.field.dockBadgeHint',
+      keywords: ['dock', 'badge', 'unread', 'unseen', 'counter', 'count', 'notification', 'macos'],
+      availability: { platform: 'mac' } },
+  },
+  {
+    id: 'appearance.pwa-install-name', category: 'appearance', owner: 'app',
+    field: { path: 'pwaAppName', kind: 'string', maxLength: 64 },
+    apply: 'manual',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.installAppName',
+      descriptionKey: 'settings.piarium.visual.field.installAppNameHint',
+      keywords: ['pwa', 'installed app'],
+      availability: { web: true } },
+  },
+  {
+    id: 'appearance.pwa-orientation', category: 'appearance', owner: 'app',
+    field: { path: 'pwaOrientation', kind: 'enum',
+      options: [{ value: 'system' }, { value: 'portrait' }, { value: 'landscape' }] },
+    apply: 'manual',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.installOrientation',
+      descriptionKey: 'settings.piarium.visual.field.installOrientationHint',
+      keywords: ['pwa', 'portrait', 'landscape'],
+      availability: { web: true } },
+  },
+  {
+    id: 'appearance.mobile-keyboard-mode', category: 'appearance', owner: 'app',
+    field: { path: 'mobileKeyboardMode', kind: 'enum',
+      options: [{ value: 'native' }, { value: 'resize-content' }] },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.mobileKeyboardMode',
+      descriptionKey: 'settings.piarium.visual.field.mobileKeyboardModeHint',
+      keywords: ['mobile', 'keyboard', 'resize'],
+      availability: { mobile: true, web: true } },
+  },
+  {
+    id: 'appearance.interface-font-size', category: 'appearance', owner: 'app',
+    fields: [
+      { path: 'fontSize', kind: 'number', min: 10, max: 24, unit: 'px' },
+      { path: 'uiFont', kind: 'string', nullable: true, note: 'font family override' },
+      { path: 'monoFont', kind: 'string', nullable: true, note: 'monospace font override' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.interfaceFontSize',
+      keywords: ['font', 'text size', 'ui scale'],
+      availability: { mobile: false } },
+  },
+  {
+    id: 'appearance.terminal-font-size', category: 'appearance', owner: 'app',
+    field: { path: 'terminalFontSize', kind: 'number', min: 8, max: 32, unit: 'px' },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.terminalFontSize',
+      keywords: ['terminal', 'font', 'text size'] },
+  },
+  {
+    id: 'appearance.terminal-shell', category: 'terminal', owner: 'app',
+    fields: [
+      { path: 'terminalShell', kind: 'enum',
+        options: [
+          { value: 'auto' }, { value: 'bash' }, { value: 'zsh' }, { value: 'sh' },
+          { value: 'fish' }, { value: 'pwsh' }, { value: 'powershell' }, { value: 'cmd' },
+          { value: 'dash' }, { value: 'ksh' }, { value: 'nu' },
+        ] },
+      { path: 'terminalLoginShells', kind: 'string-list',
+        note: 'shells that run as login shells' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.terminalShell',
+      descriptionKey: 'settings.piarium.visual.field.terminalShellHint',
+      keywords: ['terminal', 'shell', 'bash', 'zsh', 'fish', 'pwsh', 'powershell'] },
+  },
+  {
+    id: 'appearance.editor-font-size', category: 'editor', owner: 'app',
+    field: { path: 'editorFontSize', kind: 'number', min: 8, max: 32, unit: 'px' },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.editorFontSize',
+      keywords: ['editor', 'font', 'text size', 'code'] },
+  },
+  {
+    id: 'appearance.spacing-density', category: 'appearance', owner: 'app',
+    fields: [
+      { path: 'padding', kind: 'number', min: 0, max: 32, unit: 'px' },
+      { path: 'cornerRadius', kind: 'number', min: 0, max: 24, unit: 'px' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.spacingDensity',
+      keywords: ['density', 'compact', 'comfortable', 'spacing'] },
+  },
+  {
+    id: 'appearance.input-bar-offset', category: 'appearance', owner: 'app',
+    field: { path: 'inputBarOffset', kind: 'number', min: 0, max: 120, unit: 'px' },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.visual.field.inputBarOffset',
+      descriptionKey: 'settings.piarium.visual.field.inputBarOffsetTooltip',
+      keywords: ['input', 'home bar', 'offset'],
+      availability: { mobile: true } },
+  },
+  {
+    id: 'appearance.auto-save-enabled', category: 'editor', owner: 'app',
+    field: { path: 'autoSaveEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.autoSaveEnabled',
+      descriptionKey: 'settings.piarium.visual.field.autoSaveEnabledInfo',
+      keywords: ['editor', 'autosave', 'auto-save', 'files', 'save'] },
+  },
+  {
+    id: 'appearance.expanded-editor-toolbar', category: 'editor', owner: 'app',
+    field: { path: 'expandedEditorToolbar', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.expandedEditorToolbar',
+      keywords: ['editor', 'toolbar', 'tabs', 'docked', 'files'] },
+  },
+  {
+    id: 'appearance.file-editor-keymap', category: 'editor', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.fileEditorKeymap',
+      keywords: ['editor', 'vim', 'keymap'] },
+  },
+  {
+    id: 'appearance.file-editor', category: 'editor', owner: 'app',
+    field: { path: 'fileEditorSettings', kind: 'json',
+      note: 'editor options object (minimap, wrap, whitespace, indentation, format)' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.editor.section.title',
+      descriptionKey: 'settings.piarium.editor.section.description',
+      keywords: ['editor', 'minimap', 'wrap', 'whitespace', 'indentation', 'format'] },
+  },
+  {
+    id: 'appearance.terminal-quick-keys', category: 'terminal', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.terminalQuickKeys',
+      descriptionKey: 'settings.piarium.visual.field.terminalQuickKeysTooltip',
+      keywords: ['terminal', 'keyboard', 'esc', 'ctrl', 'arrows'],
+      availability: { mobile: false } },
+  },
+
+  // ── Chat ─────────────────────────────────────────────────────────────────
+  {
+    id: 'chat.render-mode', category: 'chat', owner: 'app',
+    field: { path: 'chatRenderMode', kind: 'enum',
+      options: [{ value: 'sorted' }, { value: 'live' }] },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.chatRenderMode',
+      keywords: ['messages', 'conversation', 'rendering'] },
+  },
+  {
+    id: 'chat.message-transport', category: 'chat', owner: 'app',
+    field: { path: 'messageStreamTransport', kind: 'enum',
+      options: [{ value: 'auto' }, { value: 'ws' }, { value: 'sse' }] },
+    apply: 'restart',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.section.messageStreamTransport',
+      keywords: ['streaming', 'sse', 'websocket'] },
+  },
+  {
+    id: 'chat.session-recap', category: 'chat', owner: 'app',
+    field: { path: 'sessionRecapEnabled', kind: 'boolean' },
+    apply: 'next-run',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.sessionRecap',
+      keywords: ['recap', 'assist', 'small model', 'summary'] },
+  },
+  {
+    id: 'chat.session-assistance', category: 'chat', owner: 'app',
+    apply: 'next-run',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.sessionAssistance',
+      keywords: ['recap', 'suggestion', 'subagent'] },
+  },
+  {
+    id: 'chat.session-suggestion', category: 'chat', owner: 'app',
+    field: { path: 'sessionSuggestionEnabled', kind: 'boolean' },
+    apply: 'next-run',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.sessionSuggestion',
+      keywords: ['suggestion', 'assist', 'small model', 'follow up'] },
+  },
+  {
+    id: 'chat.session-goal', category: 'chat', owner: 'app',
+    field: { path: 'sessionGoalEnabled', kind: 'boolean' },
+    apply: 'next-run',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.sessionGoal',
+      keywords: ['goal', 'objective', 'auto continue', 'small model'] },
+  },
+  {
+    id: 'chat.session-goal-budget', category: 'chat', owner: 'app',
+    fields: [
+      { path: 'sessionGoalDefaultBudgetEnabled', kind: 'boolean' },
+      { path: 'sessionGoalDefaultBudget', kind: 'number', min: 1, integer: true, unit: 'tokens' },
+    ],
+    apply: 'next-run',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.goal.budgetLabel',
+      keywords: ['goal', 'budget', 'tokens', 'limit'] },
+  },
+  {
+    id: 'chat.reasoning-traces', category: 'chat', owner: 'app',
+    field: { path: 'showReasoningTraces', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showReasoningTraces',
+      keywords: ['thinking', 'reasoning'] },
+  },
+  {
+    id: 'chat.reasoning', category: 'chat', owner: 'app',
+    field: { path: 'collapsibleThinkingBlocks', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.reasoning',
+      keywords: ['thinking', 'traces'] },
+  },
+  {
+    id: 'chat.sticky-user-header', category: 'chat', owner: 'app',
+    field: { path: 'stickyUserHeader', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.stickyUserHeader',
+      keywords: ['messages', 'header'] },
+  },
+  {
+    id: 'chat.prompt-navigator', category: 'chat', owner: 'app',
+    field: { path: 'promptNavigatorEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.promptNavigatorEnabled',
+      keywords: ['prompt', 'navigator', 'navigation', 'timeline', 'scroll'] },
+  },
+  {
+    id: 'chat.collapsible-user-messages', category: 'chat', owner: 'app',
+    field: { path: 'collapsibleUserMessages', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.collapsibleUserMessages',
+      keywords: ['collapse', 'expand', 'clamp', 'long messages', 'user messages'] },
+  },
+  {
+    id: 'chat.wide-layout', category: 'chat', owner: 'app',
+    field: { path: 'wideChatLayoutEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.wideChatLayout',
+      keywords: ['layout', 'wide', 'messages'] },
+  },
+  {
+    id: 'chat.message-appearance', category: 'chat', owner: 'app',
+    field: { path: 'userMessageRenderingMode', kind: 'enum',
+      options: [{ value: 'markdown' }, { value: 'plain' }] },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.messageAppearance',
+      keywords: ['layout', 'messages', 'appearance'] },
+  },
+  {
+    id: 'chat.code-block-line-wrap', category: 'chat', owner: 'app',
+    field: { path: 'codeBlockLineWrap', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.codeBlockLineWrap',
+      keywords: ['code', 'wrap', 'line wrap', 'markdown'] },
+  },
+  {
+    id: 'chat.inline-assistant-actions', category: 'chat', owner: 'app',
+    field: { path: 'showSplitAssistantMessageActions', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showSplitAssistantMessageActions',
+      descriptionKey: 'settings.piarium.visual.field.showSplitAssistantMessageActionsTooltip',
+      keywords: ['copy', 'save image', 'read aloud'] },
+  },
+  {
+    id: 'chat.draft-starters-visible', category: 'chat', owner: 'app',
+    field: { path: 'draftStartersVisible', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.draftStartersVisible',
+      keywords: ['starter', 'starters', 'new session', 'welcome', 'suggestions'] },
+  },
+  {
+    id: 'chat.subagent-read-only-banner', category: 'chat', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.allowPromptingSubagentSessions',
+      keywords: ['subagent', 'read only', 'prompt', 'banner'] },
+  },
+  {
+    id: 'chat.tool-file-icons', category: 'chat', owner: 'app',
+    field: { path: 'showToolFileIcons', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showToolFileIcons',
+      keywords: ['tools', 'files', 'icons'] },
+  },
+  {
+    id: 'chat.tools-and-files', category: 'chat', owner: 'app',
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.toolsAndFiles',
+      keywords: ['tools', 'files', 'dotfiles'] },
+  },
+  {
+    id: 'chat.changed-files', category: 'chat', owner: 'app',
+    field: { path: 'showTurnChangedFiles', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showTurnChangedFiles',
+      keywords: ['changed files', 'turns'] },
+  },
+  {
+    id: 'chat.server-permission-auto-accept', category: 'chat', owner: 'app',
+    field: { path: 'serverPermissionAutoAcceptEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.serverPermissionAutoAccept',
+      descriptionKey: 'settings.piarium.visual.field.serverPermissionAutoAcceptTooltip',
+      keywords: ['permission', 'permissions', 'auto accept', 'approve', 'unattended', 'backend'] },
+  },
+  {
+    id: 'chat.dotfiles', category: 'chat', owner: 'app',
+    field: { path: 'directoryShowHidden', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.showDotfiles',
+      keywords: ['hidden files'] },
+  },
+  {
+    id: 'chat.follow-up-behavior', category: 'chat', owner: 'app',
+    field: { path: 'followUpBehavior', kind: 'enum',
+      options: [{ value: 'steer' }, { value: 'queue' }] },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.followUpBehavior',
+      descriptionKey: 'settings.piarium.visual.field.followUpBehaviorDescription',
+      keywords: ['follow up', 'queue', 'steer', 'send immediately'] },
+  },
+  {
+    id: 'chat.persist-drafts', category: 'chat', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.persistDraftMessages',
+      keywords: ['draft', 'message'] },
+  },
+  {
+    id: 'chat.composer', category: 'chat', owner: 'app',
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.section.composer',
+      keywords: ['input', 'draft', 'spellcheck'] },
+  },
+  {
+    id: 'chat.spellcheck', category: 'chat', owner: 'app',
+    field: { path: 'inputSpellcheckEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.enableSpellcheckInTextInputs',
+      keywords: ['spelling', 'input'],
+      availability: { mobile: false } },
+  },
+
+  // ── Sessions ─────────────────────────────────────────────────────────────
+  {
+    id: 'sessions.default-model', category: 'model', owner: 'pi-settings',
+    fields: [
+      modelField('defaultModel', 'user-or-project'),
+      { path: 'defaultProvider', kind: 'string', scope: 'user-or-project',
+        note: 'provider id paired with defaultModel' },
+    ],
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.field.defaultModel',
+      keywords: ['model', 'provider', 'new sessions'] },
+  },
+  {
+    id: 'sessions.default-thinking', category: 'model', owner: 'pi-settings',
+    field: { path: 'defaultThinkingLevel', kind: 'string', scope: 'user-or-project',
+      optionsSource: 'thinking-levels' },
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.field.defaultThinking',
+      keywords: ['thinking', 'reasoning', 'variant'] },
+  },
+  {
+    id: 'sessions.default-agent', category: 'model', owner: 'pi-settings',
+    field: { path: 'defaultAgent', kind: 'string', scope: 'user-or-project' },
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.field.defaultModel',
+      keywords: ['agent', 'default agent', 'new sessions'] },
+  },
+  {
+    id: 'sessions.deletion-dialog', category: 'sessions', owner: 'app',
+    field: { path: 'showDeletionDialog', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.field.showDeletionDialog',
+      keywords: ['delete', 'confirmation'] },
+  },
+  {
+    id: 'sessions.small-model', category: 'model', owner: 'app',
+    fields: [
+      { path: 'smallModelUseDefault', kind: 'boolean',
+        note: 'reuse the default model for utility work' },
+      { path: 'smallModelOverride', kind: 'string', optionsSource: 'models',
+        note: 'provider/model for recap, suggestions, goal audit' },
+    ],
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.smallModel.title',
+      descriptionKey: 'settings.piarium.defaults.smallModel.description',
+      keywords: ['small model', 'utility', 'summary', 'recap', 'cheap', 'override'] },
+  },
+  {
+    id: 'sessions.walkthrough-model', category: 'model', owner: 'app',
+    field: { path: 'walkthroughModelOverride', kind: 'string', optionsSource: 'models' },
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.walkthroughModel.title',
+      descriptionKey: 'settings.piarium.defaults.walkthroughModel.description',
+      keywords: ['walkthrough', 'review', 'diff', 'model'] },
+  },
+  {
+    id: 'sessions.auto-cleanup', category: 'sessions', owner: 'app',
+    field: { path: 'autoDeleteEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.sessionRetention.field.enableAutoCleanup',
+      descriptionKey: 'settings.piarium.sessionRetention.tooltip',
+      keywords: ['retention', 'archive', 'delete'] },
+  },
+  {
+    id: 'sessions.retention-period', category: 'sessions', owner: 'app',
+    field: { path: 'autoDeleteAfterDays', kind: 'number', min: 1, integer: true, unit: 'days' },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.sessionRetention.field.retentionPeriod',
+      keywords: ['days', 'cleanup', 'retention'] },
+  },
+  {
+    id: 'sessions.retention-action', category: 'sessions', owner: 'app',
+    field: { path: 'sessionRetentionAction', kind: 'enum',
+      options: [{ value: 'archive' }, { value: 'delete' }] },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.sessionRetention.field.whenSessionsExpire',
+      keywords: ['archive', 'delete', 'expire'] },
+  },
+  {
+    id: 'sessions.recovery', category: 'sessions', owner: 'app',
+    fields: [
+      { path: 'recoveryPreference', kind: 'string',
+        note: 'RecoveryPreference value for crashed/interrupted sessions' },
+      { path: 'checkpointRetentionLimit', kind: 'number', min: 0, integer: true },
+    ],
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.sessionRetention.field.enableAutoCleanup',
+      keywords: ['recovery', 'checkpoint', 'restore', 'crash'] },
+  },
+  {
+    id: 'sessions.message-limit', category: 'sessions', owner: 'app',
+    field: { path: 'messageLimit', kind: 'number', min: 20, integer: true, default: 200,
+      note: 'history fetch/trim/Load More chunk size' },
+    apply: 'immediate',
+    ui: { page: 'sessions', titleKey: 'settings.piarium.defaults.field.showDeletionDialog',
+      keywords: ['history', 'messages', 'limit', 'load more'] },
+  },
+  {
+    id: 'sessions.desktop-launch-at-login', category: 'sessions', owner: 'client',
+    apply: 'manual',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.launchAtLogin',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.launchAtLoginDescription',
+      keywords: ['desktop', 'startup', 'login', 'launch', 'background', 'autostart'],
+      availability: { desktopLocal: true } },
+  },
+  {
+    id: 'sessions.desktop-window-controls-position', category: 'appearance', owner: 'app',
+    field: { path: 'desktopWindowControlsPosition', kind: 'enum',
+      options: [{ value: 'left' }, { value: 'right' }] },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.desktopNetwork.field.windowControlsPosition',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.windowControlsPositionDescription',
+      keywords: ['desktop', 'window', 'controls', 'minimize', 'maximize', 'close', 'titlebar', 'linux', 'windows'],
+      availability: { desktop: true, platform: 'not-mac' } },
+  },
+  {
+    id: 'sessions.desktop-window-controls-style', category: 'appearance', owner: 'app',
+    field: { path: 'desktopWindowControlsStyle', kind: 'enum',
+      options: [{ value: 'classic' }, { value: 'traffic-lights' }] },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.piarium.desktopNetwork.field.windowControlsStyle',
+      keywords: ['desktop', 'window', 'controls', 'style', 'traffic', 'lights', 'classic', 'macos', 'titlebar'],
+      availability: { desktop: true, platform: 'not-mac' } },
+  },
+  {
+    id: 'sessions.desktop-mac-menu-bar', category: 'sessions', owner: 'app',
+    field: { path: 'desktopMacMenuBarEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.macMenuBar',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.macMenuBarDescription',
+      keywords: ['desktop', 'menu bar', 'tray', 'status item', 'macos', 'background'],
+      availability: { desktopLocal: true, platform: 'mac' } },
+  },
+  {
+    id: 'sessions.desktop-minimize-to-tray', category: 'sessions', owner: 'app',
+    field: { path: 'desktopMinimizeToTrayEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.minimizeToTray',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.minimizeToTrayDescription',
+      keywords: ['desktop', 'tray', 'system tray', 'minimize', 'close', 'background', 'windows', 'linux'],
+      availability: { desktopLocal: true, platform: 'not-mac' } },
+  },
+  {
+    id: 'sessions.desktop-keep-awake', category: 'sessions', owner: 'app',
+    field: { path: 'desktopKeepAwakeEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.keepAwake',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.keepAwakeDescription',
+      keywords: ['desktop', 'sleep', 'awake', 'server', 'mobile', 'phone'],
+      availability: { desktopLocal: true } },
+  },
+  {
+    id: 'sessions.desktop-ui-password', category: 'sessions', owner: 'app',
+    field: { path: 'desktopUiPassword', kind: 'secret' },
+    apply: 'restart',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopPassword.field.password',
+      descriptionKey: 'settings.piarium.desktopPassword.field.passwordDescription',
+      keywords: ['desktop', 'password', 'auth', 'login'],
+      availability: { desktopLocal: true } },
+  },
+  {
+    id: 'sessions.desktop-lan-access', category: 'sessions', owner: 'app',
+    field: { path: 'desktopLanAccessEnabled', kind: 'boolean' },
+    apply: 'restart',
+    ui: { page: 'general', titleKey: 'settings.piarium.desktopNetwork.field.allowLanAccess',
+      descriptionKey: 'settings.piarium.desktopNetwork.field.allowLanAccessDescription',
+      keywords: ['desktop', 'lan', 'network', 'phone', 'tablet'],
+      availability: { desktopLocal: true } },
+  },
+
+  // ── Notifications ────────────────────────────────────────────────────────
+  {
+    id: 'notifications.delivery', category: 'notifications', owner: 'app',
+    fields: [
+      { path: 'nativeNotificationsEnabled', kind: 'boolean' },
+      { path: 'notificationMode', kind: 'enum',
+        options: [{ value: 'always' }, { value: 'hidden-only' }] },
+    ],
+    apply: 'immediate',
+    ui: { page: 'notifications', titleKey: 'settings.notifications.page.delivery.title',
+      keywords: ['desktop notifications', 'system notifications'] },
+  },
+  {
+    id: 'notifications.events', category: 'notifications', owner: 'app',
+    fields: [
+      { path: 'notifyOnCompletion', kind: 'boolean' },
+      { path: 'notifyOnError', kind: 'boolean' },
+      { path: 'notifyOnQuestion', kind: 'boolean' },
+      { path: 'notifyOnSubtasks', kind: 'boolean' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'notifications', titleKey: 'settings.notifications.page.events.title',
+      keywords: ['completion', 'subtasks', 'errors', 'questions'] },
+  },
+  {
+    id: 'notifications.templates', category: 'notifications', owner: 'app',
+    field: { path: 'notificationTemplates', kind: 'json',
+      note: 'per-event {completion,error,question,subtask} → {title,message} templates' },
+    apply: 'immediate',
+    ui: { page: 'notifications', titleKey: 'settings.notifications.page.events.title',
+      keywords: ['notification', 'template', 'message'] },
+  },
+  {
+    id: 'notifications.push', category: 'notifications', owner: 'action',
+    actionRef: { domain: 'service:notifications',
+      note: 'web push subscription is per-device and browser-granted; agent cannot subscribe another device' },
+    apply: 'manual',
+    ui: { page: 'notifications', titleKey: 'settings.notifications.page.push.title',
+      keywords: ['background', 'push'],
+      availability: { web: true } },
+  },
+
+  // ── Git ──────────────────────────────────────────────────────────────────
+  {
+    id: 'git.github-account', category: 'git', owner: 'action',
+    actionRef: { domain: 'service:git', verbs: ['status'],
+      note: 'GitHub OAuth connect is an interactive flow; agents can only report status' },
+    ui: { page: 'git', titleKey: 'settings.github.page.actions.connect',
+      keywords: ['github', 'account', 'oauth', 'prs', 'issues'] },
+  },
+  {
+    id: 'git.identities', category: 'git', owner: 'action',
+    actionRef: { domain: 'service:git', verbs: ['list', 'create', 'delete'],
+      note: 'git identity profiles (author/email/signing) via the git identity service' },
+    ui: { page: 'git', titleKey: 'settings.gitIdentities.page.section.title',
+      descriptionKey: 'settings.gitIdentities.page.empty.description',
+      keywords: ['identity', 'profile', 'author', 'email', 'credentials', 'signing', 'commit signing', 'ssh signing', 'gpg'] },
+  },
+  {
+    id: 'git.default-identity', category: 'git', owner: 'app',
+    field: { path: 'defaultGitIdentityId', kind: 'string', optionsSource: 'git-identities',
+      note: '"global" or a profile id; empty/unset = per-repo default' },
+    apply: 'immediate',
+    ui: { page: 'git', titleKey: 'settings.gitIdentities.page.section.title',
+      keywords: ['identity', 'default', 'author'] },
+  },
+  {
+    id: 'git.changes-view', category: 'git', owner: 'app',
+    field: { path: 'gitChangesViewMode', kind: 'enum',
+      options: [{ value: 'flat' }, { value: 'tree' }] },
+    apply: 'immediate',
+    ui: { page: 'git', titleKey: 'settings.piarium.git.changesViewTitle',
+      keywords: ['changes', 'flat list', 'tree view'] },
+  },
+  {
+    id: 'git.gitmoji', category: 'git', owner: 'app',
+    field: { path: 'gitmojiEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'git', titleKey: 'settings.piarium.git.enableGitmoji',
+      keywords: ['commit', 'emoji'] },
+  },
+  {
+    id: 'git.gitignored-files', category: 'git', owner: 'app',
+    field: { path: 'filesViewShowGitignored', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'git', titleKey: 'settings.piarium.git.showGitignored',
+      keywords: ['ignored', 'files', 'gitignore'] },
+  },
+
+  // ── Usage ────────────────────────────────────────────────────────────────
+  {
+    id: 'usage.header-menu', category: 'usage', owner: 'app',
+    field: { path: 'usageDropdownProviders', kind: 'string-list',
+      note: 'provider ids shown in the header usage dropdown; empty hides the menu' },
+    apply: 'immediate',
+    ui: { page: 'usage', titleKey: 'settings.usage.page.options.showInHeader',
+      descriptionKey: 'settings.usage.page.options.showInHeaderTooltip',
+      keywords: ['quota', 'header', 'dropdown'] },
+  },
+  {
+    id: 'usage.display', category: 'usage', owner: 'app',
+    fields: [
+      { path: 'usageAutoRefresh', kind: 'boolean' },
+      { path: 'usageRefreshIntervalMs', kind: 'number', min: 30000, integer: true, unit: 'ms' },
+      { path: 'usageDisplayMode', kind: 'enum',
+        options: [{ value: 'usage' }, { value: 'remaining' }] },
+      { path: 'usageShowPredValues', kind: 'boolean' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'usage', titleKey: 'settings.usage.page.section.modelQuotas',
+      keywords: ['refresh', 'display', 'usage', 'remaining'] },
+  },
+  {
+    id: 'usage.model-quotas', category: 'usage', owner: 'app',
+    fields: [
+      { path: 'usageSelectedModels', kind: 'json',
+        note: 'providerId → selected model names shown in quota tracking' },
+      { path: 'usageModelGroups', kind: 'json',
+        note: 'providerId → custom grouping/assignment/rename config' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'usage', titleKey: 'settings.usage.page.section.modelQuotas',
+      keywords: ['models', 'quota', 'limits', 'tokens'] },
+  },
+
+  // ── Projects ─────────────────────────────────────────────────────────────
+  {
+    id: 'projects.name', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['rename'],
+      note: 'project metadata lives inside the projects[] entries of the app document; edits need a target project id' },
+    ui: { page: 'projects', titleKey: 'settings.projects.page.field.projectName',
+      keywords: ['label', 'display name', 'project metadata'] },
+  },
+  {
+    id: 'projects.default-model', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['set-default-model'],
+      note: 'per-project defaultModel inside the projects[] entries' },
+    ui: { page: 'projects', titleKey: 'settings.projects.page.field.defaultModel',
+      descriptionKey: 'settings.projects.page.field.defaultModelDescription',
+      keywords: ['model', 'new chat', 'project default'] },
+  },
+  {
+    id: 'projects.default-work-focus', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['set-default-work-focus'],
+      note: 'per-project code|research work focus' },
+    ui: { page: 'projects', titleKey: 'workFocus.projectDefault',
+      descriptionKey: 'workFocus.projectDefaultDescription',
+      keywords: ['research', 'science', 'coding', 'focus', 'new conversation', '科研', '工作侧重'] },
+  },
+  {
+    id: 'projects.accent-color', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['set-color'] },
+    ui: { page: 'projects', titleKey: 'settings.projects.page.field.accentColor',
+      keywords: ['color', 'appearance', 'project metadata'] },
+  },
+  {
+    id: 'projects.icon', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['set-icon'] },
+    ui: { page: 'projects', titleKey: 'settings.projects.page.field.projectIcon',
+      keywords: ['icon', 'favicon', 'upload', 'project metadata'] },
+  },
+  {
+    id: 'projects.worktree', category: 'projects', owner: 'app',
+    field: { path: 'autoCreateWorktree', kind: 'boolean',
+      note: 'auto-create a worktree for new sessions; per-repo worktree policy lives in harness.worktree' },
+    apply: 'next-run',
+    ui: { page: 'projects', titleKey: 'settings.projects.page.section.worktree',
+      keywords: ['worktree', 'branch', 'repository'] },
+  },
+  {
+    id: 'projects.worktree.setup.wait', category: 'projects', owner: 'pi-settings',
+    field: { path: 'harness.worktree.setupTimeoutMs', kind: 'number', scope: 'user-or-project',
+      min: 0, integer: true, unit: 'ms',
+      note: 'how long session setup waits for worktree setup commands' },
+    apply: 'next-run',
+    ui: { page: 'projects', titleKey: 'settings.piarium.worktrees.setup.waitForCommands',
+      keywords: ['worktree', 'setup commands', 'bootstrap', 'wait'] },
+  },
+  {
+    id: 'projects.actions', category: 'projects', owner: 'action',
+    actionRef: { domain: 'service:projects', verbs: ['list-actions', 'run-action'],
+      note: 'per-project automation (open url, ssh forward)' },
+    ui: { page: 'projects', titleKey: 'settings.projects.actions.title',
+      descriptionKey: 'settings.projects.actions.description',
+      keywords: ['command', 'automation', 'open url', 'ssh forward'] },
+  },
+
+  // ── Remote instances ─────────────────────────────────────────────────────
+  {
+    id: 'remote-instances.client-auth', category: 'remote', owner: 'action',
+    actionRef: { domain: 'service:remote-instances', verbs: ['status'],
+      note: 'pairing links and client tokens are issued interactively; agents get status only' },
+    ui: { page: 'remote-instances', titleKey: 'settings.remoteInstances.clientAuth.title',
+      descriptionKey: 'settings.remoteInstances.clientAuth.description',
+      keywords: ['pairing link', 'client token', 'connect desktop', 'remote access', 'relay', 'devices', 'connect from anywhere'] },
+  },
+  {
+    id: 'remote-instances.direct-hosts', category: 'remote', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'remote-instances', titleKey: 'settings.remoteInstances.direct.title',
+      descriptionKey: 'settings.remoteInstances.direct.description',
+      keywords: ['server url', 'connection token', 'import link', 'host switcher', 'additional headers', 'request headers', 'cloudflare access', 'service token'],
+      availability: { desktop: true } },
+  },
+
+  // ── Agents / fleet ───────────────────────────────────────────────────────
+  {
+    id: 'agents.providers', category: 'agents', owner: 'action',
+    actionRef: { domain: 'service:agents', verbs: ['list', 'status'],
+      note: 'agent provider plugins (pi-subagents, magic context, historian, …) via plugin settings' },
+    ui: { page: 'agents', titleKey: 'settings.piarium.agents.providers.title',
+      descriptionKey: 'settings.piarium.agents.providers.description',
+      keywords: ['provider', 'pi-subagents', 'magic context', 'historian', 'dreamer', 'sidekick'] },
+  },
+  {
+    id: 'fleet.provider', category: 'agents', owner: 'action',
+    actionRef: { domain: 'service:fleet', verbs: ['status'],
+      note: 'delegation providers (pi-subagents, pi-background-tasks, eventbus)' },
+    ui: { page: 'fleet', titleKey: 'settings.piarium.fleet.provider.title',
+      descriptionKey: 'settings.piarium.fleet.provider.description',
+      keywords: ['pi-subagents', 'pi-background-tasks', 'eventbus', 'provider', 'delegation'] },
+  },
+  {
+    id: 'fleet.list', category: 'agents', owner: 'action',
+    actionRef: { domain: 'service:fleet', verbs: ['list', 'kill'],
+      note: 'background task/agent jobs; real lifecycle control lives in the fleet provider' },
+    ui: { page: 'fleet', titleKey: 'settings.piarium.fleet.list.title',
+      descriptionKey: 'settings.piarium.fleet.description',
+      keywords: ['background task', 'background agent', 'logs', 'kill', 'stop', 'run', 'jobs'] },
+  },
+  {
+    id: 'fleet.actions', category: 'agents', owner: 'action',
+    actionRef: { domain: 'service:fleet', verbs: ['inspect', 'doctor'],
+      note: 'provider diagnostics and maintenance actions' },
+    ui: { page: 'fleet', titleKey: 'settings.piarium.fleet.actions.title',
+      descriptionKey: 'settings.piarium.fleet.actions.description',
+      keywords: ['inspector', 'doctor', 'subagents-stop', 'packages'] },
+  },
+  {
+    id: 'agents.catalog', category: 'agents', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read'],
+      note: 'agent/workflow definitions are Pi resources; read via resource.*, edit via resource text update' },
+    ui: { page: 'agents', titleKey: 'settings.piarium.agents.catalog.title',
+      descriptionKey: 'settings.piarium.agents.description',
+      keywords: ['agent', 'subagent', 'workflow', 'role', 'model', 'fallback', 'thinking'] },
+  },
+  {
+    id: 'prompts.editor', category: 'agents', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write'],
+      note: 'prompt templates are Pi resources (user/project scope), edited through the resource authority' },
+    ui: { page: 'prompts', titleKey: 'settings.piarium.prompts.catalog.title',
+      descriptionKey: 'settings.piarium.prompts.description',
+      keywords: ['prompt', 'template', 'markdown', 'argument hint', 'user', 'project', 'copy'] },
+  },
+  {
+    id: 'skills.editor', category: 'agents', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['list', 'read', 'write'],
+      note: 'skills are Pi resources (agent/user/project/package scope); read-only scopes stay read-only' },
+    ui: { page: 'skills', titleKey: 'settings.piarium.skills.catalog.title',
+      descriptionKey: 'settings.piarium.skills.description',
+      keywords: ['skill', 'skill.md', 'markdown', 'user', 'project', 'package', 'copy'] },
+  },
+  {
+    id: 'mcp.runtime', category: 'agents', owner: 'action',
+    actionRef: { domain: 'runtime:mcp', verbs: ['status', 'reconnect'],
+      note: 'MCP server runtime status; reconnect/oauth are runtime actions' },
+    ui: { page: 'mcp', titleKey: 'settings.piarium.mcp.runtime.title',
+      keywords: ['server', 'status', 'reconnect', 'oauth', 'tools', 'resources'] },
+  },
+  {
+    id: 'mcp.configuration', category: 'agents', owner: 'action',
+    actionRef: { domain: 'runtime:mcp', verbs: ['read', 'write'],
+      note: 'MCP servers are configured in Pi config documents (JSON/JSONC) through config.document.*' },
+    ui: { page: 'mcp', titleKey: 'settings.piarium.mcp.config.title',
+      keywords: ['json', 'jsonc', 'config', 'stdio', 'url', 'environment', 'headers', 'timeout'] },
+  },
+  {
+    id: 'plugins.packages', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'runtime:extensions', verbs: ['list', 'install', 'remove', 'update'],
+      note: 'Pi packages/plugins — install/update/remove are real package operations' },
+    ui: { page: 'plugins', titleKey: 'settings.piarium.plugins.configured.title',
+      descriptionKey: 'settings.piarium.plugins.configured.description',
+      keywords: ['pi', 'packages', 'plugins', 'update', 'remove'] },
+  },
+  {
+    id: 'plugins.source', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'runtime:extensions', verbs: ['install'],
+      note: 'install from npm/git/url/local path' },
+    ui: { page: 'plugins', titleKey: 'settings.piarium.plugins.source.title',
+      descriptionKey: 'settings.piarium.plugins.source.description',
+      keywords: ['install', 'npm', 'git', 'url', 'local path', 'source'] },
+  },
+  {
+    id: 'plugins.recommended', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'runtime:extensions', verbs: ['list', 'install'],
+      note: 'curated plugin recommendations' },
+    ui: { page: 'plugins', titleKey: 'settings.piarium.plugins.recommended.title',
+      descriptionKey: 'settings.piarium.plugins.recommended.description',
+      keywords: ['subagents', 'magic context', 'mcp', 'web access', 'workspace history', 'wtf', 'background tasks', 'fleet'] },
+  },
+  {
+    id: 'extensions.workbench', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'service:extensions', verbs: ['list'],
+      note: 'workbench profile/shell selection is per-surface UI state' },
+    ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.title',
+      keywords: ['profile', 'shell', 'layout', 'workbench', 'ide'] },
+  },
+  {
+    id: 'extensions.workbench.profile', category: 'extensions', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.profile',
+      keywords: ['profile', 'agent', 'ide', 'layout'] },
+  },
+  {
+    id: 'extensions.workbench.shell', category: 'extensions', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.selectedShell',
+      keywords: ['shell', 'recovery', 'enable', 'disable'] },
+  },
+  {
+    id: 'extensions.workbench.extensionSet', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'service:extensions', verbs: ['list', 'enable', 'disable'],
+      note: 'extension set enablement goes through the Piarium extension service, not a config field' },
+    ui: { page: 'extensions', titleKey: 'settings.piarium.extensions.workbench.extensionSet',
+      keywords: ['apply', 'enable', 'extensions', 'set'] },
+  },
+  {
+    id: 'plugin-settings.configuration', category: 'extensions', owner: 'action',
+    actionRef: { domain: 'runtime:extensions', verbs: ['read', 'write'],
+      note: 'per-plugin JSON/JSONC settings via Pi config documents; validated by the owning plugin schema' },
+    helpRef: 'plugin settings schemas are defined by each plugin — read the plugin config doc for valid keys',
+    ui: { page: 'plugin-settings', titleKey: 'settings.piarium.pluginSettings.integrations.title',
+      descriptionKey: 'settings.piarium.pluginSettings.description',
+      keywords: [
+        'json', 'jsonc', 'settings', 'subagents', 'agents', 'workflows', 'roles',
+        'create agent', 'model overrides', 'fallback models', 'thinking',
+        'delegation', 'review', 'watchdog', 'fleet', 'worktree', 'intercom',
+        'budget', 'scheduled runs', 'magic context', 'historian', 'dreamer',
+        'sidekick', 'memory', 'embedding', 'synapse', 'sqlite', 'mural',
+        'context compression', 'aft', 'cortexkit', 'hashline',
+        'semantic search', 'cron', 'web access', 'web search', 'curator',
+        'search routing', 'exa', 'brave', 'searxng', 'firecrawl', 'gemini web',
+        'browser cookies', 'ssrf', 'domain policy', 'openai codex compat',
+        'responses lite', 'remote compaction', 'observational memory',
+        'observations', 'reflections', 'observation pool', 'pi-lens', 'lint',
+        'lsp diagnostics', 'read guard', 'opengrep', 'trivy', 'helm render',
+        'technical debt', 'hermes memory', 'persistent memory',
+        'memory insights', 'memory policy', 'memory review', 'session search',
+        'rtk', 'rtk optimizer', 'command rewrite', 'output compaction',
+        'smart truncation',
+      ] },
+  },
+  {
+    id: 'snippets.create', category: 'productivity', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['create'],
+      note: 'snippets are Pi resources' },
+    ui: { page: 'snippets', titleKey: 'settings.snippets.sidebar.actions.create',
+      keywords: ['add', 'new snippet'] },
+  },
+  {
+    id: 'snippets.content', category: 'productivity', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'],
+      note: 'snippet markdown content via the resource authority' },
+    ui: { page: 'snippets', titleKey: 'settings.snippets.page.field.content',
+      keywords: ['markdown', 'prompt', 'template'] },
+  },
+  {
+    id: 'knowledge.workspace', category: 'knowledge', owner: 'action',
+    actionRef: { domain: 'service:knowledge', verbs: ['list', 'accept', 'supersede'],
+      note: 'workspace knowledge events and suggestions via the knowledge service' },
+    ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.workspace',
+      descriptionKey: 'settings.page.knowledge.description',
+      keywords: ['knowledge', 'memory', 'recall', 'workspace', 'supersede'] },
+  },
+  {
+    id: 'knowledge.user', category: 'knowledge', owner: 'action',
+    actionRef: { domain: 'service:knowledge', verbs: ['list', 'accept', 'supersede'],
+      note: 'user-scoped knowledge events' },
+    ui: { page: 'harness-context', titleKey: 'settings.knowledge.section.user',
+      descriptionKey: 'settings.page.knowledge.description',
+      keywords: ['knowledge', 'memory', 'user', 'recall'] },
+  },
+  {
+    id: 'language-support.workspace', category: 'language', owner: 'action',
+    actionRef: { domain: 'runtime:language-support', verbs: ['status'],
+      note: 'per-workspace language/grammar detection state' },
+    ui: { page: 'language-support', titleKey: 'settings.languageSupport.section.workspace',
+      descriptionKey: 'settings.page.languageSupport.description',
+      keywords: ['language', 'grammar', 'structure', 'tree-sitter', 'lsp', 'language server'] },
+  },
+  {
+    id: 'language-support.pack', category: 'language', owner: 'action',
+    actionRef: { domain: 'runtime:language-support', verbs: ['prepare', 'status'],
+      note: 'structure pack install/prepare downloads real assets — status reports actual readiness' },
+    ui: { page: 'language-support', titleKey: 'settings.languageSupport.row.structurePack',
+      keywords: ['grammar', 'wasm', 'install', 'structure pack'] },
+  },
+  {
+    id: 'runtime.current', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['status'],
+      note: 'active Pi runtime version/path' },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.section.current',
+      descriptionKey: 'settings.page.runtime.description',
+      keywords: ['pi', 'runtime', 'version', 'path', 'node'] },
+  },
+  {
+    id: 'runtime.status', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['status'] },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.field.status',
+      keywords: ['ready', 'missing', 'upgrade', 'failed'] },
+  },
+  {
+    id: 'runtime.version', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['status', 'upgrade'] },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.field.version',
+      keywords: ['pi version', 'sdk'] },
+  },
+  {
+    id: 'runtime.commandPath', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['status', 'choose'] },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.field.commandPath',
+      keywords: ['path', 'executable', 'pi.cmd'] },
+  },
+  {
+    id: 'runtime.packageRoot', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['status'] },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.field.packageRoot',
+      keywords: ['package', 'module', 'node_modules'] },
+  },
+  {
+    id: 'runtime.actions', category: 'runtime', owner: 'action',
+    actionRef: { domain: 'runtime:runtime-update', verbs: ['install', 'upgrade', 'rediscover'],
+      note: 'install/upgrade run the real runtime manager, not a saved flag' },
+    ui: { page: 'runtime', titleKey: 'settings.runtime.section.actions',
+      keywords: ['install', 'upgrade', 'rediscover', 'detect', 'choose'] },
+  },
+  {
+    id: 'providers.connect', category: 'providers', owner: 'action',
+    actionRef: { domain: 'runtime:providers', verbs: ['list', 'connect'],
+      note: 'custom/openai-compatible provider connection is a runtime action' },
+    ui: { page: 'providers', titleKey: 'settings.providers.page.connect.title',
+      keywords: ['add provider', 'connect provider', 'custom provider', 'openai compatible', 'base url', 'credentials'] },
+  },
+  {
+    id: 'providers.auth', category: 'providers', owner: 'action',
+    actionRef: { domain: 'runtime:providers', verbs: ['status', 'login'],
+      note: 'credentials live in Pi auth.json; reads return status/labels only, never secret material' },
+    ui: { page: 'providers', titleKey: 'settings.providers.page.auth.title',
+      keywords: ['api key', 'oauth', 'credentials'] },
+  },
+  {
+    id: 'providers.connection-details', category: 'providers', owner: 'action',
+    actionRef: { domain: 'runtime:providers', verbs: ['read', 'disconnect'] },
+    ui: { page: 'providers', titleKey: 'settings.providers.page.connectionDetails.title',
+      keywords: ['config', 'source', 'disconnect'] },
+  },
+  {
+    id: 'providers.models', category: 'providers', owner: 'app',
+    fields: [
+      { path: 'favoriteModels', kind: 'json', note: '[{providerID, modelID}] pinned models' },
+      { path: 'hiddenModels', kind: 'json', note: '[{providerID, modelID}] hidden from pickers' },
+      { path: 'collapsedModelProviders', kind: 'string-list' },
+    ],
+    apply: 'immediate',
+    ui: { page: 'providers', titleKey: 'settings.providers.page.models.title',
+      keywords: ['models', 'hide', 'show'] },
+  },
+  {
+    id: 'magic-prompts.visible-prompt', category: 'productivity', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'],
+      note: 'magic prompt templates are Pi resources' },
+    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.visiblePrompt',
+      keywords: ['prompt text', 'user message', 'template'] },
+  },
+  {
+    id: 'magic-prompts.instructions', category: 'productivity', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['read', 'write'] },
+    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.block.instructions',
+      keywords: ['hidden prompt', 'instructions', 'template'] },
+  },
+  {
+    id: 'magic-prompts.reset-overrides', category: 'productivity', owner: 'action',
+    actionRef: { domain: 'runtime:resources', verbs: ['reset'],
+      note: 'restore shipped prompt defaults' },
+    ui: { page: 'magic-prompts', titleKey: 'settings.magicPrompts.page.actions.resetAllOverrides',
+      keywords: ['reset', 'default prompts', 'overrides'] },
+  },
+  {
+    id: 'shortcuts.keyboard-shortcuts', category: 'productivity', owner: 'app',
+    field: { path: 'shortcutOverrides', kind: 'json',
+      note: 'commandId → keybinding override map' },
+    apply: 'immediate',
+    ui: { page: 'shortcuts', titleKey: 'settings.piarium.keyboardShortcuts.title',
+      descriptionKey: 'settings.piarium.keyboardShortcuts.tooltip',
+      keywords: ['keyboard', 'hotkeys', 'bindings'] },
+  },
+  {
+    id: 'voice.playback', category: 'voice', owner: 'client',
+    apply: 'immediate',
+    ui: { page: 'voice', titleKey: 'settings.voice.page.section.playbackAndSummary',
+      keywords: ['tts', 'read aloud', 'voice', 'provider', 'speech rate', 'speech pitch', 'speech volume', 'tts input mode', 'markdown'] },
+  },
+  {
+    id: 'voice.speech-recognition', category: 'voice', owner: 'app',
+    fields: [
+      { path: 'dictationEnabled', kind: 'boolean' },
+      { path: 'sttProvider', kind: 'enum',
+        options: [{ value: 'local' }, { value: 'openai-compatible' }] },
+      { path: 'sttServerUrl', kind: 'string', nullable: true },
+      { path: 'sttModel', kind: 'string', nullable: true },
+      { path: 'sttLocalModel', kind: 'string', nullable: true },
+      { path: 'sttLanguage', kind: 'string', nullable: true },
+      { path: 'sttSilenceThresholdDb', kind: 'number', nullable: true },
+      { path: 'sttSilenceHoldMs', kind: 'number', min: 0, integer: true, nullable: true },
+      { path: 'sttTranscribeOnStop', kind: 'boolean', nullable: true },
+    ],
+    apply: 'immediate',
+    ui: { page: 'voice', titleKey: 'settings.voice.page.section.speechRecognition',
+      keywords: ['stt', 'dictation', 'voice input', 'transcribe', 'whisper', 'parakeet', 'microphone'] },
+  },
+  {
+    id: 'tunnel.provider', category: 'tunnel', owner: 'app',
+    fields: [
+      { path: 'tunnelProvider', kind: 'string', nullable: true,
+        note: 'e.g. cloudflare, ngrok — validated against installed providers at apply time' },
+      { path: 'tunnelMode', kind: 'enum',
+        options: [{ value: 'quick' }, { value: 'managed-remote' }, { value: 'managed-local' }] },
+    ],
+    apply: 'manual',
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.field.provider',
+      descriptionKey: 'settings.piarium.tunnel.description',
+      keywords: ['remote access', 'cloudflare', 'ngrok'] },
+  },
+  {
+    id: 'tunnel.type', category: 'tunnel', owner: 'app',
+    field: { path: 'tunnelMode', kind: 'enum',
+      options: [{ value: 'quick' }, { value: 'managed-remote' }, { value: 'managed-local' }] },
+    apply: 'manual',
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.field.tunnelType',
+      keywords: ['quick', 'managed remote', 'managed local'] },
+  },
+  {
+    id: 'tunnel.ttl', category: 'tunnel', owner: 'app',
+    fields: [
+      { path: 'tunnelBootstrapTtlMs', kind: 'number', min: 0, integer: true, nullable: true, unit: 'ms' },
+      { path: 'tunnelSessionTtlMs', kind: 'number', min: 0, integer: true, unit: 'ms' },
+    ],
+    apply: 'manual',
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.field.connectLinkTtl',
+      descriptionKey: 'settings.piarium.tunnel.field.tunnelSessionTtl',
+      keywords: ['expiry', 'expiration', 'session ttl', 'connect link ttl'] },
+  },
+  {
+    id: 'tunnel.managed-remote', category: 'tunnel', owner: 'app',
+    fields: [
+      { path: 'managedRemoteTunnelHostname', kind: 'string', nullable: true },
+      { path: 'managedRemoteTunnelToken', kind: 'secret', nullable: true,
+        note: 'token is stored in the OS credential store via the settings writer; reads return status only' },
+      { path: 'managedRemoteTunnelPresets', kind: 'json',
+        note: '[{id, name, hostname}] saved tunnels; tokens go through managedRemoteTunnelPresetTokens' },
+      { path: 'managedRemoteTunnelSelectedPresetId', kind: 'string', nullable: true },
+    ],
+    apply: 'manual',
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.section.savedManagedRemoteTunnels',
+      keywords: ['cloudflare', 'hostname', 'token', 'managed remote'] },
+  },
+  {
+    id: 'tunnel.managed-local-config', category: 'tunnel', owner: 'app',
+    field: { path: 'managedLocalTunnelConfigPath', kind: 'string', nullable: true,
+      note: 'path to the cloudflared config file used by managed-local tunnels' },
+    apply: 'manual',
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.field.configurationFile',
+      descriptionKey: 'settings.piarium.tunnel.note.managedLocalUsesConfig',
+      keywords: ['cloudflared', 'config', 'yaml', 'json', 'managed local'] },
+  },
+  {
+    id: 'tunnel.start', category: 'tunnel', owner: 'action',
+    actionRef: { domain: 'service:tunnel', verbs: ['start', 'stop', 'status'],
+      note: 'starting a tunnel is a real host action producing one-time connect links' },
+    ui: { page: 'tunnel', titleKey: 'settings.piarium.tunnel.actions.startTunnel',
+      descriptionKey: 'settings.piarium.tunnel.note.connectLinksOneTime',
+      keywords: ['connect link', 'qr code', 'public url', 'remote access'] },
+  },
+  {
+    id: 'global.behavior-prompt', category: 'model', owner: 'app',
+    field: { path: 'globalBehaviorPrompt', kind: 'string', multiline: true,
+      note: 'Piarium-owned global behavior prompt prepended to sessions' },
+    apply: 'next-run',
+    ui: { page: 'general', titleKey: 'settings.piarium.defaults.field.defaultModel',
+      keywords: ['behavior', 'prompt', 'instructions', 'global'] },
+  },
+  {
+    id: 'global.response-style', category: 'model', owner: 'app',
+    fields: [
+      { path: 'responseStyleEnabled', kind: 'boolean' },
+      { path: 'responseStylePreset', kind: 'enum',
+        options: [
+          { value: 'concise' }, { value: 'detailed' }, { value: 'mentor' },
+          { value: 'pushback' }, { value: 'noFiller' }, { value: 'matchEnergy' },
+          { value: 'warmPeer' }, { value: 'custom' },
+        ] },
+      { path: 'responseStyleCustomInstructions', kind: 'string', multiline: true, nullable: true },
+    ],
+    apply: 'next-run',
+    ui: { page: 'general', titleKey: 'settings.piarium.defaults.field.defaultModel',
+      keywords: ['response style', 'tone', 'concise', 'detailed'] },
+  },
+  {
+    id: 'global.auto-update-checks', category: 'sessions', owner: 'app',
+    field: { path: 'autoUpdateChecksEnabled', kind: 'boolean' },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.visual.field.autoSaveEnabled',
+      keywords: ['update', 'auto update', 'version check'] },
+  },
+  {
+    id: 'global.skill-catalogs', category: 'agents', owner: 'app',
+    field: { path: 'skillCatalogs', kind: 'json',
+      note: 'user-added skill catalog sources (SkillCatalogConfig[])' },
+    apply: 'next-run',
+    ui: { page: 'skills', titleKey: 'settings.piarium.skills.catalog.title',
+      keywords: ['skill catalog', 'source', 'registry'] },
+  },
+  {
+    id: 'chat.draft-starters', category: 'chat', owner: 'app',
+    field: { path: 'draftStarters', kind: 'json',
+      note: 'pinned commands/skills shown on the new-session welcome' },
+    apply: 'immediate',
+    ui: { page: 'chat', titleKey: 'settings.piarium.visual.field.draftStartersVisible',
+      keywords: ['starter', 'welcome', 'draft', 'suggestions'] },
+  },
+  {
+    id: 'editor.diff-layout', category: 'editor', owner: 'app',
+    field: { path: 'diffLayoutPreference', kind: 'enum',
+      options: [{ value: 'dynamic' }, { value: 'inline' }, { value: 'side-by-side' }] },
+    apply: 'immediate',
+    ui: { page: 'general', titleKey: 'settings.piarium.editor.section.title',
+      keywords: ['diff', 'layout', 'side by side', 'inline'] },
+  },
+];
+
+// ── Query helpers (shared by UI search and the agent catalog service) ───────
+
+export interface SettingsCatalogQuery {
+  query?: string;
+  category?: SettingsCategory;
+  /** Exact stable id lookup. */
+  id?: string;
+  owner?: SettingsOwnerKind;
+}
+
+export function getSettingsCatalogEntry(id: string): SettingsCatalogEntry | null {
+  const normalized = id.trim().toLowerCase();
+  return SETTINGS_CATALOG.find((entry) => entry.id.toLowerCase() === normalized) ?? null;
+}
+
+export function listSettingsCategories(): SettingsCategory[] {
+  return [...new Set(SETTINGS_CATALOG.map((entry) => entry.category))];
+}
+
+const normalizeText = (value: string): string => value.trim().toLocaleLowerCase();
+
+/**
+ * AND-matching over id + category + keywords + title/description keys. The UI
+ * additionally matches against translated titles; the host-side directory
+ * matches on the same base fields so both consumers agree on membership.
+ */
+export function querySettingsCatalog(query: SettingsCatalogQuery): SettingsCatalogEntry[] {
+  if (query.id) {
+    const hit = getSettingsCatalogEntry(query.id);
+    return hit ? [hit] : [];
+  }
+  const terms = normalizeText(query.query ?? '').split(/\s+/).filter(Boolean);
+  return SETTINGS_CATALOG.filter((entry) => {
+    if (query.category && entry.category !== query.category) return false;
+    if (query.owner && entry.owner !== query.owner) return false;
+    if (terms.length === 0) return true;
+    const haystack = normalizeText([
+      entry.id,
+      entry.category,
+      entry.ui.titleKey,
+      entry.ui.descriptionKey ?? '',
+      ...(entry.ui.keywords ?? []),
+      entry.field?.path ?? '',
+      ...(entry.fields?.map((field) => field.path) ?? []),
+    ].join(' '));
+    return terms.every((term) => haystack.includes(term));
+  });
+}

@@ -1658,8 +1658,9 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 ## 阶段 S：对话式设置与 Agent 管理（D-306）
 
-状态：**设计已接受 / 后续阶段 / 尚未实施或验收**。设计 authority 为
+状态：**纵切已接线并定向验证（S0–S3 交付，S4 组合 Skill 未单独交付文件）/ 尚未完整验收**。设计 authority 为
 [agent-settings-design.md](agent-settings-design.md)，本节只规定实施责任和完成边界。
+实施现状见 [agent-harness-status.md](agent-harness-status.md) 的 D-306 记录。
 
 目标是设置页与对话管理同一套配置，覆盖现有主要设置类别及相关管理动作，不只交付几个 Harness 开关。
 现有 settings.get/update、resource CRUD、扩展管理 API 是基础；尚不能据此声明 Agent 设置能力已接线。
