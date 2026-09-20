@@ -8,7 +8,7 @@ product surfaces. The cleanup and root build were locally verified; packaged, cr
 remote-CI evidence remains owned by their respective release checks. Historical Stage R and migration
 evidence may still name that surface where it records work completed before retirement.
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 ## 1. Context
 
@@ -1141,6 +1141,26 @@ The workbench shell itself is now the largest consumer of this platform: both fi
 shapes are built-in extensions selected by profile, and the public authoring surface ships through
 `@piarium/extension-sdk`, `@piarium/extension-react`, and `@piarium/extension-cli` templates. See
 section 4.5 and [piarium-extension-authoring.md](piarium-extension-authoring.md).
+
+### 7.4 Conversational settings and Agent administration (planned, D-306)
+
+[agent-settings-design.md](agent-settings-design.md) defines planned Stage S in the
+[harness plan](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306). Settings UI and Agent tools will share
+discovery metadata, validation sources and owner-backed operations across the existing settings surface.
+Application settings, Pi configuration/resources, extensions and client-native behavior retain their
+current authorities; the design does not add a settings database or a second Agent-only writer.
+
+A short stable entry advertises the capability. Search returns enough information for simple updates;
+targeted reads disclose effective values, provenance, supported scopes, dynamic options and complex
+examples on demand. Skills explain compound workflows, while tools supply live facts and execute
+operations. Existing login, installation and connection services keep their action/lifecycle semantics.
+
+Target resolution distinguishes owning workspace, execution Host and client Surface. Partial updates
+and revision checks preserve concurrent edits; reset removes an actual override. Saved and applied
+state remain distinct, frozen Run configuration changes only at its legal boundary, and a tool must
+not synchronously reload its own executing session. UI and Agent consumers receive the same owner
+state without a write-back loop. Native permission enforcement and credential ownership remain intact.
+This is accepted design, not a claim that existing settings APIs already provide the complete Agent path.
 
 ## 8. Recovery model
 

@@ -29,7 +29,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 16 |
-| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务。 | 34 |
+| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置与 Agent 管理。 | 35 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 61 |
@@ -344,3 +344,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-303 | 2026-09-20 | D-300 本机实验与协作纵切验收返工；完整 7D/7F 保持 Partial | implementation / focused acceptance in status | 纠正规格、资源、恢复、原文与 UI 消费边界；不追溯扩大到 7G/7H | plan 7B/7F；status；Host/Pi harness module docs | [research-cluster](decisions/research-cluster.md) |
 | D-304 | 2026-09-20 | 7I 受管远程、多机器执行、自然生长实验与按规模运维；Slurm 延期 | accepted design / queued after 7G and 7H / not implemented | 部分调整 D-300 原生集群、矩阵和管理角色目标；D-303 本机事实保留 | research-cluster-design 5.1/6/11/13；plan 7I；harness 10.3；status；architecture；roadmap | [research-cluster](decisions/research-cluster.md) |
 | D-305 | 2026-09-20 | 7G/7H/7I 生产收口：请求尾部现场、资源调度工具、受管远程与多机器执行 | implementation / focused acceptance | 实施 D-301/D-302/D-304；Slurm、矩阵 DSL 和专用运维 runtime 继续不在范围 | plan 7G–7I；harness 5.9/8.1.1/10.3；research-cluster-design 6–7；status；architecture；roadmap | [research-cluster](decisions/research-cluster.md) |
+| D-306 | 2026-09-20 | 对话式设置与 Agent 管理：共用 authority、实时查询/修改、渐进披露与组合 Skills | accepted design / planned Stage S / not implemented | 覆盖现有主要设置及相关动作；简单项直接改、复杂项展开；保留范围/权限/Run 世代与 UI 同步 | agent-settings-design；plan S0–S4；harness 5.11；status；architecture；roadmap | [tool-environment](decisions/tool-environment.md) |

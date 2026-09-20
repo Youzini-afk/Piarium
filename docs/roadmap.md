@@ -1,8 +1,8 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S 7A and first 7B slice implemented; remaining work includes the accepted D-300 execution/collaboration design
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; conversational settings and Agent administration planned at D-306
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 Each phase is a separately tested, committed, and pushed recovery point. This file is the delivery
 ledger, not a specification: it records what shipped and what remains. The Git history is the
@@ -27,6 +27,7 @@ authoritative record of delivery, and each phase names the design document that 
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
+| S | Conversational settings and Agent administration | Accepted design (D-306); S0–S4 planned, not implemented |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery
@@ -91,6 +92,15 @@ Operations work can stay with current threads at small scale or be divided among
 responsible for machine groups, environments or data. They use existing tools, messages and current-state
 context, without a mandatory hierarchy or model call for every sample. Slurm and other native cluster
 adapters are deferred until there is an actual deployment need. The managed-remote production slice shipped at D-305.
+
+Stage S follows the D-305 delivery and is specified in [agent-settings-design.md](agent-settings-design.md).
+It makes the settings UI and conversation two clients of the same owner-backed configuration services,
+covering the existing main settings categories and related management actions. Stable query/update tools
+provide live values, supported scopes, effective state and on-demand details; Skills teach compound uses.
+The implementation sequence is coverage/shared definitions, discovery, mutation/action adapters,
+UI/runtime synchronization, and Skill/coverage closure. Existing APIs alone do not satisfy this stage;
+saved versus applied state, concurrent edits and local-client versus remote-Host identity remain explicit.
+See [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306); production delivery will be recorded in harness status.
 
 Phases 2 and 3 are retained as prototype provenance. Their acceptance evidence informed the
 retained contracts, but their implementations were deliberately removed rather than maintained in

@@ -2,7 +2,7 @@
 
 Status: living document maintained by the executing agent; the only authority on what is delivered
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 这是 [agent-harness.md](agent-harness.md) 所述能力的**交付状态**，四级定义见
 [agent-harness-plan.md](agent-harness-plan.md) 0.1（D-038，经 D-078 修订）：
@@ -17,6 +17,13 @@ Last updated: 2026-09-19
 规则：proven 才算已验证的可用路径，证据列给具体文件；Blocker 写实际未完成行为/特定环境问题，不把优化或缺独立评测当通用阻塞。
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
+
+**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），设计已接受，尚未实施或验收。**
+设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
+[plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。目标是现有大部分设置可由 Agent 查询、理解和修改，
+与设置页共用 authority、真实生效状态及同步；查询工具渐进披露实时信息，Skill 按需提供组合方法。
+已有应用设置、Pi settings/resource 与扩展 API 是复用基础；共用目录、Agent 管理工具、完整 owner 适配和双向同步
+仍待接线，不能标 implemented/wired/proven/default-on。本次仅交付设计、计划与决策，不改变既有 7G–7I 交付范围。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。
