@@ -46,7 +46,7 @@ export function createSettingsSearchTool(bridge: HostServicesBridge): ToolDefini
     promptSnippet: "settings_search: locate a setting by keyword, category, or id",
     promptGuidelines: [
       "Search is scoped: pass a category (appearance, chat, sessions, model, harness, retrieval, web, notifications, git, extensions, agents, …) or free text. Results carry stable ids for settings_read.",
-      "owner \"client\" applies on a connected surface (summary.surfaces>0 means reachable); owner \"action\" means the row is a real operation (install, login, connect) — invoke it with settings_action using the listed verbs.",
+      "owner \"client\" is resolved from the caller's live Host session: zero reachable surfaces is unavailable and more than one is ambiguous; never pass a surface id to select one. owner \"action\" means the row is a real operation (install, login, connect) — invoke it with settings_action using the listed verbs.",
       "Simple rows already carry the live value and source in summary — you can write directly with settings_update + expectedRevision from settings_read when CAS matters.",
     ],
     parameters: Type.Object({
@@ -172,7 +172,7 @@ export function createSettingsUpdateTool(bridge: HostServicesBridge): ToolDefini
       "appliedAt reports when the change takes effect: immediate, next-run (frozen session/tool config), restart, or manual. Never claim a restarted or applied effect the owner did not perform.",
       "status \"partial\" means some fields failed — report exactly which and why.",
       "items[] runs a compound update: same-owner fields commit atomically, cross-owner items report per-item status — never claim a global rollback that did not happen.",
-      "Client-owned entries apply on a connected surface (pass surface to choose when several are connected); offline surfaces report unavailable, never assumed-applied.",
+      "Client-owned entries apply on the surface bound to the caller's live Host session; zero surfaces report unavailable and multiple surfaces report ambiguous. Surface selection is Host-resolved and must not be supplied by the model.",
       "Action entries (install, connect, login) are invoked with settings_action, not written as fields.",
     ],
     parameters: Type.Object({
@@ -257,17 +257,18 @@ export function createSettingsActionTool(bridge: HostServicesBridge): ToolDefini
   return defineTool({
     name: "settings_action",
     label: "Settings Action",
-    description: "Invoke a real domain operation on an action-owned catalog entry — provider login/logout/model discovery, MCP server changes, Pi package/resource management, extensions, tunnel, remote instances, language support, runtime updates, git identities, knowledge, and project metadata. Read the entry first for the live verb list; long operations return pending and the real owner-specific status/cancel path.",
+    description: "Invoke a real domain operation on an action-owned catalog entry — provider login/logout/model discovery, MCP server changes, Pi package/resource management, extensions, tunnel, remote instances, language support, runtime updates, git identities, knowledge, and project metadata. Awaited owner facts return applied/failed; an asynchronous owner returns a durable operation id only when its real status path is available.",
     promptSnippet: "settings_action: run a domain operation on an action-owned catalog entry",
     promptGuidelines: [
       "Read the catalog entry first — action.verbs lists what the owner can actually execute right now.",
-      "status pending means the owner has not reported completion. Re-read owner status or use its declared cancel verb; an operation object appears only when that owner supplies a real stable handle.",
+      "A pending result always includes the owner's durable operation id and can be queried again with verb=status plus operationId. A cancel verb is shown only when the owner exposes a real cancellation API; otherwise the operation is explicitly non-cancellable.",
       "status unavailable means the owner is offline or not wired on this host — never claim the change happened.",
       "Credentials are never returned; auth status is reported as connected/isSet facts only.",
     ],
     parameters: Type.Object({
       id: Type.String({ description: "Stable catalog id of an owner:action entry" }),
       verb: Type.String({ description: "One of the entry's advertised verbs" }),
+      operationId: Type.Optional(Type.String({ description: "Owner operation id returned by an earlier settings_action" })),
       args: Type.Optional(Type.Record(Type.String(), Type.Unknown(),
         { description: "Verb arguments — e.g. providerId, source, name, content, expectedRevision" })),
     }),
@@ -276,7 +277,12 @@ export function createSettingsActionTool(bridge: HostServicesBridge): ToolDefini
       if (!params.id?.trim()) return invalidParams("settings_action", "id is required");
       if (!params.verb?.trim()) return invalidParams("settings_action", "verb is required");
       try {
-        const result = await bridge.request<"settings.action">("settings.action", params, signal ? { signal } : undefined) as SettingsActionResult;
+        const result = await bridge.request<"settings.action">("settings.action", {
+          id: params.id,
+          verb: params.verb,
+          ...(params.operationId ? { operationId: params.operationId } : {}),
+          ...(params.args ? { args: params.args } : {}),
+        }, signal ? { signal } : undefined) as SettingsActionResult;
         const parts = [`${result.entry.id} ${result.verb} — ${result.status}`];
         if (result.detail) parts.push(result.detail);
         if (result.operation) {

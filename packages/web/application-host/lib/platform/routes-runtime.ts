@@ -66,6 +66,8 @@ export interface PlatformRouteDependencies {
   getPiRuntimeBroker?: PiRuntimeDependencies['getPiRuntimeBroker'];
   getPiariumEventClients: PiariumEventDependencies['getPiariumEventClients'];
   surfaceBridge?: PiariumEventDependencies['surfaceBridge'];
+  resolveSurfaceSession?: PiariumEventDependencies['resolveSurfaceSession'];
+  resolveAuthContext?: PiariumEventDependencies['resolveAuthContext'];
   languageSupervisor?: LanguageRouteDependencies['language'];
   languageSupport?: import('../language-support/runtime.js').LanguageSupportRuntime;
   normalizeDirectoryPath: NormalizationRuntime['normalizeDirectoryPath'];
@@ -177,6 +179,8 @@ export const createPlatformRoutesRuntime = ({
       getPiariumEventClients,
       writeSseEvent,
       surfaceBridge,
+      resolveSurfaceSession,
+      resolveAuthContext,
       reloadRuntimeConfiguration = async () => {},
       extensionCatalog,
       extensionPackages,
@@ -273,6 +277,8 @@ export const createPlatformRoutesRuntime = ({
       writeSseEvent,
       requireAuth: uiAuthController.requireAuth,
       ...(surfaceBridge ? { surfaceBridge } : {}),
+      ...(resolveSurfaceSession ? { resolveSurfaceSession } : {}),
+      ...(resolveAuthContext ? { resolveAuthContext } : {}),
     });
     registerQuotaRoutes(app, { getQuotaProviders });
     registerSmallModelRoutes(app, { getSmallModelService });

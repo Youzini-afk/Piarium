@@ -1,6 +1,6 @@
 # Delivery roadmap
 
-Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W wired and corrected through D-310, both still partial
+Status: core workbench/harness, stage Q and companion retirement delivered; AI4S execution/collaboration delivered through D-305; Stage S/W delivered through D-311
 
 Last updated: 2026-09-21
 
@@ -27,8 +27,8 @@ authoritative record of delivery, and each phase names the design document that 
 | Q | Repository-wide testing and CI redesign | Implemented and accepted (D-292–D-295); locally verified |
 | D-296 | Former VS Code companion retirement | Implemented and locally verified; AI4S follows |
 | 11 | AI4S heterogeneous research cluster | Local experiments and collaboration accepted at D-303; 7G → 7H → 7I production slices delivered at D-305; Slurm deferred |
-| S | Conversational settings and Agent administration | Owner-backed catalog/actions, authenticated single-Surface application, per-owner compound updates and product Skills wired and corrected (D-306–D-310); multi-Surface targeting and external flows remain |
-| W | Session waiting, triggers and continuation | Durable sources, remote reconciliation, Thread/session lifecycle, workspace recovery and calendar Agent management wired and corrected (D-307–D-310); ordinary-shell durability and composite/shared observation remain |
+| S | Conversational settings and Agent administration | Complete (D-306–D-311): owner-backed catalog/actions, session-bound authenticated Surfaces, typed operations, per-owner compound updates and product Skills |
+| W | Session waiting, triggers and continuation | Complete (D-307–D-311): durable source facts, ordinary-shell observation, composite/shared observation, unified delivery, recovery and calendar Agent management |
 
 Stage R completed the [Rust kernel design](rust-kernel-design.md) and R0–R6 in the
 [harness implementation plan](agent-harness-plan.md): protocol/runtime, working-state and recovery

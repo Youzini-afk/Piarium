@@ -157,6 +157,11 @@ process manager.
 - Background completion is emitted once by PTY exit even when no caller reads
   output. A failed writer release keeps directory protection and is retried by
   disposal instead of being treated as a completed cleanup.
+- Shell start/completion enter the workspace Knowledge event owner. `follow_up`
+  may bind the returned executionId to exit/status/output-match conditions;
+  streamed output remains in the terminal/output owner and only compact match
+  and cursor observations are persisted. A Host restart that cannot reattach a
+  still-running local PTY marks that source unavailable.
 - `waitMs: 0` detaches only after the terminal runtime has accepted the command,
   so the returned `sh_N` is the real runtime identity. The foreground wait has no
   process-kill meaning. The default is the session-resolved 10-second soft setting,
@@ -617,6 +622,40 @@ page asks, not at boot: `searchFilesystemFiles` + `languageIdForPath`, cap
 8000 files, `partial` when truncated, 30s per-workspace cache (D-120). A
 structure request for an installable-but-missing language records an in-memory
 wanted id and still returns `unsupported` (D-121).
+
+### Settings caller and Surface targeting
+
+`settings.read`/`settings.update` resolve client-owned preferences from the
+Harness caller's live `sessionId`. The UI first authenticates and binds its
+current session through `/api/piarium/client-settings/bind`; the event stream
+is targetable only after that Host-side binding and live broker validation.
+Surface ids are returned as facts and are never accepted as model selectors.
+Zero bound Surfaces is `unavailable`; multiple windows bound to one session are
+`ambiguous`. A reconnect or deleted session has no binding until the UI binds
+again.
+
+`settings.action` returns `operation` only when an owner supplies a real stable
+identity and status/cancel adapter. Host metadata is persisted through the Rust
+`settings.operation` record with caller session, entry and owner identity in
+the record key. Owner calls that await a terminal result report that result;
+an asynchronous owner without durable observation is `unavailable`, so the
+service does not leave a synthetic operation running across restart.
+
+### Follow-up sources and delivery
+
+`followups.ts` stores definition, occurrence and compact observation identities
+through the kernel record boundary. `any`/`all` parents own hidden leaf
+definitions; compatible file, metric, attempt and external observers share the
+underlying subscription/query. File and metric edges become typed observations
+before a definition cursor advances. Ordinary shell start/completion facts are
+durable Knowledge events, while output stays with `ShellSupervisor`: registration
+first reads bytes already present at its cursor, then consumes live chunks and
+persists only match facts. A local shell that disappeared with its Host is
+`unavailable`, not restarted.
+
+Thread delivery calls the same directed-message ledger, target lock and
+admission path as `thread.send`; an occurrence id is the request identity across
+retry/reconcile. Root sessions retain the Pi broker's native receipt path.
 
 `explore.search` asks an optional `structureSource` (see
 `lib/structure/DOCUMENTATION.md`) for a revision-bound outline after a file is

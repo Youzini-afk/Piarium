@@ -1,4 +1,5 @@
 import type { Express, Request, RequestHandler, Response } from 'express';
+import { createHash } from 'node:crypto';
 import { createScheduledTaskService } from './service.js';
 
 type ServiceDependencies = Parameters<typeof createScheduledTaskService>[0];
@@ -17,10 +18,20 @@ export interface PiariumEventRouteDependencies {
    * ack route resolves pending client-settings requests.
    */
   surfaceBridge?: {
-    attach(res: Response, surfaceId: string, kind: string, authKey: string): void;
+    attach(res: Response, surfaceId: string, kind: string, authKey: string, sessionId: string): void;
+    bindSession?(authKey: string, sessionId: string, surfaceId: string): void;
+    consumeSessionBinding?(authKey: string, sessionId: string, surfaceId: string): boolean;
+    isSessionBound?(authKey: string, sessionId: string, surfaceId: string): boolean;
     dropConnection(res: Response): void;
     ack(requestId: string, surfaceId: string, connectionId: string, authKey: string, results: unknown): boolean;
   };
+  /** Resolves a UI supplied selection against the Host's live session registry. */
+  resolveSurfaceSession?: (sessionId: string, authKey: string) => boolean | Promise<boolean>;
+  resolveAuthContext?: (
+    req: Request,
+    res: Response,
+    options?: { allowClientAuth?: boolean; allowUrlToken?: boolean },
+  ) => Promise<unknown>;
 }
 
 const asRecord = (value: unknown): Record<string, unknown> | null => (
@@ -42,21 +53,41 @@ const parseTaskID = (req: Request) => asNonEmptyString(req.params.taskId);
 
 export const registerPiariumEventRoutes = (
   app: Express,
-  { getPiariumEventClients, writeSseEvent, surfaceBridge, requireAuth }: PiariumEventRouteDependencies,
+  {
+    getPiariumEventClients,
+    writeSseEvent,
+    surfaceBridge,
+    requireAuth,
+    resolveSurfaceSession,
+    resolveAuthContext,
+  }: PiariumEventRouteDependencies,
 ): void => {
-  const authKey = (req: Request): string | null => {
-    const auth = req.piariumAuth;
-    if (auth?.type === 'client') return `client:${auth.clientId}`;
-    if (auth?.type === 'session') return 'session';
+  const authKey = (req: Request, resolved?: unknown): string | null => {
+    const auth = resolved ?? req.piariumAuth;
+    if (!auth || typeof auth !== 'object' || Array.isArray(auth)) return null;
+    const context = auth as { type?: unknown; clientId?: unknown; token?: unknown };
+    const hash = (prefix: string, value: string): string => (
+      `${prefix}:${createHash('sha256').update(value).digest('hex')}`
+    );
+    if (context.type === 'client' && typeof context.clientId === 'string' && context.clientId) return hash('client', context.clientId);
+    if (context.type === 'session' && typeof context.token === 'string' && context.token) return hash('session', context.token);
     return null;
   };
-  app.get('/api/piarium/events', requireAuth, (req, res) => {
+  app.get('/api/piarium/events', requireAuth, async (req, res) => {
+    // The auth middleware establishes access, while this context gives the
+    // bridge one stable principal. Resolve it before flushing SSE headers so a
+    // failed/changed auth context can still produce an ordinary HTTP response.
+    const resolvedAuth = req.piariumAuth ?? (resolveAuthContext
+      ? await resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
+      : null);
+    if (resolveAuthContext && !resolvedAuth) {
+      return res.status(401).json({ error: 'authenticated surface session is unavailable' });
+    }
     res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-
     const clients = getPiariumEventClients();
     clients.add(res);
     // A surface that identifies itself becomes individually addressable for
@@ -64,10 +95,8 @@ export const registerPiariumEventRoutes = (
     // broadcast-only — the host never invents a client identity.
     const surfaceId = asNonEmptyString(req.query?.surface);
     const surfaceKind = asNonEmptyString(req.query?.kind);
-    const principal = authKey(req);
-    if (surfaceId && surfaceBridge && principal) {
-      surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web', principal);
-    }
+    const selectedSessionId = asNonEmptyString(req.query?.session);
+    let closed = false;
     try {
       writeSseEvent(res, {
         type: 'piarium:event-stream-ready',
@@ -75,6 +104,16 @@ export const registerPiariumEventRoutes = (
       });
     } catch {
       // The client can reconnect and receive the next heartbeat.
+    }
+    const principal = authKey(req, resolvedAuth);
+    if (surfaceId && surfaceBridge && principal && selectedSessionId && resolveSurfaceSession) {
+      const valid = await resolveSurfaceSession(selectedSessionId, principal)
+        && (surfaceBridge.consumeSessionBinding?.(principal, selectedSessionId, surfaceId)
+          ?? surfaceBridge.isSessionBound?.(principal, selectedSessionId, surfaceId)
+          ?? false);
+      if (!closed && valid) {
+        surfaceBridge.attach(res, surfaceId, surfaceKind ?? 'web', principal, selectedSessionId);
+      }
     }
 
     const heartbeat = setInterval(() => {
@@ -90,6 +129,7 @@ export const registerPiariumEventRoutes = (
       }
     }, 25_000);
     req.on('close', () => {
+      closed = true;
       clearInterval(heartbeat);
       clients.delete(res);
       surfaceBridge?.dropConnection(res);
@@ -97,12 +137,32 @@ export const registerPiariumEventRoutes = (
   });
 
   if (surfaceBridge) {
-    app.post('/api/piarium/client-settings/ack', requireAuth, (req, res) => {
+    app.post('/api/piarium/client-settings/bind', requireAuth, async (req, res) => {
+      const resolvedAuth = req.piariumAuth ?? await (resolveAuthContext
+        ? resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
+        : Promise.resolve(null));
+      const principal = authKey(req, resolvedAuth);
+      const body = asRecord(req.body) ?? {};
+      const sessionId = asNonEmptyString(body.sessionId);
+      const surfaceId = asNonEmptyString(body.surfaceId);
+      if (!principal || !sessionId || !surfaceId || !resolveSurfaceSession || !surfaceBridge.bindSession) {
+        return res.status(503).json({ error: 'authenticated surface session binding is unavailable' });
+      }
+      if (!await resolveSurfaceSession(sessionId, principal)) {
+        return res.status(404).json({ error: 'session is not live on this Host' });
+      }
+      surfaceBridge.bindSession(principal, sessionId, surfaceId);
+      return res.json({ ok: true, sessionId, surfaceId });
+    });
+    app.post('/api/piarium/client-settings/ack', requireAuth, async (req, res) => {
+      const resolvedAuth = req.piariumAuth ?? await (resolveAuthContext
+        ? resolveAuthContext(req, res, { allowClientAuth: true, allowUrlToken: true }).catch(() => null)
+        : Promise.resolve(null));
       const body = asRecord(req.body) ?? {};
       const requestId = asNonEmptyString(body.requestId);
       const surfaceId = asNonEmptyString(body.surfaceId);
       const connectionId = asNonEmptyString(body.connectionId);
-      const principal = authKey(req);
+      const principal = authKey(req, resolvedAuth);
       const results = Array.isArray(body.results) ? body.results : [];
       if (!requestId || !surfaceId || !connectionId || !principal) {
         return res.status(400).json({ error: 'requestId, surfaceId, connectionId and authenticated surface are required' });

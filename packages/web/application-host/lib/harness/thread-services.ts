@@ -24,7 +24,7 @@ import { HarnessServiceError } from "./service-error.js";
 import { EXECUTION_PRESETS } from "./presets.js";
 import { RESEARCH_CAPABILITY_DEFINITIONS, isResearchCapability, type ResearchResourceManifest } from "@piarium/protocol";
 import { resolveNestedThreadScope, type ThreadControlToolName } from "./thread-nesting.js";
-import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError } from "./thread-registry.js";
+import { sameFrozenRunConfig, ThreadAdmissionError, ThreadRegistryError, type ThreadRegistry } from "./thread-registry.js";
 import { ThreadRuntimeError } from "./thread-runtime.js";
 
 interface ThreadSnapshot {
@@ -806,6 +806,156 @@ const continueError = (error: unknown): never => {
   throw error;
 };
 
+export interface AuthorizedThreadRequestInput {
+  workspaceId: string;
+  threadId: string;
+  text: string;
+  requestId: string;
+  from: ThreadMessagePeer;
+}
+
+export interface AuthorizedThreadRequestDeps {
+  registry: ThreadRegistry;
+  continueRun?(input: {
+    workspaceId: string;
+    parent: ThreadParent;
+    threadId: string;
+    mode: "continue";
+    task: string;
+    requestId: string;
+    from: ThreadMessagePeer;
+  }): Promise<{ runId?: string }>;
+  sendToSession?(sessionId: string, message: string, meta: { from: string; requestId?: string; messageId: string }): Promise<void>;
+}
+
+/**
+ * The already-authorized `thread.send(kind=request, context=continue)` core.
+ * Both the public service and Host-owned follow-ups use this exact ledger,
+ * target lock, held-message flush, and continuation admission path.
+ */
+export const deliverAuthorizedThreadRequest = async (
+  deps: AuthorizedThreadRequestDeps,
+  input: AuthorizedThreadRequestInput,
+): Promise<{ accepted: true; lifecycle: Thread["lifecycle"]; attention: Thread["attention"]; messageId: string; delivery: "delivered" | "held" | "scheduled"; runId?: string; route?: "active" | "continued" }> => deps.registry.withMessageDelivery(
+  input.workspaceId,
+  `thread:${input.threadId}`,
+  async () => {
+    const thread = await deps.registry.getThreadById(input.workspaceId, input.threadId);
+    if (!thread) throw new HarnessServiceError("not-found", `Thread not found: ${input.threadId}`);
+    if (thread.lifecycle === "archived" || thread.deletion) {
+      throw new HarnessServiceError("unavailable", `Thread is unavailable: ${thread.id}`);
+    }
+    const to = { kind: "thread" as const, id: thread.id };
+    const previous = thread.messages?.find((message) => message.direction === "in" && message.id === input.requestId);
+    if (previous) {
+      if (previous.kind !== "request" || (previous.context ?? "continue") !== "continue"
+        || previous.text !== input.text || previous.from.kind !== input.from.kind || previous.from.id !== input.from.id) {
+        throw new HarnessServiceError("invalid-params", "requestId is already bound to a different message or sender");
+      }
+      const continuation = thread.pendingContinuations?.find((candidate) => candidate.requestId === input.requestId);
+      const priorRun = (await deps.registry.listRuns(input.workspaceId, thread.id))
+        .find((candidate) => candidate.request?.requestId === input.requestId);
+      if (continuation) return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+        messageId: input.requestId, delivery: "scheduled" };
+      if (previous.status === "failed") throw new HarnessServiceError("unavailable", previous.failure ?? "The request previously failed");
+      if (previous.status === "delivered" || previous.status === "resolved" || priorRun) {
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+          messageId: input.requestId, delivery: "delivered",
+          route: priorRun ? "continued" : "active",
+          ...(previous.runId ?? priorRun?.id ? { runId: previous.runId ?? priorRun!.id } : {}) };
+      }
+    }
+    const at = previous?.at ?? new Date().toISOString();
+    if (!previous) {
+      await deps.registry.recordDirectedMessage(input.workspaceId, {
+        id: input.requestId,
+        from: input.from,
+        to,
+        kind: "request",
+        context: "continue",
+        text: input.text,
+        status: "pending",
+        at,
+      });
+    }
+    const patch = (status: ThreadMessageRecord["status"], runId?: string) => (
+      deps.registry.patchDirectedMessage(input.workspaceId, thread.id, input.requestId, {
+        status,
+        ...(runId ? { runId } : {}),
+      })
+    );
+    if (thread.lifecycle === "queued") {
+      return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+        messageId: input.requestId, delivery: "scheduled" };
+    }
+    const run = await deps.registry.getActiveRun(input.workspaceId, thread.id);
+    const lostWorker = thread.lifecycle === "active" && (run?.outcome === "lost" || run?.workerState === "lost");
+    if (thread.lifecycle === "settled" || lostWorker) {
+      if (!deps.continueRun) throw new HarnessServiceError("unavailable", "Thread runtime is not configured for continuation");
+      let continued: { runId?: string };
+      try {
+        continued = await deps.continueRun({
+          workspaceId: input.workspaceId,
+          parent: thread.parent,
+          threadId: thread.id,
+          mode: "continue",
+          task: input.text,
+          requestId: input.requestId,
+          from: input.from,
+        });
+      } catch (error) {
+        return continueError(error);
+      }
+      if (!continued.runId) {
+        await deps.registry.enqueueContinuation(input.workspaceId, thread.id, {
+          requestId: input.requestId,
+          mode: "continue",
+          task: input.text,
+          from: input.from,
+          at,
+        });
+        return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+          messageId: input.requestId, delivery: "scheduled" };
+      }
+      await patch("delivered", continued.runId);
+      return { accepted: true, lifecycle: "active", attention: "none",
+        runId: continued.runId, messageId: input.requestId, delivery: "delivered", route: "continued" };
+    }
+    if (!run || run.workerState === "exited" || (run.workerState === "running" && !run.sessionId)) {
+      await patch("held", run?.id);
+      return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+        messageId: input.requestId, delivery: "held", ...(run?.id ? { runId: run.id } : {}) };
+    }
+    if (run.workerState === "starting" && !run.sessionId) {
+      return { accepted: true, lifecycle: thread.lifecycle, attention: thread.attention,
+        messageId: input.requestId, delivery: "scheduled" };
+    }
+    const held = await deps.registry.listPendingThreadMessages(input.workspaceId, thread.id, input.requestId);
+    if (!deps.sendToSession) throw new HarnessServiceError("unavailable", "Thread session delivery is not configured");
+    for (const heldMessage of held) {
+      await deps.sendToSession(run.sessionId!, heldMessage.text, {
+        from: messagePeerLabel(heldMessage.from),
+        messageId: heldMessage.id,
+        ...(heldMessage.kind === "request" ? { requestId: heldMessage.id } : {}),
+      });
+      await deps.registry.acknowledgeThreadMessages(input.workspaceId, thread.id, [heldMessage.id], run.id);
+    }
+    await patch("pending", run.id);
+    await deps.sendToSession(run.sessionId!, input.text, {
+      from: messagePeerLabel(input.from),
+      requestId: input.requestId,
+      messageId: input.requestId,
+    });
+    await patch("delivered", run.id);
+    let attention = thread.attention;
+    if (thread.waitingFor?.kind === "thread") {
+      attention = (await deps.registry.setAttention(input.workspaceId, thread.id, "none"))?.attention ?? "none";
+    }
+    return { accepted: true, lifecycle: "active", attention, runId: run.id,
+      messageId: input.requestId, delivery: "delivered", route: "active" };
+  },
+);
+
 export function createThreadSendService(host: HarnessServiceHost): HarnessService<"thread.send"> {
   return {
     handle: async (params, ctx) => {
@@ -919,6 +1069,21 @@ export function createThreadSendService(host: HarnessServiceHost): HarnessServic
           throw new HarnessServiceError("denied", `Thread is outside the caller's root-task relationships: ${candidate.id}`);
         }
         target = candidate;
+      }
+
+      if (target && kind === "request" && !upgradeRequested && params.replyTo === undefined
+        && waitSeconds === 0 && (params.context ?? "continue") === "continue") {
+        return deliverAuthorizedThreadRequest({
+          registry,
+          ...(host.threadContinueRun ? { continueRun: host.threadContinueRun } : {}),
+          ...(host.threadSendToSession ? { sendToSession: (sessionId, message, meta) => host.threadSendToSession!(sessionId, message, meta) } : {}),
+        }, {
+          workspaceId,
+          threadId: target.id,
+          text: params.message,
+          requestId: params.requestId ?? `msg-${randomUUID()}`,
+          from: fromPeer,
+        });
       }
 
       const sent = await registry.withMessageDelivery(workspaceId, target ? "thread:" + target.id : "session:" + targetSessionId,

@@ -56,9 +56,25 @@ current values — always query the live catalog first.
    ordinary settings; remote/cluster execution is an action on
    \`resources.*\` / \`remote.*\` entries.
 4. **Experiments** — prefer durable \`experiment\` runs over ad-hoc shell
-   loops; register \`follow_up\` waits instead of polling.
+   loops; register \`follow_up\` waits instead of polling. Shell-output waits
+   retain compact match facts and advance a definition cursor; they do not copy
+   the command log into follow-up storage.
 5. **Verify** — re-read the changed entries and report what is effective
    vs pending (\`appliedAt: next-run\` means a future run picks it up).
+
+## Client surfaces and actions
+
+- Client-owned preferences are applied only to the Surface bound by the
+  caller's live session. Multiple windows remain separate; zero reachable
+  Surfaces is \`unavailable\` and more than one is \`ambiguous\`. Do not pass a
+  guessed Surface id — the Host resolves the target from the authenticated UI
+  session.
+- Domain actions report the owner fact returned by the real service. If an
+  action returns an operation object, retain its \`operation.id\` and query it
+  with \`settings_action\` (\`verb: "status", operationId\`) before retrying. Use
+  \`verb: "cancel", operationId\` only when the returned operation exposes a
+  cancel verb; an owner without durable status/cancel support is reported as
+  \`unavailable\` rather than kept \`running\`.
 
 ## Judgment
 
@@ -119,9 +135,9 @@ Retrieval spans ordinary settings (domain policy) and domain actions
 1. \`settings_search\` for \`web\`, \`domains\`, \`search\`, \`language\`.
 2. Domain allow/block lists are settings — read then update with CAS.
 3. Language/semantic components are actions on \`language.*\` /
-   \`runtime.*\` entries: \`status\` first, then \`prepare\`/\`install\` —
-   these are long operations that return operation handles; poll the
-   operation rather than re-invoking.
+   \`runtime.*\` entries: \`status\` first, then \`prepare\`/\`install\`.
+   The owner may complete an awaited preparation directly; if it returns a
+   real operation handle, query that exact handle rather than re-invoking.
 4. External MCP search providers are configured through \`mcp.*\` action
    entries (config documents) plus \`mcp.runtime\` status/reconnect.
 

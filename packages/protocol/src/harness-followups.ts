@@ -10,7 +10,7 @@
 import type { JsonValue } from "./types.js";
 
 /** What the program watches. Field sets are per-kind; no arbitrary script conditions. */
-export type FollowUpSource =
+export type FollowUpLeafSource =
   | {
       kind: "time";
       /** Absolute due time (epoch ms), resolved at registration. */
@@ -102,7 +102,38 @@ export type FollowUpSource =
       kind: "manual";
       /** Free-form source description kept for the audit trail. */
       note?: string;
+    }
+  | {
+      /** Watches an ordinary Harness shell execution owned by this session. */
+      kind: "shell";
+      /** Stable execution identity returned by bash/powershell. */
+      executionId: string;
+      /**
+       * exit   — the command reaches a confirmed terminal state.
+       * output — newly committed output matches `pattern`.
+       * status — one of `states` is durably observed.
+       */
+      condition: "exit" | "output" | "status";
+      pattern?: string;
+      regex?: boolean;
+      states?: Array<"running" | "completed" | "failed" | "cancelled" | "unavailable">;
+      /** output only: fire for each later committed match. */
+      every?: boolean;
+      fallbackAt?: number;
     };
+
+/**
+ * Composite sources keep the tool input declarative: an agent supplies ordinary
+ * sources and chooses whether the first (`any`) or every (`all`) source must
+ * signal. A composite is one-shot by default. With `every`, only leaves that
+ * naturally emit repeatable edges can participate in later cycles.
+ */
+export type FollowUpSource = FollowUpLeafSource | {
+  kind: "any" | "all";
+  sources: FollowUpLeafSource[];
+  every?: boolean;
+  fallbackAt?: number;
+};
 
 export type FollowUpStatus =
   /** Registered and observing the source. */

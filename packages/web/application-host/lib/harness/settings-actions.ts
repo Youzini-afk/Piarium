@@ -37,6 +37,19 @@ export interface ActionInvocation {
   operation?: SettingsActionResult['operation'];
 }
 
+/**
+ * An adapter declares this before invoke when the owner may outlive the
+ * request. The Host can then refuse before side effects if its durable record
+ * authority or the owner's observation API is unavailable.
+ */
+export interface SettingsActionCapabilities {
+  execution: 'sync' | 'async';
+  operation?: {
+    query: boolean;
+    cancel?: boolean;
+  };
+}
+
 export interface SettingsActionAdapter {
   /** Verbs this adapter implements; catalog declarations are intersected with this list. */
   verbs: readonly string[];
@@ -45,6 +58,26 @@ export interface SettingsActionAdapter {
     ctx: SettingsActionContext,
     entry: SettingsCatalogEntry,
     verb: string,
+    args: Record<string, unknown>,
+  ): Promise<ActionInvocation>;
+  capabilities?(
+    ctx: SettingsActionContext,
+    entry: SettingsCatalogEntry,
+    verb: string,
+    args: Record<string, unknown>,
+  ): SettingsActionCapabilities | Promise<SettingsActionCapabilities>;
+  /** Query an owner operation using the real identity returned by invoke. */
+  getOperation?(
+    ctx: SettingsActionContext,
+    entry: SettingsCatalogEntry,
+    operationId: string,
+    args: Record<string, unknown>,
+  ): Promise<ActionInvocation>;
+  /** Cancel an owner operation only when the owner exposes a real cancel API. */
+  cancelOperation?(
+    ctx: SettingsActionContext,
+    entry: SettingsCatalogEntry,
+    operationId: string,
     args: Record<string, unknown>,
   ): Promise<ActionInvocation>;
 }
@@ -378,8 +411,8 @@ const providersAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           const type = str(args, 'type') === 'api_key' ? 'api_key' : 'oauth';
           await deps.requestWorkspace(root, 'provider.login', { providerId, type });
           return {
-            status: 'pending',
-            detail: 'interactive login started — answer the session UI prompt, then recheck provider status/list',
+            status: 'applied',
+            detail: 'provider login request accepted by the owning session; recheck provider status/list for authentication state',
             data: { providerId, started: true },
           };
         }
@@ -439,14 +472,14 @@ const mcpAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           const name = str(args, 'name');
           const command = name ? `/mcp reconnect ${name}` : '/mcp reconnect';
           const result = await deps.requestSession(ctx.caller.sessionId, 'command.execute', { command });
-          return { status: 'pending', detail: `executed "${command}" in the owning session`, data: result };
+          return { status: 'applied', detail: `executed "${command}" in the owning session`, data: result };
         }
         case 'enable':
         case 'disable': {
           const name = needString(args, 'name');
           const command = `/mcp ${verb} ${name.replace(/\s+/g, '-')}`;
           const result = await deps.requestSession(ctx.caller.sessionId, 'command.execute', { command });
-          return { status: 'pending', detail: `executed "${command}" in the owning session`, data: result };
+          return { status: 'applied', detail: `executed "${command}" in the owning session`, data: result };
         }
         case 'read': {
           const snapshot = await deps.requestWorkspace(root, 'mcp.config.snapshot', {});
@@ -597,14 +630,14 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
             const foundation = deps.foundational?.();
             if (!foundation) return unavailable('foundational package restore unavailable');
             const ids = Array.isArray(args.ids) ? args.ids.filter((v): v is string => typeof v === 'string') : undefined;
-            return { status: 'pending', detail: 'foundational package restore started', data: await foundation.restore(ids) };
+            return { status: 'applied', detail: 'foundational package restore completed at the Pi package owner', data: await foundation.restore(ids) };
           }
           const source = needString(args, 'source');
           const scope = str(args, 'scope') === 'project' ? 'project' : 'global';
           const result = await deps.requestWorkspace(root, 'package.install', { source, scope });
           return {
-            status: 'pending',
-            detail: `package install started for ${source}; recheck package list for completion`,
+            status: 'applied',
+            detail: `package install completed for ${source}; recheck package list for the owner state`,
             data: sanitizePackageResult(result),
           };
         }
@@ -618,8 +651,8 @@ const piPackagesAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => (
         }
         case 'update':
           return {
-            status: 'pending',
-            detail: 'package update started; recheck package list for completion',
+            status: 'applied',
+            detail: 'package update completed at the Pi package owner; recheck package list for the owner state',
             data: sanitizePackageResult(await deps.requestWorkspace(root, 'package.update', {
               ...(str(args, 'source') ? { source: str(args, 'source')! } : {}),
             })),
@@ -1186,8 +1219,8 @@ const languageSupportAdapter = (deps: SettingsActionDeps): SettingsActionAdapter
         case 'prepare': {
           const languageId = needString(args, 'languageId');
           return {
-            status: 'pending',
-            detail: `language server preparation started for ${languageId}; recheck language status for completion`,
+            status: 'applied',
+            detail: `language server preparation completed for ${languageId}; recheck language status for the owner state`,
             data: await support.prepareServer({ workspaceId, languageId }),
           };
         }
@@ -1228,12 +1261,12 @@ const runtimeUpdateAdapter = (deps: SettingsActionDeps): SettingsActionAdapter =
           return { status: 'applied', data: lifecycle.snapshot };
         case 'install':
           return {
-            status: 'pending', detail: 'runtime install started; recheck runtime status for completion',
+            status: 'applied', detail: 'runtime install completed at the runtime lifecycle owner',
             data: await lifecycle.install(),
           };
         case 'upgrade':
           return {
-            status: 'pending', detail: 'runtime upgrade started; recheck runtime status for completion',
+            status: 'applied', detail: 'runtime upgrade completed at the runtime lifecycle owner',
             data: await lifecycle.upgrade(),
           };
         case 'rediscover':
@@ -1286,8 +1319,8 @@ const tunnelAdapter = (deps: SettingsActionDeps): SettingsActionAdapter => ({
           if (str(args, 'provider')) input.provider = str(args, 'provider');
           if (str(args, 'mode')) input.mode = str(args, 'mode');
           return {
-            status: 'pending',
-            detail: 'tunnel start requested; recheck tunnel status for completion',
+            status: 'applied',
+            detail: 'tunnel start completed at the tunnel owner; recheck tunnel status for the live endpoint',
             data: await tunnel.start(input),
           };
         }

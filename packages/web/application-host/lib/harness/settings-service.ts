@@ -41,11 +41,39 @@ import type {
 import { mergeHarnessSettings } from '@piarium/protocol';
 import { HarnessServiceError } from './service-error.js';
 import type { PiariumSettingsDocument } from '@piarium/settings-store';
-import type { ActionInvocation, ActionStatus, SettingsActionRegistry } from './settings-actions.js';
+import type {
+  ActionInvocation,
+  ActionStatus,
+  SettingsActionCapabilities,
+  SettingsActionRegistry,
+} from './settings-actions.js';
 
 export interface SettingsServiceCaller {
   workspaceId: string | null;
   sessionId: string;
+}
+
+export interface SettingsActionOperationStore {
+  /** Exact entry-scoped lookup; operation ids are only meaningful for one entry/session. */
+  get(caller: SettingsServiceCaller, entryId: string, operationId: string): Promise<{
+    id: string;
+    entryId: string;
+    verb: string;
+    state: NonNullable<SettingsActionResult['operation']>['state'];
+    detail?: string;
+    cancelVerb?: string;
+    recordRevision?: number;
+  } | null>;
+  /** Host storage authority is available for a new async operation record. */
+  available?(caller: SettingsServiceCaller): Promise<boolean>;
+  put(caller: SettingsServiceCaller, operation: {
+    id: string;
+    entryId: string;
+    verb: string;
+    state: NonNullable<SettingsActionResult['operation']>['state'];
+    detail?: string;
+    cancelVerb?: string;
+  }): Promise<void>;
 }
 
 export interface AppPersistOutcome {
@@ -77,6 +105,8 @@ export interface SettingsServiceDeps {
   ): Promise<{ value: string; label?: string }[] | null>;
   /** Domain-action adapters for `action` entries (Stage S). */
   actions?: SettingsActionRegistry;
+  /** Durable owner operation references. Missing means async actions cannot be observed safely. */
+  actionOperations?: SettingsActionOperationStore;
   /**
    * Targeted surface bridge for `client` entries. Absent = no live surface
    * channel — client entries report `unavailable` honestly.
@@ -106,17 +136,17 @@ export interface ClientSurfaceFieldResult {
 }
 
 export interface ClientSurfaceBridge {
-  /** Connected surfaces the host can address individually. */
-  list(): ClientSurfaceInfo[];
+  /** Connected surfaces whose stream was Host-validated against one caller session. */
+  listForSession(sessionId: string): ClientSurfaceInfo[];
   /**
    * Read or apply client-owned fields on one surface. The bridge resolves the
-   * target: explicit `surfaceId`, or the single connected surface. Several
-   * candidates without a selector = `ambiguous`; none = `unavailable`.
+   * target: the Surface bound to the caller's authenticated session. Several
+   * bound candidates = `ambiguous`; none = `unavailable`.
    */
   request(op: {
     type: 'read' | 'apply';
     entries: { id: string; values?: Record<string, unknown>; reset?: string[] }[];
-  }): Promise<{
+  }, target: { sessionId: string }): Promise<{
     surface: ClientSurfaceInfo;
     results: ClientSurfaceFieldResult[];
   }>;
@@ -336,7 +366,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       const root = await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null);
       if (root) piSnapshot = await deps.requestPi(root, 'settings.get', {}).catch(() => null);
     }
-    const surfaceCount = deps.clientSurfaces?.list().length ?? 0;
+    const surfaceCount = deps.clientSurfaces?.listForSession(caller.sessionId).length ?? 0;
     const actionRoot = caller.workspaceId
       ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null)
       : null;
@@ -603,7 +633,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       return {
         state: 'denied',
         entry: toSearchItem(entry),
-        reason: 'explicit surface selection is unavailable; connect exactly one authenticated surface',
+        reason: 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted',
       };
     }
     const bridge = deps.clientSurfaces;
@@ -619,7 +649,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
       response = await bridge.request({
         type: 'read',
         entries: [{ id: entry.id }],
-      });
+      }, { sessionId: caller.sessionId });
     } catch (error) {
       const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
       return {
@@ -730,6 +760,153 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         detail: `no owner adapter is wired for ${entry.actionRef.domain}`,
       };
     }
+    const args = params.args ?? {};
+    const requestedOperationId = params.operationId
+      ?? (typeof args.operationId === 'string' && args.operationId.trim() ? args.operationId.trim() : undefined);
+    const workspaceRoot = caller.workspaceId
+      ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null)
+      : null;
+    const actionContext = { caller, workspaceRoot };
+    const operationResult = (
+      record: NonNullable<Awaited<ReturnType<NonNullable<SettingsActionOperationStore['get']>>>>,
+    ): SettingsActionResult => ({
+      status: record.state === 'running' ? 'pending' : record.state === 'unavailable' ? 'unavailable' : record.state === 'succeeded' ? 'applied' : 'failed',
+      entry: toSearchItem(entry),
+      verb: params.verb,
+      ...(record.detail ? { detail: record.detail } : {}),
+      operation: {
+        id: record.id,
+        state: record.state,
+        ...(record.cancelVerb ? { cancelVerb: record.cancelVerb } : {}),
+        ...(record.detail ? { detail: record.detail } : {}),
+      },
+    });
+    const makeOperation = (
+      id: string,
+      state: NonNullable<ActionInvocation['operation']>['state'],
+      detail?: string,
+      cancelVerb?: string,
+    ): NonNullable<ActionInvocation['operation']> => ({
+      id,
+      state,
+      ...(detail ? { detail } : {}),
+      ...(cancelVerb ? { cancelVerb } : {}),
+    });
+    const persistOperation = async (
+      operation: NonNullable<ActionInvocation['operation']>,
+      detail?: string,
+      ownerVerb = params.verb,
+    ): Promise<boolean> => {
+      if (!deps.actionOperations || !caller.workspaceId) return false;
+      try {
+        await deps.actionOperations.put(caller, {
+          id: operation.id,
+          entryId: entry.id,
+          verb: ownerVerb,
+          state: operation.state,
+          ...(detail ?? operation.detail ? { detail: detail ?? operation.detail } : {}),
+          ...(operation.cancelVerb ? { cancelVerb: operation.cancelVerb } : {}),
+        });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    if (requestedOperationId && (params.verb === 'status' || params.verb === 'cancel')) {
+      const stored = await deps.actionOperations?.get(caller, entry.id, requestedOperationId).catch(() => null);
+      if (!stored) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: `settings operation ${requestedOperationId} has no durable record for this session`,
+        };
+      }
+      if (stored.entryId !== entry.id) {
+        return { status: 'denied', entry: toSearchItem(entry), verb: params.verb, detail: 'operation does not belong to this settings entry' };
+      }
+      if (params.verb === 'status') {
+        if (stored.state !== 'running') return operationResult(stored);
+        if (!adapter.getOperation) {
+          const detail = 'owner has no durable operation status API; completion cannot be inferred after this boundary';
+          const unavailable = makeOperation(
+            stored.id,
+            'unavailable',
+            detail,
+          );
+          await persistOperation(unavailable, detail, stored.verb);
+          return {
+            status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+            detail, operation: unavailable,
+          };
+        }
+        const observed = await adapter.getOperation(actionContext, entry, stored.id, args).catch((error: unknown): ActionInvocation => ({
+          status: 'unavailable',
+          detail: error instanceof Error ? error.message : String(error),
+          operation: { id: stored.id, state: 'unavailable' },
+        }));
+        const operation = observed.operation && observed.operation.id === stored.id
+          ? observed.operation
+          : observed.status === 'pending'
+            ? makeOperation(stored.id, 'running', observed.detail, stored.cancelVerb)
+            : makeOperation(stored.id, observed.status === 'applied' ? 'succeeded' : observed.status === 'unavailable' ? 'unavailable' : 'failed', observed.detail, stored.cancelVerb);
+        if (!await persistOperation(operation, observed.detail, stored.verb)) {
+          return {
+            status: 'unavailable',
+            entry: toSearchItem(entry),
+            verb: params.verb,
+            detail: 'owner state was observed, but Host could not commit the durable operation revision; query the same operation again',
+            operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb),
+          };
+        }
+        return {
+          status: observed.status,
+          entry: toSearchItem(entry),
+          verb: params.verb,
+          ...(observed.detail ? { detail: observed.detail } : {}),
+          ...(observed.data !== undefined ? { data: observed.data } : {}),
+          operation,
+        };
+      }
+      if (stored.state !== 'running') return operationResult(stored);
+      if (!stored.cancelVerb) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner does not expose a cancellation identity for this operation',
+          operation: makeOperation(stored.id, stored.state, stored.detail),
+        };
+      }
+      if (!adapter.cancelOperation) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner does not expose a cancellation API for this operation',
+          operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb),
+        };
+      }
+      const cancelled = await adapter.cancelOperation(actionContext, entry, stored.id, args).catch((error: unknown): ActionInvocation => ({
+        status: 'unavailable',
+        detail: error instanceof Error ? error.message : String(error),
+        operation: { id: stored.id, state: 'unavailable' },
+      }));
+      const cancellation = cancelled.operation && cancelled.operation.id === stored.id
+        ? cancelled.operation
+        : makeOperation(stored.id, cancelled.status === 'applied' ? 'cancelled' : cancelled.status === 'unavailable' ? 'unavailable' : 'running', cancelled.detail, stored.cancelVerb);
+      if (!await persistOperation(cancellation, cancelled.detail, stored.verb)) {
+        return {
+          status: 'unavailable',
+          entry: toSearchItem(entry),
+          verb: params.verb,
+          detail: 'owner cancellation returned, but Host could not commit the durable operation revision; query the same operation again',
+          operation: makeOperation(stored.id, stored.state, stored.detail, stored.cancelVerb),
+        };
+      }
+      return {
+        status: cancelled.status,
+        entry: toSearchItem(entry),
+        verb: params.verb,
+        ...(cancelled.detail ? { detail: cancelled.detail } : {}),
+        ...(cancelled.data !== undefined ? { data: cancelled.data } : {}),
+        operation: cancellation,
+      };
+    }
     const declared = entry.actionRef.verbs ?? [];
     if (declared.length > 0 && !declared.includes(params.verb) && params.verb !== 'status') {
       return {
@@ -747,18 +924,95 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
         detail: `verb "${params.verb}" is not implemented by the ${entry.actionRef.domain} owner`,
       };
     }
-    const workspaceRoot = caller.workspaceId
-      ? await deps.resolveWorkspaceRoot(caller.workspaceId).catch(() => null)
-      : null;
+    const capabilities: SettingsActionCapabilities = await (adapter.capabilities
+      ? adapter.capabilities(actionContext, entry, params.verb, args)
+      : { execution: 'sync' });
+    const needsDurableOperation = capabilities.execution === 'async'
+      || Boolean(capabilities.operation?.query);
+    if (needsDurableOperation) {
+      const operationStore = deps.actionOperations;
+      const unavailableDetail = !caller.workspaceId
+        ? 'asynchronous owner actions require a workspace-bound session'
+        : !operationStore
+          ? 'asynchronous owner actions require durable Host operation storage'
+          : !capabilities.operation?.query
+            ? 'owner marked this action asynchronous without a queryable operation identity'
+            : !adapter.getOperation
+              ? 'owner marked this action queryable but exposes no operation status API'
+              : null;
+      if (unavailableDetail) {
+        return { status: 'unavailable', entry: toSearchItem(entry), verb: params.verb, detail: unavailableDetail };
+      }
+      if (capabilities.operation?.cancel && !adapter.cancelOperation) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner advertised cancellation but exposes no cancellation API',
+        };
+      }
+      if (operationStore?.available && !await operationStore.available(caller).catch(() => false)) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'Host cannot durably record this owner operation for the workspace/session',
+        };
+      }
+      if (!operationStore?.available) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'Host operation storage cannot prove durable availability before invoke',
+        };
+      }
+    }
     const outcome: ActionInvocation = await adapter.invoke(
-      { caller, workspaceRoot },
+      actionContext,
       entry,
       params.verb,
-      params.args ?? {},
+      args,
     ).catch((error: unknown): ActionInvocation => ({
       status: 'failed' as const,
       detail: error instanceof Error ? error.message : String(error),
     }));
+    if (outcome.status === 'pending' && !outcome.operation) {
+      return {
+        status: 'unavailable',
+        entry: toSearchItem(entry),
+        verb: params.verb,
+        detail: `${outcome.detail ?? 'owner started an asynchronous action'}; owner returned no stable status/cancel operation identity`,
+        ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+      };
+    }
+    if (outcome.operation) {
+      const operationId = typeof outcome.operation.id === 'string' ? outcome.operation.id.trim() : '';
+      if (!operationId) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner returned an operation without a stable identity',
+          ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+        };
+      }
+      if (outcome.operation.state === 'running' && !adapter.getOperation) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner returned a running operation without a real status API',
+          operation: { ...outcome.operation, id: operationId, state: 'unavailable' },
+        };
+      }
+      if (outcome.operation.cancelVerb && !adapter.cancelOperation) {
+        return {
+          status: 'unavailable', entry: toSearchItem(entry), verb: params.verb,
+          detail: 'owner returned a cancellation identity without a real cancellation API',
+          operation: { ...outcome.operation, id: operationId, state: 'unavailable' },
+        };
+      }
+      if (!outcome.operation.id || !(await persistOperation(outcome.operation, outcome.detail))) {
+        return {
+          status: 'unavailable',
+          entry: toSearchItem(entry),
+          verb: params.verb,
+          detail: 'owner returned an operation identity but Host could not durably record it for this workspace/session',
+          ...(outcome.data !== undefined ? { data: outcome.data } : {}),
+        };
+      }
+    }
     return {
       status: outcome.status,
       entry: toSearchItem(entry),
@@ -951,6 +1205,9 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams,
   ): Promise<SettingsUpdateResult> => {
+    if (params.surface) {
+      throw new HarnessServiceError('denied', 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted');
+    }
     if (params.scope !== undefined) {
       throw new HarnessServiceError(
         'denied',
@@ -1184,9 +1441,6 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsUpdateParams | SettingsUpdateItem,
   ): Promise<SettingsUpdateResult> => {
-    if (params.surface) {
-      throw new HarnessServiceError('denied', 'explicit surface selection is unavailable; client settings require one authenticated surface');
-    }
     const bridge = deps.clientSurfaces;
     if (!bridge) {
       throw new HarnessServiceError(
@@ -1227,7 +1481,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           values,
           ...(resets.length > 0 ? { reset: resets } : {}),
         }],
-      });
+      }, { sessionId: caller.sessionId });
     } catch (error) {
       const code = error instanceof HarnessServiceError ? error.harnessCode : undefined;
       throw new HarnessServiceError(
@@ -1300,11 +1554,11 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
           break;
         }
         case 'client': {
-          if (item.surface ?? params.surface) {
-            itemResults.push({ id: item.id, status: 'failed', error: 'explicit surface selection is unavailable; connect exactly one authenticated surface' });
-          } else {
-            clientEntries.push({ entry, params: item });
+          if (item.surface || params.surface) {
+            itemResults.push({ id: item.id, status: 'failed', error: 'surface selection is Host-resolved from the caller session; model supplied surface ids are not accepted' });
+            break;
           }
+          clientEntries.push({ entry, params: item });
           break;
         }
         case 'action':

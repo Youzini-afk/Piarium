@@ -3,7 +3,7 @@ import { createPathLockService, type PathLockService } from "./path-lock.js";
 import { discoverShells } from "./shell-discovery.js";
 import type { HarnessShellSetting } from "./harness-shell-settings.js";
 import type { HarnessWebBinding } from "./harness-web-settings.js";
-import { createShellSupervisor, selectInterpreter, type ShellCommandCompletedEvent, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
+import { createShellSupervisor, selectInterpreter, type ShellCommandCompletedEvent, type ShellCommandOutputEvent, type ShellCommandStartedEvent, type ShellInterpreter, type ShellSupervisor } from "./shell-supervisor.js";
 import type { TerminalSessionApi } from "../terminal/session-api.js";
 import { createHarnessSearchService, type HarnessSearchDeps, type HarnessSearchService } from "./search-service.js";
 import type { DiagnosticsProvider } from "./diagnostics-service.js";
@@ -413,7 +413,7 @@ export interface HarnessServiceHost {
   scheduledTaskService: import("../scheduled-tasks/service.js").ScheduledTaskService | null;
   managedRemoteTargets: import("./managed-remote-client.js").ManagedRemoteTargetRegistry | null;
   /** Deliver one terminal shell fact into the same 7G observer used by local PTY commands. */
-  observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): void;
+  observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -459,6 +459,9 @@ export interface HarnessServiceHostOptions {
   createTerminalSession?: TerminalSessionApi["createTerminalSession"];
   /** Receives the single PTY-confirmed completion fact for 7G context delivery. */
   onShellCompleted?: (sessionId: string, event: ShellCommandCompletedEvent) => void | Promise<void>;
+  /** Durable shell lifecycle producers used by follow-up and Zone 2. */
+  onShellStarted?: (sessionId: string, event: ShellCommandStartedEvent) => void | Promise<void>;
+  onShellOutput?: (sessionId: string, event: ShellCommandOutputEvent) => void | Promise<void>;
   /** Web fetch service (null on cloud/web hosts without fetch capability) */
   webFetchService?: HarnessServiceHost["webFetchService"];
   /** Web search service (null when no search provider available) */
@@ -577,13 +580,22 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
 
   const sessions = new Map<string, SessionEntry>();
   const observedShellCompletions = new Set<string>();
-  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): void => {
+  const shellCompletionWrites = new Map<string, Promise<void>>();
+  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): Promise<void> => {
     const key = `${sessionId}\0${event.executionId}`;
-    if (observedShellCompletions.has(key)) return;
-    observedShellCompletions.add(key);
-    void Promise.resolve(options.onShellCompleted?.(sessionId, event)).catch((error: unknown) => {
+    if (observedShellCompletions.has(key)) return Promise.resolve();
+    const existing = shellCompletionWrites.get(key);
+    if (existing) return existing;
+    const write = Promise.resolve(options.onShellCompleted?.(sessionId, event)).then(() => {
+      observedShellCompletions.add(key);
+    }).catch((error: unknown) => {
       console.error('[HarnessShell] Completion observation failed:', sessionId, error);
+      throw error;
+    }).finally(() => {
+      if (shellCompletionWrites.get(key) === write) shellCompletionWrites.delete(key);
     });
+    shellCompletionWrites.set(key, write);
+    return write;
   };
   // A broker session can disappear before its PTY exits. Keep that writer visible
   // to worktree reclamation until disposal has actually completed.
@@ -637,13 +649,14 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
         sessionId,
         cwd: ctx.workspaceRoot ?? undefined,
         commandLifecycle: {
-          started: (event) => verification.beginCommand({ ...event, actor: ctx.actor }),
-          completed: (event) => {
-            void Promise.resolve(verification.completeCommand({ ...event, actor: ctx.actor }))
-              .then(() => observeShellCompletion(sessionId, event))
-              .catch((error: unknown) => {
-                console.error('[HarnessShell] Completion observation failed:', sessionId, error);
-              });
+          started: async (event) => {
+            await verification.beginCommand({ ...event, actor: ctx.actor });
+            await options.onShellStarted?.(sessionId, event);
+          },
+          output: (event) => options.onShellOutput?.(sessionId, event),
+          completed: async (event) => {
+            await verification.completeCommand({ ...event, actor: ctx.actor });
+            await observeShellCompletion(sessionId, event);
           },
         },
         ...(options.registerWriter ? {

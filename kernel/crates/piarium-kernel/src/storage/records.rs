@@ -1,5 +1,6 @@
 //! Durable product records and their object references.
 use super::*;
+use sha2::{Digest, Sha256};
 
 impl Storage {
     fn working_reference_map(params: &Value) -> Result<BTreeMap<String, String>, KernelError> {
@@ -99,6 +100,7 @@ impl Storage {
         record_id: &str,
         workspace_id: &str,
         state: &str,
+        envelope_session_id: Option<&str>,
         payload: &Value,
     ) -> Result<(), KernelError> {
         let object = payload.as_object().ok_or_else(|| {
@@ -273,13 +275,81 @@ impl Storage {
             }
             "followup.definition" => {
                 derived("followup.definition")?;
-                same("workspaceId", workspace_id)?;
-                required("sessionId")?;
-                required("instruction")?;
-                if object.get("source").is_none_or(|value| !value.is_object()) {
+                if required("workspaceId")? != workspace_id {
                     return Err(KernelError::Operation(
-                        "followup definition requires a source object".to_string(),
+                        "followup definition workspaceId does not match its envelope".to_string(),
                     ));
+                }
+                let session_id = required("sessionId")?;
+                if envelope_session_id != Some(session_id) {
+                    return Err(KernelError::Operation(
+                        "followup definition sessionId does not match its envelope".to_string(),
+                    ));
+                }
+                required("instruction")?;
+                if object
+                    .get("experimentCaller")
+                    .is_none_or(|value| !value.is_object())
+                {
+                    return Err(KernelError::Operation(
+                        "followup definition requires experimentCaller authority".to_string(),
+                    ));
+                }
+                for field in ["createdAt", "updatedAt"] {
+                    if object.get(field).and_then(Value::as_u64).is_none() {
+                        return Err(KernelError::Operation(format!(
+                            "followup definition {field} must be an epoch millisecond"
+                        )));
+                    }
+                }
+                let source = object
+                    .get("source")
+                    .and_then(Value::as_object)
+                    .ok_or_else(|| {
+                        KernelError::Operation(
+                            "followup definition requires a source object".to_string(),
+                        )
+                    })?;
+                let source_kind = source.get("kind").and_then(Value::as_str).unwrap_or("");
+                let source_kinds = [
+                    "time",
+                    "experiment",
+                    "artifact",
+                    "file",
+                    "log",
+                    "metric",
+                    "external",
+                    "shell",
+                    "manual",
+                    "any",
+                    "all",
+                ];
+                if !source_kinds.contains(&source_kind) {
+                    return Err(KernelError::Operation(
+                        "followup definition source.kind is invalid".to_string(),
+                    ));
+                }
+                if matches!(source_kind, "any" | "all") {
+                    let children = source
+                        .get("sources")
+                        .and_then(Value::as_array)
+                        .filter(|v| !v.is_empty())
+                        .ok_or_else(|| {
+                            KernelError::Operation(
+                                "followup composite source requires children".to_string(),
+                            )
+                        })?;
+                    if children.iter().any(|child| {
+                        child
+                            .as_object()
+                            .and_then(|item| item.get("kind"))
+                            .and_then(Value::as_str)
+                            .is_none_or(|kind| !source_kinds[..9].contains(&kind))
+                    }) {
+                        return Err(KernelError::Operation(
+                            "followup composite child source is invalid".to_string(),
+                        ));
+                    }
                 }
                 state_in(&[
                     "waiting",
@@ -295,7 +365,87 @@ impl Storage {
                 derived("followup.occurrence")?;
                 required("followUpId")?;
                 required("reason")?;
+                if object.get("facts").is_none_or(|value| !value.is_object())
+                    || object.get("at").and_then(Value::as_u64).is_none()
+                {
+                    return Err(KernelError::Operation(
+                        "followup occurrence requires object facts and epoch at".to_string(),
+                    ));
+                }
                 state_in(&["recorded", "delivering", "delivered", "held", "dropped"])?;
+            }
+            "followup.observation" => {
+                derived("followup.observation")?;
+                if required("workspaceId")? != workspace_id {
+                    return Err(KernelError::Operation(
+                        "followup observation workspaceId does not match its envelope".to_string(),
+                    ));
+                }
+                let source_kind = required("sourceKind")?;
+                if !["file", "metric", "shell"].contains(&source_kind) {
+                    return Err(KernelError::Operation(
+                        "followup observation sourceKind is invalid".to_string(),
+                    ));
+                }
+                let payload_session_id = object.get("sessionId").and_then(Value::as_str);
+                let session_identity_matches = if source_kind == "shell" {
+                    payload_session_id.is_some() && payload_session_id == envelope_session_id
+                } else {
+                    payload_session_id.is_none() && envelope_session_id.is_none()
+                };
+                if !session_identity_matches {
+                    return Err(KernelError::Operation(
+                        "followup observation session identity does not match its source/envelope"
+                            .to_string(),
+                    ));
+                }
+                required("sourceKey")?;
+                required("eventId")?;
+                if object.get("at").and_then(Value::as_u64).is_none()
+                    || object.get("facts").is_none_or(|value| !value.is_object())
+                {
+                    return Err(KernelError::Operation(
+                        "followup observation requires epoch at and object facts".to_string(),
+                    ));
+                }
+                state_in(&["available", "expired"])?;
+            }
+            "settings.operation" => {
+                let id = required("id")?;
+                let entry_id = required("entryId")?;
+                let session_id = required("sessionId")?;
+                let envelope_session_id = envelope_session_id.ok_or_else(|| {
+                    KernelError::Operation(
+                        "settings operation envelope sessionId is required".to_string(),
+                    )
+                })?;
+                if session_id != envelope_session_id {
+                    return Err(KernelError::Operation(
+                        "settings operation payload sessionId does not match its envelope"
+                            .to_string(),
+                    ));
+                }
+                let payload_state = required("state")?;
+                if payload_state != state {
+                    return Err(KernelError::Operation(
+                        "settings operation payload state does not match its envelope".to_string(),
+                    ));
+                }
+                required("verb")?;
+                required("createdAt")?;
+                required("updatedAt")?;
+                same("workspaceId", workspace_id)?;
+                let identity = format!("{session_id}\0{entry_id}\0{id}");
+                let expected_record_id = format!(
+                    "settings.operation:{}",
+                    hex::encode(Sha256::digest(identity.as_bytes()))
+                );
+                if record_id != expected_record_id {
+                    return Err(KernelError::Operation(
+                        "settings operation recordId does not match its caller/entry/owner identity".to_string(),
+                    ));
+                }
+                state_in(&["running", "succeeded", "failed", "cancelled", "unavailable"])?;
             }
             "resource.machine" => {
                 derived("resource.machine")?;
@@ -608,6 +758,8 @@ impl Storage {
             "managed.remote.shell",
             "followup.definition",
             "followup.occurrence",
+            "followup.observation",
+            "settings.operation",
         ];
         if !KNOWN_RECORD_TYPES.contains(&record_type)
             && !(record_type.starts_with("retrieval.evidence.")
@@ -653,6 +805,7 @@ impl Storage {
             record_id,
             &workspace_id,
             state,
+            params_value.get("sessionId").and_then(Value::as_str),
             &payload,
         )?;
         let references = params_value

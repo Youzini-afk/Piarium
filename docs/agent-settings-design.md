@@ -1,13 +1,14 @@
 # Piarium 对话式设置与 Agent 管理设计
 
-Status: owner-backed field/action/client slices wired and corrected through D-310; Stage S remains partial (multi-Surface targeting and owner operation identities)
+Status: Stage S delivered through D-311: owner-backed fields/actions, session-bound client Surfaces, typed owner operations and compound management are wired
 
 Last updated: 2026-09-21
 
 实施顺序见 [Harness plan 的阶段 S](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)，
 交付事实见 [Harness status](agent-harness-status.md)，决策见 [D-306](decisions/tool-environment.md#d-306--2026-09-20--阶段-s对话式设置与-agent-管理)。
 本文同时定义完整目标和当前实现边界；字段目录、查询/修改、UI 同步、领域动作、客户端 Surface 操作、
-跨 owner 组合更新和 S4 组合指南已经接线；认证 Surface、逐项 CAS、secret 投影与 scheduler/follow-up 验收修订见 D-310，
+跨 owner 组合更新和 S4 组合指南已经接线；认证 Surface、逐项 CAS、secret 投影与初轮验收修订见 D-310，
+session→Surface 绑定及 typed action-operation 收口见 D-311，
 具体事实与剩余边界以 status 为准。
 
 ## 1. 产品目标
@@ -155,8 +156,11 @@ Agent 创建或修改 Skill/提示词时走既有资源 API，变更与用户在
 
 安装、登录、启停、连接、准备模型/语言服务等操作由目录引用原领域动作，复用或补齐该服务的 Agent 工具适配，
 不伪装成布尔值更新。缺少 Agent 适配时记为未接线，只有 UI 链接不能算对话管理已完成。
-涉及系统交互的步骤可以返回可打开的入口；涉及长任务的步骤返回真实操作身份、状态与取消/重试入口，
-沿既有长任务观察机制继续，不保持整个设置服务阻塞。
+涉及系统交互的步骤可以返回可打开的入口；涉及长任务的步骤只有在 owner 返回真实稳定身份、
+并提供可查询/可取消 authority 时才返回 operation。Host 将 operation 元数据写入现有 Rust
+`settings.operation` typed record，记录 caller session、entry 和 owner identity；重启后按
+同一记录对账。Owner 只有异步启动而没有状态 authority 时返回 `unavailable`，不伪造 handle，
+也不保留永远 `running` 的影子任务。
 
 设置读取默认没有副作用，不能因查看可选 provider/组件便登录、下载、安装或唤起模型。
 改变到需要尚未安装组件的配置时，明确给出依赖与准备动作，沿用户请求和既有授权处理，不隐式视为安装成功。
@@ -172,6 +176,12 @@ Agent 创建或修改 Skill/提示词时走既有资源 API，变更与用户在
 作用范围取决于实际字段定义，不为所有设置虚构全局、项目、会话覆盖。D-031/5.10 的 user-only、
 可信项目与只能收紧的规则继续有效；若后续要扩大某字段范围，必须连真实 owner/resolver 和消费者一起实现并记录该语义变化。
 “这次使用”与“修改以后默认”分别路由，不能为满足一句临时要求悄悄改动其他会话的默认值。
+
+客户端 Surface 绑定由已认证 UI 先向 Host 登记当前 session，再由 Host 校验该 session
+仍在 broker 中存活并绑定 SSE 连接；Harness caller 的 `sessionId` 是唯一选择依据。
+Surface id 只作为 Host 返回的事实，不接受模型传入的 Surface 选择器。零个绑定 Surface
+返回 `unavailable`，同一 session 的多个窗口返回 `ambiguous`，连接重建或 session 删除后
+必须重新登记，不能把临时连接推断成跨设备永久绑定。
 
 所有修改经过 Piarium 原生 `tool_call` 权限门和 Host 能力检查，沿实际设置资源描述授权，
 不因使用统一 update 入口便给予对整个应用配置的无限写入。已有授权可直接执行，不为每次改字体、通知重复审批。

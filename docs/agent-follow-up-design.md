@@ -1,15 +1,15 @@
 # Piarium 会话等待、触发与续接设计
 
-Status: durable experiment/artifact/file/metric/log/external sources, remote reconciliation, Thread/session lifecycle, workspace recovery and calendar management wired and corrected through D-310; Stage W remains partial
+Status: Stage W delivered through D-311: durable composite/source observations, ordinary-shell observation, unified delivery, recovery and calendar management are wired
 
 Last updated: 2026-09-21
 
 实施顺序见 [Harness plan 阶段 W](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)，交付事实见
 [Harness status](agent-harness-status.md)，决策见 [D-307](decisions/tool-environment.md#d-307--2026-09-20--阶段-w会话等待触发与续接)。
 阶段 W 排在 [阶段 S](agent-settings-design.md) 之后，复用 7G 请求前增量、7H 后台工具与事件等待、7I 实验/远程事实。
-本文同时定义完整目标和当前实现边界；时间、耐久 experiment、artifact、file、metric、log、external 与 manual 来源，
-远程目标续接、Thread/session 生命周期、workspace 枚举恢复和 calendar 任务的 Agent 管理已经接线。普通 shell
-仍使用 7H 的非耐久句柄；跨来源 all/any、共享外部观察以及无历史 file/metric 边沿的崩溃恢复仍未实现，具体事实以 status 为准。
+本文同时定义完整目标和当前实现边界；时间、耐久 experiment、artifact、file、metric、log、external、ordinary shell
+与 manual 来源，以及跨来源 `any`/`all` 已接线。相容 file/metric/attempt/external 观察共享 owner 订阅或查询；file/metric
+边沿先写 kernel observation 再推进 occurrence。普通 shell 的进程仍不跨 Host 生存，重启后无法重附着会如实 unavailable。
 
 ## 1. 用户需求
 
@@ -45,7 +45,7 @@ Agent 自然使用工具登记后续意图，用户不必另开调度器、填�
 
 | 场景 | 首选来源 | 程序负责的工作 |
 | --- | --- | --- |
-| 训练、构建或长执行结束/失败 | 耐久 experiment attempt 的权威终态；短期普通 shell 用 7H wait/output | 识别退出/成功/失败，给结果和原文入口；不把普通 shell 冒充可重启来源 |
+| 训练、构建或长执行结束/失败 | 耐久 experiment attempt；普通 shell 可按 executionId 登记退出/状态/输出命中 | 识别退出/成功/失败，给结果和原文入口；普通 shell 重启不可重附着时转 unavailable |
 | 文件或产物就绪 | Documents/文件观察或产物收集服务 | 区分文件出现、发生变更与完整产物 ready，不能把开始写入当作完整可读 |
 | 指标达到条件 | 已声明的结构化指标来源 | 读取值、单位、修订/时间并判断明确谓词 |
 | 出现指定日志内容 | 指定执行的原始日志增量 | 沿游标匹配，保留命中范围和来源；不能把任意 ERROR 文本自动当作作业失败 |
@@ -141,7 +141,8 @@ Application Host 拥有触发与续接策略，沿现有 Rust durable storage �
 登记前已经完成的来源应返回已满足事实并安排一次有效后续，不永远等待下一条不会出现的终态事件。
 程序扫描和事件通知可能重叠，通过 definition revision 与来源事件/状态修订形成 occurrence 身份。
 
-触发先耐久记录，再按该身份申请交付/续接，复用已有 requestId 幂等消息与 broker 准入。
+触发先耐久记录，再按该身份申请交付/续接。Thread 目标复用 `thread.send` 的 request ledger、目标串行区、held flush、
+continuation admission 与同一 requestId；root session 没有 Thread ledger，继续复用 Pi 原生 notify/request receipt。
 响应丢失后查投递/运行状态再继续，不盲目重复派发。观察、触发、消息接受、Agent 运行和结果完成分别表达，
 不能把 accepted 当 completed，也不能仅凭去重键承诺任意远端副作用全局 exactly-once。
 条件更新/取消与回调以相同 revision/状态边界协调，旧定义不能继续产生新动作。

@@ -1,8 +1,45 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 
+let mockSessionId: string | null = null;
+const sessionListeners = new Set<(state: { currentSessionId: string | null }, previous: { currentSessionId: string | null }) => void>();
+const bindCalls: string[] = [];
+let bindGate: Promise<void> | null = null;
+let runtimeListener: (() => void) | null = null;
+
 mock.module('@piarium/application-client', () => ({
-  getRuntimeUrlResolver: () => ({ sse: (path: string) => `http://runtime.test${path}` }),
-  subscribeRuntimeEndpointChanged: () => () => undefined,
+  getRuntimeUrlResolver: () => ({
+    sse: (path: string, query?: Record<string, string>) => {
+      const suffix = query ? `?${new URLSearchParams(query).toString()}` : '';
+      return `http://runtime.test${path}${suffix}`;
+    },
+  }),
+  subscribeRuntimeEndpointChanged: (listener: () => void) => {
+    runtimeListener = listener;
+    return () => { runtimeListener = null; };
+  },
+}));
+
+mock.module('@/stores/usePiSessionStore', () => ({
+  usePiSessionStore: {
+    getState: () => ({ currentSessionId: mockSessionId }),
+    subscribe: (listener: (state: { currentSessionId: string | null }, previous: { currentSessionId: string | null }) => void) => {
+      sessionListeners.add(listener);
+      return () => sessionListeners.delete(listener);
+    },
+  },
+}));
+
+mock.module('@/lib/client-settings-bridge', () => ({
+  bindClientSurfaceSession: async (sessionId: string) => {
+    bindCalls.push(sessionId);
+    if (bindGate) await bindGate;
+  },
+  clientSurfaceQuery: () => ({
+    surface: 'surface-test',
+    kind: 'web',
+    ...(mockSessionId ? { session: mockSessionId } : {}),
+  }),
+  handleClientSettingsRequest: async () => undefined,
 }));
 
 class MockEventSource {
@@ -24,8 +61,17 @@ class MockEventSource {
 }
 
 describe('Piarium events', () => {
+  const flushAsync = async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  };
+
   beforeEach(() => {
     MockEventSource.instances = [];
+    mockSessionId = null;
+    bindCalls.length = 0;
+    bindGate = null;
+    runtimeListener = null;
+    sessionListeners.clear();
     globalThis.window = {
       addEventListener: () => undefined,
       removeEventListener: () => undefined,
@@ -69,6 +115,48 @@ describe('Piarium events', () => {
         dispatchedAsCommand: false,
       },
     ]);
+    unsubscribe();
+  });
+
+  test('binds a non-empty session before opening SSE', async () => {
+    mockSessionId = 'session-a';
+    let release!: () => void;
+    bindGate = new Promise<void>((resolve) => { release = resolve; });
+    const { subscribePiariumEvents } = await import('./piariumEvents');
+    const unsubscribe = subscribePiariumEvents(() => undefined);
+
+    expect(bindCalls).toEqual(['session-a']);
+    expect(MockEventSource.instances).toHaveLength(0);
+    release();
+    await flushAsync();
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0]?.url).toContain('session=session-a');
+    unsubscribe();
+  });
+
+  test('rebinds after a session switch and runtime reconnect', async () => {
+    mockSessionId = 'session-a';
+    const { subscribePiariumEvents } = await import('./piariumEvents');
+    const unsubscribe = subscribePiariumEvents(() => undefined);
+    await flushAsync();
+    const first = MockEventSource.instances[0];
+    expect(first?.url).toContain('session=session-a');
+
+    mockSessionId = 'session-b';
+    for (const listener of sessionListeners) {
+      listener({ currentSessionId: 'session-b' }, { currentSessionId: 'session-a' });
+    }
+    await flushAsync();
+    expect(first?.readyState).toBe(MockEventSource.CLOSED);
+    expect(bindCalls).toEqual(['session-a', 'session-b']);
+    expect(MockEventSource.instances.at(-1)?.url).toContain('session=session-b');
+
+    MockEventSource.instances.at(-1)?.onerror?.();
+    expect(bindCalls).toEqual(['session-a', 'session-b']);
+    runtimeListener?.();
+    await flushAsync();
+    expect(bindCalls).toEqual(['session-a', 'session-b', 'session-b']);
+    expect(MockEventSource.instances.at(-1)?.url).toContain('session=session-b');
     unsubscribe();
   });
 

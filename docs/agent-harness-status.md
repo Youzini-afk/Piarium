@@ -18,7 +18,7 @@ Last updated: 2026-09-21
 Default-on 列只记当前代码，尚未完成的正式目标单独列为待实施。
 [roadmap.md](roadmap.md) 只引用本文件，不再自述测试数。
 
-**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），字段、领域 action、client Surface 与组合管理纵切已接线，并经 D-308/D-310 两轮验收返工；阶段仍为 Partial。**
+**D-306 / 阶段 S：对话式设置与 Agent 管理（2026-09-20），经 D-308/D-310/D-311 收口，当前产品范围已完成并进入生产调用链。**
 设计见 [agent-settings-design.md](agent-settings-design.md)，实施顺序见
 [plan S0–S4](agent-harness-plan.md#阶段-s对话式设置与-agent-管理d-306)。
 
@@ -37,9 +37,10 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
   远程、Git identity、magic-prompt、知识库、runtime 与 tunnel 等既有 owner。adapter 的实时 verb 与 catalog 取交集；
   无 owner API 的条目不再广告可执行 verb。provider/MCP/plugin 配置返回领域白名单投影，原文凭据、header/env 与 URL
   userinfo 不进入模型；owner 没有可查询操作身份时只返回 pending 与实际复查入口，不构造假 operation handle。
-- client owner 经 `lib/harness/client-surfaces.ts` 的桥接线：events/ack 均经过 UI auth，pending request 绑定认证主体、
-  Surface id 和 Host 生成的 connection nonce；UI 只有完成真实 store/IPC 操作后才回执。Agent 不能传任意 Surface id；
-  恰有一个认证 Surface 时可操作，离线为 unavailable，多个为 ambiguous。set/reset 按 catalog 校验，已知默认值由
+- client owner 经 `lib/harness/client-surfaces.ts` 的桥接线：UI 先以认证主体登记 live broker session 与窗口 Surface，
+  Host 发出的单次 permit 再由该 Surface 的 SSE 连接消费；request/ack 绑定认证主体、session、Surface id 和 connection nonce。
+  UI 只有完成真实 store/IPC 操作后才回执。Agent 不能传任意 Surface id；恰有一个该 session 的认证 Surface 时可操作，
+  离线为 unavailable，多个为 ambiguous。重连与 session 删除会撤销旧绑定。set/reset 按 catalog 校验，已知默认值由
   Surface 恢复，失败不广播 applied。
 - `settings_update` 支持 `items[]`：app 文档及 Pi global/project 各用自己的 item revision/CAS，冲突重复路径在写前拒绝，
   字段失败进入 item 的 partial/failed 结果并对模型可见。app 与同一 Pi scope 分别单次原子提交；client 与跨 owner 操作
@@ -47,16 +48,18 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 - `settings_search` 结果携带当前值摘要/类型/scope/可用性等渐进披露信息（8b29c18e）。
 - 产品 Skills 经 `lib/pi-runtime/product-skills.ts` 按发现体系按需种子到 agentDir：引用稳定设置 ID 与 action 入口，
   当前值/参数/安装状态由工具实时查询，不复制第二份静态 authority（8b29c18e）。
+- 真实异步 action 只有在 owner 提供稳定 status（及实际 cancel）能力时才进入 typed `settings.operation`；身份绑定
+  session + entry + operationId，Rust 核验 envelope/payload/CAS。现有安装、登录、准备和连接 adapter 会等待 owner 的
+  实际返回并直接报告 applied/unavailable，不把已完成调用伪造成长期 pending。
 
-定向证据：设置服务、认证 Surface、action 脱敏、组合 CAS、并发 reload、产品 Skill 与工具输出的相关行为检查通过；
-protocol、Pi Host、UI 与 Application Host 类型检查通过。未据此外推真实外部登录或跨平台 Surface。
+定向证据：设置服务、session→Surface 认证绑定、action 脱敏与 operation identity、组合 CAS、并发 reload、产品 Skill
+与工具输出的相关行为检查通过；protocol、Pi Host、UI 与 Application Host 类型检查通过。
 
-未实现/未接线：当前 Harness actor 没有 session→Surface 绑定，因此多个认证 Surface 同时连接时只能返回 ambiguous，
-尚不能由 Agent 安全点选其中一个；个别无 owner API 的 catalog 条目保持 unavailable；没有统一的耐久 action-operation
-查询域，长动作只使用真实 owner 已有的 status/cancel 能力。真实外部登录、付费 provider 安装与跨平台 Surface 现场未实测。
-运行中 harness 配置按 `next-run` 生效；远程 Host 的 app 设置作用于该 Host 文档。
+边界：个别没有 owner API 的目录项保持 unavailable；同一 session 在多个窗口打开时不猜选 Surface。运行中 harness
+配置按 `next-run` 生效；远程 Host 的 app 设置作用于该 Host 文档。真实外部登录/付费安装往返和跨平台 Surface 未实测，
+按本阶段交付选择不再作为完成门槛，也不据此宣称这些外部环境已经 proven。
 
-**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），耐久来源、远程对账、Thread/session 生命周期与 calendar 管理纵切已接线，并经 D-308/D-310 两轮验收返工；阶段仍为 Partial。**
+**D-307 / 阶段 W：会话等待、触发与续接（2026-09-20），经 D-308/D-310/D-311 收口，W0–W4 当前产品范围已完成并进入生产调用链。**
 设计见 [agent-follow-up-design.md](agent-follow-up-design.md)，任务见
 [plan W0–W4](agent-harness-plan.md#阶段-w会话等待触发与续接d-307)。
 
@@ -89,10 +92,16 @@ protocol、Pi Host、UI 与 Application Host 类型检查通过。未据此外�
 - 原 scheduler 普通任务等待实际 settle；多轮 Goal 持有调度身份直到真实终态。会让仍运行会话释放不重叠锁的 30 分钟
   watchdog 已删除；首次创建 `.agents/loops` 可由已存在祖先 watcher 捕获。
 
-未实现/未接线：跨来源 `all`/`any` 与相容外部查询共享未实现；普通 shell 没有耐久 source，短等待继续用 7H，需跨重启的
-训练/构建应使用 experiment attempt。file/metric owner 没有耐久事件历史，因此 delivery 窗口在进程内可合并，Host 崩溃期间
-的短暂边沿不承诺 exactly-once。active notify 被接受后恰逢 Run settle，再转 continue 的两套 receipt 尚未形成统一消费证明，
-仍是重复输入风险。真实 GitHub 查询、完整桌面重启/跨平台、外部编辑器参与 Markdown CAS 和真实模型链仍未实测。
+Stage W 后续来源已接线：`any`/`all` 使用隐藏 leaf definition 与 parent latch，并保留 repeatable edge；file/metric 边沿先写
+`followup.observation` typed record，再按各 definition cursor 消费；file watcher、metric/attempt subscription 与 external query group
+按相容身份共享并在最后订阅者退出时释放。Thread occurrence 经同一 `thread.send(kind=request, context=continue)` 核心、message ledger
+和 requestId 处理 active/held/settled/queued，暂时投递失败由同一 durable occurrence 重试；root session 仍依赖 Pi 原生 receipt。
+普通 shell 的 start/completion 写 Knowledge owner，登记时先从 supervisor 按字节游标补读已有输出，再订阅新 chunk；follow-up
+只保留匹配事实与 definition cursor，不复制整段日志。Host 重启后不能重附着的本地 shell 转 unavailable。
+
+边界：file/metric 在 Host 收到来源边沿后先耐久化，来源 owner 尚未送达的瞬时事件不承诺跨进程 exactly-once；本地进程
+不因登记等待而升级为远端耐久作业。真实 GitHub 登录、完整桌面重启/跨平台、外部编辑器参与 Markdown CAS 和真实模型链
+未实测，按本阶段交付选择不再作为完成门槛。
 
 **D-292/D-295 阶段 Q：测试与 CI 体系重整（2026-09-19），实施完成、本地验证通过，已由主代理验收收口。** 现状审计与处置见
 [testing-ci-audit.md](testing-ci-audit.md)，设计见 [testing-ci-design.md](testing-ci-design.md)。

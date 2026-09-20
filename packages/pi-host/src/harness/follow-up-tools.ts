@@ -58,6 +58,15 @@ const describeSource = (source: Record<string, unknown>): string => {
       return `${source.metric} on ${source.machineId} ${source.predicate} ${source.threshold}${source.every === true ? " (each crossing)" : ""}`;
     case "external":
       return `GitHub PR ${source.condition}${typeof source.branch === "string" ? ` on ${source.branch}` : ""}`;
+    case "shell":
+      return source.condition === "output"
+        ? `shell ${source.executionId} output matching ${source.regex === true ? `/${source.pattern}/` : JSON.stringify(source.pattern)}`
+        : source.condition === "status"
+          ? `shell ${source.executionId} status ${(source.states as string[] | undefined)?.join("/") ?? "terminal"}`
+          : `shell ${source.executionId} to exit`;
+    case "any":
+    case "all":
+      return `${source.kind} of ${((source.sources as Record<string, unknown>[] | undefined) ?? []).map(describeSource).join("; ")}${source.every === true ? " (repeatable edges)" : ""}`;
     case "manual":
       return typeof source.note === "string" ? source.note : "explicit trigger only";
     default:
@@ -68,7 +77,7 @@ const describeSource = (source: Record<string, unknown>): string => {
 const describeView = (view: { id: string; status: string; waitingSummary?: string; revision: string }): string =>
   `${view.id} [${view.status}]${view.waitingSummary ? ` — ${view.waitingSummary}` : ""} (rev ${view.revision})`;
 
-const sourceSchema = Type.Union([
+const leafSourceSchema = Type.Union([
   Type.Object({
     kind: Type.Literal("time"),
     at: Type.Number({ description: "Absolute due time in epoch milliseconds (compute it — the host stores the instant, not the text)" }),
@@ -123,9 +132,38 @@ const sourceSchema = Type.Union([
     fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
   }, { description: "Fire when a GitHub PR reaches a state — typed adapter, deterministic queries" }),
   Type.Object({
+    kind: Type.Literal("shell"),
+    executionId: Type.String({ description: "Stable executionId returned by an ordinary bash/powershell command" }),
+    condition: Type.Union([Type.Literal("exit"), Type.Literal("output"), Type.Literal("status")]),
+    pattern: Type.Optional(Type.String({ description: "output only: literal text, or a JavaScript RegExp with regex=true" })),
+    regex: Type.Optional(Type.Boolean()),
+    states: Type.Optional(Type.Array(Type.Union([
+      Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"),
+      Type.Literal("cancelled"), Type.Literal("unavailable"),
+    ]), { description: "status only: states that wake the follow-up" })),
+    every: Type.Optional(Type.Boolean({ description: "output only: fire for each later committed match" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop" })),
+  }, { description: "Fire from an ordinary background shell's durable lifecycle or streamed output match" }),
+  Type.Object({
     kind: Type.Literal("manual"),
     note: Type.Optional(Type.String({ description: "What is being awaited, for the audit trail" })),
   }, { description: "Fire only via check/fire — e.g. a signal the program cannot observe" }),
+]);
+
+const sourceSchema = Type.Union([
+  leafSourceSchema,
+  Type.Object({
+    kind: Type.Literal("any"),
+    sources: Type.Array(leafSourceSchema, { minItems: 1, description: "Ordinary sources; the first durable signal wakes the follow-up" }),
+    every: Type.Optional(Type.Boolean({ description: "Re-arm repeatable edge sources after each occurrence" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop for the combined wait" })),
+  }),
+  Type.Object({
+    kind: Type.Literal("all"),
+    sources: Type.Array(leafSourceSchema, { minItems: 1, description: "Ordinary sources; each must durably signal before wakeup" }),
+    every: Type.Optional(Type.Boolean({ description: "Start another cycle; one-shot leaves cannot satisfy a later cycle without a new event" })),
+    fallbackAt: Type.Optional(Type.Number({ description: "Epoch ms deadline backstop for the combined wait" })),
+  }),
 ]);
 
 export function createFollowUpTool(bridge: HostServicesBridge): ToolDefinition {
@@ -133,11 +171,13 @@ export function createFollowUpTool(bridge: HostServicesBridge): ToolDefinition {
     name: "follow_up",
     label: "Follow-up",
     description:
-      "Register a durable follow-up on this conversation: what to wait for and what to do when it happens. Sources: time, experiment terminal, artifact collection, workspace file, log pattern, machine metric crossing, external GitHub PR state, or manual. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
+      "Register a durable follow-up on this conversation: what to wait for and what to do when it happens. Sources: time, experiment terminal, artifact collection, workspace file, log pattern, machine metric crossing, ordinary background shell, external GitHub PR state, manual, or an any/all combination of these. The host watches the source — you do not poll. When it fires, this thread resumes with the trigger facts. Actions: register, list, get, update, cancel, check, fire.",
     promptSnippet: "follow_up: durable wait + continuation (register/list/get/update/cancel/check/fire)",
     promptGuidelines: [
       "Register AFTER the work exists: an experiment/artifact/log source needs the real attemptId from experiment submit, a file source needs a workspace-relative path, a metric source needs a machineId from the resources overview, a time source needs a concrete epoch-ms instant you computed.",
       "Sources bind real events: artifact fires when collection makes the artifact available (or reports missing/failed); file 'ready' requires no active writer plus a stable stat — a bare file appearing is never 'ready'; metric fires only on threshold crossings, never on a steady-true stream; log matches incrementally by byte cursor.",
+      "A shell source uses the executionId returned by bash/powershell. It does not turn the command into an experiment: completion is durable, output matching stores only compact match/cursor facts, and a still-running local process becomes unavailable after a Host restart when it cannot be reattached.",
+      "Use {kind:'any', sources:[...]} for the first matching source or {kind:'all', sources:[...]} to latch each source. Combinations are one-shot unless every=true; later cycles require new repeatable edges, so a due time or already-completed attempt does not manufacture repeated wakeups.",
       "Registration is non-blocking — keep working unless the user asked you to wait. With pause=true the thread is marked waiting, the goal pauses, and the trigger resumes the run; without it the trigger arrives as a message while you work.",
       "check is a program-side evaluation of the source (is the attempt done yet?) — it fires the follow-up if satisfied but never calls the model. fire invokes you now.",
       "Only a successful register result means the follow-up exists — never promise a trigger for a failed or unconfirmed registration.",

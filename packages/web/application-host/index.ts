@@ -102,8 +102,10 @@ import { reconcileInterruptedKernelBranchIntegrations } from './lib/recovery/dur
 import { DEFAULT_HARNESS_SETTINGS, mergeHarnessSettings, resolvePresets, THINKING_LEVELS, type SessionSnapshot } from '@piarium/protocol';
 import { createSettingsService, settingsDocumentRevision } from './lib/harness/settings-service.js';
 import { createFollowUpService } from './lib/harness/followups.js';
+import { createFollowUpThreadSender } from './lib/harness/followup-delivery.js';
 import { createClientSurfaceBridge } from './lib/harness/client-surfaces.js';
 import { createSettingsActionRegistry } from './lib/harness/settings-actions.js';
+import { createKernelSettingsActionOperationStore } from './lib/harness/settings-operation-store.js';
 import { createMagicPromptRuntime } from './lib/magic-prompts/runtime.js';
 import * as gitIdentityStorage from './lib/git/identity-storage.js';
 import { getGitHubAuth, getGitHubAuthAccounts, isGhCliActive, isGhCliDisabled } from './lib/github/auth.js';
@@ -493,7 +495,11 @@ const {
   emitDesktopNotification,
   broadcastUiNotification,
 } = notificationEmitterRuntime;
-const clientSurfaceBridge = createClientSurfaceBridge({ writeSseEvent });
+let isPiSessionLive: (sessionId: string) => Promise<boolean> = async () => false;
+const clientSurfaceBridge = createClientSurfaceBridge({
+  writeSseEvent,
+  isSessionLive: (sessionId) => isPiSessionLive(sessionId),
+});
 const magicPromptRuntime = createMagicPromptRuntime({
   filePath: path.join(PIARIUM_DATA_DIR, 'magic-prompts.json'),
   fsPromises,
@@ -977,6 +983,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const ownsPiRuntimeBroker = !options.piRuntimeBroker && !options.piRuntimeLifecycle;
   const piRuntimeBroker = options.piRuntimeBroker || piRuntimeLifecycle.asBroker();
+  isPiSessionLive = async (sessionId) => (
+    (await piRuntimeBroker.listSessions()).some((session) => session.id === sessionId)
+  );
   if (options.piRuntimeBroker) {
     attachPiSessionExecutionAdmission(piRuntimeBroker, admitPiSessionExecution);
   }
@@ -1424,6 +1433,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       settingsDocumentRevision,
     ),
   });
+  const settingsActionOperations = createKernelSettingsActionOperationStore(kernelStorageAdapter);
   const settingsService = createSettingsService({
     readAppSettings: () => readSettingsFromDisk(),
     persistAppSettings: (changes, removals, expectedRevision) => settingsRuntime.persistSettingsCas(
@@ -1437,6 +1447,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await documentsAuthority.inspectWorkspace(workspaceId).catch(() => null)
     )?.root ?? null,
     actions: settingsActionRegistry,
+    actionOperations: settingsActionOperations,
     clientSurfaces: clientSurfaceBridge,
     resolveOptions: async (source, caller) => {
       if (source === 'thinking-levels') {
@@ -2117,11 +2128,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const followUpService = createFollowUpService({
     client: kernelClient,
     getThread: (workspaceId, threadId) => threadRegistry.getThreadById(workspaceId, threadId),
-    getActiveRun: (workspaceId, threadId) => threadRegistry.getActiveRun(workspaceId, threadId),
-    continueRun: (input) => threadRuntime!.continueRun(input),
-    enqueueContinuation: (workspaceId, threadId, continuation) => (
-      threadRegistry.enqueueContinuation(workspaceId, threadId, continuation)
-    ),
     notifySession: async (sessionId, text, messageId) => {
       const result = await piRuntimeBroker.requestForSession(sessionId, 'agent.notify', { sessionId, text, messageId });
       if (!result.accepted) throw new Error(`Pi session rejected the follow-up inform: ${sessionId}`);
@@ -2134,7 +2140,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const snapshot = await piRuntimeBroker.requestForSession(sessionId, 'session.snapshot', { sessionId }).catch(() => null);
       return Boolean(snapshot && (snapshot.busy === true || snapshot.isStreaming === true));
     },
-    recordDirectedMessage: (workspaceId, message) => threadRegistry.recordDirectedMessage(workspaceId, message),
+    sendToThread: createFollowUpThreadSender({
+      registry: threadRegistry,
+      continueRun: (input) => threadRuntime!.continueRun(input),
+      sendToSession: (sessionId, message, meta) => threadRuntime!.send(sessionId, message, meta),
+    }),
     setFollowUpAttention: async (workspaceId, threadId, waitingFor) => {
       const thread = await threadRegistry.getThreadById(workspaceId, threadId);
       if (!thread) return;
@@ -2174,6 +2184,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       try {
         const subscription = documentsAuthority.watch(workspaceId, (event) => {
           listener({
+            sourceId: event.sourceId,
             kind: event.kind,
             sequence: event.sequence,
             generation: event.generation,
@@ -2205,6 +2216,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     subscribeResourceSamples: (listener) => resourceService.subscribeSamples(listener),
     getResourceSample: (machineId) => resourceService.getMachineSample(machineId),
     externalSource: (provider) => provider === 'github-pr' ? followUpExternalSources.githubPr : null,
+    getShellEvents: (workspaceId, sessionId, executionId, afterId) => (
+      knowledgeContextRuntime.shellEvents(workspaceId, sessionId, executionId, afterId)
+    ),
+    subscribeShellEvents: (listener) => knowledgeContextRuntime.subscribeShellEvents(listener),
+    getShellExecutionStatus: async (sessionId, executionId) => {
+      const supervisor = harnessServiceHost.getShellSupervisor(sessionId);
+      if (!supervisor) return null;
+      return supervisor.inspectExecution(executionId);
+    },
+    readShellExecutionOutput: async (sessionId, executionId, offset, length) => {
+      const supervisor = harnessServiceHost.getShellSupervisor(sessionId);
+      if (!supervisor) return null;
+      return supervisor.readExecutionOutput(executionId, offset, length);
+    },
     onChange: (workspaceId) => broadcastResearchFacts(workspaceId, 'followup'),
     onError: (error) => console.error('[PiariumFollowUp]', error.message),
   });
@@ -2857,7 +2882,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(webSearchService ? { webSearchService } : {}),
     // Phase 2: knowledge, memory, zone2, compaction, todo, recall
     zone2Provider,
-    onShellCompleted: (sessionId, event) => knowledgeContextRuntime.observeShellCompletion(sessionId, event),
+    onShellStarted: (sessionId, event) => knowledgeContextRuntime.observeShellStarted(sessionId, event).then(() => undefined),
+    onShellOutput: (sessionId, event) => knowledgeContextRuntime.observeShellOutput(sessionId, event).then(() => undefined),
+    onShellCompleted: (sessionId, event) => knowledgeContextRuntime.observeShellCompletion(sessionId, event).then(() => undefined),
     onSessionCompacted: (sessionId) => knowledgeContextRuntime.resetSessionObservationBaselines(sessionId),
     todoDepsProvider,
     recallDepsProvider,
@@ -3080,6 +3107,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         void kernelStorageAdapter.revokeSession(event.sessionId);
         kernelSessionActors.delete(event.sessionId);
         if (ownsRegisteredSession) {
+          clientSurfaceBridge.dropSession(event.sessionId);
           sessionSnapshots.delete(event.sessionId);
           sessionNames.delete(event.sessionId);
           knowledgeContextRuntime.dropSession(event.sessionId);
@@ -3096,7 +3124,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       harnessSessionRegistration.dropSession(sessionId, event.actor);
       void kernelStorageAdapter.revokeSession(sessionId);
       kernelSessionActors.delete(sessionId);
-      if (ownsRegisteredSession) knowledgeContextRuntime.dropSession(sessionId);
+      if (ownsRegisteredSession) {
+        clientSurfaceBridge.dropSession(sessionId);
+        knowledgeContextRuntime.dropSession(sessionId);
+      }
       return;
     }
     if (envelope.event === 'session.snapshot' && sessionId) {
@@ -3251,6 +3282,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     getPiariumEventClients: () => uiPiariumEventClients,
     writeSseEvent,
     surfaceBridge: clientSurfaceBridge,
+    resolveAuthContext: uiAuthController.resolveAuthContext,
+    resolveSurfaceSession: async (sessionId) => (
+      (await piRuntimeBroker.listSessions()).some((session) => session.id === sessionId)
+    ),
     extensionCatalog,
     extensionPackages,
     extensionRuntime,

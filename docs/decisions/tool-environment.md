@@ -677,3 +677,26 @@ session→Surface 绑定与多 Surface 安全点选、统一耐久 action-operat
 和真实模型链继续只是未实测。
 
 状态：生产缺陷已修复 / 定向整合验证通过 / S 与 W 保持 Partial。
+
+### D-311 · 2026-09-21 · 阶段 S/W 生产收口与完成边界
+
+类型：实施 / 生产合同收口
+
+决定：完成 D-310 保留的实际功能缺口，并将阶段 S 与 W 在当前产品范围内收口。设置侧以认证主体、live session、
+Surface 和 connection nonce 建立单次绑定；client 操作只解析调用 session 的连接，多窗口不猜选。真实异步 action
+使用 Rust typed `settings.operation`，身份绑定 session + catalog entry + owner operation id；没有 status/cancel authority
+的 owner 不生成假运行。follow-up 侧交付 `all`/`any` hidden leaves、共享 owner 观察、typed observation、普通 shell
+生命周期与输出游标、以及复用 `thread.send` ledger/target lock/admission 的 Thread 投递。
+
+原因：D-310 的 Partial 既包含真实未接线项，也混入了外部实测和 owner 固有限制。本轮沿生产消费者补齐前者：Surface
+重连/删除撤销旧绑定，operation lookup 不再按 session 全表碰撞；file/metric 事件在 Host 接收后先耐久化，复合重复来源
+不会在 parent delivery 窗口吞掉边沿；普通 shell 登记会补读 supervisor 已有输出，实时 chunk 与 completion 按顺序交付；
+暂时投递失败保留同一 occurrence 重试。阶段完成不要求把本地进程改造成跨 Host 作业，也不要求模型选择任意 UI 窗口。
+
+边界：同一 session 同时连接多个 Surface 时返回 ambiguous；无 owner API 的设置 action 返回 unavailable。本地 shell 随
+Host 生命周期结束，来源 owner 尚未把 file/metric 边沿交给 Host 前不存在可持久化事实。真实外部登录/安装、跨平台
+Surface、完整桌面重启与真实模型链未实测；这些现场不作为本次功能完成门槛，也不标为 proven。
+
+影响：更新 settings/follow-up design、plan S/W、status、architecture、roadmap、Harness 模块文档与决策索引。
+
+状态：已实施并进入生产调用链 / 定向验证 / 阶段 S 与 W 完成。

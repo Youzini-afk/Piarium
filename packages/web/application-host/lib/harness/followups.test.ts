@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, it as vitestIt, vi } from "vitest";
-import type { ExperimentArtifactView, ExperimentAttemptView } from "@piarium/protocol";
+import { sliceUtf8ByBytes, type ExperimentArtifactView, type ExperimentAttemptView } from "@piarium/protocol";
 import { createKernelClient, type KernelClient } from "../kernel/kernel-client.js";
-import { createFollowUpService, type FollowUpCaller, type FollowUpExternalSource, type FollowUpResourceSample, type FollowUpServiceDeps } from "./followups.js";
+import { createFollowUpService, type FollowUpCaller, type FollowUpExternalSource, type FollowUpResourceSample, type FollowUpServiceDeps, type FollowUpShellEvent } from "./followups.js";
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const kernelPath = process.env.PIARIUM_TEST_KERNEL_PATH
@@ -53,11 +53,15 @@ interface Harness {
   logs: Map<string, string>;
   logEof: Map<string, boolean>;
   files: Map<string, { exists: boolean; size: number; mtimeMs: number }>;
-  fileWatchListeners: Map<string, Array<(event: { kind: string; sequence: number; generation: number; path?: string }) => void>>;
+  fileWatchListeners: Map<string, Array<(event: { sourceId: string; kind: string; sequence: number; generation: number; path?: string }) => void>>;
   activeWriters: Set<string>;
   samples: Map<string, FollowUpResourceSample>;
   sampleListeners: Array<(sample: FollowUpResourceSample) => void>;
   external: Map<string, FollowUpExternalSource>;
+  shellEvents: Map<string, FollowUpShellEvent[]>;
+  shellListeners: Array<(event: FollowUpShellEvent) => void>;
+  shellRuntime: Map<string, { running: boolean; exitCode?: number }>;
+  shellOutput: Map<string, { text: string; running: boolean; exitCode?: number }>;
   errors: Error[];
 }
 
@@ -87,7 +91,8 @@ async function fixture(options: {
   afterNotify?: (harness: Harness) => void;
   getAttempt?: (harness: Harness, attemptId: string, caller: FollowUpCaller) => Promise<ExperimentAttemptView | null>;
   watchReady?: Promise<boolean>;
-  continueRun?: (harness: Harness, input: Parameters<FollowUpServiceDeps["continueRun"]>[0]) => Promise<{ runId?: string }>;
+  continueRun?: (harness: Harness, input: Parameters<FollowUpServiceDeps["sendToThread"]>[0]) => Promise<{ runId?: string }>;
+  sendToThread?: (harness: Harness, input: Parameters<FollowUpServiceDeps["sendToThread"]>[0]) => Promise<{ delivery: import("@piarium/protocol").FollowUpOccurrenceDelivery; runId?: string }>;
 } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "piarium-followup-"));
   roots.push(root);
@@ -123,6 +128,10 @@ async function fixture(options: {
     samples: new Map(),
     sampleListeners: [],
     external: new Map(),
+    shellEvents: new Map(),
+    shellListeners: [],
+    shellRuntime: new Map(),
+    shellOutput: new Map(),
     errors: [],
   };
   options.seed?.(harness);
@@ -130,19 +139,6 @@ async function fixture(options: {
   const deps: FollowUpServiceDeps = {
     client,
     getThread: async (_ws, threadId) => harness.threads.get(threadId) ?? null,
-    getActiveRun: async (_ws, threadId) => {
-      const thread = harness.threads.get(threadId);
-      return thread?.activeRunId ? harness.runs.get(thread.activeRunId) ?? null : null;
-    },
-    continueRun: async (input) => {
-      harness.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
-      if (options.continueRun) return options.continueRun(harness, input);
-      return { runId: `run-${harness.continued.length}` };
-    },
-    enqueueContinuation: async (_ws, threadId, continuation) => {
-      harness.parked.push({ requestId: continuation.requestId, threadId });
-      return {};
-    },
     notifySession: async (sessionId, text, messageId) => {
       harness.informs.push({ messageId, sessionId, text });
       options.afterNotify?.(harness);
@@ -151,9 +147,25 @@ async function fixture(options: {
       harness.sessionRequests.push({ messageId, sessionId, text });
     },
     sessionBusy: async (sessionId) => harness.busy.has(sessionId),
-    recordDirectedMessage: async (_ws, message) => {
-      harness.ledger.push({ id: message.id, status: message.status });
-      return {};
+    sendToThread: async (input) => {
+      if (options.sendToThread) return options.sendToThread(harness, input);
+      const thread = harness.threads.get(input.threadId);
+      if (!thread || thread.lifecycle === "archived") return { delivery: "dropped" };
+      harness.ledger.push({ id: input.requestId, status: thread.lifecycle === "queued" ? "pending" : "delivered" });
+      if (thread.lifecycle === "queued") {
+        harness.parked.push({ requestId: input.requestId, threadId: input.threadId });
+        return { delivery: "parked" };
+      }
+      if (thread.lifecycle === "active" && thread.activeRunId) {
+        harness.sessionRequests.push({ sessionId: "s-1", messageId: input.requestId, text: input.text });
+        return { delivery: "active-inform", runId: thread.activeRunId };
+      }
+      harness.continued.push({ requestId: input.requestId, task: input.text, threadId: input.threadId });
+      if (options.continueRun) {
+        const result = await options.continueRun(harness, input);
+        return result.runId ? { delivery: "continued", runId: result.runId } : { delivery: "parked" };
+      }
+      return { delivery: "continued", runId: `run-${harness.continued.length}` };
     },
     setFollowUpAttention: async (_ws, threadId, waitingFor) => {
       harness.attention.push({ threadId, waitingFor });
@@ -223,6 +235,26 @@ async function fixture(options: {
     },
     getResourceSample: async (machineId) => harness.samples.get(machineId) ?? null,
     externalSource: (provider) => harness.external.get(provider) ?? null,
+    getShellEvents: async (_workspaceId, sessionId, executionId, afterId = 0) => (
+      (harness.shellEvents.get(`${sessionId}:${executionId}`) ?? []).filter((event) => event.id > afterId)
+    ),
+    subscribeShellEvents: (listener) => {
+      harness.shellListeners.push(listener);
+      return () => {
+        const index = harness.shellListeners.indexOf(listener);
+        if (index >= 0) harness.shellListeners.splice(index, 1);
+      };
+    },
+    getShellExecutionStatus: async (sessionId, executionId) => harness.shellRuntime.get(`${sessionId}:${executionId}`) ?? null,
+    readShellExecutionOutput: async (sessionId, executionId, offset, length) => {
+      const output = harness.shellOutput.get(`${sessionId}:${executionId}`);
+      if (!output) return null;
+      return {
+        ...sliceUtf8ByBytes(output.text, offset, length),
+        running: output.running,
+        ...(output.exitCode === undefined ? {} : { exitCode: output.exitCode }),
+      };
+    },
     onError: (error) => harness.errors.push(error),
   };
   const service = createFollowUpService(deps);
@@ -286,15 +318,15 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(early.followUp.status, "waiting");
     assert.equal(f.harness.continued.length, 0);
 
-    // Move the due time into the past via update, then check fires once.
+    // Moving the due time into the past fires during the update itself.
     const updated = await f.service.update(caller(), {
       expectedRevision: registered.followUp.revision,
       id: registered.followUp.id,
       source: { at: Date.now() - 1_000, kind: "time" },
     });
-    assert.equal(updated.followUp.status, "waiting");
+    assert.equal(updated.followUp.status, "delivered");
     const fired = await f.service.check(caller(), { id: registered.followUp.id });
-    assert.equal(fired.fired, true);
+    assert.equal(fired.fired, false);
 
     await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
     // Settled thread → the normal continuation admission ran with the
@@ -582,9 +614,9 @@ describe("follow-up service on the real kernel", () => {
 
     const active = await fire((await register("t-active")).followUp.id, "t-active");
     assert.equal(active.occurrences[0]!.delivery, "active-inform");
-    assert.equal(f.harness.informs.length, 1);
+    assert.equal(f.harness.sessionRequests.length, 1);
     assert.equal(f.harness.ledger.length, 1);
-    assert.equal(f.harness.ledger[0]!.id, active.occurrences[0]!.id);
+    assert.equal(f.harness.ledger[0]!.id, `followup.occurrence:${active.occurrences[0]!.id}`);
 
     const queued = await fire((await register("t-queued")).followUp.id, "t-queued");
     assert.equal(queued.occurrences[0]!.delivery, "parked");
@@ -596,7 +628,7 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(gone.followUp.status, "unavailable");
   });
 
-  it("re-enters admission when the active run settles during notification", async () => {
+  it("uses one thread.send request receipt when an active run settles at admission", async () => {
     const f = await fixture({
       seed: (h) => {
         h.threads.set("t-1", {
@@ -607,11 +639,14 @@ describe("follow-up service on the real kernel", () => {
         });
         h.runs.set("r-live", { id: "r-live", workerState: "running" });
       },
-      afterNotify: (h) => {
+      sendToThread: async (h, input) => {
         const thread = h.threads.get("t-1")!;
         thread.activeRunId = null;
         thread.lifecycle = "settled";
         h.runs.get("r-live")!.workerState = "completed";
+        h.ledger.push({ id: input.requestId, status: "delivered" });
+        h.continued.push({ requestId: input.requestId, task: input.text, threadId: input.threadId });
+        return { delivery: "continued", runId: "run-after-settle" };
       },
     });
     const registered = await f.service.register(caller(), {
@@ -620,8 +655,9 @@ describe("follow-up service on the real kernel", () => {
     });
     const fired = await f.service.fire(caller(), { id: registered.followUp.id });
     assert.equal(fired.occurrences[0]!.delivery, "continued");
-    assert.equal(f.harness.informs.length, 1);
     assert.equal(f.harness.continued.length, 1);
+    assert.equal(f.harness.ledger.length, 1);
+    assert.equal(f.harness.ledger[0]!.id, f.harness.continued[0]!.requestId);
   });
 
   it("root-session registrations deliver through the session request path", async () => {
@@ -721,16 +757,13 @@ describe("follow-up service on the real kernel", () => {
     const service2 = createFollowUpService({
       client: f.client,
       getThread: async (_ws, threadId) => f2.harness.threads.get(threadId) ?? null,
-      getActiveRun: async () => null,
-      continueRun: async (input) => {
-        f2.harness.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
-        return { runId: "run-restarted" };
-      },
-      enqueueContinuation: async () => ({}),
       notifySession: async () => {},
       sessionRequest: async () => {},
       sessionBusy: async () => false,
-      recordDirectedMessage: async () => ({}),
+      sendToThread: async (input) => {
+        f2.harness.continued.push({ requestId: input.requestId, task: input.text, threadId: input.threadId });
+        return { delivery: "continued", runId: "run-restarted" };
+      },
       setFollowUpAttention: async () => ({}),
       requestForSession: async () => ({}),
       onError: (error) => f2.harness.errors.push(error),
@@ -773,16 +806,13 @@ describe("follow-up service on the real kernel", () => {
     const service3 = createFollowUpService({
       client: f.client,
       getThread: async (_ws, threadId) => f2.harness.threads.get(threadId) ?? null,
-      getActiveRun: async () => null,
-      continueRun: async (input) => {
-        f2.harness.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
-        return { runId: "run-restarted" };
-      },
-      enqueueContinuation: async () => ({}),
       notifySession: async () => {},
       sessionRequest: async () => {},
       sessionBusy: async () => false,
-      recordDirectedMessage: async () => ({}),
+      sendToThread: async (input) => {
+        f2.harness.continued.push({ requestId: input.requestId, task: input.text, threadId: input.threadId });
+        return { delivery: "continued", runId: "run-restarted" };
+      },
       setFollowUpAttention: async () => ({}),
       requestForSession: async () => ({}),
       onError: (error) => f2.harness.errors.push(error),
@@ -802,7 +832,7 @@ describe("follow-up service on the real kernel", () => {
   };
   const emitFile = (h: Harness, workspaceId: string, path: string, kind = "changed", sequence = 1) => {
     for (const listener of h.fileWatchListeners.get(workspaceId) ?? []) {
-      listener({ generation: 1, kind, path, sequence });
+      listener({ sourceId: "watch-test", generation: 1, kind, path, sequence });
     }
   };
   const emitSample = (h: Harness, sample: FollowUpResourceSample) => {
@@ -979,7 +1009,7 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(registered.firedImmediately, false);
     f.harness.files.set("ws:data/reset.csv", { exists: true, mtimeMs: 2, size: 2 });
     for (const listener of f.harness.fileWatchListeners.get("ws") ?? []) {
-      listener({ generation: 2, kind: "reset", sequence: 1 });
+      listener({ sourceId: "watch-test", generation: 2, kind: "reset", sequence: 1 });
     }
     await until(() => f.harness.continued.length === 1, 4_000, f.harness.errors);
     const occurrence = (await f.service.get(caller(), { id: registered.followUp.id })).occurrences[0]!;
@@ -1244,6 +1274,164 @@ describe("follow-up service on the real kernel", () => {
     assert.equal(f.harness.continued.length, 0);
   });
 
+  it("combines ordinary sources with any/all and hides durable child definitions", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const any = await f.service.register(caller(), {
+      instruction: "first signal wins",
+      source: {
+        kind: "any",
+        sources: [{ kind: "file", condition: "exists", path: "out/combined.txt" }, { kind: "time", at: Date.now() + 60_000 }],
+      },
+    });
+    f.harness.files.set("ws:out/combined.txt", { exists: true, size: 1, mtimeMs: 1 });
+    emitFile(f.harness, "ws", "out/combined.txt", "created", 1);
+    await until(async () => (await f.service.get(caller(), { id: any.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+
+    const all = await f.service.register(caller(), {
+      instruction: "both signals arrived",
+      source: {
+        kind: "all",
+        sources: [{ kind: "time", at: Date.now() - 1 }, { kind: "manual", note: "approval" }],
+      },
+    });
+    assert.equal(all.followUp.status, "waiting");
+    await f.service.fire(caller(), { id: all.followUp.id, reason: "approved" });
+    await until(async () => (await f.service.get(caller(), { id: all.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const visible = await f.service.list(caller(), { includeInactive: true });
+    assert.equal(visible.followUps.filter((entry) => entry.id === any.followUp.id || entry.id === all.followUp.id).length, 2);
+    assert.ok(visible.followUps.every((entry) => !entry.id.includes(":source:")));
+  });
+
+  it("uses durable shell lifecycle facts and persists only compact output matches", async () => {
+    const started: FollowUpShellEvent = {
+      id: 1, type: "shell-start", sessionId: "s-1", workspaceId: "ws", executionId: "exec-1",
+      at: Date.now(), state: "running", command: "long build", cwd: "C:/ws",
+    };
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.shellEvents.set("s-1:exec-1", [started]);
+      h.shellRuntime.set("s-1:exec-1", { running: true });
+    } });
+    const output = await f.service.register(caller(), {
+      instruction: "service ready",
+      source: { kind: "shell", executionId: "exec-1", condition: "output", pattern: "READY" },
+    });
+    f.harness.shellOutput.set("s-1:exec-1", { text: "boot\nREADY\n", running: true });
+    const transient: FollowUpShellEvent = { ...started, id: 0, type: "shell-output", offset: 0, text: "boot\nREADY\n" };
+    for (const listener of [...f.harness.shellListeners]) listener(transient);
+    await until(async () => (await f.service.get(caller(), { id: output.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    assert.equal((await f.service.get(caller(), { id: output.followUp.id })).occurrences[0]!.reason, "shell-output-match");
+
+    const exit = await f.service.register(caller(), {
+      instruction: "build finished",
+      source: { kind: "shell", executionId: "exec-1", condition: "exit" },
+    });
+    const completed: FollowUpShellEvent = { ...started, id: 2, type: "shell-completion", state: "completed", exitCode: 0 };
+    f.harness.shellEvents.set("s-1:exec-1", [started, completed]);
+    f.harness.shellRuntime.set("s-1:exec-1", { running: false, exitCode: 0 });
+    for (const listener of [...f.harness.shellListeners]) listener(completed);
+    await until(async () => (await f.service.get(caller(), { id: exit.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+
+    f.harness.shellEvents.set("s-1:exec-lost", [{ ...started, executionId: "exec-lost", id: 3 }]);
+    const lost = await f.service.register(caller(), {
+      instruction: "cannot reattach",
+      source: { kind: "shell", executionId: "exec-lost", condition: "exit" },
+    });
+    assert.equal(lost.followUp.status, "unavailable");
+  });
+
+  it("reads output that existed before an ordinary shell follow-up was registered", async () => {
+    const started: FollowUpShellEvent = {
+      id: 1,
+      type: "shell-start",
+      sessionId: "s-1",
+      workspaceId: "ws",
+      executionId: "exec-existing",
+      at: Date.now(),
+      state: "running",
+      command: "serve",
+      cwd: "/workspace",
+    };
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.shellEvents.set("s-1:exec-existing", [started]);
+      h.shellRuntime.set("s-1:exec-existing", { running: true });
+      h.shellOutput.set("s-1:exec-existing", { text: "booting\nREADY\n", running: true });
+    } });
+    const registered = await f.service.register(caller(), {
+      instruction: "service ready",
+      source: { kind: "shell", executionId: "exec-existing", condition: "output", pattern: "READY" },
+    });
+    await until(async () => (await f.service.get(caller(), { id: registered.followUp.id })).followUp.status === "delivered", 4_000, f.harness.errors);
+    const detail = await f.service.get(caller(), { id: registered.followUp.id });
+    assert.equal(detail.occurrences[0]!.reason, "shell-output-match");
+    assert.equal(detail.occurrences[0]!.facts.offset, 8);
+  });
+
+  it("shares a workspace file observer and releases it after the last subscriber", async () => {
+    const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
+    const first = await f.service.register(caller(), {
+      instruction: "first", source: { kind: "file", condition: "changed", path: "out/shared.txt" },
+    });
+    const second = await f.service.register(caller(), {
+      instruction: "second", source: { kind: "file", condition: "changed", path: "out/shared.txt" },
+    });
+    assert.equal(f.harness.fileWatchListeners.get("ws")?.length, 1);
+    await f.service.cancel(caller(), { id: first.followUp.id });
+    assert.equal(f.harness.fileWatchListeners.get("ws")?.length, 1);
+    await f.service.cancel(caller(), { id: second.followUp.id });
+    assert.equal(f.harness.fileWatchListeners.get("ws")?.length, 0);
+
+    const metricA = await f.service.register(caller(), {
+      instruction: "metric a", source: { kind: "metric", machineId: "local", metric: "cpuPercent", predicate: "above", threshold: 90 },
+    });
+    const metricB = await f.service.register(caller(), {
+      instruction: "metric b", source: { kind: "metric", machineId: "local", metric: "cpuPercent", predicate: "above", threshold: 95 },
+    });
+    assert.equal(f.harness.sampleListeners.length, 1);
+    await f.service.cancel(caller(), { id: metricA.followUp.id });
+    await f.service.cancel(caller(), { id: metricB.followUp.id });
+    assert.equal(f.harness.sampleListeners.length, 0);
+
+    f.harness.experiments.set("attempt-shared", { attempt: attemptView({ attemptId: "attempt-shared" }), artifacts: [] });
+    const artifactA = await f.service.register(caller(), {
+      instruction: "artifact a", source: { kind: "artifact", attemptId: "attempt-shared", name: "a" },
+    });
+    const artifactB = await f.service.register(caller(), {
+      instruction: "artifact b", source: { kind: "artifact", attemptId: "attempt-shared", name: "b" },
+    });
+    assert.equal(f.harness.attemptListeners.length, 1);
+    await f.service.cancel(caller(), { id: artifactA.followUp.id });
+    await f.service.cancel(caller(), { id: artifactB.followUp.id });
+    assert.equal(f.harness.attemptListeners.length, 0);
+  });
+
+  it("coalesces compatible external queries into one in-flight adapter call", async () => {
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => { release = resolve; });
+    let queries = 0;
+    const f = await fixture({ seed: (h) => {
+      h.threads.set("t-1", settledThread());
+      h.external.set("github-pr", {
+        intervalMs: 60_000,
+        query: async () => { queries += 1; await blocked; return { facts: {}, matched: false }; },
+      });
+    } });
+    const first = f.service.register(caller(), {
+      instruction: "first query", source: { kind: "external", provider: "github-pr", condition: "open", branch: "main" },
+    });
+    await until(() => queries === 1);
+    const second = f.service.register(caller(), {
+      instruction: "second query", source: { kind: "external", provider: "github-pr", condition: "open", branch: "main" },
+    });
+    await pause(50);
+    assert.equal(queries, 1);
+    release();
+    const [a, b] = await Promise.all([first, second]);
+    await f.service.cancel(caller(), { id: a.followUp.id });
+    await f.service.cancel(caller(), { id: b.followUp.id });
+  });
+
   it("rejects path escapes and invalid source fields at the boundary", async () => {
     const f = await fixture({ seed: (h) => h.threads.set("t-1", settledThread()) });
     await assert.rejects(
@@ -1311,16 +1499,13 @@ describe("follow-up service on the real kernel", () => {
     const service2 = createFollowUpService({
       client: f.client,
       getThread: async (_ws, threadId) => harness2.threads.get(threadId) ?? null,
-      getActiveRun: async () => null,
-      continueRun: async (input) => {
-        harness2.continued.push({ requestId: input.requestId, task: input.task, threadId: input.threadId });
-        return { runId: "run-2" };
-      },
-      enqueueContinuation: async () => ({}),
       notifySession: async () => {},
       sessionRequest: async () => {},
       sessionBusy: async () => false,
-      recordDirectedMessage: async () => ({}),
+      sendToThread: async (input) => {
+        harness2.continued.push({ requestId: input.requestId, task: input.text, threadId: input.threadId });
+        return { delivery: "continued", runId: "run-2" };
+      },
       setFollowUpAttention: async () => ({}),
       requestForSession: async () => ({}),
       getExperiment: async (_c, attemptId) => harness2.experiments.get(attemptId) ?? null,

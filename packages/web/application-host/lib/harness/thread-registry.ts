@@ -197,7 +197,16 @@ interface MutationResult<T> {
 }
 
 const LIFECYCLES = new Set<ThreadLifecycle>(["queued", "active", "settled", "archived"]);
-const ATTENTIONS = new Set<ThreadAttention>(["none", "user", "permission", "thread", "stalled", "looping"]);
+const ATTENTIONS = new Set<ThreadAttention>([
+  "none",
+  "user",
+  "permission",
+  "thread",
+  "experiment",
+  "followup",
+  "stalled",
+  "looping",
+]);
 const INTEGRATIONS = new Set<ThreadIntegration>(["none", "dirty", "merge-ready", "conflict", "merged"]);
 const WORKTREE_PREPARATION_STAGES = new Set<NonNullable<ThreadWorktree["preparationStage"]>>([
   "capturing-baseline",
@@ -2059,6 +2068,26 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     return { value: entry, changed: [thread] };
   });
 
+  /** Patch both copies of an already-authorized directed-message receipt. */
+  const patchDirectedMessage = async (
+    workspaceId: string,
+    threadId: string,
+    messageId: string,
+    patch: { status?: ThreadMessageRecord["status"]; runId?: string },
+  ): Promise<ThreadMessageRecord | null> => mutateWorkspace(workspaceId, (catalog) => {
+    const thread = findThread(catalog, threadId);
+    const incoming = thread?.messages?.find((message) => message.direction === "in" && message.id === messageId);
+    if (!incoming) return { value: null, changed: [], write: false };
+    const next = {
+      ...incoming,
+      ...(patch.status === undefined ? {} : { status: patch.status }),
+      ...(patch.runId === undefined ? {} : { runId: patch.runId }),
+    };
+    const outcome = writeDirectedMessage(catalog, next);
+    for (const entry of outcome.changed) touchThread(catalog, entry);
+    return { value: next, changed: outcome.changed, write: outcome.write };
+  });
+
   /** Read pending input without claiming the consumer has accepted it. */
   const listPendingThreadMessages = async (
     workspaceId: string, threadId: string, excludeId?: string,
@@ -2883,6 +2912,7 @@ export function createThreadRegistry(options: ThreadRegistryOptions) {
     recordThreadMessage,
     recordDirectedMessage,
     patchThreadMessage,
+    patchDirectedMessage,
     listPendingThreadMessages,
     acknowledgeThreadMessages,
     failRunRequest,

@@ -1,7 +1,8 @@
 import { getRuntimeUrlResolver } from '@piarium/application-client';
 import { subscribeRuntimeEndpointChanged } from '@piarium/application-client';
 import type { Thread, ThreadParent, ThreadRun } from '@piarium/protocol';
-import { clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
+import { bindClientSurfaceSession, clientSurfaceQuery, handleClientSettingsRequest } from '@/lib/client-settings-bridge';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
 type StreamReadyEvent = {
   type: 'stream-ready';
@@ -70,6 +71,11 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
+let sessionChangeUnsubscribe: (() => void) | null = null;
+let sessionBindingPromise: Promise<void> | null = null;
+let sessionBindingTarget: string | null = null;
+let boundSessionId: string | null = null;
+let surfaceBindingGeneration = 0;
 const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -110,6 +116,7 @@ const resetHeartbeatTimer = () => {
   }
   heartbeatTimer = setTimeout(() => {
     cleanupSource();
+    boundSessionId = null;
     scheduleReconnect();
   }, HEARTBEAT_TIMEOUT_MS);
 };
@@ -311,6 +318,31 @@ const connect = () => {
     return;
   }
 
+  const currentSessionId = usePiSessionStore.getState().currentSessionId;
+  if (currentSessionId && boundSessionId !== currentSessionId) {
+    if (!sessionBindingPromise) {
+      const bindingTarget = currentSessionId;
+      const bindingGeneration = surfaceBindingGeneration;
+      sessionBindingTarget = bindingTarget;
+      let bound = false;
+      sessionBindingPromise = bindClientSurfaceSession(bindingTarget)
+        .then(() => {
+          bound = surfaceBindingGeneration === bindingGeneration
+            && usePiSessionStore.getState().currentSessionId === bindingTarget;
+          if (bound) boundSessionId = bindingTarget;
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          sessionBindingPromise = null;
+          if (sessionBindingTarget === bindingTarget) sessionBindingTarget = null;
+          if (listeners.size === 0) return;
+          if (bound) connect();
+          else scheduleReconnect();
+        });
+    }
+    return;
+  }
+
   cleanupSource();
 
   // The surface query makes this connection individually addressable for
@@ -330,6 +362,8 @@ const connect = () => {
 
   source.onerror = () => {
     cleanupSource();
+    boundSessionId = null;
+    surfaceBindingGeneration += 1;
     scheduleReconnect();
   };
 
@@ -340,6 +374,20 @@ const ensureRuntimeChangeSubscription = () => {
   if (runtimeChangeUnsubscribe || typeof window === 'undefined') return;
   runtimeChangeUnsubscribe = subscribeRuntimeEndpointChanged(() => {
     cleanupSource();
+    boundSessionId = null;
+    surfaceBindingGeneration += 1;
+    reconnectAttempt = 0;
+    connect();
+  });
+};
+
+const ensureSessionChangeSubscription = () => {
+  if (sessionChangeUnsubscribe || typeof window === 'undefined') return;
+  sessionChangeUnsubscribe = usePiSessionStore.subscribe((state, previous) => {
+    if (state.currentSessionId === previous.currentSessionId || listeners.size === 0) return;
+    cleanupSource();
+    boundSessionId = null;
+    surfaceBindingGeneration += 1;
     reconnectAttempt = 0;
     connect();
   });
@@ -350,9 +398,15 @@ const cleanupRuntimeChangeSubscription = () => {
   runtimeChangeUnsubscribe = null;
 };
 
+const cleanupSessionChangeSubscription = () => {
+  sessionChangeUnsubscribe?.();
+  sessionChangeUnsubscribe = null;
+};
+
 export const subscribePiariumEvents = (listener: Listener): (() => void) => {
   listeners.add(listener);
   ensureRuntimeChangeSubscription();
+  ensureSessionChangeSubscription();
   connect();
 
   return () => {
@@ -364,7 +418,10 @@ export const subscribePiariumEvents = (listener: Listener): (() => void) => {
       }
       reconnectAttempt = 0;
       cleanupSource();
+      boundSessionId = null;
+      surfaceBindingGeneration += 1;
       cleanupRuntimeChangeSubscription();
+      cleanupSessionChangeSubscription();
     }
   };
 };

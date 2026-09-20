@@ -1,6 +1,6 @@
 import type { DocumentMutationObservation } from "../documents/authority.js";
 import type { Zone2ContextUsage, Zone2Material, Zone2ShellCompletion } from "../harness/zone2.js";
-import type { ShellCommandCompletedEvent } from "../harness/shell-supervisor.js";
+import type { ShellCommandCompletedEvent, ShellCommandOutputEvent, ShellCommandStartedEvent } from "../harness/shell-supervisor.js";
 import { createObservers, type DiagnosticEvent, type GitStatusEvent, type Observers, type TerminalCommandEvent, type TerminalExitEvent } from "./observers.js";
 import { terminalCommandDedupeKey, type KnowledgeStore, type RecallResult, type StoredEvent } from "./store.js";
 
@@ -49,6 +49,21 @@ export interface Zone2MaterialResult {
   shellCompletions?: string[];
 }
 
+export interface DurableShellEvent {
+  id: number;
+  type: "shell-start" | "shell-output" | "shell-completion";
+  sessionId: string;
+  workspaceId: string;
+  executionId: string;
+  at: number;
+  state: "running" | "completed" | "failed" | "cancelled";
+  command: string;
+  cwd: string;
+  offset?: number;
+  text?: string;
+  exitCode?: number | null;
+}
+
 const emptyMaterial = (contextUsage: Zone2ContextUsage | null): Zone2Material => ({
   userEdits: [],
   userCommands: [],
@@ -69,6 +84,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
   const sessions = new Map<string, SessionBinding>();
   const pending = new Set<Promise<void>>();
   const seenCommandIds = new Set<string>();
+  const shellListeners = new Set<(event: DurableShellEvent) => void | Promise<void>>();
   let disposed = false;
 
   const track = (task: Promise<void>): void => {
@@ -176,37 +192,138 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     targetSessionId?: string,
   ): Promise<boolean> => persistTerminalObservation(event, targetSessionId);
 
-  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): void => {
-    if (disposed) return;
+  const persistShellEvent = async (
+    sessionId: string,
+    event: ShellCommandStartedEvent | ShellCommandOutputEvent | ShellCommandCompletedEvent,
+    type: DurableShellEvent["type"],
+  ): Promise<DurableShellEvent | null> => {
+    if (disposed) return null;
     const binding = sessions.get(sessionId);
-    if (!binding) return;
+    if (!binding) return null;
+    if (type === "shell-output") {
+      const output = event as ShellCommandOutputEvent;
+      const transient: DurableShellEvent = {
+        id: 0,
+        type,
+        sessionId,
+        workspaceId: binding.workspaceId,
+        executionId: event.executionId,
+        at: output.at,
+        state: "running",
+        command: event.command,
+        cwd: event.cwd,
+        offset: output.offset,
+        text: output.text,
+      };
+      // Raw shell output remains in the terminal/output owner. Follow-up
+      // observers may persist a compact match fact before advancing their own
+      // cursor; the Knowledge event store never becomes a duplicate log spool.
+      await Promise.all([...shellListeners].map((listener) => listener(transient)));
+      return transient;
+    }
+    let durable: DurableShellEvent | null = null;
     const task = binding.tail.then(async () => {
-      const observers = await observersFor(binding);
       const store = await options.getStore(binding.workspaceId);
-      if (!store || !observers) return;
-      await store.putEvent({
+      if (!store) return;
+      const completed = type === "shell-completion" ? event as ShellCommandCompletedEvent : null;
+      const result = await store.putEvent({
         kind: "command",
-        at: event.endedAt,
+        at: completed?.endedAt ?? event.startedAt,
         sessionId,
         turnIndex: binding.turnIndex,
         text: event.command,
         source: "agent",
-        dedupeKey: `shell-completion:${event.executionId}`,
+        dedupeKey: type === "shell-start"
+          ? `shell-start:${event.executionId}`
+          : `shell-completion:${event.executionId}`,
         data: {
-          type: "shell-completion",
+          type,
           executionId: event.executionId,
           commandRunId: event.commandRunId,
           command: event.command,
           cwd: event.cwd,
-          exitCode: event.exitCode,
-          cancelled: event.cancelled,
-          endedAt: event.endedAt,
-          ...(event.outputHandle === undefined ? {} : { outputHandle: event.outputHandle }),
+          startedAt: event.startedAt,
+          ...(completed ? {
+            exitCode: completed.exitCode,
+            cancelled: completed.cancelled,
+            endedAt: completed.endedAt,
+            ...(completed.outputHandle === undefined ? {} : { outputHandle: completed.outputHandle }),
+          } : {}),
         },
       });
+      const state = completed
+        ? completed.cancelled ? "cancelled" : completed.exitCode === 0 ? "completed" : "failed"
+        : "running";
+      durable = {
+        id: result.id,
+        type,
+        sessionId,
+        workspaceId: binding.workspaceId,
+        executionId: event.executionId,
+        at: completed?.endedAt ?? event.startedAt,
+        state,
+        command: event.command,
+        cwd: event.cwd,
+        ...(completed ? { exitCode: completed.exitCode, ...(completed.outputPreview === undefined ? {} : { text: completed.outputPreview }) } : {}),
+      };
+      await Promise.all([...shellListeners].map((listener) => listener(durable!)));
     });
     binding.tail = task.catch(() => undefined);
     track(task);
+    await task;
+    return durable;
+  };
+
+  const observeShellStarted = (sessionId: string, event: ShellCommandStartedEvent): Promise<DurableShellEvent | null> => (
+    persistShellEvent(sessionId, event, "shell-start")
+  );
+
+  const observeShellOutput = (sessionId: string, event: ShellCommandOutputEvent): Promise<DurableShellEvent | null> => (
+    persistShellEvent(sessionId, event, "shell-output")
+  );
+
+  const observeShellCompletion = (sessionId: string, event: ShellCommandCompletedEvent): Promise<DurableShellEvent | null> => (
+    persistShellEvent(sessionId, event, "shell-completion")
+  );
+
+  const shellEvents = async (
+    workspaceId: string,
+    sessionId: string,
+    executionId: string,
+    afterId = 0,
+  ): Promise<DurableShellEvent[]> => {
+    const store = await options.getStore(workspaceId);
+    if (!store) return [];
+    const events = await store.listEvents({ sessionId, afterId });
+    return events.flatMap((stored): DurableShellEvent[] => {
+      const data = dataOf(stored);
+      if (data.executionId !== executionId
+        || (data.type !== "shell-start" && data.type !== "shell-output" && data.type !== "shell-completion")) return [];
+      const type = data.type;
+      const exitCode = typeof data.exitCode === "number" || data.exitCode === null ? data.exitCode : undefined;
+      const cancelled = data.cancelled === true;
+      return [{
+        id: stored.id,
+        type,
+        sessionId,
+        workspaceId,
+        executionId,
+        at: stored.at,
+        state: type === "shell-completion"
+          ? cancelled ? "cancelled" : exitCode === 0 ? "completed" : "failed"
+          : "running",
+        command: typeof data.command === "string" ? data.command : stored.text,
+        cwd: typeof data.cwd === "string" ? data.cwd : "",
+        ...(typeof data.offset === "number" ? { offset: data.offset } : {}),
+        ...(typeof data.text === "string" ? { text: data.text } : {}),
+        ...(exitCode === undefined ? {} : { exitCode }),
+      }];
+    });
+  };
+
+  const subscribeShellEvents = (listener: (event: DurableShellEvent) => void | Promise<void>): (() => void) => {
+    shellListeners.add(listener);
+    return () => shellListeners.delete(listener);
   };
 
   const observeDiagnostics = (event: DiagnosticEvent): void => {
@@ -430,6 +547,7 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
   const dispose = async (): Promise<void> => {
     disposed = true;
     sessions.clear();
+    shellListeners.clear();
     await drain();
   };
 
@@ -447,6 +565,10 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
     observeTerminalCommand,
     observeTerminalExit,
     observeShellCompletion,
+    observeShellOutput,
+    observeShellStarted,
+    shellEvents,
+    subscribeShellEvents,
     resetSessionObservationBaselines,
     zone2Material,
   };

@@ -203,6 +203,10 @@ describe("stripControlSequences", () => {
   it("handles mixed sequences", () => {
     expect(stripControlSequences("\x1b[1mbold\x1b[0m \x1b]0;title\x07 normal")).toBe("bold  normal");
   });
+
+  it("does not expose an incomplete control sequence as output text", () => {
+    expect(stripControlSequences("ready\x1b[31")).toBe("ready");
+  });
 });
 
 describe("background shell output", () => {

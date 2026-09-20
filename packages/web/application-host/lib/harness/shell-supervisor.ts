@@ -85,15 +85,36 @@ export function selectInterpreter(input: SelectInterpreterInput): ShellInterpret
   return { unavailable: { reason: "No suitable shell found", hint: "Install bash or set harness.shell explicitly." } };
 }
 
-// eslint-disable-next-line no-control-regex, no-useless-escape
-const CSI_PATTERN = /\x1b\[[0-?]*[ -\/]*[@-~]/g;
-// eslint-disable-next-line no-control-regex
-const OSC_PATTERN = /\x1b\][^\x07\x1b]*(\x07|\x1b\\)/g;
-// eslint-disable-next-line no-control-regex
-const ESC_PATTERN = /\x1b./g;
+type OutputControlState = "text" | "escape" | "csi" | "osc" | "osc-escape";
+
+const stripOutputChunk = (text: string, initial: OutputControlState): { text: string; state: OutputControlState } => {
+  let state = initial;
+  let visible = "";
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    if (state === "text") {
+      if (char === "\x1b") state = "escape";
+      else visible += char;
+    } else if (state === "escape") {
+      if (char === "[") state = "csi";
+      else if (char === "]") state = "osc";
+      else state = "text";
+    } else if (state === "csi") {
+      if (code >= 0x40 && code <= 0x7e) state = "text";
+    } else if (state === "osc") {
+      if (char === "\x07") state = "text";
+      else if (char === "\x1b") state = "osc-escape";
+    } else if (char === "\\") {
+      state = "text";
+    } else {
+      state = char === "\x1b" ? "osc-escape" : "osc";
+    }
+  }
+  return { text: visible, state };
+};
 
 export function stripControlSequences(text: string): string {
-  return text.replace(OSC_PATTERN, "").replace(CSI_PATTERN, "").replace(ESC_PATTERN, "");
+  return stripOutputChunk(text, "text").text;
 }
 
 const SENTINEL = "__PIARIUM_SENTINEL_";
@@ -261,8 +282,17 @@ export interface ShellCommandCompletedEvent extends ShellCommandStartedEvent {
   outputPreview?: string;
 }
 
+export interface ShellCommandOutputEvent extends ShellCommandStartedEvent {
+  /** UTF-8 byte offset in the normalized command output. */
+  offset: number;
+  /** Newly observed normalized output bytes. */
+  text: string;
+  at: number;
+}
+
 export interface ShellCommandLifecycle {
   started?(event: ShellCommandStartedEvent): void | Promise<void>;
+  output?(event: ShellCommandOutputEvent): void | Promise<void>;
   completed?(event: ShellCommandCompletedEvent): void | Promise<void>;
 }
 
@@ -281,6 +311,8 @@ interface BackgroundShell {
   lifecycleCompleted: boolean;
   lifecyclePromise?: Promise<void>;
   lastOutputAt: number | null;
+  observedOutputBytes: number;
+  outputControlState: OutputControlState;
   writer: { close: () => Promise<void> } | null;
   writerClosePromise?: Promise<void>;
   handle: TerminalHandle;
@@ -354,6 +386,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     cwd: string;
     writer: ShellWriter | null;
     startedAt: number;
+    observedOutputBytes: number;
+    outputControlState: OutputControlState;
     toolCallId?: string;
     abortCleanup?: () => void;
   }
@@ -403,11 +437,43 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     try { await deps.commandLifecycle?.started?.(event); } catch { /* observers cannot change shell behavior */ }
   };
 
-  const notifyCommandCompleted = (event: ShellCommandCompletedEvent): Promise<void> => trackCommandLifecycle(
-    Promise.resolve().then(async () => {
+  const notifyCommandCompleted = (event: ShellCommandCompletedEvent): Promise<void> => {
+    const priorOutputWrites = [...commandLifecyclePromises];
+    return trackCommandLifecycle(
+      Promise.all(priorOutputWrites).then(async () => {
       try { await deps.commandLifecycle?.completed?.(event); } catch { /* observers cannot change shell behavior */ }
+      }),
+    );
+  };
+
+  const notifyCommandOutput = (event: ShellCommandOutputEvent): Promise<void> => trackCommandLifecycle(
+    Promise.resolve().then(async () => {
+      try { await deps.commandLifecycle?.output?.(event); } catch { /* observers cannot change shell behavior */ }
     }),
   );
+
+  const publishOutputDelta = (
+    command: Pick<ShellCommandStartedEvent, "command" | "commandRunId" | "executionId" | "cwd" | "startedAt" | "toolCallId">
+      & { observedOutputBytes: number; outputControlState: OutputControlState },
+    chunk: string,
+  ): void => {
+    const normalized = stripOutputChunk(chunk, command.outputControlState);
+    command.outputControlState = normalized.state;
+    if (!normalized.text) return;
+    const offset = command.observedOutputBytes;
+    command.observedOutputBytes += Buffer.byteLength(normalized.text, "utf8");
+    void notifyCommandOutput({
+      command: command.command,
+      commandRunId: command.commandRunId,
+      executionId: command.executionId,
+      cwd: command.cwd,
+      startedAt: command.startedAt,
+      offset,
+      text: normalized.text,
+      at: Date.now(),
+      ...(command.toolCallId === undefined ? {} : { toolCallId: command.toolCallId }),
+    });
+  };
 
   const closeBackgroundWriter = (background: BackgroundShell): Promise<void> => {
     if (background.writerClosePromise) return background.writerClosePromise;
@@ -552,14 +618,17 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     const isCurrentSession = (): boolean => sessionHandle === handle;
     trackDisposable(handle, handle.onData((data: string) => {
       if (pendingCommand && isCurrentSession()) {
+        const command = pendingCommand;
         outputBuffer += data;
         parsePendingOutput();
+        if (pendingCommand === command) publishOutputDelta(command, data);
         return;
       }
       const background = backgroundShells.get(handle.id);
       if (background && !background.exited) {
         background.output += data;
         parseBackgroundOutput(background);
+        if (!background.exited) publishOutputDelta(background, data);
         background.lastOutputAt = Date.now();
         notifyShellChanged(background.id);
         return;
@@ -939,6 +1008,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
             cancelRequested: false,
             lifecycleCompleted: false,
             lastOutputAt: stripControlSequences(outputBuffer).length > 0 ? Date.now() : null,
+            observedOutputBytes: pendingCommand?.observedOutputBytes ?? 0,
+            outputControlState: pendingCommand?.outputControlState ?? "text",
             writer,
             handle,
             ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
@@ -978,6 +1049,8 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
           cwd,
           writer,
           startedAt,
+          observedOutputBytes: 0,
+          outputControlState: "text",
           ...(options.toolCallId === undefined ? {} : { toolCallId: options.toolCallId }),
           ...(options.signal === undefined ? {} : {
             abortCleanup: () => options.signal?.removeEventListener("abort", onAbort),
@@ -1298,5 +1371,72 @@ export function createShellSupervisor(deps: ShellSupervisorOptions) {
     return false;
   };
 
-  return { exec, read, waitForOutput, write, kill, dispose, hasActiveCommandAt };
+  const inspectExecution = (executionId: string): { running: boolean; exitCode?: number } | null => {
+    if (pendingCommand?.executionId === executionId) return { running: true };
+    for (const background of backgroundShells.values()) {
+      if (background.executionId !== executionId) continue;
+      return {
+        running: !background.exited,
+        ...(background.exitCode === null ? {} : { exitCode: background.exitCode }),
+      };
+    }
+    for (const accepted of acceptedExecutions.values()) {
+      const result = accepted.result;
+      if (!result || result.kind === "spawn-failed" || result.executionId !== executionId) continue;
+      if (result.kind === "completed") {
+        return {
+          running: false,
+          ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+        };
+      }
+      const background = backgroundShells.get(result.id);
+      if (background) {
+        return {
+          running: !background.exited,
+          ...(background.exitCode === null ? {} : { exitCode: background.exitCode }),
+        };
+      }
+    }
+    return null;
+  };
+
+  const readExecutionOutput = (executionId: string, offset = 0, length = 32 * 1024): (OutputSlice & {
+    running: boolean;
+    exitCode?: number;
+  }) | null => {
+    if (pendingCommand?.executionId === executionId) {
+      return { ...sliceUtf8ByBytes(stripControlSequences(outputBuffer), offset, length), running: true };
+    }
+    for (const background of backgroundShells.values()) {
+      if (background.executionId !== executionId) continue;
+      return {
+        ...sliceUtf8ByBytes(stripControlSequences(background.output), offset, length),
+        running: !background.exited,
+        ...(background.exitCode === null ? {} : { exitCode: background.exitCode }),
+      };
+    }
+    for (const accepted of acceptedExecutions.values()) {
+      const result = accepted.result;
+      if (!result || result.kind !== "completed" || result.executionId !== executionId) continue;
+      const text = `${result.stdout}${result.stderr ? `\n[stderr]\n${result.stderr}` : ""}`;
+      return {
+        ...sliceUtf8ByBytes(text, offset, length),
+        running: false,
+        ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
+      };
+    }
+    return null;
+  };
+
+  return {
+    exec,
+    read,
+    waitForOutput,
+    write,
+    kill,
+    dispose,
+    hasActiveCommandAt,
+    inspectExecution,
+    readExecutionOutput,
+  };
 }

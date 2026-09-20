@@ -510,7 +510,10 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       return { type: 'client', clientId, client: client as PiariumAuthenticatedClient };
     }
     if (context.type === 'session') {
-      return { type: 'session' };
+      return {
+        type: 'session',
+        ...(typeof context.token === 'string' && context.token ? { token: context.token } : {}),
+      };
     }
     return null;
   };

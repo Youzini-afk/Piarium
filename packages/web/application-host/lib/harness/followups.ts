@@ -12,7 +12,7 @@
  * - `pause` pauses the session goal (goal.update paused, statusReason waiting)
  *   so automation stops auditing; cancel/fire resumes it only if we paused it.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   FollowUpCancelParams,
   FollowUpCheckParams,
@@ -23,6 +23,7 @@ import type {
   FollowUpGetResult,
   FollowUpListParams,
   FollowUpListResult,
+  FollowUpLeafSource,
   FollowUpOccurrenceDelivery,
   FollowUpOccurrenceView,
   FollowUpRegisterParams,
@@ -34,6 +35,7 @@ import type {
   JsonValue,
   ThreadParent,
 } from "@piarium/protocol";
+import { sliceUtf8ByBytes } from "@piarium/protocol";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import type { ExperimentArtifactView, ExperimentAttemptView } from "@piarium/protocol";
@@ -44,6 +46,7 @@ const OCCURRENCE_PREFIX = "followup.occurrence:";
 const TERMINAL_ATTEMPT_STATES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled", "lost"]);
 const ACTIVE_STATUSES: ReadonlySet<FollowUpStatus> = new Set(["waiting", "triggered"]);
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+const DELIVERY_RETRY_DELAY_MS = 1_000;
 
 const SERVICE_CAPABILITIES = ["storage.read", "storage.write", "storage.maintenance"];
 
@@ -90,6 +93,12 @@ interface DefinitionPayload {
   createdAt: number;
   updatedAt: number;
   lastOccurrence?: { id: string; reason: string; at: number; delivered: boolean };
+  /** Hidden leaf definition owned by a composite parent. */
+  internalSource?: { parentId: string; key: string };
+  composite?: {
+    childIds: string[];
+    satisfied: Record<string, { eventId: string; reason: string; at: number; facts: Record<string, JsonValue> }>;
+  };
   /**
    * Durable per-source observation state: log byte cursor, metric holding
    * flag, fired artifact ids. Rebuilt-conservative on restart — occurrence
@@ -106,6 +115,15 @@ interface DefinitionPayload {
     /** Last watch position folded into the file baseline (0 = initial snapshot). */
     fileGeneration?: number;
     fileSequence?: number;
+    fileSourceId?: string;
+    fileObservationAt?: number;
+    fileObservationEventId?: string;
+    metricObservedAt?: number;
+    /** Last durable Knowledge event consumed for an ordinary shell execution. */
+    shellEventId?: number;
+    shellOutputOffset?: number;
+    shellOutputTail?: string;
+    shellMatchOffset?: number;
   };
 }
 
@@ -122,6 +140,17 @@ interface OccurrencePayload {
   at: number;
 }
 
+interface ObservationPayload {
+  id: string;
+  workspaceId: string;
+  sessionId?: string;
+  sourceKind: "file" | "metric" | "shell";
+  sourceKey: string;
+  eventId: string;
+  at: number;
+  facts: Record<string, JsonValue>;
+}
+
 /** Committed `resource.sample` fact observed through the resource service. */
 export interface FollowUpResourceSample {
   machineId: string;
@@ -131,6 +160,21 @@ export interface FollowUpResourceSample {
     memoryMb?: number;
     gpus?: Array<{ index?: number; utilizationPercent?: number; usedMemoryMb?: number; memoryMb?: number }>;
   };
+}
+
+export interface FollowUpShellEvent {
+  id: number;
+  type: "shell-start" | "shell-output" | "shell-completion";
+  sessionId: string;
+  workspaceId: string;
+  executionId: string;
+  at: number;
+  state: "running" | "completed" | "failed" | "cancelled";
+  command: string;
+  cwd: string;
+  offset?: number;
+  text?: string;
+  exitCode?: number | null;
 }
 
 /**
@@ -164,43 +208,20 @@ export interface FollowUpServiceDeps {
     parent: ThreadParent;
     activeRunId: string | null;
   } | null>;
-  /** Active run worker state for delivery routing. */
-  getActiveRun(workspaceId: string, threadId: string): Promise<{ id: string; workerState: string; sessionId?: string | null } | null>;
-  /** Resume a settled thread through the normal admission path. */
-  continueRun(input: {
-    workspaceId: string;
-    parent: ThreadParent;
-    threadId: string;
-    mode: "continue";
-    task: string;
-    requestId: string;
-    from: { kind: "thread"; id: string };
-  }): Promise<{ runId?: string }>;
-  /** Park a continuation behind the budget for a queued thread. */
-  enqueueContinuation(workspaceId: string, threadId: string, continuation: {
-    mode: "continue";
-    task: string;
-    requestId: string;
-    from: { kind: "thread"; id: string };
-    at: string;
-  }): Promise<unknown>;
   /** Passive inform into a live session (lands in the next model request). */
   notifySession(sessionId: string, text: string, messageId: string): Promise<void>;
   /** Session-level idempotent execution request (native receipt dedupes). */
   sessionRequest(sessionId: string, text: string, messageId: string): Promise<void>;
   /** Whether the session is mid-run — an inform lands in the current turn. */
   sessionBusy(sessionId: string): Promise<boolean>;
-  /** Record the inform on the thread ledger for observers/dedupe. */
-  recordDirectedMessage(workspaceId: string, message: {
-    id: string;
-    from: { kind: "thread"; id: string };
-    to: { kind: "thread"; id: string };
-    kind: "inform";
+  /** Single thread.send-compatible message/admission path for Thread targets. */
+  sendToThread(input: {
+    workspaceId: string;
+    threadId: string;
     text: string;
-    status: "delivered" | "held" | "failed";
-    runId?: string;
-    at: string;
-  }): Promise<unknown>;
+    requestId: string;
+    from: ThreadParent;
+  }): Promise<{ delivery: FollowUpOccurrenceDelivery; runId?: string }>;
   /**
    * Presentation wait marker on the thread. `null` clears only a follow-up
    * attention — never a user/permission wait that arrived meanwhile.
@@ -229,6 +250,7 @@ export interface FollowUpServiceDeps {
    * (path, kind, sequence) only; content is re-read via stat, never watched.
    */
   watchWorkspace?(workspaceId: string, listener: (event: {
+    sourceId: string;
     kind: string;
     sequence: number;
     generation: number;
@@ -244,6 +266,25 @@ export interface FollowUpServiceDeps {
   getResourceSample?(machineId: string): Promise<FollowUpResourceSample | null>;
   /** Registered external-source adapters by provider id ("github-pr"). */
   externalSource?(provider: string): FollowUpExternalSource | null;
+  /** Durable Knowledge events produced by the shell owner before notification. */
+  getShellEvents?(workspaceId: string, sessionId: string, executionId: string, afterId?: number): Promise<FollowUpShellEvent[]>;
+  subscribeShellEvents?(listener: (event: FollowUpShellEvent) => void | Promise<void>): () => void;
+  /** Current-runtime projection; null means a started process cannot be reattached. */
+  getShellExecutionStatus?(sessionId: string, executionId: string): Promise<{ running: boolean; exitCode?: number } | null>;
+  /**
+   * Read output already owned by the live shell supervisor. This closes the
+   * registration gap without copying the command log into the follow-up store.
+   */
+  readShellExecutionOutput?(sessionId: string, executionId: string, offset: number, length: number): Promise<{
+    text: string;
+    offset: number;
+    length: number;
+    nextOffset: number;
+    total: number;
+    eof: boolean;
+    running: boolean;
+    exitCode?: number;
+  } | null>;
   onChange?(workspaceId: string): void;
   now?(): number;
   onError?(error: Error): void;
@@ -263,6 +304,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const definitionIdFor = (id: string) => `${DEFINITION_PREFIX}${id}`;
 const occurrenceIdFor = (id: string) => `${OCCURRENCE_PREFIX}${id}`;
+const observationIdFor = (sourceKey: string, eventId: string) => (
+  createHash("sha256").update(`${sourceKey}\0${eventId}`).digest("hex")
+);
 
 interface FireGuard {
   /** Record revision observed when the callback was armed — optional: source identity is the authoritative guard for in-band drains. */
@@ -271,26 +315,36 @@ interface FireGuard {
 }
 
 interface FileWatchSignal {
+  sourceId: string;
   kind: string;
   sequence: number;
   generation: number;
   path?: string;
+  observationAt?: number;
+  observationEventId?: string;
   /** The signal crossed a triggered/delivery window and is being coalesced. */
   buffered?: true;
 }
 
+const stableJson = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+};
+
 const sourceIdentityFor = (source: FollowUpSource, reason: string): string => {
   if (source.kind === "experiment" && reason === "experiment-terminal") {
-    return JSON.stringify({ kind: source.kind, attemptId: source.attemptId, states: source.states ?? null });
+    return stableJson({ kind: source.kind, attemptId: source.attemptId, states: source.states ?? null });
   }
   if (reason !== "deadline" && "fallbackAt" in source) {
     // fallbackAt is a backstop timer facet, not the observed condition — a
     // consumed deadline must not change the source identity and block the
     // real event.
     const { fallbackAt: _ignored, ...rest } = source as Record<string, unknown> & { fallbackAt?: number };
-    return JSON.stringify(rest);
+    return stableJson(rest);
   }
-  return JSON.stringify(source);
+  return stableJson(source);
 };
 
 const assertOnlyKeys = (value: Record<string, unknown>, allowed: ReadonlySet<string>, label: string) => {
@@ -337,13 +391,51 @@ const normalizeWatchPath = (raw: string): string => {
 
 const METRIC_KEY = /^(cpuPercent|memoryMb|gpu:\d+\.(?:percent|memoryMb))$/;
 
+const isCompositeSource = (source: FollowUpSource): source is Extract<FollowUpSource, { kind: "any" | "all" }> => (
+  source.kind === "any" || source.kind === "all"
+);
+
+const isRepeatableLeaf = (source: FollowUpLeafSource): boolean => (
+  source.kind === "file" && source.condition === "changed"
+  || source.kind === "artifact" && source.every === true
+  || source.kind === "log" && source.every === true
+  || source.kind === "metric" && source.every === true
+  || source.kind === "shell" && source.condition === "output" && source.every === true
+);
+
 /** Validate and normalize the untrusted wire value at the service boundary. */
 const validateSource = (value: unknown): FollowUpSource => {
   if (!isRecord(value) || typeof value.kind !== "string") {
     throw new HarnessServiceError(
       "invalid-params",
-      "source.kind is required (time | experiment | artifact | file | log | metric | external | manual)",
+      "source.kind is required (time | experiment | artifact | file | log | metric | external | shell | manual | any | all)",
     );
+  }
+  if (value.kind === "any" || value.kind === "all") {
+    assertOnlyKeys(value, new Set(["kind", "sources", "every", "fallbackAt"]), `${value.kind} source`);
+    if (!Array.isArray(value.sources) || value.sources.length === 0) {
+      throw new HarnessServiceError("invalid-params", `${value.kind} source requires at least one source`);
+    }
+    const sources = value.sources.map((candidate) => validateSource(candidate));
+    if (sources.some(isCompositeSource)) {
+      throw new HarnessServiceError("invalid-params", "nested follow-up combinations are not supported; put ordinary sources directly in any/all");
+    }
+    if (value.every === true) {
+      const repeatable = (sources as FollowUpLeafSource[]).filter(isRepeatableLeaf).length;
+      if ((value.kind === "all" && repeatable !== sources.length)
+        || (value.kind === "any" && repeatable === 0)) {
+        throw new HarnessServiceError(
+          "invalid-params",
+          `${value.kind} source with every=true requires ${value.kind === "all" ? "every" : "at least one"} child to emit repeatable edges`,
+        );
+      }
+    }
+    return {
+      kind: value.kind,
+      sources: sources as FollowUpLeafSource[],
+      ...(optionalBoolean(value, "every", `${value.kind} source`) !== undefined ? { every: value.every as boolean } : {}),
+      ...(optionalEpoch(value, "fallbackAt", `${value.kind} source`) !== undefined ? { fallbackAt: value.fallbackAt as number } : {}),
+    };
   }
   if (value.kind === "time") {
     assertOnlyKeys(value, new Set(["kind", "at", "timezone"]), "time source");
@@ -424,9 +516,7 @@ const validateSource = (value: unknown): FollowUpSource => {
     const attemptId = optionalNonEmptyString(value, "attemptId", "log source");
     if (!attemptId) throw new HarnessServiceError("invalid-params", "log source requires a non-empty attemptId");
     const pattern = optionalNonEmptyString(value, "pattern", "log source");
-    if (!pattern || pattern.length > 512) {
-      throw new HarnessServiceError("invalid-params", "log source pattern must be 1-512 characters");
-    }
+    if (!pattern) throw new HarnessServiceError("invalid-params", "log source requires a non-empty pattern");
     if (value.stream !== undefined && value.stream !== "stdout" && value.stream !== "stderr") {
       throw new HarnessServiceError("invalid-params", "log source stream must be stdout | stderr");
     }
@@ -488,6 +578,46 @@ const validateSource = (value: unknown): FollowUpSource => {
       ...(optionalEpoch(value, "fallbackAt", "external source") !== undefined ? { fallbackAt: value.fallbackAt as number } : {}),
     };
   }
+  if (value.kind === "shell") {
+    assertOnlyKeys(value, new Set(["kind", "executionId", "condition", "pattern", "regex", "states", "every", "fallbackAt"]), "shell source");
+    const executionId = optionalNonEmptyString(value, "executionId", "shell source");
+    if (!executionId) throw new HarnessServiceError("invalid-params", "shell source requires the executionId returned by bash/powershell");
+    if (value.condition !== "exit" && value.condition !== "output" && value.condition !== "status") {
+      throw new HarnessServiceError("invalid-params", "shell source condition must be exit | output | status");
+    }
+    const pattern = optionalNonEmptyString(value, "pattern", "shell source");
+    if (value.condition === "output" && !pattern) {
+      throw new HarnessServiceError("invalid-params", "shell output source requires a non-empty pattern");
+    }
+    if (value.condition !== "output" && pattern !== undefined) {
+      throw new HarnessServiceError("invalid-params", "shell pattern is only valid with condition=output");
+    }
+    const regex = optionalBoolean(value, "regex", "shell source");
+    if (regex === true && pattern) {
+      try { new RegExp(pattern); } catch {
+        throw new HarnessServiceError("invalid-params", "shell source pattern is not a valid regular expression");
+      }
+    }
+    const allowedStates = new Set(["running", "completed", "failed", "cancelled", "unavailable"]);
+    if (value.states !== undefined && (!Array.isArray(value.states)
+      || value.states.length === 0 || value.states.some((state) => typeof state !== "string" || !allowedStates.has(state)))) {
+      throw new HarnessServiceError("invalid-params", "shell source states contain an unsupported status");
+    }
+    if (value.condition === "status" && value.states === undefined) {
+      throw new HarnessServiceError("invalid-params", "shell status source requires states");
+    }
+    const states = value.states as Array<"running" | "completed" | "failed" | "cancelled" | "unavailable"> | undefined;
+    return {
+      kind: "shell",
+      executionId,
+      condition: value.condition,
+      ...(pattern !== undefined ? { pattern } : {}),
+      ...(regex !== undefined ? { regex } : {}),
+      ...(states !== undefined ? { states: [...states] } : {}),
+      ...(optionalBoolean(value, "every", "shell source") !== undefined ? { every: value.every as boolean } : {}),
+      ...(optionalEpoch(value, "fallbackAt", "shell source") !== undefined ? { fallbackAt: value.fallbackAt as number } : {}),
+    };
+  }
   if (value.kind === "manual") {
     assertOnlyKeys(value, new Set(["kind", "note"]), "manual source");
     if (value.note !== undefined && typeof value.note !== "string") {
@@ -499,6 +629,10 @@ const validateSource = (value: unknown): FollowUpSource => {
 };
 
 const assertSourceWithinCallerScope = (caller: FollowUpCaller, source: FollowUpSource): void => {
+  if (isCompositeSource(source)) {
+    for (const child of source.sources) assertSourceWithinCallerScope(caller, child);
+    return;
+  }
   if (source.kind !== "file" || !caller.workspaceScope?.length) return;
   const allowed = caller.workspaceScope.some((scope) => (
     scope === "" || source.path === scope || source.path.startsWith(`${scope}/`)
@@ -528,8 +662,17 @@ const summarizeSource = (source: FollowUpSource): string => {
         + (source.every === true ? " (each crossing)" : "");
     case "external":
       return `GitHub PR ${source.condition}${source.branch ? ` on ${source.branch}` : ""}`;
+    case "shell":
+      return source.condition === "output"
+        ? `shell ${source.executionId} output matching ${source.regex === true ? `/${source.pattern}/` : JSON.stringify(source.pattern)}`
+        : source.condition === "status"
+          ? `shell ${source.executionId} status ${(source.states ?? []).join("/")}`
+          : `shell ${source.executionId} to exit`;
     case "manual":
       return source.note ?? "explicit trigger only";
+    case "any":
+    case "all":
+      return `${source.kind} of ${source.sources.map(summarizeSource).join("; ")}${source.every === true ? " (repeatable edges)" : ""}`;
   }
 };
 
@@ -548,8 +691,16 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   /** External polling timers are independent from fallback/deadline timers. */
   const externalTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const deliveryRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const externalGroups = new Map<string, {
+    workspaceId: string;
+    source: Extract<FollowUpSource, { kind: "external" }>;
+    followUpIds: Set<string>;
+    running?: Promise<void>;
+  }>();
   /** attemptId -> Set<followUpId> for experiment/artifact/log waits. */
   const attemptWaits = new Map<string, Set<string>>();
+  let unsubscribeAttempts: (() => void) | undefined;
   /** workspaceId -> normalized path -> Set<followUpId> for file waits. */
   const fileWaits = new Map<string, Map<string, Set<string>>>();
   /** workspaceId -> live document-authority watch shared by file waits. */
@@ -558,10 +709,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const readySettles = new Map<string, { timer: ReturnType<typeof setTimeout>; size: number | undefined; mtimeMs: number | undefined }>();
   /** machineId -> followUpId -> workspaceId for metric waits. */
   const metricWaits = new Map<string, Map<string, string>>();
-  /** File invalidations that arrived while a re-arming occurrence was delivering. */
-  const pendingFileSignals = new Map<string, FileWatchSignal & { buffered: true }>();
-  /** Metric transitions observed while a re-arming occurrence was delivering. */
-  const pendingMetricSamples = new Map<string, FollowUpResourceSample[]>();
+  let unsubscribeSamples: (() => void) | undefined;
+  /** executionId -> followUpId -> durable owner identity. */
+  const shellWaits = new Map<string, Map<string, { workspaceId: string; sessionId: string }>>();
+  let unsubscribeShellEvents: (() => void) | undefined;
+  const shellStreamState = new Map<string, { offset: number; tail: string }>();
   const reprimeQueued = new Set<string>();
   /** followUpId -> consumed log byte offset (persisted on sourceState). */
   const logOffsets = new Map<string, number>();
@@ -645,6 +797,79 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     });
   };
 
+  const putObservation = async (
+    workspaceId: string,
+    sourceKind: ObservationPayload["sourceKind"],
+    sourceKey: string,
+    eventId: string,
+    facts: Record<string, JsonValue>,
+    sessionId?: string,
+  ): Promise<KernelRecordResult> => {
+    const { scoped } = await recordScope(workspaceId);
+    const payload: ObservationPayload = {
+      id: observationIdFor(sourceKey, eventId),
+      workspaceId,
+      ...(sessionId ? { sessionId } : {}),
+      sourceKind,
+      sourceKey,
+      eventId,
+      at: now(),
+      facts,
+    };
+    try {
+      return await scoped.putRecord({
+        operationId: `followup.observation:${randomUUID()}`,
+        recordId: `followup.observation:${payload.id}`,
+        recordType: "followup.observation",
+        workspaceId,
+        state: "available",
+        ...(sessionId ? { sessionId } : {}),
+        payloadJson: JSON.stringify(payload),
+        ownerIds: [],
+        references: [],
+      });
+    } catch (error) {
+      const existing = await scoped.getRecord(workspaceId, `followup.observation:${payload.id}`).catch(() => null);
+      if (existing) return existing;
+      throw error;
+    }
+  };
+
+  const listObservations = async (workspaceId: string, sourceKey: string): Promise<ObservationPayload[]> => {
+    const { scoped } = await recordScope(workspaceId);
+    const observations: ObservationPayload[] = [];
+    let cursor: number | undefined;
+    do {
+      const page = await scoped.listRecords({
+        workspaceId,
+        recordType: "followup.observation",
+        pageSize: 128,
+        ...(cursor === undefined ? {} : { cursor }),
+      });
+      for (const record of page.records) {
+        const payload = payloadOf(record) as unknown as ObservationPayload;
+        if (payload.sourceKey === sourceKey) observations.push(payload);
+      }
+      cursor = page.nextCursor === null ? undefined : page.nextCursor;
+    } while (cursor !== undefined);
+    return observations.sort((left, right) => left.at - right.at || left.eventId.localeCompare(right.eventId));
+  };
+
+  const releaseObservation = async (workspaceId: string, observation: ObservationPayload): Promise<void> => {
+    const { scoped } = await recordScope(workspaceId);
+    await scoped.releaseRecord(
+      `followup.observation.release:${randomUUID()}`,
+      workspaceId,
+      `followup.observation:${observation.id}`,
+    );
+  };
+
+  const releaseObservationsForSource = async (workspaceId: string, sourceKey: string): Promise<void> => {
+    for (const observation of await listObservations(workspaceId, sourceKey)) {
+      await releaseObservation(workspaceId, observation);
+    }
+  };
+
   const toView = (record: KernelRecordResult): FollowUpDefinitionView => {
     const payload = payloadOf(record) as unknown as DefinitionPayload;
     return {
@@ -709,7 +934,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   };
 
   const scheduleExternalAt = (id: string, dueAt: number, callback: () => Promise<unknown>) => {
-    clearExternalTimer(id);
+    // External poll timers are keyed by compatible workspace/query groups.
     const scheduleNext = () => {
       const delay = Math.max(0, Math.min(dueAt - now(), MAX_TIMER_DELAY_MS));
       const timer = setTimeout(() => {
@@ -731,6 +956,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     if (!set) return;
     set.delete(followUpId);
     if (set.size === 0) attemptWaits.delete(attemptId);
+    if (attemptWaits.size === 0) {
+      unsubscribeAttempts?.();
+      unsubscribeAttempts = undefined;
+    }
   };
 
   const watchAttempt = (attemptId: string, followUpId: string) => {
@@ -740,6 +969,57 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       attemptWaits.set(attemptId, set);
     }
     set.add(followUpId);
+    if (!unsubscribeAttempts && deps.subscribeAttempts) {
+      unsubscribeAttempts = deps.subscribeAttempts(onAttemptEvent);
+    }
+  };
+
+  const watchMetric = (machineId: string, followUpId: string, workspaceId: string) => {
+    let set = metricWaits.get(machineId);
+    if (!set) {
+      set = new Map();
+      metricWaits.set(machineId, set);
+    }
+    set.set(followUpId, workspaceId);
+    if (!unsubscribeSamples && deps.subscribeResourceSamples) {
+      unsubscribeSamples = deps.subscribeResourceSamples(onResourceSample);
+    }
+  };
+
+  const unwatchMetric = (machineId: string, followUpId: string) => {
+    const set = metricWaits.get(machineId);
+    if (set) {
+      set.delete(followUpId);
+      if (set.size === 0) metricWaits.delete(machineId);
+    }
+    if (metricWaits.size === 0) {
+      unsubscribeSamples?.();
+      unsubscribeSamples = undefined;
+    }
+  };
+
+  const watchShell = (executionId: string, followUpId: string, workspaceId: string, sessionId: string) => {
+    let set = shellWaits.get(executionId);
+    if (!set) {
+      set = new Map();
+      shellWaits.set(executionId, set);
+    }
+    set.set(followUpId, { workspaceId, sessionId });
+    if (!unsubscribeShellEvents && deps.subscribeShellEvents) {
+      unsubscribeShellEvents = deps.subscribeShellEvents(onShellEvent);
+    }
+  };
+
+  const unwatchShell = (executionId: string, followUpId: string) => {
+    const set = shellWaits.get(executionId);
+    if (set) {
+      set.delete(followUpId);
+      if (set.size === 0) shellWaits.delete(executionId);
+    }
+    if (shellWaits.size === 0) {
+      unsubscribeShellEvents?.();
+      unsubscribeShellEvents = undefined;
+    }
   };
 
   const ensureWorkspaceWatch = (workspaceId: string): Promise<boolean> | null => {
@@ -780,7 +1060,6 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const id = payload.id;
     const source = payload.source;
     clearTimer(id);
-    clearExternalTimer(id);
     if (source.kind === "time") {
       const dueAt = source.at;
       scheduleAt(id, dueAt, () => fire(
@@ -818,16 +1097,12 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       }
     }
     if (source.kind === "metric") {
-      let set = metricWaits.get(source.machineId);
-      if (!set) {
-        set = new Map();
-        metricWaits.set(source.machineId, set);
-      }
-      set.set(id, payload.workspaceId);
+      watchMetric(source.machineId, id, payload.workspaceId);
     }
-    if (source.kind === "external") {
-      scheduleExternal(payload.workspaceId, id, source);
+    if (source.kind === "shell") {
+      watchShell(source.executionId, id, payload.workspaceId, payload.sessionId);
     }
+    if (source.kind === "external") watchExternal(payload.workspaceId, id, source);
     const fallbackAt = "fallbackAt" in source ? source.fallbackAt : undefined;
     if (typeof fallbackAt === "number") {
       scheduleAt(id, fallbackAt, () => fire(
@@ -844,7 +1119,6 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
 
   const disarm = (payload: DefinitionPayload) => {
     clearTimer(payload.id);
-    clearExternalTimer(payload.id);
     const source = payload.source;
     if (source.kind === "experiment" || source.kind === "artifact" || source.kind === "log") {
       unwatchAttempt(source.attemptId, payload.id);
@@ -858,21 +1132,31 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         if (set.size === 0) {
           paths?.delete(source.path);
           releaseWorkspaceWatch(payload.workspaceId);
+          void releaseObservationsForSource(
+            payload.workspaceId,
+            fileSourceKey(payload.workspaceId, source.path),
+          ).catch(reportError);
         }
       }
       if (paths && paths.size === 0) fileWaits.delete(payload.workspaceId);
     }
     if (source.kind === "metric") {
-      const set = metricWaits.get(source.machineId);
-      if (set) {
-        set.delete(payload.id);
-        if (set.size === 0) metricWaits.delete(source.machineId);
+      unwatchMetric(source.machineId, payload.id);
+      if (!metricWaits.has(source.machineId)) {
+        void releaseObservationsForSource(payload.workspaceId, metricSourceKey(source.machineId)).catch(reportError);
       }
     }
+    if (source.kind === "shell") {
+      unwatchShell(source.executionId, payload.id);
+      void releaseObservationsForSource(
+        payload.workspaceId,
+        shellSourceKey(payload.sessionId, source.executionId, payload.id),
+      ).catch(reportError);
+    }
+    if (source.kind === "external") unwatchExternal(payload.workspaceId, payload.id, source);
+    shellStreamState.delete(payload.id);
 
     if (source.kind === "log") logOffsets.delete(payload.id);
-    pendingFileSignals.delete(payload.id);
-    pendingMetricSamples.delete(payload.id);
     reprimeQueued.delete(payload.id);
   };
 
@@ -1208,13 +1492,78 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     state: DefinitionPayload["sourceState"],
     stat: { exists: boolean; size?: number; mtimeMs?: number },
     signal?: FileWatchSignal,
-  ): NonNullable<DefinitionPayload["sourceState"]> => ({
-    fileExists: stat.exists,
-    fileSize: stat.exists ? stat.size ?? null : null,
-    fileMtimeMs: stat.exists ? stat.mtimeMs ?? null : null,
-    fileGeneration: signal?.generation ?? state?.fileGeneration ?? 0,
-    fileSequence: signal?.sequence ?? state?.fileSequence ?? 0,
-  });
+  ): NonNullable<DefinitionPayload["sourceState"]> => {
+    const sourceId = signal?.sourceId ?? state?.fileSourceId;
+    const observationAt = signal?.observationAt ?? state?.fileObservationAt;
+    const observationEventId = signal?.observationEventId ?? state?.fileObservationEventId;
+    return {
+      fileExists: stat.exists,
+      fileSize: stat.exists ? stat.size ?? null : null,
+      fileMtimeMs: stat.exists ? stat.mtimeMs ?? null : null,
+      fileGeneration: signal?.generation ?? state?.fileGeneration ?? 0,
+      fileSequence: signal?.sequence ?? state?.fileSequence ?? 0,
+      ...(sourceId === undefined ? {} : { fileSourceId: sourceId }),
+      ...(observationAt === undefined ? {} : { fileObservationAt: observationAt }),
+      ...(observationEventId === undefined ? {} : { fileObservationEventId: observationEventId }),
+    };
+  };
+
+  const fileSourceKey = (workspaceId: string, path: string): string => `file:${workspaceId}:${path}`;
+
+  const fileObservationConsumed = async (
+    workspaceId: string,
+    path: string,
+    observation: ObservationPayload,
+  ): Promise<boolean> => {
+    const ids = fileWaits.get(workspaceId)?.get(path);
+    if (!ids || ids.size === 0) return true;
+    for (const id of ids) {
+      const record = await getDefinitionRecord(workspaceId, id);
+      if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) continue;
+      if (record.state === "triggered") return false;
+      const payload = payloadOf(record) as unknown as DefinitionPayload;
+      const at = payload.sourceState?.fileObservationAt ?? -1;
+      const eventId = payload.sourceState?.fileObservationEventId ?? "";
+      if (at < observation.at || (at === observation.at && eventId < observation.eventId)) return false;
+    }
+    return true;
+  };
+
+  const drainFileObservations = async (workspaceId: string, followUpId: string): Promise<boolean> => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || record.state !== "waiting") return false;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.source.kind !== "file") return false;
+    let observationAt = payload.sourceState?.fileObservationAt ?? -1;
+    let observationEventId = payload.sourceState?.fileObservationEventId ?? "";
+    const observations = await listObservations(workspaceId, fileSourceKey(workspaceId, payload.source.path));
+    for (const observation of observations) {
+      if (observation.sourceKind !== "file" || observation.at < payload.createdAt) continue;
+      if (observation.at < observationAt
+        || (observation.at === observationAt && observation.eventId <= observationEventId)) continue;
+      const nextGeneration = typeof observation.facts.generation === "number" ? observation.facts.generation : 0;
+      const nextSequence = typeof observation.facts.sequence === "number" ? observation.facts.sequence : 0;
+      const sourceId = typeof observation.facts.sourceId === "string" ? observation.facts.sourceId : "legacy";
+      await evaluateFileWait(workspaceId, followUpId, "durable-event", {
+        sourceId,
+        kind: typeof observation.facts.event === "string" ? observation.facts.event : "changed",
+        generation: nextGeneration,
+        sequence: nextSequence,
+        path: payload.source.path,
+        observationAt: observation.at,
+        observationEventId: observation.eventId,
+        buffered: true,
+      });
+      observationAt = observation.at;
+      observationEventId = observation.eventId;
+      if (await fileObservationConsumed(workspaceId, payload.source.path, observation)) {
+        await releaseObservation(workspaceId, observation);
+      }
+      const current = await getDefinitionRecord(workspaceId, followUpId);
+      if (!current || current.state !== "waiting") return true;
+    }
+    return false;
+  };
 
   const fileStatChanged = (
     state: NonNullable<DefinitionPayload["sourceState"]>,
@@ -1259,9 +1608,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const observation = fileObservationPatch(payload.sourceState, stat, signal);
     if (source.condition === "changed") {
       const changedFromBaseline = baselineKnown && fileStatChanged(payload.sourceState!, stat);
-      const bufferedChange = signal?.buffered === true
-        && signal.kind !== "reset";
-      if (!baselineKnown || (!changedFromBaseline && !bufferedChange)) {
+      const observedChange = signal !== undefined && signal.kind !== "reset";
+      if ((!baselineKnown && !observedChange) || (baselineKnown && !changedFromBaseline && !observedChange)) {
         await updateSourceState(workspaceId, followUpId, observation, sourceJson).catch(reportError);
         return;
       }
@@ -1370,9 +1718,8 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const source = payload.source;
     if (source.kind !== "file" || (event.path !== undefined && source.path !== event.path)) return;
     if (record.state === "triggered") {
-      // The watcher has no durable event history. Retain the latest invalidation
-      // in-process so delivery cannot permanently consume the only wakeup.
-      pendingFileSignals.set(followUpId, { ...event, buffered: true });
+      // The owner callback persisted this invalidation before fan-out. Delivery
+      // reprime consumes it from the durable per-definition cursor.
       return;
     }
     await evaluateFileWait(workspaceId, followUpId, event.kind === "reset" ? "watch-reset" : "event", event);
@@ -1381,11 +1728,33 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   const onWatchEvent = (workspaceId: string, event: FileWatchSignal) => {
     const paths = fileWaits.get(workspaceId);
     if (!paths) return;
-    const ids = event.path === undefined
-      ? new Set([...paths.values()].flatMap((set) => [...set]))
-      : new Set(paths.get(event.path) ?? []);
-    for (const followUpId of ids) {
-      void handleFileSignal(workspaceId, followUpId, event).catch(reportError);
+    const targets = event.path === undefined
+      ? [...paths.entries()]
+      : [[event.path, paths.get(event.path) ?? new Set<string>()] as const];
+    for (const [path, ids] of targets) {
+      void (async () => {
+        const eventId = `${event.sourceId}:${event.generation}:${event.sequence}:${event.kind}`;
+        const observation = await putObservation(workspaceId, "file", fileSourceKey(workspaceId, path),
+          eventId, {
+            sourceId: event.sourceId,
+            generation: event.generation,
+            sequence: event.sequence,
+            event: event.kind,
+            path,
+          });
+        const observationPayload = payloadOf(observation) as unknown as ObservationPayload;
+        for (const followUpId of [...ids]) {
+          await handleFileSignal(workspaceId, followUpId, {
+            ...event,
+            path,
+            observationAt: observationPayload.at,
+            observationEventId: eventId,
+          });
+        }
+        if (await fileObservationConsumed(workspaceId, path, observationPayload)) {
+          await releaseObservation(workspaceId, observationPayload);
+        }
+      })().catch(reportError);
     }
   };
 
@@ -1399,6 +1768,55 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       return gpu[2] === "percent" ? entry?.utilizationPercent : entry?.usedMemoryMb;
     }
     return undefined;
+  };
+
+  const metricSourceKey = (machineId: string): string => `metric:${machineId}`;
+
+  const metricObservationConsumed = async (
+    workspaceId: string,
+    machineId: string,
+    observation: ObservationPayload,
+  ): Promise<boolean> => {
+    const observedAt = typeof observation.facts.observedAt === "number" ? observation.facts.observedAt : -1;
+    const ids = metricWaits.get(machineId);
+    if (!ids) return true;
+    for (const [id, ownerWorkspaceId] of ids) {
+      if (ownerWorkspaceId !== workspaceId) continue;
+      const record = await getDefinitionRecord(workspaceId, id);
+      if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) continue;
+      if (record.state === "triggered") return false;
+      const payload = payloadOf(record) as unknown as DefinitionPayload;
+      if ((payload.sourceState?.metricObservedAt ?? -1) < observedAt) return false;
+    }
+    return true;
+  };
+
+  const drainMetricObservations = async (workspaceId: string, followUpId: string): Promise<boolean> => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || record.state !== "waiting") return false;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.source.kind !== "metric") return false;
+    const cursor = payload.sourceState?.metricObservedAt ?? -1;
+    const observations = await listObservations(workspaceId, metricSourceKey(payload.source.machineId));
+    let processed = false;
+    for (const observation of observations) {
+      const observedAt = typeof observation.facts.observedAt === "number" ? observation.facts.observedAt : -1;
+      if (observation.sourceKind !== "metric" || observation.at < payload.createdAt || observedAt <= cursor) continue;
+      const usage = observation.facts.usage;
+      if (!usage || typeof usage !== "object" || Array.isArray(usage)) continue;
+      await evaluateMetricSample(workspaceId, followUpId, {
+        machineId: payload.source.machineId,
+        observedAt,
+        usage: usage as FollowUpResourceSample["usage"],
+      }, "durable-event");
+      processed = true;
+      if (await metricObservationConsumed(workspaceId, payload.source.machineId, observation)) {
+        await releaseObservation(workspaceId, observation);
+      }
+      const current = await getDefinitionRecord(workspaceId, followUpId);
+      if (!current || current.state !== "waiting") return true;
+    }
+    return processed;
   };
 
   /**
@@ -1418,13 +1836,26 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const source = payload.source;
     if (source.kind !== "metric" || source.machineId !== sample.machineId) return;
     const value = metricValue(sample, source.metric);
-    if (value === undefined) return; // dimension not probed — not evidence either way
+    if (value === undefined) {
+      await updateSourceState(
+        workspaceId,
+        followUpId,
+        { metricObservedAt: sample.observedAt },
+        JSON.stringify(source),
+      ).catch(reportError);
+      return; // dimension not probed — not evidence either way
+    }
     const holds = source.predicate === "above" ? value > source.threshold : value < source.threshold;
     const held = payload.sourceState?.holding === true;
     const sourceJson = JSON.stringify(source);
-    if (holds === held) return;
+    if (holds === held) {
+      if ((payload.sourceState?.metricObservedAt ?? -1) < sample.observedAt) {
+        await updateSourceState(workspaceId, followUpId, { metricObservedAt: sample.observedAt }, sourceJson).catch(reportError);
+      }
+      return;
+    }
     if (!holds) {
-      await updateSourceState(workspaceId, followUpId, { holding: false }, sourceJson).catch(reportError);
+      await updateSourceState(workspaceId, followUpId, { holding: false, metricObservedAt: sample.observedAt }, sourceJson).catch(reportError);
       return;
     }
     await fire(workspaceId, followUpId, "metric-crossed", {
@@ -1440,7 +1871,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       sourceIdentity: sourceIdentityFor(source, "metric-crossed"),
     }, {
       rearm: source.every === true,
-      sourceStatePatch: { holding: true },
+      sourceStatePatch: { holding: true, metricObservedAt: sample.observedAt },
     });
   };
 
@@ -1455,108 +1886,489 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const source = payload.source;
     if (source.kind !== "metric" || source.machineId !== sample.machineId) return;
     if (record.state === "triggered") {
-      const value = metricValue(sample, source.metric);
-      if (value === undefined) return;
-      const holds = source.predicate === "above" ? value > source.threshold : value < source.threshold;
-      const pending = pendingMetricSamples.get(followUpId) ?? [];
-      const previous = pending.at(-1);
-      const previousValue = previous ? metricValue(previous, source.metric) : undefined;
-      const previousHolds = previousValue === undefined
-        ? undefined
-        : source.predicate === "above" ? previousValue > source.threshold : previousValue < source.threshold;
-      if (previousHolds === holds) pending[pending.length - 1] = sample;
-      else pending.push(sample);
-      pendingMetricSamples.set(followUpId, pending);
+      // The sample was persisted before fan-out. The re-arming definition will
+      // replay it after delivery using its durable observedAt cursor.
       return;
     }
     await evaluateMetricSample(workspaceId, followUpId, sample, "sample");
   };
 
-  const unsubscribeSamples = deps.subscribeResourceSamples?.((sample) => {
+  function onResourceSample(sample: FollowUpResourceSample): void {
     const set = metricWaits.get(sample.machineId);
     if (!set) return;
+    const byWorkspace = new Map<string, string[]>();
     for (const [followUpId, workspaceId] of [...set]) {
-      void handleMetricSample(workspaceId, followUpId, sample).catch(reportError);
+      const ids = byWorkspace.get(workspaceId) ?? [];
+      ids.push(followUpId);
+      byWorkspace.set(workspaceId, ids);
     }
+    for (const [workspaceId, ids] of byWorkspace) {
+      void (async () => {
+        const observationRecord = await putObservation(workspaceId, "metric", metricSourceKey(sample.machineId),
+          `${sample.observedAt}:${createHash("sha256").update(JSON.stringify(sample.usage)).digest("hex")}`, {
+            machineId: sample.machineId,
+            observedAt: sample.observedAt,
+            usage: sample.usage as unknown as JsonValue,
+          });
+        for (const followUpId of ids) await handleMetricSample(workspaceId, followUpId, sample);
+        const observation = payloadOf(observationRecord) as unknown as ObservationPayload;
+        if (await metricObservationConsumed(workspaceId, sample.machineId, observation)) {
+          await releaseObservation(workspaceId, observation);
+        }
+      })().catch(reportError);
+    }
+  }
+
+  const shellStatusFacts = (event: FollowUpShellEvent): Record<string, JsonValue> => ({
+    executionId: event.executionId,
+    state: event.state,
+    command: event.command,
+    cwd: event.cwd,
+    eventId: event.id,
+    observedAt: event.at,
+    ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }),
   });
 
-  /**
-   * Registration/poke evaluation for an external source. The adapter's own
-   * `intervalMs` spaces queries; `retryAfterMs` handles rate limiting. A
-   * matched state fires once with the adapter's stable event identity.
-   */
-  const runExternalQuery = async (
+  const shellSourceKey = (sessionId: string, executionId: string, followUpId: string): string => (
+    `shell:${sessionId}:${executionId}:${followUpId}`
+  );
+
+  const drainShellMatchObservations = async (
     workspaceId: string,
     followUpId: string,
+    payload: DefinitionPayload,
+    source: Extract<FollowUpSource, { kind: "shell" }>,
     via: string,
-    expectedSourceIdentity?: string,
+  ): Promise<boolean> => {
+    const observations = await listObservations(workspaceId, shellSourceKey(payload.sessionId, source.executionId, followUpId));
+    let consumed = payload.sourceState?.shellMatchOffset ?? 0;
+    for (const observation of observations) {
+      if (observation.sourceKind !== "shell" || observation.facts.kind !== "match") continue;
+      const end = typeof observation.facts.end === "number" ? observation.facts.end : 0;
+      if (end <= consumed) continue;
+      const current = await getDefinitionRecord(workspaceId, followUpId);
+      if (!current || current.state !== "waiting") return false;
+      const currentPayload = payloadOf(current) as unknown as DefinitionPayload;
+      if (currentPayload.source.kind !== "shell" || JSON.stringify(currentPayload.source) !== JSON.stringify(source)) return false;
+      const fired = await fire(workspaceId, followUpId, "shell-output-match", {
+        ...observation.facts,
+        observationId: observation.id,
+        via,
+      }, observation.eventId, {
+        recordRevision: current.recordRevision,
+        sourceIdentity: sourceIdentityFor(source, "shell-output-match"),
+      }, {
+        rearm: source.every === true,
+        sourceStatePatch: {
+          shellMatchOffset: end,
+          shellOutputOffset: typeof observation.facts.outputOffset === "number" ? observation.facts.outputOffset : end,
+          shellOutputTail: typeof observation.facts.tail === "string" ? observation.facts.tail : "",
+        },
+      });
+      const after = await getDefinitionRecord(workspaceId, followUpId);
+      const afterPayload = after ? payloadOf(after) as unknown as DefinitionPayload : null;
+      if (!after || !ACTIVE_STATUSES.has(after.state as FollowUpStatus)
+        || (afterPayload?.sourceState?.shellMatchOffset ?? 0) >= end) {
+        await releaseObservation(workspaceId, observation);
+      }
+      if (!fired) return false;
+      consumed = end;
+      if (source.every !== true) return true;
+    }
+    return consumed > (payload.sourceState?.shellMatchOffset ?? 0);
+  };
+
+  const observeShellOutputEvent = async (
+    workspaceId: string,
+    followUpId: string,
+    event: FollowUpShellEvent,
   ): Promise<void> => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) return;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    const source = payload.source;
+    if (source.kind !== "shell" || source.condition !== "output" || source.executionId !== event.executionId || !event.text) return;
+    const persisted = shellStreamState.get(followUpId) ?? {
+      offset: payload.sourceState?.shellOutputOffset ?? 0,
+      tail: payload.sourceState?.shellOutputTail ?? "",
+    };
+    let chunk = event.text;
+    let chunkOffset = event.offset ?? persisted.offset;
+    const patternBytes = Buffer.byteLength(source.pattern ?? "", "utf8");
+    if (event.type === "shell-completion" && event.offset === undefined) {
+      const start = Math.max(0, persisted.offset - Math.max(0, patternBytes - 1));
+      const page = sliceUtf8ByBytes(chunk, start, Math.max(0, Buffer.byteLength(chunk, "utf8") - start));
+      chunk = page.text;
+      chunkOffset = page.offset;
+    }
+    const tailBytes = Buffer.byteLength(persisted.tail, "utf8");
+    const scan = persisted.tail + chunk;
+    const base = Math.max(0, chunkOffset - tailBytes);
+    const matches: Array<{ at: number; end: number; text: string }> = [];
+    if (source.regex === true) {
+      const regex = new RegExp(source.pattern!, "g");
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(scan)) !== null) {
+        const at = base + Buffer.byteLength(scan.slice(0, match.index), "utf8");
+        const end = at + Buffer.byteLength(match[0], "utf8");
+        if (end > persisted.offset) matches.push({ at, end, text: match[0].slice(0, 160) });
+        if (source.every !== true) break;
+        if (match[0].length === 0) regex.lastIndex += 1;
+      }
+    } else {
+      let from = 0;
+      for (;;) {
+        const index = scan.indexOf(source.pattern!, from);
+        if (index < 0) break;
+        const at = base + Buffer.byteLength(scan.slice(0, index), "utf8");
+        const end = at + patternBytes;
+        from = index + Math.max(1, source.pattern!.length);
+        if (end > persisted.offset) matches.push({ at, end, text: source.pattern!.slice(0, 160) });
+        if (source.every !== true) break;
+      }
+    }
+    const nextOffset = Math.max(persisted.offset, chunkOffset + Buffer.byteLength(chunk, "utf8"));
+    const carry = Math.max(0, patternBytes - 1);
+    const tailPage = sliceUtf8ByBytes(scan, Math.max(0, Buffer.byteLength(scan, "utf8") - carry), carry);
+    const nextTail = tailPage.text;
+    shellStreamState.set(followUpId, { offset: nextOffset, tail: nextTail });
+    const key = shellSourceKey(payload.sessionId, source.executionId, followUpId);
+    for (const match of matches) {
+      await putObservation(workspaceId, "shell", key, `match-${match.at}-${match.end}`, {
+        kind: "match",
+        executionId: source.executionId,
+        offset: match.at,
+        end: match.end,
+        match: match.text,
+        outputOffset: nextOffset,
+        tail: nextTail,
+        observedAt: event.at,
+      }, payload.sessionId);
+    }
+    if (record.state === "waiting") {
+      if (matches.length > 0) {
+        await drainShellMatchObservations(workspaceId, followUpId, payload, source, "event");
+      }
+    }
+  };
+
+  /**
+   * Ordinary shell waits consume the shell owner's durable Knowledge events.
+   * The subscription is only a wakeup; registration, checks, and restart all
+   * replay from the per-definition event/byte cursor.
+   */
+  const evaluateShellWait = async (workspaceId: string, followUpId: string, via: string): Promise<void> => {
     let record = await getDefinitionRecord(workspaceId, followUpId);
     if (!record || record.state !== "waiting") return;
     let payload = payloadOf(record) as unknown as DefinitionPayload;
-    let source = payload.source;
-    if (source.kind !== "external") return;
-    const sourceIdentity = sourceIdentityFor(source, "external-match");
-    if (expectedSourceIdentity !== undefined && expectedSourceIdentity !== sourceIdentity) return;
-    const adapter = deps.externalSource?.(source.provider);
-    if (!adapter) {
+    const source = payload.source;
+    if (source.kind !== "shell") return;
+    if (!deps.getShellEvents) {
       await markUnavailable(workspaceId, followUpId);
       return;
     }
-    let result: Awaited<ReturnType<FollowUpExternalSource["query"]>>;
-    try {
-      result = await adapter.query({ workspaceId, source });
-    } catch (error) {
-      // Transient query failure — keep the wait and try the next slot.
-      reportError(error);
-      const current = await getDefinitionRecord(workspaceId, followUpId);
-      if (!current || current.state !== "waiting") return;
-      const currentPayload = payloadOf(current) as unknown as DefinitionPayload;
-      if (currentPayload.source.kind !== "external"
-        || sourceIdentityFor(currentPayload.source, "external-match") !== sourceIdentity) return;
-      scheduleExternal(workspaceId, followUpId, currentPayload.source);
+    if (source.condition === "output"
+      && await drainShellMatchObservations(workspaceId, followUpId, payload, source, via)) {
+      const afterMatches = await getDefinitionRecord(workspaceId, followUpId);
+      if (!afterMatches || afterMatches.state !== "waiting") return;
+      record = afterMatches;
+      payload = payloadOf(record) as unknown as DefinitionPayload;
+    }
+    if (source.condition === "output" && deps.readShellExecutionOutput) {
+      let readOffset = Math.max(
+        payload.sourceState?.shellOutputOffset ?? 0,
+        shellStreamState.get(followUpId)?.offset ?? 0,
+      );
+      for (;;) {
+        const page = await deps.readShellExecutionOutput(
+          payload.sessionId,
+          source.executionId,
+          readOffset,
+          32 * 1024,
+        ).catch(() => null);
+        if (!page) break;
+        if (page.text) {
+          await observeShellOutputEvent(workspaceId, followUpId, {
+            id: 0,
+            type: "shell-output",
+            sessionId: payload.sessionId,
+            workspaceId,
+            executionId: source.executionId,
+            at: now(),
+            state: page.running ? "running" : page.exitCode === 0 ? "completed" : "failed",
+            command: "",
+            cwd: "",
+            offset: page.offset,
+            text: page.text,
+            ...(page.exitCode === undefined ? {} : { exitCode: page.exitCode }),
+          });
+          const current = await getDefinitionRecord(workspaceId, followUpId);
+          if (!current || current.state !== "waiting") return;
+          const currentPayload = payloadOf(current) as unknown as DefinitionPayload;
+          if (currentPayload.source.kind !== "shell" || JSON.stringify(currentPayload.source) !== JSON.stringify(source)) return;
+          record = current;
+          payload = payloadOf(record) as unknown as DefinitionPayload;
+        }
+        if (page.eof || page.nextOffset <= readOffset) break;
+        readOffset = page.nextOffset;
+      }
+      const streamed = shellStreamState.get(followUpId);
+      if (streamed && via !== "event") {
+        await updateSourceState(workspaceId, followUpId, {
+          shellOutputOffset: streamed.offset,
+          shellOutputTail: streamed.tail,
+        }, JSON.stringify(source));
+        record = await getDefinitionRecord(workspaceId, followUpId) ?? record;
+        payload = payloadOf(record) as unknown as DefinitionPayload;
+      }
+    }
+    const initialCursor = payload.sourceState?.shellEventId ?? 0;
+    const events = (await deps.getShellEvents(workspaceId, payload.sessionId, source.executionId, initialCursor))
+      .sort((left, right) => left.id - right.id);
+    if (events.length === 0 && initialCursor === 0) {
+      const runtime = await deps.getShellExecutionStatus?.(payload.sessionId, source.executionId).catch(() => null);
+      if (runtime === null) {
+        await markUnavailable(workspaceId, followUpId);
+      }
       return;
     }
-    record = await getDefinitionRecord(workspaceId, followUpId);
-    if (!record || record.state !== "waiting") return;
-    payload = payloadOf(record) as unknown as DefinitionPayload;
-    source = payload.source;
-    if (source.kind !== "external" || sourceIdentityFor(source, "external-match") !== sourceIdentity) return;
-    if (result.unavailable === true) {
-      await markUnavailable(workspaceId, followUpId);
-      return;
+
+    let cursor = initialCursor;
+    const streamed = shellStreamState.get(followUpId);
+    let outputOffset = Math.max(payload.sourceState?.shellOutputOffset ?? 0, streamed?.offset ?? 0);
+    let tail = streamed && streamed.offset >= (payload.sourceState?.shellOutputOffset ?? 0)
+      ? streamed.tail
+      : payload.sourceState?.shellOutputTail ?? "";
+    const sourceJson = JSON.stringify(source);
+    for (const event of events) {
+      cursor = Math.max(cursor, event.id);
+      if (source.condition === "exit" && event.type === "shell-completion") {
+        await fire(workspaceId, followUpId, "shell-exit", { ...shellStatusFacts(event), via }, `shell-${source.executionId}-exit-${event.id}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(source, "shell-exit"),
+        }, { sourceStatePatch: { shellEventId: cursor, shellOutputOffset: outputOffset, shellOutputTail: tail } });
+        return;
+      }
+      if (source.condition === "status" && (source.states ?? []).includes(event.state)) {
+        await fire(workspaceId, followUpId, "shell-status", { ...shellStatusFacts(event), via }, `shell-${source.executionId}-status-${event.state}-${event.id}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(source, "shell-status"),
+        }, { sourceStatePatch: { shellEventId: cursor, shellOutputOffset: outputOffset, shellOutputTail: tail } });
+        return;
+      }
+      if (source.condition !== "output") continue;
+      let chunk = event.text ?? "";
+      let chunkOffset = event.offset ?? outputOffset;
+      if (event.type === "shell-completion" && event.offset === undefined && chunk) {
+        const overlap = Math.max(0, Buffer.byteLength(source.pattern ?? "", "utf8") - 1);
+        const start = Math.max(0, outputOffset - overlap);
+        const page = sliceUtf8ByBytes(chunk, start, Math.max(0, Buffer.byteLength(chunk, "utf8") - start));
+        chunk = page.text;
+        chunkOffset = page.offset;
+      }
+      if (chunk) {
+        const tailBytes = Buffer.byteLength(tail, "utf8");
+        const scan = tail + chunk;
+        const base = Math.max(0, chunkOffset - tailBytes);
+        const regex = source.regex === true ? new RegExp(source.pattern!, "g") : null;
+        const matches: Array<{ at: number; end: number; text: string }> = [];
+        if (regex) {
+          let match: RegExpExecArray | null;
+          while ((match = regex.exec(scan)) !== null) {
+            const at = base + Buffer.byteLength(scan.slice(0, match.index), "utf8");
+            const end = at + Buffer.byteLength(match[0], "utf8");
+            if (end > outputOffset) matches.push({ at, end, text: match[0].slice(0, 160) });
+            if (source.every !== true) break;
+            if (match[0].length === 0) regex.lastIndex += 1;
+          }
+        } else {
+          let from = 0;
+          for (;;) {
+            const index = scan.indexOf(source.pattern!, from);
+            if (index < 0) break;
+            const at = base + Buffer.byteLength(scan.slice(0, index), "utf8");
+            const end = at + Buffer.byteLength(source.pattern!, "utf8");
+            from = index + Math.max(1, source.pattern!.length);
+            if (end > outputOffset) matches.push({ at, end, text: source.pattern!.slice(0, 160) });
+            if (source.every !== true) break;
+          }
+        }
+        outputOffset = Math.max(outputOffset, chunkOffset + Buffer.byteLength(chunk, "utf8"));
+        const carry = Math.max(0, Buffer.byteLength(source.pattern!, "utf8") - 1);
+        const tailPage = sliceUtf8ByBytes(scan, Math.max(0, Buffer.byteLength(scan, "utf8") - carry), carry);
+        tail = tailPage.text;
+        for (const match of matches) {
+          record = await getDefinitionRecord(workspaceId, followUpId) ?? record;
+          payload = payloadOf(record) as unknown as DefinitionPayload;
+          if (record.state !== "waiting" || JSON.stringify(payload.source) !== sourceJson) return;
+          const fired = await fire(workspaceId, followUpId, "shell-output-match", {
+            executionId: source.executionId,
+            offset: match.at,
+            match: match.text,
+            eventId: event.id,
+            via,
+          }, `shell-${source.executionId}-output-${match.at}`, {
+            recordRevision: record.recordRevision,
+            sourceIdentity: sourceIdentityFor(source, "shell-output-match"),
+          }, {
+            rearm: source.every === true,
+            sourceStatePatch: { shellEventId: cursor, shellOutputOffset: Math.max(outputOffset, match.end), shellOutputTail: tail },
+          });
+          if (!fired || source.every !== true) return;
+        }
+      }
+      if (event.type === "shell-completion") {
+        await fire(workspaceId, followUpId, "shell-output-exhausted", {
+          ...shellStatusFacts(event), pattern: source.pattern ?? "", via,
+        }, `shell-${source.executionId}-output-exhausted-${event.id}`, {
+          sourceIdentity: sourceIdentityFor(source, "shell-output-exhausted"),
+        }, { sourceStatePatch: { shellEventId: cursor, shellOutputOffset: outputOffset, shellOutputTail: tail } });
+        return;
+      }
     }
-    if (!result.matched) {
-      scheduleExternal(workspaceId, followUpId, source, result.retryAfterMs);
-      return;
+    if (cursor !== initialCursor || via !== "event") {
+      await updateSourceState(workspaceId, followUpId, {
+        shellEventId: cursor,
+        shellOutputOffset: outputOffset,
+        shellOutputTail: tail,
+      }, sourceJson).catch(reportError);
     }
-    await fire(workspaceId, followUpId, "external-match", {
-      provider: source.provider,
-      ...result.facts,
-      via,
-    }, result.eventId ?? `ext-${source.provider}-${JSON.stringify(result.facts)}`, {
-      recordRevision: record.recordRevision,
-      sourceIdentity: sourceIdentityFor(source, "external-match"),
-    });
+    const latest = events.at(-1);
+    if (latest && latest.type !== "shell-completion" && deps.getShellExecutionStatus) {
+      const runtime = await deps.getShellExecutionStatus(payload.sessionId, source.executionId).catch(() => null);
+      if (runtime === null) {
+        if (source.condition === "status" && (source.states ?? []).includes("unavailable")) {
+          const current = await getDefinitionRecord(workspaceId, followUpId);
+          if (current?.state === "waiting") {
+            await fire(workspaceId, followUpId, "shell-status", {
+              executionId: source.executionId,
+              state: "unavailable",
+              recoveredAfterRestart: via === "reconcile",
+              via,
+            }, `shell-${source.executionId}-status-unavailable`, {
+              recordRevision: current.recordRevision,
+              sourceIdentity: sourceIdentityFor(source, "shell-status"),
+            }, { sourceStatePatch: { shellEventId: cursor, shellOutputOffset: outputOffset, shellOutputTail: tail } });
+          }
+        } else {
+          await markUnavailable(workspaceId, followUpId);
+        }
+      }
+    }
   };
 
-  const scheduleExternal = (
-    workspaceId: string,
-    followUpId: string,
-    source: Extract<FollowUpSource, { kind: "external" }>,
-    delayMs?: number,
-  ) => {
-    const adapter = deps.externalSource?.(source.provider);
+  async function onShellEvent(event: FollowUpShellEvent): Promise<void> {
+    const set = shellWaits.get(event.executionId);
+    if (!set) return;
+    const deliveries: Promise<void>[] = [];
+    for (const [followUpId, owner] of [...set]) {
+      if (owner.workspaceId !== event.workspaceId || owner.sessionId !== event.sessionId) continue;
+      deliveries.push((async () => {
+        // The live supervisor is the output owner. Its byte slice excludes the
+        // command-framing sentinels and closes registration races; the transient
+        // event is only a wakeup. Completion preview remains the fallback once
+        // the execution is no longer attached to a supervisor.
+        if (event.type === "shell-completion" && event.text) {
+          await observeShellOutputEvent(owner.workspaceId, followUpId, event);
+        } else if (event.type === "shell-output" && event.text && !deps.readShellExecutionOutput) {
+          await observeShellOutputEvent(owner.workspaceId, followUpId, event);
+        }
+        await evaluateShellWait(owner.workspaceId, followUpId, "event");
+      })());
+    }
+    await Promise.all(deliveries);
+  }
+
+  const externalGroupKey = (workspaceId: string, source: Extract<FollowUpSource, { kind: "external" }>) => (
+    `${workspaceId}\0${sourceIdentityFor(source, "external-match")}`
+  );
+
+  const scheduleExternalGroup = (key: string, delayMs?: number): void => {
+    const group = externalGroups.get(key);
+    if (!group || group.followUpIds.size === 0) return;
+    const adapter = deps.externalSource?.(group.source.provider);
     if (!adapter) {
-      void markUnavailable(workspaceId, followUpId).catch(reportError);
+      for (const id of [...group.followUpIds]) void markUnavailable(group.workspaceId, id).catch(reportError);
       return;
     }
-    // Adapter-owned spacing; the floor only guards against a hot retry loop.
-    const delay = Math.max(5_000, delayMs ?? adapter.intervalMs);
-    const sourceIdentity = sourceIdentityFor(source, "external-match");
-    scheduleExternalAt(followUpId, now() + delay, () => (
-      runExternalQuery(workspaceId, followUpId, "poll", sourceIdentity)
-    ));
+    const delay = Math.max(0, delayMs ?? adapter.intervalMs);
+    scheduleExternalAt(key, now() + delay, () => runExternalGroup(key, "poll"));
+  };
+
+  const watchExternal = (workspaceId: string, followUpId: string, source: Extract<FollowUpSource, { kind: "external" }>): void => {
+    const key = externalGroupKey(workspaceId, source);
+    let group = externalGroups.get(key);
+    if (!group) {
+      group = { workspaceId, source, followUpIds: new Set() };
+      externalGroups.set(key, group);
+    }
+    group.followUpIds.add(followUpId);
+    if (!externalTimers.has(key) && !group.running) scheduleExternalGroup(key);
+  };
+
+  const unwatchExternal = (workspaceId: string, followUpId: string, source: Extract<FollowUpSource, { kind: "external" }>): void => {
+    const key = externalGroupKey(workspaceId, source);
+    const group = externalGroups.get(key);
+    if (!group) return;
+    group.followUpIds.delete(followUpId);
+    if (group.followUpIds.size === 0) {
+      clearExternalTimer(key);
+      externalGroups.delete(key);
+    }
+  };
+
+  async function runExternalGroup(key: string, via: string): Promise<void> {
+    const group = externalGroups.get(key);
+    if (!group || group.followUpIds.size === 0) return;
+    if (group.running) return group.running;
+    const work = (async () => {
+      const adapter = deps.externalSource?.(group.source.provider);
+      if (!adapter) {
+        for (const id of [...group.followUpIds]) await markUnavailable(group.workspaceId, id);
+        return;
+      }
+      let result: Awaited<ReturnType<FollowUpExternalSource["query"]>>;
+      try {
+        result = await adapter.query({ workspaceId: group.workspaceId, source: group.source });
+      } catch (error) {
+        reportError(error);
+        scheduleExternalGroup(key);
+        return;
+      }
+      for (const followUpId of [...group.followUpIds]) {
+        const record = await getDefinitionRecord(group.workspaceId, followUpId);
+        if (!record || record.state !== "waiting") continue;
+        const payload = payloadOf(record) as unknown as DefinitionPayload;
+        if (payload.source.kind !== "external" || externalGroupKey(group.workspaceId, payload.source) !== key) continue;
+        if (result.unavailable === true) {
+          await markUnavailable(group.workspaceId, followUpId);
+        } else if (result.matched) {
+          await fire(group.workspaceId, followUpId, "external-match", {
+            provider: payload.source.provider,
+            ...result.facts,
+            via,
+          }, result.eventId ?? `ext-${payload.source.provider}-${JSON.stringify(result.facts)}`, {
+            recordRevision: record.recordRevision,
+            sourceIdentity: sourceIdentityFor(payload.source, "external-match"),
+          });
+        }
+      }
+      if (!result.matched && result.unavailable !== true) scheduleExternalGroup(key, result.retryAfterMs);
+    })();
+    group.running = work;
+    try { await work; } finally {
+      const current = externalGroups.get(key);
+      if (current?.running === work) delete current.running;
+    }
+  }
+
+  const runExternalQuery = async (workspaceId: string, followUpId: string, via: string): Promise<void> => {
+    const record = await getDefinitionRecord(workspaceId, followUpId);
+    if (!record || record.state !== "waiting") return;
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.source.kind !== "external") return;
+    watchExternal(workspaceId, followUpId, payload.source);
+    await runExternalGroup(externalGroupKey(workspaceId, payload.source), via);
   };
 
   /** Registration/reconcile snapshot: fire if the condition already holds. */
@@ -1568,10 +2380,15 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     if (source.kind === "artifact") {
       await evaluateArtifactWait(workspaceId, followUpId, via);
     } else if (source.kind === "file") {
+      if (await drainFileObservations(workspaceId, followUpId)) return;
       await evaluateFileWait(workspaceId, followUpId, via);
     } else if (source.kind === "log") {
       await drainLog(workspaceId, followUpId, via);
     } else if (source.kind === "metric") {
+      if (await drainMetricObservations(workspaceId, followUpId)) {
+        const current = await getDefinitionRecord(workspaceId, followUpId);
+        if (!current || current.state !== "waiting") return;
+      }
       if (!deps.getResourceSample) {
         await markUnavailable(workspaceId, followUpId);
         return;
@@ -1583,35 +2400,27 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       if (sample) await evaluateMetricSample(workspaceId, followUpId, sample, via);
     } else if (source.kind === "external") {
       await runExternalQuery(workspaceId, followUpId, via);
+    } else if (source.kind === "shell") {
+      await evaluateShellWait(workspaceId, followUpId, via);
     }
   };
 
-  /**
-   * Once delivery returns a re-arming definition to waiting, consume any
-   * in-process edge buffer first and then re-read the source snapshot. Durable
-   * artifact/log history and file/metric snapshots close the rest of the gap.
-   */
+  /** Once delivery re-arms, replay the source owner's durable cursor/history. */
   const reprimeAfterDelivery = async (workspaceId: string, followUpId: string): Promise<void> => {
     reprimeQueued.delete(followUpId);
-    let record = await getDefinitionRecord(workspaceId, followUpId);
+    const record = await getDefinitionRecord(workspaceId, followUpId);
     if (!record || record.state !== "waiting") return;
-    let payload = payloadOf(record) as unknown as DefinitionPayload;
-    if (payload.source.kind === "file") {
-      const signal = pendingFileSignals.get(followUpId);
-      pendingFileSignals.delete(followUpId);
-      if (signal) await evaluateFileWait(workspaceId, followUpId, "delivery-buffer", signal);
-    } else if (payload.source.kind === "metric") {
-      const samples = pendingMetricSamples.get(followUpId) ?? [];
-      pendingMetricSamples.delete(followUpId);
-      for (const sample of samples) {
-        await evaluateMetricSample(workspaceId, followUpId, sample, "delivery-buffer");
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (isCompositeSource(payload.source) && payload.composite) {
+      for (const childId of payload.composite.childIds) {
+        const child = await getDefinitionRecord(workspaceId, childId);
+        if (!child || child.state !== "waiting") continue;
+        await primeSource(workspaceId, childId, "delivery-reprime");
       }
+      return;
     }
-    record = await getDefinitionRecord(workspaceId, followUpId);
-    if (!record || record.state !== "waiting") return;
-    payload = payloadOf(record) as unknown as DefinitionPayload;
     if (payload.source.kind === "artifact" || payload.source.kind === "log"
-      || payload.source.kind === "metric" || payload.source.kind === "file") {
+      || payload.source.kind === "metric" || payload.source.kind === "file" || payload.source.kind === "shell") {
       await primeSource(workspaceId, followUpId, "delivery-reprime");
     }
   };
@@ -1702,16 +2511,20 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       factsText ? `Observed: ${factsText}` : "",
       "Logs and artifacts stay on demand — read them via the experiment/thread tools if needed.",
     ].filter(Boolean).join("\n");
+    // The directed-message ledger, passive notify, native session receipt, and
+    // continuation admission all share one identity. A live→settled race may
+    // change the delivery path, but it cannot append a second model message.
+    const requestId = occurrenceIdFor(occurrence.id);
     if (!definition.threadId) {
       // Root-session target: no thread lifecycle — the session itself is the
       // continuation. Busy gets a passive inform; idle gets the idempotent
       // execution request (its native receipt dedupes restart replays).
       if (await deps.sessionBusy(definition.sessionId).catch(() => false)) {
         try {
-          await deps.notifySession(definition.sessionId, task, occurrence.id);
+          await deps.notifySession(definition.sessionId, task, requestId);
         } catch (error) {
           if (await deps.sessionBusy(definition.sessionId).catch(() => true)) throw error;
-          await deps.sessionRequest(definition.sessionId, task, occurrence.id);
+          await deps.sessionRequest(definition.sessionId, task, requestId);
           return { delivery: "continued" as const };
         }
         // The run can settle between the busy snapshot and notification. The
@@ -1720,79 +2533,19 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         if (await deps.sessionBusy(definition.sessionId).catch(() => true)) {
           return { delivery: "active-inform" as const };
         }
-        await deps.sessionRequest(definition.sessionId, task, occurrence.id);
+        await deps.sessionRequest(definition.sessionId, task, requestId);
         return { delivery: "continued" as const };
       }
-      await deps.sessionRequest(definition.sessionId, task, occurrence.id);
+      await deps.sessionRequest(definition.sessionId, task, requestId);
       return { delivery: "continued" as const };
     }
-    const isLive = (run: { id: string; workerState: string; sessionId?: string | null } | null): run is { id: string; workerState: string; sessionId?: string | null } =>
-      run !== null && (run.workerState === "starting" || run.workerState === "running");
-    // Snapshot/notify races are resolved against live admission. Repeated
-    // notifications use one message id, while continueRun uses one request id;
-    // both downstream paths are idempotent for this occurrence.
-    while (true) {
-      const thread = await deps.getThread(workspaceId, definition.threadId).catch(() => null);
-      if (!thread || thread.lifecycle === "archived") {
-        return { delivery: "dropped" as const };
-      }
-      if (thread.lifecycle === "queued") {
-        await deps.enqueueContinuation(workspaceId, definition.threadId, {
-          mode: "continue",
-          task,
-          requestId: occurrenceIdFor(occurrence.id),
-          from: { kind: "thread", id: definition.threadId },
-          at: new Date(now()).toISOString(),
-        });
-        return { delivery: "parked" };
-      }
-      const activeRun = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
-      if (isLive(activeRun)) {
-        const activeSessionId = activeRun.sessionId || definition.sessionId;
-        try {
-          await deps.notifySession(activeSessionId, task, occurrence.id);
-        } catch (error) {
-          const afterFailure = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
-          if (isLive(afterFailure) && afterFailure.id === activeRun.id) throw error;
-          continue;
-        }
-        const afterNotify = await deps.getActiveRun(workspaceId, definition.threadId).catch(() => null);
-        if (!isLive(afterNotify) || afterNotify.id !== activeRun.id) {
-          continue;
-        }
-        await deps.recordDirectedMessage(workspaceId, {
-          id: occurrence.id,
-          from: { kind: "thread", id: definition.threadId },
-          to: { kind: "thread", id: definition.threadId },
-          kind: "inform",
-          text: task,
-          status: "delivered",
-          runId: activeRun.id,
-          at: new Date(now()).toISOString(),
-        });
-        return { delivery: "active-inform" };
-      }
-      try {
-        const result = await deps.continueRun({
-          workspaceId,
-          parent: definition.parent ?? { kind: "session", id: definition.sessionId },
-          threadId: definition.threadId,
-          mode: "continue",
-          task,
-          requestId: occurrenceIdFor(occurrence.id),
-          from: { kind: "thread", id: definition.threadId },
-        });
-        return result.runId
-          ? { delivery: "continued", runId: result.runId }
-          : { delivery: "parked" };
-      } catch (error) {
-        const code = (error as { code?: string }).code;
-        if (code === "conflict") {
-          continue;
-        }
-        throw error;
-      }
-    }
+    return deps.sendToThread({
+      workspaceId,
+      threadId: definition.threadId,
+      text: task,
+      requestId,
+      from: definition.parent ?? { kind: "session", id: definition.sessionId },
+    });
   };
 
   const syncFollowUpAttention = async (workspaceId: string, threadId: string): Promise<void> => {
@@ -1826,8 +2579,23 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         outcome = await deliver(workspaceId, definition, occurrence);
       } catch (error) {
         reportError(error);
+        if (!deliveryRetryTimers.has(occurrence.id)) {
+          const timer = setTimeout(() => {
+            deliveryRetryTimers.delete(occurrence.id);
+            void (async () => {
+              const { scoped } = await recordScope(workspaceId);
+              const current = await scoped.getRecord(workspaceId, occurrenceIdFor(occurrence.id)).catch(() => null);
+              if (!current || current.state === "delivered" || current.state === "dropped") return;
+              await deliverRecordedOccurrence(workspaceId, followUpId, current);
+            })().catch(reportError);
+          }, DELIVERY_RETRY_DELAY_MS);
+          deliveryRetryTimers.set(occurrence.id, timer);
+        }
         return false;
       }
+      const retry = deliveryRetryTimers.get(occurrence.id);
+      if (retry) clearTimeout(retry);
+      deliveryRetryTimers.delete(occurrence.id);
       try {
         occurrenceRecord = await putOccurrence(
           workspaceId,
@@ -1872,6 +2640,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       scheduleReprime(workspaceId, followUpId);
     } else {
       disarm(latestPayload);
+      // A composite parent can be firing while one child owns its serial lock.
+      // Defer sibling cleanup until that signal transaction releases the child.
+      if (latestPayload.composite) {
+        setTimeout(() => { void settleCompositeChildren(workspaceId, latestPayload).catch(reportError); }, 0);
+      }
       if (latestPayload.threadId) {
         await syncFollowUpAttention(workspaceId, latestPayload.threadId).catch(reportError);
       }
@@ -1879,6 +2652,74 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     }
     changed(workspaceId);
     return true;
+  };
+
+  const settleCompositeChildren = async (workspaceId: string, payload: DefinitionPayload): Promise<void> => {
+    if (!payload.composite) return;
+    for (const childId of payload.composite.childIds) {
+      await withDefinition(childId, async () => {
+        const child = await getDefinitionRecord(workspaceId, childId);
+        if (!child || !ACTIVE_STATUSES.has(child.state as FollowUpStatus)) return;
+        const childPayload = payloadOf(child) as unknown as DefinitionPayload;
+        disarm(childPayload);
+        await putDefinition(workspaceId, { ...childPayload, updatedAt: now() }, "superseded", child.recordRevision);
+      });
+    }
+  };
+
+  const signalComposite = async (
+    child: DefinitionPayload,
+    reason: string,
+    facts: Record<string, JsonValue>,
+    eventId: string,
+  ): Promise<{ recorded: boolean; fired: boolean }> => {
+    const internal = child.internalSource;
+    if (!internal) return { recorded: false, fired: false };
+    const signal = await withDefinition(internal.parentId, async () => {
+      const parentRecord = await getDefinitionRecord(child.workspaceId, internal.parentId);
+      if (!parentRecord || parentRecord.state !== "waiting") return { recorded: false, ready: null };
+      const parent = payloadOf(parentRecord) as unknown as DefinitionPayload;
+      if (!isCompositeSource(parent.source) || !parent.composite?.childIds.includes(child.id)) {
+        return { recorded: false, ready: null };
+      }
+      const existing = parent.composite.satisfied[internal.key];
+      if (existing?.eventId === eventId) return { recorded: true, ready: null };
+      const satisfied = {
+        ...parent.composite.satisfied,
+        [internal.key]: { eventId, reason, facts, at: now() },
+      };
+      const updatedPayload: DefinitionPayload = {
+        ...parent,
+        updatedAt: now(),
+        composite: { ...parent.composite, satisfied },
+      };
+      const updated = await putDefinition(child.workspaceId, updatedPayload, "waiting", parentRecord.recordRevision);
+      const complete = parent.source.kind === "any"
+        ? Object.keys(satisfied).length > 0
+        : parent.composite.childIds.every((_id, index) => satisfied[String(index)] !== undefined);
+      return {
+        recorded: true,
+        ready: complete ? { record: updated, payload: updatedPayload, satisfied } : null,
+      };
+    });
+    if (!signal.recorded || !signal.ready) return { recorded: signal.recorded, fired: false };
+    const source = signal.ready.payload.source;
+    if (!isCompositeSource(source)) return { recorded: false, fired: false };
+    const cycleIdentity = createHash("sha256").update(JSON.stringify(
+      Object.entries(signal.ready.satisfied).sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, value]) => [key, value.eventId]),
+    )).digest("hex");
+    const fired = await fire(child.workspaceId, internal.parentId, `${source.kind}-satisfied`, {
+      mode: source.kind,
+      matched: Object.entries(signal.ready.satisfied).map(([key, value]) => ({ key, reason: value.reason, facts: value.facts })) as unknown as JsonValue,
+    }, `composite-${cycleIdentity}`, {
+      recordRevision: signal.ready.record.recordRevision,
+      sourceIdentity: sourceIdentityFor(source, `${source.kind}-satisfied`),
+    }, {
+      rearm: source.every === true,
+      sourceStatePatch: undefined,
+    });
+    return { recorded: true, fired };
   };
 
   /**
@@ -1908,6 +2749,31 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
           && payload.lastOccurrence?.reason === "deadline"
           && sameSource;
         if (!sameSource || (!sameRevision && !consumedDeadlineOnly)) return false;
+      }
+      if (payload.internalSource) {
+        const eventId = dedupeKey ?? `${reason}-${now()}`;
+        const compositeSignal = await signalComposite(payload, reason, facts, eventId);
+        if (!compositeSignal.recorded) return false;
+        const parentRecord = await getDefinitionRecord(workspaceId, payload.internalSource.parentId);
+        const parentPayload = parentRecord ? payloadOf(parentRecord) as unknown as DefinitionPayload : null;
+        const compositeRepeats = Boolean(parentPayload && isCompositeSource(parentPayload.source)
+          && parentPayload.source.every === true
+          && (payload.source.kind === "log"
+            || payload.source.kind === "metric"
+            || payload.source.kind === "artifact" && payload.source.every === true
+            || payload.source.kind === "shell" && payload.source.condition === "output"
+            || payload.source.kind === "file" && payload.source.condition === "changed"));
+        const sourceState = opts?.sourceStatePatch === undefined
+          ? payload.sourceState
+          : { ...(payload.sourceState ?? {}), ...opts.sourceStatePatch };
+        const nextState: FollowUpStatus = opts?.rearm === true || compositeRepeats ? "waiting" : "delivered";
+        await putDefinition(workspaceId, {
+          ...payload,
+          updatedAt: now(),
+          ...(sourceState === undefined ? {} : { sourceState }),
+        }, nextState, record.recordRevision);
+        if (nextState !== "waiting") disarm(payload);
+        return compositeSignal.fired;
       }
       const occurrenceId = `occ-${followUpId}-${reason}-${dedupeKey ?? now()}`;
       const occurrence: OccurrencePayload = {
@@ -1952,6 +2818,9 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         const nextPayload: DefinitionPayload = {
           ...payload,
           updatedAt: now(),
+          ...(isCompositeSource(payload.source) && opts?.rearm === true && payload.composite
+            ? { composite: { ...payload.composite, satisfied: {} } }
+            : {}),
           ...(mergedSourceState !== undefined ? { sourceState: mergedSourceState } : {}),
           lastOccurrence: { id: occurrenceId, reason, at: now(), delivered: false },
         };
@@ -1989,17 +2858,136 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     allowedThreadIds: [...caller.allowedThreadIds],
   });
 
-  const markUnavailable = async (workspaceId: string, followUpId: string): Promise<void> => {
+  const activateDefinition = async (
+    record: KernelRecordResult,
+    payload: DefinitionPayload,
+    via: string,
+  ): Promise<void> => {
+    const source = payload.source;
+    if (source.kind === "time") {
+      if (source.at <= now()) {
+        await fire(payload.workspaceId, payload.id, "time-due", { dueAt: source.at, via }, `time-${source.at}`, {
+          recordRevision: record.recordRevision,
+          sourceIdentity: sourceIdentityFor(source, "time-due"),
+        });
+      } else await arm(record);
+      return;
+    }
+    if (source.kind === "experiment") {
+      await arm(record);
+      if (!deps.getAttempt) {
+        await markUnavailable(payload.workspaceId, payload.id);
+        return;
+      }
+      const attempt = await deps.getAttempt(payload.experimentCaller, source.attemptId).catch((error) => {
+        reportError(error);
+        return undefined;
+      });
+      if (attempt === null) {
+        await markUnavailable(payload.workspaceId, payload.id);
+      } else if (attempt !== undefined) {
+        const states = new Set(source.states ?? [...TERMINAL_ATTEMPT_STATES]);
+        if (states.has(attempt.state)) {
+          await fire(payload.workspaceId, payload.id, "experiment-terminal", {
+            attemptId: source.attemptId,
+            state: attempt.state,
+            ...(attempt.exitCode !== undefined ? { exitCode: attempt.exitCode } : {}),
+            via,
+          } as Record<string, JsonValue>, `terminal-${source.attemptId}-${attempt.state}`, {
+            recordRevision: record.recordRevision,
+            sourceIdentity: sourceIdentityFor(source, "experiment-terminal"),
+          });
+        }
+      }
+      return;
+    }
+    if (!await arm(record)) return;
+    await primeSource(payload.workspaceId, payload.id, via);
+  };
+
+  const createCompositeChildren = async (
+    _parentRecord: KernelRecordResult,
+    parent: DefinitionPayload,
+    via: string,
+    replaceExisting = true,
+  ): Promise<void> => {
+    if (!isCompositeSource(parent.source) || !parent.composite) return;
+    const records: Array<{ record: KernelRecordResult; payload: DefinitionPayload }> = [];
+    for (let index = 0; index < parent.source.sources.length; index += 1) {
+      const source = parent.source.sources[index]!;
+      const id = parent.composite.childIds[index]!;
+      const childPayload: DefinitionPayload = {
+        id,
+        workspaceId: parent.workspaceId,
+        sessionId: parent.sessionId,
+        ...(parent.threadId ? { threadId: parent.threadId } : {}),
+        ...(parent.parent ? { parent: parent.parent } : {}),
+        ...(parent.runId ? { runId: parent.runId } : {}),
+        instruction: parent.instruction,
+        source,
+        experimentCaller: parent.experimentCaller,
+        pauseRequested: false,
+        pausedGoal: false,
+        waitingSummary: `Composite ${parent.source.kind} source ${index + 1}: ${summarizeSource(source)}`,
+        createdAt: parent.createdAt,
+        updatedAt: now(),
+        internalSource: { parentId: parent.id, key: String(index) },
+      };
+      const existing = await getDefinitionRecord(parent.workspaceId, id);
+      if (existing && !replaceExisting) {
+        const existingPayload = payloadOf(existing) as unknown as DefinitionPayload;
+        if (ACTIVE_STATUSES.has(existing.state as FollowUpStatus)) {
+          records.push({ record: existing, payload: existingPayload });
+        }
+      } else {
+        const childRecord = existing
+          ? await putDefinition(parent.workspaceId, childPayload, "waiting", existing.recordRevision)
+          : await putDefinition(parent.workspaceId, childPayload, "waiting");
+        records.push({ record: childRecord, payload: childPayload });
+      }
+    }
+    for (const child of records) {
+      const currentParent = await getDefinitionRecord(parent.workspaceId, parent.id);
+      if (!currentParent || !ACTIVE_STATUSES.has(currentParent.state as FollowUpStatus)) {
+        await settleCompositeChildren(parent.workspaceId, parent);
+        return;
+      }
+      if (child.payload.source.kind === "time" && child.payload.source.at <= now()) {
+        await signalComposite(child.payload, "time-due", { dueAt: child.payload.source.at, via }, `time-${child.payload.source.at}`);
+        const fresh = await getDefinitionRecord(parent.workspaceId, child.payload.id);
+        if (fresh?.state === "waiting") {
+          await putDefinition(parent.workspaceId, { ...child.payload, updatedAt: now() }, "delivered", fresh.recordRevision);
+        }
+      } else {
+        await activateDefinition(child.record, child.payload, via);
+      }
+    }
+  };
+
+  const markUnavailable: (workspaceId: string, followUpId: string) => Promise<void> = async (workspaceId, followUpId) => {
+    let internalParentId: string | undefined;
     await withDefinition(followUpId, async () => {
       const record = await getDefinitionRecord(workspaceId, followUpId);
       if (!record || !ACTIVE_STATUSES.has(record.state as FollowUpStatus)) return;
       const payload = payloadOf(record) as unknown as DefinitionPayload;
+      internalParentId = payload.internalSource?.parentId;
       disarm(payload);
       await putDefinition(workspaceId, { ...payload, updatedAt: now() }, "unavailable", record.recordRevision);
+      if (!payload.internalSource) await settleCompositeChildren(workspaceId, payload);
       if (payload.threadId) await syncFollowUpAttention(workspaceId, payload.threadId).catch(reportError);
       await goalResume(workspaceId, payload.sessionId, payload.pausedGoalId, followUpId);
       changed(workspaceId);
     });
+    if (internalParentId) {
+      const parentRecord = await getDefinitionRecord(workspaceId, internalParentId);
+      if (!parentRecord || parentRecord.state !== "waiting") return;
+      const parent = payloadOf(parentRecord) as unknown as DefinitionPayload;
+      if (!isCompositeSource(parent.source) || !parent.composite) return;
+      const children = await Promise.all(parent.composite.childIds.map((id) => getDefinitionRecord(workspaceId, id)));
+      const closeParent = parent.source.kind === "all"
+        || children.every((child) => !child || child.state === "unavailable" || child.state === "superseded");
+      if (closeParent) await markUnavailable(workspaceId, parent.id);
+    }
   };
 
   const claimRequestedPause = async (
@@ -2061,6 +3049,12 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       waitingSummary: `Waiting for ${summarizeSource(source)}`,
       createdAt: now(),
       updatedAt: now(),
+      ...(isCompositeSource(source) ? {
+        composite: {
+          childIds: source.sources.map((_child, index) => `${id}:source:${index}`),
+          satisfied: {},
+        },
+      } : {}),
     };
     // Persist pause intent before mutating the session goal. If the Host dies in
     // the next window, reconcile can safely complete and claim the pause.
@@ -2080,7 +3074,10 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     // in the registration interval queues the same per-definition operation and
     // is drained below before the result is returned.
     let firedImmediately = false;
-    if (source.kind === "time") {
+    if (isCompositeSource(source)) {
+      await arm(record);
+      await createCompositeChildren(record, payload, "register");
+    } else if (source.kind === "time") {
       if (source.at <= now()) {
         firedImmediately = await fire(caller.workspaceId, id, "time-due", { dueAt: source.at, atRegistration: true }, `time-${source.at}`, {
           recordRevision: record.recordRevision,
@@ -2154,6 +3151,9 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       throw new HarnessServiceError("not-found", `unknown follow-up "${id}"`);
     }
     const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (payload.internalSource) {
+      throw new HarnessServiceError("not-found", `unknown follow-up "${id}"`);
+    }
     const ownsTarget = payload.threadId !== undefined
       ? caller.threadId === payload.threadId
       : caller.sessionId === payload.sessionId;
@@ -2169,6 +3169,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     await reconcile(caller.workspaceId);
     const records = await listDefinitions(caller.workspaceId);
     const views = records
+      .filter((record) => !(payloadOf(record) as unknown as DefinitionPayload).internalSource)
       .map(toView)
       .filter((view) => params.includeInactive === true || ACTIVE_STATUSES.has(view.status))
       .filter((view) => view.threadId !== undefined
@@ -2231,14 +3232,28 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
           ? `Waiting for ${summarizeSource(source)}`
           : payload.waitingSummary,
       };
-      if (source !== undefined) delete next.sourceState;
+      if (source !== undefined) {
+        delete next.sourceState;
+        delete next.composite;
+        if (isCompositeSource(source)) {
+          next.composite = {
+            childIds: source.sources.map((_child, index) => `${payload.id}:source:${index}`),
+            satisfied: {},
+          };
+        }
+      }
       const updated = await putDefinition(caller.workspaceId, next, "waiting", record.recordRevision);
-      disarm(payload);
+      if (source !== undefined) disarm(payload);
       changed(caller.workspaceId);
-      return { updated, next };
+      return { updated, next, previous: payload, sourceChanged: source !== undefined };
     });
-    const { updated, next } = result;
-    if (next.source.kind === "time" && next.source.at <= now()) {
+    const { updated, next, previous, sourceChanged } = result;
+    if (!sourceChanged) return { followUp: toView(updated) };
+    await settleCompositeChildren(caller.workspaceId, previous);
+    if (isCompositeSource(next.source)) {
+      await arm(updated);
+      await createCompositeChildren(updated, next, "update");
+    } else if (next.source.kind === "time" && next.source.at <= now()) {
       await fire(caller.workspaceId, params.id, "time-due", { dueAt: next.source.at, via: "update" }, `time-${next.source.at}`, {
         recordRevision: updated.recordRevision,
         sourceIdentity: sourceIdentityFor(next.source, "time-due"),
@@ -2294,6 +3309,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   };
 
   const cancel = async (caller: FollowUpCaller, params: FollowUpCancelParams): Promise<FollowUpGetResult> => {
+    let cancelledPayload: DefinitionPayload | undefined;
     await withDefinition(params.id, async () => {
       const { record, payload } = await requireDefinition(caller, params.id);
       const status = record.state as FollowUpStatus;
@@ -2309,6 +3325,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         );
       }
       disarm(payload);
+      cancelledPayload = payload;
       await putDefinition(caller.workspaceId, { ...payload, updatedAt: now() }, "cancelled", record.recordRevision);
       if (payload.threadId) {
         await syncFollowUpAttention(caller.workspaceId, payload.threadId).catch(reportError);
@@ -2316,6 +3333,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       await goalResume(caller.workspaceId, payload.sessionId, payload.pausedGoalId, params.id);
       changed(caller.workspaceId);
     });
+    if (cancelledPayload) await settleCompositeChildren(caller.workspaceId, cancelledPayload);
     return get(caller, { id: params.id });
   };
 
@@ -2336,6 +3354,13 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         exists: stat?.exists === true,
         ...(stat?.size !== undefined ? { size: stat.size } : {}),
         ...(stat?.mtimeMs !== undefined ? { mtimeMs: stat.mtimeMs } : {}),
+      };
+    }
+    if (isCompositeSource(source)) {
+      return {
+        kind: source.kind,
+        satisfied: Object.keys(payload.composite?.satisfied ?? {}).length,
+        total: source.sources.length,
       };
     }
     if (source.kind === "metric") {
@@ -2375,10 +3400,19 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     if (source.kind === "external") {
       return { kind: "external", provider: source.provider, condition: source.condition };
     }
+    if (source.kind === "shell") {
+      return {
+        kind: "shell",
+        executionId: source.executionId,
+        condition: source.condition,
+        eventCursor: payload.sourceState?.shellEventId ?? 0,
+        outputOffset: payload.sourceState?.shellOutputOffset ?? 0,
+      };
+    }
     return { kind: source.kind };
   };
 
-  const OBSERVED_KINDS: ReadonlySet<string> = new Set(["artifact", "file", "log", "metric", "external"]);
+  const OBSERVED_KINDS: ReadonlySet<string> = new Set(["artifact", "file", "log", "metric", "external", "shell"]);
 
   /** Program-side evaluation of the source — "check now", never a model call. */
   const evaluate = async (
@@ -2427,6 +3461,20 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     const { record: before } = await requireDefinition(caller, params.id);
     const beforePayload = payloadOf(before) as unknown as DefinitionPayload;
     const beforeOccurrence = beforePayload.lastOccurrence?.id;
+    if (before.state === "waiting" && isCompositeSource(beforePayload.source) && beforePayload.composite) {
+      for (const childId of beforePayload.composite.childIds) {
+        const child = await getDefinitionRecord(caller.workspaceId, childId);
+        if (!child || child.state !== "waiting") continue;
+        await activateDefinition(child, payloadOf(child) as unknown as DefinitionPayload, "check");
+      }
+      const { record: after } = await requireDefinition(caller, params.id);
+      const afterPayload = payloadOf(after) as unknown as DefinitionPayload;
+      return {
+        followUp: toView(after),
+        fired: afterPayload.lastOccurrence?.id !== undefined && afterPayload.lastOccurrence.id !== beforeOccurrence,
+        observed: await probeFacts(caller, afterPayload),
+      };
+    }
     if (before.state === "waiting" && OBSERVED_KINDS.has(beforePayload.source.kind)) {
       // Observed sources evaluate through their own prime path — the same one
       // registration and reconcile use — so check cannot diverge from events.
@@ -2478,9 +3526,38 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       );
     }
     const reason = params.reason ?? "invoked-now";
+    const payload = payloadOf(record) as unknown as DefinitionPayload;
+    if (isCompositeSource(payload.source) && payload.composite) {
+      const manualIndex = payload.source.sources.findIndex((source, index) => (
+        source.kind === "manual" && payload.composite?.satisfied[String(index)] === undefined
+      ));
+      if (manualIndex >= 0) {
+        const childId = payload.composite.childIds[manualIndex]!;
+        const childRecord = await getDefinitionRecord(caller.workspaceId, childId);
+        const childPayload = childRecord
+          ? payloadOf(childRecord) as unknown as DefinitionPayload
+          : { ...payload, id: childId, source: payload.source.sources[manualIndex]!, internalSource: { parentId: payload.id, key: String(manualIndex) } };
+        const signal = await signalComposite(
+          childPayload,
+          reason,
+          { via: "manual", compositeKey: String(manualIndex) },
+          `manual-${now()}`,
+        );
+        if (signal.recorded && childRecord && ACTIVE_STATUSES.has(childRecord.state as FollowUpStatus)) {
+          await withDefinition(childId, async () => {
+            const fresh = await getDefinitionRecord(caller.workspaceId, childId);
+            if (!fresh || !ACTIVE_STATUSES.has(fresh.state as FollowUpStatus)) return;
+            const freshPayload = payloadOf(fresh) as unknown as DefinitionPayload;
+            disarm(freshPayload);
+            await putDefinition(caller.workspaceId, { ...freshPayload, updatedAt: now() }, "delivered", fresh.recordRevision);
+          });
+        }
+        return get(caller, { id: params.id });
+      }
+    }
     await fire(caller.workspaceId, params.id, reason, { via: "manual" }, `manual-${now()}`, {
       recordRevision: record.recordRevision,
-      sourceIdentity: sourceIdentityFor((payloadOf(record) as unknown as DefinitionPayload).source, reason),
+      sourceIdentity: sourceIdentityFor(payload.source, reason),
     });
     return get(caller, { id: params.id });
   };
@@ -2488,7 +3565,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
   // Experiment attempt changes drive experiment/artifact/log waits. The
   // notification is only a wakeup — every path re-reads through the
   // definition's persisted caller. Occurrence identities dedupe replays.
-  const unsubscribeAttempts = deps.subscribeAttempts?.((workspaceId, attemptId, _view) => {
+  function onAttemptEvent(workspaceId: string, attemptId: string, _view: ExperimentAttemptView | null): void {
     const waiting = attemptWaits.get(attemptId);
     if (!waiting) return;
     for (const followUpId of [...waiting]) {
@@ -2530,7 +3607,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
         });
       })().catch(reportError);
     }
-  });
+  }
 
   const reconciledWorkspaces = new Set<string>();
   const reconcileOperations = new Map<string, Promise<void>>();
@@ -2654,6 +3731,11 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
           // Triggered without an exact pending occurrence cannot be recovered by
           // guessing from workspace history.
           await markUnavailable(workspaceId, payload.id);
+          continue;
+        }
+        if (isCompositeSource(payload.source)) {
+          await arm(record);
+          await createCompositeChildren(record, payload, "reconcile", false);
           continue;
         }
         if (payload.source.kind === "time") {
@@ -2793,8 +3875,12 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
     dispose: () => {
       unsubscribeAttempts?.();
       unsubscribeSamples?.();
+      unsubscribeShellEvents?.();
       for (const id of [...timers.keys()]) clearTimer(id);
       for (const id of [...externalTimers.keys()]) clearExternalTimer(id);
+      for (const timer of deliveryRetryTimers.values()) clearTimeout(timer);
+      deliveryRetryTimers.clear();
+      externalGroups.clear();
       for (const id of [...readySettles.keys()]) clearReadySettle(id);
       for (const [workspaceId] of workspaceWatches) {
         workspaceWatches.get(workspaceId)?.close();
@@ -2802,6 +3888,7 @@ export function createFollowUpService(deps: FollowUpServiceDeps) {
       workspaceWatches.clear();
       fileWaits.clear();
       metricWaits.clear();
+      shellWaits.clear();
       logOffsets.clear();
     },
   };

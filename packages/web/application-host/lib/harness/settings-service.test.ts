@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "vitest";
 import type { PiariumSettingsDocument } from "@piarium/settings-store";
 import type { PiSettingsSnapshot } from "@piarium/protocol";
-import { createSettingsService, settingsDocumentRevision, type ClientSurfaceBridge, type SettingsServiceDeps } from "./settings-service.js";
+import { createSettingsService, settingsDocumentRevision, type ClientSurfaceBridge, type SettingsActionOperationStore, type SettingsServiceDeps } from "./settings-service.js";
 import type { SettingsActionRegistry } from "./settings-actions.js";
 import { HarnessServiceError } from "./service-error.js";
 
@@ -76,6 +76,7 @@ function fixture(overrides: {
   onChanged?: SettingsServiceDeps["onChanged"];
   clientSurfaces?: ClientSurfaceBridge;
   actions?: SettingsActionRegistry;
+  actionOperations?: SettingsActionOperationStore;
 } = {}) {
   const base = baseDeps();
   let appDocument: PiariumSettingsDocument = overrides.app ?? base.getApp();
@@ -107,6 +108,7 @@ function fixture(overrides: {
     ...(overrides.onChanged ? { onChanged: overrides.onChanged } : {}),
     ...(overrides.clientSurfaces ? { clientSurfaces: overrides.clientSurfaces } : {}),
     ...(overrides.actions ? { actions: overrides.actions } : {}),
+    ...(overrides.actionOperations ? { actionOperations: overrides.actionOperations } : {}),
   };
   return { service: createSettingsService(deps), pi, getApp: () => appDocument };
 }
@@ -142,7 +144,7 @@ function fakeBridge(
   surfaces: { id: string; kind: string }[],
 ): ClientSurfaceBridge {
   return {
-    list: () => surfaces,
+    listForSession: () => surfaces,
     request: async (op) => {
       if (surfaces.length === 0) {
         throw new HarnessServiceError("unavailable", "no client surface is connected to this host");
@@ -446,6 +448,42 @@ describe("settings actions (D-309)", () => {
     const result = await withActions.read(caller, { id: "plugins.packages", detail: true });
     assert.equal(result.state, "action");
     assert.ok(result.action?.verbs?.includes("list"));
+  });
+
+  it("persists a real owner operation and queries its terminal state", async () => {
+    const records = new Map<string, { id: string; entryId: string; verb: string; state: "running" | "succeeded" | "failed" | "cancelled" | "unavailable"; detail?: string }>();
+    const actionOperations: SettingsActionOperationStore = {
+      get: async (_caller, _entryId, id) => records.get(id) ?? null,
+      available: async () => true,
+      put: async (_caller, operation) => { records.set(operation.id, { ...operation }); },
+    };
+    const actions: SettingsActionRegistry = {
+      adapterFor: (domain) => domain === "runtime:extensions" ? {
+        verbs: ["install", "status"],
+        describe: async () => ({ verbs: ["install", "status"] }),
+        invoke: async () => ({
+          status: "pending" as const,
+          operation: { id: "owner-op-1", state: "running" as const },
+        }),
+        capabilities: () => ({ execution: "async" as const, operation: { query: true } }),
+        getOperation: async () => ({
+          status: "applied" as const,
+          detail: "owner reports completion",
+          operation: { id: "owner-op-1", state: "succeeded" as const },
+        }),
+      } : null,
+    };
+    const { service } = fixture({ actions, actionOperations });
+    const started = await service.action(caller, { id: "plugins.packages", verb: "install" });
+    assert.equal(started.status, "pending");
+    assert.equal(started.operation?.id, "owner-op-1");
+    const finished = await service.action(caller, {
+      id: "plugins.packages",
+      verb: "status",
+      operationId: "owner-op-1",
+    });
+    assert.equal(finished.status, "applied");
+    assert.equal(finished.operation?.state, "succeeded");
   });
 });
 

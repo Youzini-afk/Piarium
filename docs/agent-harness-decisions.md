@@ -29,7 +29,7 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | 卷 | 范围 | 决策数 |
 | --- | --- | --- |
 | [foundation-governance](decisions/foundation-governance.md) | 0.x 基础契约、交叉治理（测试卫生、日志治理、执行规则）、交付政策、回放/测量规范与阶段小结。 | 16 |
-| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置、阶段 W 会话等待与续接。 | 37 |
+| [tool-environment](decisions/tool-environment.md) | 1.x 工具与 shell 监督、输出契约、编辑/诊断、路径租约、计数器、设置与提示、1b.x Web 工具、3.9 观察视图、3.17 命令整理、7H 资源调度与后台任务、阶段 S 对话式设置、阶段 W 会话等待与续接。 | 40 |
 | [context-knowledge](decisions/context-knowledge.md) | 2.x 知识库、Zone 2 组装、host 观察、上下文/后台摘要、建议/审阅、模型槽位与召回。 | 29 |
 | [permissions](decisions/permissions.md) | 3b.x 权限三层、交互确认门、插件共存与范围边界。 | 4 |
 | [retrieval](decisions/retrieval.md) | 3.2/3.3/3.15/3.16 explore、related、快速检索接线与返工、语义索引、embedding/rerank 与检索量具。 | 61 |
@@ -349,3 +349,4 @@ Status: append-only decision log; entries live in the domain volumes under decis
 | D-308 | 2026-09-20 | 阶段 S/W 验收返工：设置 owner/self-reload 与 follow-up/scheduler 状态机收口 | implemented correction / focused validation / S+W remain partial | 更正 D-306/D-307 的实施状态；核心纵切保留，未接线项继续进入后续任务 | settings/follow-up design；plan S/W；status；architecture；roadmap；code | [tool-environment](decisions/tool-environment.md) |
 | D-309 | 2026-09-20 | 阶段 S/W 剩余项实施收口：领域 action、client Surface、组合管理与全部 follow-up 来源、远程对账、生命周期与 calendar 管理 | implemented / focused validation / S+W remain partial | 实施 D-308 留下的未接线项；all/any 复合算子与外部现场实测仍未完成 | settings/follow-up design；plan S/W；status；architecture；roadmap；scheduler module | [tool-environment](decisions/tool-environment.md) |
 | D-310 | 2026-09-21 | 阶段 S/W 第二轮生产验收：认证 Surface、真实 CAS/结果、观察恢复与 calendar 状态机修正 | implemented correction / focused integration validation / S+W remain partial | 更正 D-309 的完成边界；保留真实 owner 纵切，撤回全部来源/session-Surface/attempt-delete/全局文件 CAS 的过高声明 | settings/follow-up design；plan S/W；status；architecture；roadmap；scheduler module | [tool-environment](decisions/tool-environment.md) |
+| D-311 | 2026-09-21 | 阶段 S/W 生产收口：session-Surface、typed operation、复合/共享观察、普通 shell 与统一 Thread 投递 | implemented / wired / focused validation / S+W complete | 完成 D-310 的实际缺口；外部/跨平台/完整桌面/真实模型现场未实测但不作为阶段门槛 | settings/follow-up design；plan S/W；status；architecture；roadmap；Harness module | [tool-environment](decisions/tool-environment.md) |

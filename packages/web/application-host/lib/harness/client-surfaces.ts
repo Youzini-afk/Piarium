@@ -3,8 +3,9 @@
  * device-local settings on connected UI surfaces.
  *
  * A surface identifies itself when it opens `/api/piarium/events` with
- * `?surface=<id>&kind=<kind>`. Host-side writes never guess the client
- * identity — the surface registers its own id/kind, and applies land only on
+ * `?surface=<id>&kind=<kind>&session=<live-session>`, after an authenticated
+ * bind operation. Host-side writes never guess the client identity — the
+ * session binding selects the connection, and applies land only on
  * connections that declared that identity. The surface acknowledges over
  * `POST /api/piarium/client-settings/ack`; the request resolves with the
  * surface-reported facts (saved/applied/failed), never an assumed success.
@@ -33,6 +34,8 @@ interface SurfaceConnection {
   res: Response;
   surfaceId: string;
   kind: string;
+  /** Host-validated selected Pi session. */
+  sessionId: string;
 }
 
 interface PendingRequest {
@@ -46,24 +49,82 @@ interface PendingRequest {
 
 export interface SurfaceBridgeDeps {
   writeSseEvent(res: Response, event: { type: string; properties: Record<string, unknown> }): void;
+  /** Live session registry check; stale connections are evicted before a request. */
+  isSessionLive?(sessionId: string): boolean | Promise<boolean>;
 }
 
-export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) {
+export function createClientSurfaceBridge({ writeSseEvent, isSessionLive }: SurfaceBridgeDeps) {
   const connections = new Map<Response, SurfaceConnection>();
   const pending = new Map<string, PendingRequest>();
 
-  const attach = (res: Response, surfaceId: string, kind: string, authKey: string) => {
-    connections.set(res, { authKey, connectionId: randomUUID(), res, surfaceId, kind });
+  const attach = (
+    res: Response,
+    surfaceId: string,
+    kind: string,
+    authKey: string,
+    sessionId: string,
+  ) => {
+    connections.set(res, {
+      authKey,
+      connectionId: randomUUID(),
+      res,
+      surfaceId,
+      kind,
+      sessionId,
+    });
+  };
+
+  // A bind authorizes one subsequent SSE connection for one concrete Surface.
+  // Repeating the POST replaces the same permit instead of accumulating stale
+  // reconnect credits; separate windows have separate surface ids.
+  const boundSessions = new Map<string, Map<string, Set<string>>>();
+  const bindSession = (authKey: string, sessionId: string, surfaceId: string): void => {
+    const sessions = boundSessions.get(authKey) ?? new Map<string, Set<string>>();
+    const surfaces = sessions.get(sessionId) ?? new Set<string>();
+    surfaces.add(surfaceId);
+    sessions.set(sessionId, surfaces);
+    boundSessions.set(authKey, sessions);
+  };
+  const isSessionBound = (authKey: string, sessionId: string, surfaceId: string): boolean => (
+    boundSessions.get(authKey)?.get(sessionId)?.has(surfaceId) === true
+  );
+  const consumeSessionBinding = (authKey: string, sessionId: string, surfaceId: string): boolean => {
+    const sessions = boundSessions.get(authKey);
+    const surfaces = sessions?.get(sessionId);
+    if (!sessions || !surfaces?.delete(surfaceId)) return false;
+    if (surfaces.size === 0) sessions.delete(sessionId);
+    if (sessions.size === 0) boundSessions.delete(authKey);
+    return true;
+  };
+
+  const dropSession = (sessionId: string): void => {
+    for (const [authKey, sessions] of boundSessions) {
+      sessions.delete(sessionId);
+      if (sessions.size === 0) boundSessions.delete(authKey);
+    }
+    for (const [res, connection] of connections) {
+      if (connection.sessionId === sessionId) dropConnection(res);
+    }
   };
 
   const detach = (res: Response) => {
     connections.delete(res);
   };
 
-  /** Distinct connected surfaces (one entry per surface id). */
+  /** Distinct authenticated surfaces for Host-side capability/status hints. */
   const list = (): ClientSurfaceInfo[] => {
     const seen = new Map<string, ClientSurfaceInfo>();
     for (const conn of connections.values()) {
+      const identity = `${conn.authKey}\0${conn.surfaceId}`;
+      if (!seen.has(identity)) seen.set(identity, { id: conn.surfaceId, kind: conn.kind });
+    }
+    return [...seen.values()];
+  };
+
+  const listForSession = (sessionId: string): ClientSurfaceInfo[] => {
+    const seen = new Map<string, ClientSurfaceInfo>();
+    for (const conn of connections.values()) {
+      if (conn.sessionId !== sessionId) continue;
       const identity = `${conn.authKey}\0${conn.surfaceId}`;
       if (!seen.has(identity)) seen.set(identity, { id: conn.surfaceId, kind: conn.kind });
     }
@@ -81,24 +142,40 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
     }
   };
 
-  const request: ClientSurfaceBridge['request'] = async (op) => {
+  const request: ClientSurfaceBridge['request'] = async (op, target) => {
+    if (isSessionLive && !(await isSessionLive(target.sessionId))) {
+      dropSession(target.sessionId);
+      throw new HarnessServiceError(
+        'unavailable',
+        `session ${target.sessionId} is no longer live on this Host`,
+      );
+    }
     const targets = [...connections.values()];
-    const surfaces = list();
+    const sessionTargets = targets.filter((conn) => conn.sessionId === target.sessionId);
+    const targetSurfaces = new Map<string, ClientSurfaceInfo>();
+    for (const conn of sessionTargets) {
+      const identity = `${conn.authKey}\0${conn.surfaceId}`;
+      if (!targetSurfaces.has(identity)) targetSurfaces.set(identity, { id: conn.surfaceId, kind: conn.kind });
+    }
+    const surfaces = [...targetSurfaces.values()];
     if (surfaces.length === 0) {
       throw new HarnessServiceError(
         'unavailable',
-        'no client surface is connected to this host',
+        `no authenticated surface is bound to session ${target.sessionId}`,
       );
-    } else if (surfaces.length > 1) {
+    }
+    if (surfaces.length > 1) {
       throw new HarnessServiceError(
         'ambiguous',
         `${surfaces.length} authenticated surfaces are connected (${surfaces.map((s) => `${s.kind}:${s.id.slice(0, 8)}`).join(', ')})`,
       );
     }
     const surface = surfaces[0]!;
-    const targetIdentity = targets.find((conn) => conn.surfaceId === surface.id)!;
+    const targetIdentity = sessionTargets.find((conn) => conn.surfaceId === surface.id)!;
     const selectedTargets = targets.filter((conn) => (
-      conn.surfaceId === surface.id && conn.authKey === targetIdentity.authKey
+      conn.surfaceId === surface.id
+      && conn.authKey === targetIdentity.authKey
+      && conn.sessionId === targetIdentity.sessionId
     ));
     const requestId = `surface-${randomUUID()}`;
     const results = new Promise<{ surface: ClientSurfaceInfo; results: ClientSurfaceFieldResult[] }>((resolve, reject) => {
@@ -184,9 +261,14 @@ export function createClientSurfaceBridge({ writeSseEvent }: SurfaceBridgeDeps) 
 
   return {
     attach,
+    bindSession,
+    consumeSessionBinding,
+    isSessionBound,
+    dropSession,
     detach,
     dropConnection,
     list,
+    listForSession,
     request,
     ack,
     /** Testing/inspection: number of in-flight requests. */

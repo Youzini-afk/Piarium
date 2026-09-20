@@ -13,10 +13,11 @@ export type PiariumRequestAuthContext =
       type: 'client';
     }
   | {
-      client?: PiariumAuthenticatedClient;
-      clientId?: string;
-      type: 'session';
-    };
+    client?: PiariumAuthenticatedClient;
+    clientId?: string;
+    token?: string;
+    type: 'session';
+  };
 
 declare global {
   // Express intentionally exposes this open namespace for application request metadata.

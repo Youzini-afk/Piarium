@@ -23,23 +23,24 @@ import {
   setDesktopLaunchAtLogin,
 } from '@/lib/desktop';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
+import { usePiSessionStore } from '@/stores/usePiSessionStore';
 
-const SURFACE_ID_STORAGE_KEY = 'piarium.client-surface.v1';
+const SURFACE_ID_STORAGE_KEY = 'piarium.client-surface.window.v1';
 let cachedSurfaceId: string | null = null;
 
 export type ClientSurfaceKind = 'desktop' | 'web' | 'mobile';
 
-/** Stable per-device identity — generated once, persisted locally. */
+/** Stable per-window identity — separate browser/desktop windows are distinct Surfaces. */
 export const getClientSurfaceId = (): string => {
   if (cachedSurfaceId) return cachedSurfaceId;
   try {
-    const existing = window.localStorage.getItem(SURFACE_ID_STORAGE_KEY);
+    const existing = window.sessionStorage.getItem(SURFACE_ID_STORAGE_KEY);
     if (existing) {
       cachedSurfaceId = existing;
       return existing;
     }
     const id = `surface-${crypto.randomUUID()}`;
-    window.localStorage.setItem(SURFACE_ID_STORAGE_KEY, id);
+    window.sessionStorage.setItem(SURFACE_ID_STORAGE_KEY, id);
     cachedSurfaceId = id;
     return id;
   } catch {
@@ -58,7 +59,22 @@ export const getClientSurfaceKind = (): ClientSurfaceKind => {
 export const clientSurfaceQuery = (): Record<string, string> => ({
   surface: getClientSurfaceId(),
   kind: getClientSurfaceKind(),
+  ...(usePiSessionStore.getState().currentSessionId
+    ? { session: usePiSessionStore.getState().currentSessionId! }
+    : {}),
 });
+
+/** Establish the Host-side session binding before opening the targetable SSE stream. */
+export const bindClientSurfaceSession = async (sessionId: string): Promise<void> => {
+  const response = await runtimeFetch('/api/piarium/client-settings/bind', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId, surfaceId: getClientSurfaceId() }),
+  });
+  if (!response.ok) {
+    throw new Error(`client Surface binding failed (${response.status})`);
+  }
+};
 
 export interface ClientSettingsFieldResult {
   id: string;

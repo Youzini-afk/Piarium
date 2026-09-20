@@ -13,11 +13,11 @@ Last updated: 2026-09-21
 请求前上下文、工具资源调度/长任务、受管远程与多机器执行进入生产链。自然生长实验与按需运维角色沿 D-304，Slurm 暂缓；
 交付事实见 status，未做外部实测不单独阻断代码与功能已经完善的阶段。
 
-后续新增 **阶段 S：对话式设置与 Agent 管理（D-306）**，owner-backed 字段/动作、认证单 Surface 与组合管理已接线并经 D-310 返工。
+**阶段 S：对话式设置与 Agent 管理（D-306）** 已在 D-311 收口，owner-backed 字段/动作、session-bound Surface、typed operation 与组合管理进入生产链。
 它覆盖现有大部分设置的查询、修改与实际生效，工具负责实时事实和执行，Skill 按需指导组合用法；
 完整合同见 [agent-settings-design.md](agent-settings-design.md)，不追溯扩大 7G–7I 的交付范围。
 
-阶段 S 之后接续 **阶段 W：会话等待、触发与续接（D-307）**，耐久来源、远程对账、Thread/session 生命周期与 calendar 管理已接线并经 D-310 返工。
+**阶段 W：会话等待、触发与续接（D-307）** 同样在 D-311 收口，耐久/实时来源、复合与共享观察、统一续接、远程对账、Thread/session 生命周期与 calendar 管理已接线。
 Agent 可自然登记条件和后续工作，程序通过时间/事件/确定性检查决定何时交付，同一会话或线程在需要时恢复。
 完整设计见 [agent-follow-up-design.md](agent-follow-up-design.md)；交付事实与未覆盖边界见 status。
 
@@ -1658,10 +1658,10 @@ provider 允许的工具配对与上下文边界仍保持；跨平台、真实�
 
 ## 阶段 S：对话式设置与 Agent 管理（D-306）
 
-状态：**字段、领域 action、认证单 Surface、组合管理与产品 Skill 纵切已接线并经 D-308/D-310 验收返工 / 阶段仍为 Partial**。
-S0–S4 的共用目录、查询披露、app/Pi/client/action 写入通路、组合更新与组合 Skill 已经接线；
-多个 Surface 的 session 绑定/安全点选和统一 action-operation 身份尚未实现；个别无 owner API 的条目保持 unavailable，
-外部登录/安装与跨平台 Surface 现场未实测。设计 authority 为
+状态：**S0–S4 已完成并经 D-308/D-310/D-311 收口**（2026-09-21）。共用目录、查询披露、
+app/Pi/client/action 写入、session→Surface 绑定、typed action-operation、组合更新与产品 Skill 已接线。
+同一 session 同时连接多个 Surface 时明确返回 ambiguous，不允许模型猜选本地窗口；无 owner API 的条目如实 unavailable。
+外部登录/安装与跨平台 Surface 现场未实测，但不构成当前生产通路的未实现项。设计 authority 为
 [agent-settings-design.md](agent-settings-design.md)，本节只规定实施责任和完成边界。
 实施现状见 [agent-harness-status.md](agent-harness-status.md) 的 D-306 记录。
 
@@ -1739,9 +1739,10 @@ S0–S4 是同一完整阶段内的实施顺序，不是把剩余设置长期列
 
 ## 阶段 W：会话等待、触发与续接（D-307）
 
-状态：**耐久来源、远程对账、Thread/session 生命周期、calendar 管理与 scheduler 恢复纵切已接线，并经 D-308/D-310 验收返工 / 阶段仍为 Partial**
-（2026-09-21）。产物、指标、日志、文件与外部查询来源，受管远程续接，主动 Thread/session 收口与 calendar 任务的
-Agent 管理已交付；普通 shell source、跨来源 all/any、相容观察去重及无历史 file/metric 边沿的崩溃恢复未实现。设计 authority 为
+状态：**W0–W4 已完成并经 D-308/D-310/D-311 收口**（2026-09-21）。时间、实验、产物、指标、日志、文件、
+外部查询、普通 shell 与 manual 来源，跨来源 `all`/`any`，共享观察，受管远程续接，Thread/session 生命周期及
+calendar Agent 管理均已接线。普通 shell 仍遵循本地进程 owner 生命周期，Host 重启后无法重附着时转 unavailable；
+file/metric 在 Host 收到边沿后先耐久化 observation，不能把来源 owner 尚未送达的瞬时事件宣称为跨进程 exactly-once。设计 authority 为
 [agent-follow-up-design.md](agent-follow-up-design.md)。本阶段复用 7G/7H/7I、现有 Thread/Run、Goal、
 原生权限和 scheduler 服务；支持原会话续接，并保留按日历新建工作的用途。
 实施进展与未覆盖边界见 [agent-harness-status.md](agent-harness-status.md) 的 D-307 记录。

@@ -43,12 +43,12 @@ describe("client surface bridge", () => {
   it("delivers a request to the connected surface and resolves on ack", async () => {
     const { bridge, sent } = bridgeWithSent();
     const { res } = fakeResponse();
-    bridge.attach(res, "surf-1", "desktop", "session");
+    bridge.attach(res, "surf-1", "desktop", "session", "session-1");
 
     const promise = bridge.request({
       type: "apply",
       entries: [{ id: "chat.persist-drafts", values: { enabled: false } }],
-    });
+    }, { sessionId: "session-1" });
     const events = sent.get(res) ?? [];
     assert.equal(events.length, 1);
     const requestId = events[0]?.properties.requestId as string;
@@ -73,7 +73,7 @@ describe("client surface bridge", () => {
   it("fails honestly when no surface is connected", async () => {
     const { bridge } = bridgeWithSent();
     await assert.rejects(
-      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }),
+      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }, { sessionId: "session-1" }),
       (error: unknown) => error instanceof HarnessServiceError && error.harnessCode === "unavailable",
     );
   });
@@ -82,18 +82,18 @@ describe("client surface bridge", () => {
     const { bridge, sent } = bridgeWithSent();
     const first = fakeResponse();
     const second = fakeResponse();
-    bridge.attach(first.res, "surf-1", "desktop", "session");
-    bridge.attach(second.res, "surf-2", "web", "session");
+    bridge.attach(first.res, "surf-1", "desktop", "session", "session-1");
+    bridge.attach(second.res, "surf-2", "web", "session", "session-1");
 
     await assert.rejects(
-      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }),
+      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }, { sessionId: "session-1" }),
       (error: unknown) => error instanceof HarnessServiceError && error.harnessCode === "ambiguous",
     );
     assert.equal(sent.get(first.res)?.length ?? 0, 0);
     assert.equal(sent.get(second.res)?.length ?? 0, 0);
 
     await assert.rejects(
-      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }),
+      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }, { sessionId: "session-1" }),
       (error: unknown) => error instanceof HarnessServiceError && error.harnessCode === "ambiguous",
     );
   });
@@ -101,8 +101,8 @@ describe("client surface bridge", () => {
   it("rejects pending requests when the surface disconnects mid-flight", async () => {
     const { bridge } = bridgeWithSent();
     const { res } = fakeResponse();
-    bridge.attach(res, "surf-1", "desktop", "session");
-    const promise = bridge.request({ type: "apply", entries: [{ id: "x", values: {} }] });
+    bridge.attach(res, "surf-1", "desktop", "session", "session-1");
+    const promise = bridge.request({ type: "apply", entries: [{ id: "x", values: {} }] }, { sessionId: "session-1" });
     bridge.dropConnection(res);
     await assert.rejects(promise, /disconnected|unavailable/i);
     assert.equal(bridge.pendingCount(), 0);
@@ -112,12 +112,12 @@ describe("client surface bridge", () => {
     const { bridge } = bridgeWithSent();
     const first = fakeResponse();
     const second = fakeResponse();
-    bridge.attach(first.res, "surf-1", "desktop", "session");
-    bridge.attach(second.res, "surf-1", "desktop", "session");
+    bridge.attach(first.res, "surf-1", "desktop", "session", "session-1");
+    bridge.attach(second.res, "surf-1", "desktop", "session", "session-1");
     const promise = bridge.request({
       type: "apply",
       entries: [{ id: "x", values: {} }],
-    });
+    }, { sessionId: "session-1" });
     bridge.dropConnection(first.res);
     // The request is still pending on the surviving connection — resolve via ack.
     const timer = setTimeout(() => assert.fail("request should still be pending"), 50);
@@ -129,5 +129,35 @@ describe("client surface bridge", () => {
   it("ignores acks for unknown request ids", () => {
     const { bridge } = bridgeWithSent();
     assert.equal(bridge.ack("surface-nope", "surf-1", "connection", "session", []), false);
+  });
+
+  it("targets the Host-bound caller session and refuses same-session ambiguity", async () => {
+    const { bridge, sent } = bridgeWithSent();
+    const first = fakeResponse();
+    const second = fakeResponse();
+    bridge.attach(first.res, "surf-1", "desktop", "client:a", "session-1");
+    bridge.attach(second.res, "surf-2", "web", "client:a", "session-2");
+    const promise = bridge.request(
+      { type: "read", entries: [{ id: "appearance.language" }] },
+      { sessionId: "session-1" },
+    );
+    assert.equal(sent.get(first.res)?.length, 1);
+    assert.equal(sent.get(second.res)?.length ?? 0, 0);
+    const event = sent.get(first.res)![0]!;
+    assert.equal(bridge.ack(
+      event.properties.requestId as string,
+      "surf-1",
+      event.properties.connectionId as string,
+      "client:a",
+      [{ id: "appearance.language", status: "applied" }],
+    ), true);
+    await promise;
+
+    const third = fakeResponse();
+    bridge.attach(third.res, "surf-3", "web", "client:a", "session-1");
+    await assert.rejects(
+      bridge.request({ type: "read", entries: [{ id: "appearance.language" }] }, { sessionId: "session-1" }),
+      (error: unknown) => error instanceof HarnessServiceError && error.harnessCode === "ambiguous",
+    );
   });
 });
