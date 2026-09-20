@@ -549,6 +549,8 @@ export interface HostHandshakeParams {
     harnessWebSearch?: boolean;
     /** The application Host owns durable follow-up registrations that resume the calling thread/session (D-307). */
     harnessFollowUps?: boolean;
+    /** The application Host exposes the project scheduled-task authority to agents (D-307). */
+    harnessScheduledTasks?: boolean;
     workspaceMutationJournal?: boolean;
   };
   clientName: string;

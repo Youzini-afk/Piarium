@@ -2658,6 +2658,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sourceService,
     settingsService,
     followUpService,
+    scheduledTaskService,
     managedRemoteTargets,
     readExploreFile: createExploreFileReader(
       documentsAuthority,

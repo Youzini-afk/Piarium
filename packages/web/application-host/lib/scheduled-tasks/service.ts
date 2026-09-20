@@ -261,13 +261,13 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     return { task: result.task, sessionId: result.sessionID };
   };
 
-  const setEnabled = async (projectID: unknown, taskID: unknown, enabled: boolean) => {
+  const setEnabled = async (projectID: unknown, taskID: unknown, enabled: boolean, expectedRevision?: unknown) => {
     const tasks = await list(projectID);
     const normalizedTaskID = asNonEmptyString(taskID);
     const task = tasks.find((entry) => entry.id === normalizedTaskID);
     if (!task) throw new ScheduledTaskError('Task not found', 404);
     if (task.loopFile) {
-      return setLoopEnabled(projectID, taskID, enabled, task.loopRevision);
+      return setLoopEnabled(projectID, taskID, enabled, asNonEmptyString(expectedRevision) || task.loopRevision);
     }
     const result = await upsert(projectID, { ...task, enabled });
     return result.task;
@@ -314,3 +314,5 @@ export const createScheduledTaskService = (dependencies: ScheduledTaskServiceDep
     status,
   };
 };
+
+export type ScheduledTaskService = ReturnType<typeof createScheduledTaskService>;

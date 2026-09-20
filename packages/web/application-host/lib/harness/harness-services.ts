@@ -1234,6 +1234,102 @@ export function registerHarnessServices(
       handle: async (params, ctx) => followUps.fire(await followUpCaller(ctx), params),
     });
   }
+  if (host.scheduledTaskService) {
+    const scheduled = host.scheduledTaskService;
+    const mapScheduleError = (error: unknown): never => {
+      if (error instanceof HarnessServiceError) throw error;
+      const statusCode = (error as { statusCode?: unknown })?.statusCode;
+      const message = error instanceof Error ? error.message : String(error);
+      if (statusCode === 400) throw new HarnessServiceError("invalid-params", message);
+      if (statusCode === 404) throw new HarnessServiceError("not-found", message);
+      throw new HarnessServiceError("failed", message);
+    };
+    // Calendar tasks are owned by the project the caller's workspace resolves
+    // to — a session manages its own project's schedule, never an arbitrary
+    // projectId from the request.
+    const scheduleProjectId = async (ctx: HarnessServiceContext): Promise<string> => {
+      if (!ctx.workspaceId) {
+        throw new HarnessServiceError("unavailable", "scheduled tasks require a workspace-bound caller");
+      }
+      const root = await host.resolveWorkspaceRoot?.(ctx.workspaceId) ?? null;
+      if (!root) {
+        throw new HarnessServiceError("unavailable", "scheduled tasks require a resolvable workspace root");
+      }
+      return scheduled.resolveProjectID({ directory: root }).catch(mapScheduleError);
+    };
+    const call = async <T>(ctx: HarnessServiceContext, run: (projectId: string) => Promise<T>): Promise<T> => {
+      const projectId = await scheduleProjectId(ctx);
+      return run(projectId).catch(mapScheduleError);
+    };
+    router.register("schedule.list", {
+      handle: async (_params, ctx) => call(ctx, async (projectId) => ({
+        projectId,
+        tasks: await scheduled.list(projectId),
+      })),
+    });
+    router.register("schedule.get", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => {
+        const tasks = await scheduled.list(projectId);
+        const task = tasks.find((entry) => entry.id === params.taskId);
+        if (!task) throw new HarnessServiceError("not-found", `scheduled task not found: ${params.taskId}`);
+        return { task };
+      }),
+    });
+    router.register("schedule.upsert", {
+      handle: async (params, ctx) => call(ctx, (projectId) => scheduled.upsert(projectId, params.task)),
+    });
+    router.register("schedule.remove", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => ({
+        tasks: await scheduled.remove(projectId, params.taskId),
+      })),
+    });
+    router.register("schedule.run", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => {
+        const result = await scheduled.run(projectId, params.taskId);
+        if (!result.task) {
+          throw new HarnessServiceError("not-found", `scheduled task not found: ${params.taskId}`);
+        }
+        return {
+          task: result.task,
+          ...(result.sessionId !== undefined ? { sessionId: result.sessionId } : {}),
+        };
+      }),
+    });
+    router.register("schedule.setEnabled", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => {
+        const task = await scheduled.setEnabled(projectId, params.taskId, params.enabled, params.expectedRevision);
+        if (!task) {
+          throw new HarnessServiceError("not-found", `scheduled task not found: ${params.taskId}`);
+        }
+        return { task };
+      }),
+    });
+    router.register("schedule.loop.read", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => ({
+        document: await scheduled.readLoopDocument(projectId, params.taskId),
+      })),
+    });
+    router.register("schedule.loop.update", {
+      handle: async (params, ctx) => call(ctx, (projectId) =>
+        scheduled.updateLoopDocument(projectId, params.taskId, {
+          content: params.content,
+          expectedRevision: params.expectedRevision,
+        })),
+    });
+    router.register("schedule.loop.remove", {
+      handle: async (params, ctx) => call(ctx, async (projectId) => ({
+        tasks: await scheduled.removeLoopFile(projectId, params.taskId, params.expectedRevision),
+      })),
+    });
+    router.register("schedule.status", {
+      handle: async (_params, ctx) => {
+        if (!ctx.workspaceId) {
+          throw new HarnessServiceError("unavailable", "scheduled task status requires a workspace-bound caller");
+        }
+        return scheduled.status().catch(mapScheduleError);
+      },
+    });
+  }
   if (host.sourceService) {
     const sources = host.sourceService;
     router.register("source.register", {

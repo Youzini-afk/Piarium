@@ -73,6 +73,7 @@ export function createWebPiRuntimeBroker({
         harnessExperiments: true,
         harnessSettings: true,
         harnessFollowUps: true,
+        harnessScheduledTasks: true,
         harnessLspNavigation: true,
         harnessThreads: true,
         harnessWebRead,

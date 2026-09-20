@@ -1,4 +1,4 @@
-import { DateTime } from 'luxon';
+import { DateTime, type Zone } from 'luxon';
 import parser from 'cron-parser';
 import { watch } from 'node:fs';
 import { dirname as pathDirname } from 'node:path';
@@ -102,6 +102,21 @@ const resolveScheduleTimes = (schedule: ScheduledTask['schedule']): string[] => 
   return Array.from(new Set(times)).sort((a, b) => a.localeCompare(b));
 };
 
+const computeOnceDueAt = (
+  schedule: Partial<ScheduledTask['schedule']> | undefined,
+  zone: string | Zone,
+): number | null => {
+  if (!schedule || typeof schedule.date !== 'string' || typeof schedule.time !== 'string') {
+    return null;
+  }
+  const parsed = DateTime.fromFormat(
+    `${schedule.date} ${schedule.time}`,
+    'yyyy-LL-dd HH:mm',
+    { zone },
+  );
+  return parsed.isValid ? parsed.toMillis() : null;
+};
+
 const weekdayAsZeroBased = (dateTime: DateTime): number | null => {
   if (!dateTime || typeof dateTime.weekday !== 'number') {
     return null;
@@ -195,25 +210,12 @@ export const computeNextRunAt = (task: {
   }
 
   if (schedule.kind === 'once') {
-    if (typeof schedule.date !== 'string' || typeof schedule.time !== 'string') {
+    const dueAt = computeOnceDueAt(schedule as ScheduledTask['schedule'], zone);
+    if (dueAt === null) {
       return null;
     }
-
-    const parsed = DateTime.fromFormat(
-      `${schedule.date} ${schedule.time}`,
-      'yyyy-LL-dd HH:mm',
-      { zone },
-    );
-    if (!parsed.isValid) {
-      return null;
-    }
-
     const minAllowed = now.plus({ milliseconds: TASK_DUE_SLACK_MS });
-    if (parsed <= minAllowed) {
-      return null;
-    }
-
-    return parsed.toMillis();
+    return dueAt > minAllowed.toMillis() ? dueAt : null;
   }
 
   if (schedule.kind === 'cron') {
@@ -406,6 +408,38 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       if (nextTask) updateInMemoryTask(projectID, nextTask);
     }
 
+    // Reconcile what this process cannot be running: a persisted `running`
+    // status whose run never settled means the previous host died mid-run —
+    // the worker went with it, so the task is interrupted, not still running.
+    // And a one-time task whose only fire time passed while the host was down
+    // catches up once here; recurring kinds skip missed slots and keep the
+    // freshly computed nextRunAt.
+    const now = DateTime.local();
+    for (const task of Array.from(tasksByProject.get(projectID)?.values() || [])) {
+      const taskKey = buildTaskKey(projectID, task.id);
+      const inFlight = runningTaskKeys.has(taskKey) || queuedTaskKeys.has(taskKey);
+      if (task.state?.lastStatus === 'running' && !inFlight) {
+        try {
+          const result = await projectConfigRuntime.updateScheduledTaskState(projectID, task.id, {
+            lastStatus: 'error',
+            lastError: 'run interrupted — the host stopped before the session reached a terminal state',
+            updatedAt: Date.now(),
+          });
+          if (result.task) updateInMemoryTask(projectID, result.task);
+        } catch (error) {
+          logger.warn?.('[ScheduledTasks] failed to reconcile interrupted run:', error);
+        }
+      }
+      if (task.enabled && !inFlight && task.schedule?.kind === 'once') {
+        const dueAt = computeOnceDueAt(task.schedule, now.zone);
+        const lastRunAt = task.state?.lastRunAt;
+        if (dueAt !== null && dueAt <= now.toMillis() && (lastRunAt === undefined || lastRunAt < dueAt)) {
+          queueTaskRun(projectID, task.id, 'scheduled');
+        }
+      }
+    }
+    pumpQueue();
+
     await refreshLoopWatchers();
     return Array.from(tasksByProject.get(projectID)?.values() || []);
   };
@@ -524,6 +558,16 @@ export const createScheduledTasksRuntime = (deps: ScheduledTasksRuntimeDependenc
       task,
       title,
       onSessionCreated: (sessionID: string) => {
+        // Persist the session identity as soon as it exists — an interrupted
+        // run keeps a traceable session pointer instead of losing it.
+        void projectConfigRuntime.updateScheduledTaskState(projectID, task.id, {
+          lastSessionId: sessionID,
+          updatedAt: Date.now(),
+        }).then((patchResult) => {
+          if (patchResult.task) updateInMemoryTask(projectID, patchResult.task);
+        }).catch((error) => {
+          logger.warn?.('[ScheduledTasks] failed to persist run session id:', error);
+        });
         try {
           emitTaskRunEvent?.({
             projectID,

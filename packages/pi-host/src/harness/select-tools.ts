@@ -43,6 +43,7 @@ import {
   createSettingsActionTool,
 } from "./settings-tools.js";
 import { createFollowUpTool } from "./follow-up-tools.js";
+import { createScheduledTaskTool } from "./scheduled-task-tools.js";
 import type { HostServicesBridge } from "./host-services-bridge.js";
 import type { WorkspaceMutationJournalBridge } from "../workspace-mutation-journal.js";
 import { withToolExecutionResources } from "./tool-execution-resources.js";
@@ -78,6 +79,8 @@ export interface SelectHarnessToolsDeps {
   /** Whether the Host provides durable follow-up registrations bound to a
    * thread (D-307). Requires the thread runtime — the continuation target. */
   followUpAvailable?: boolean;
+  /** Whether the Host exposes the project scheduled-task authority (D-307). */
+  scheduledTasksAvailable?: boolean;
   /** Execution presets whose model slot resolves — dispatch lists and accepts only these. */
   resolvedPresets?: readonly ResolvedPreset[];
   /** Research capability model slots resolved for this worker. */
@@ -124,6 +127,7 @@ export function selectHarnessTools(
     experimentAvailable,
     settingsAvailable,
     followUpAvailable,
+    scheduledTasksAvailable,
     resolvedPresets,
     resolvedResearchCapabilities,
     getActiveToolNames,
@@ -266,6 +270,14 @@ export function selectHarnessTools(
   if (followUpAvailable) {
     if (tools.follow_up !== false) {
       result.push(createFollowUpTool(bridge));
+    }
+  }
+  // Calendar task management — the project scheduler authority (D-307 W-C).
+  // Distinct from follow_up: these create new sessions on a schedule, not
+  // continuations of this thread.
+  if (scheduledTasksAvailable) {
+    if (tools.scheduled_task !== false) {
+      result.push(createScheduledTaskTool(bridge));
     }
   }
   if (

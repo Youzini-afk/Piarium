@@ -644,6 +644,7 @@ export class SessionHost {
   #harnessExperimentsEnabled = false;
   #harnessSettingsEnabled = false;
   #harnessFollowUpsEnabled = false;
+  #harnessScheduledTasksEnabled = false;
   #harnessLspNavigationEnabled = false;
   #harnessDocumentReadEnabled = false;
   #harnessDocumentPathOverlayEnabled = false;
@@ -725,6 +726,10 @@ export class SessionHost {
 
   setHarnessFollowUpsEnabled(enabled: boolean): void {
     this.#harnessFollowUpsEnabled = enabled;
+  }
+
+  setHarnessScheduledTasksEnabled(enabled: boolean): void {
+    this.#harnessScheduledTasksEnabled = enabled;
   }
 
   setHarnessLspNavigationEnabled(enabled: boolean): void {
@@ -3546,6 +3551,7 @@ export class SessionHost {
         experimentAvailable: this.#harnessExperimentsEnabled,
         settingsAvailable: this.#harnessSettingsEnabled,
         followUpAvailable: this.#harnessFollowUpsEnabled && this.#harnessThreadRuntimeEnabled,
+        scheduledTasksAvailable: this.#harnessScheduledTasksEnabled,
         resolvedPresets,
         resolvedResearchCapabilities,
         getActiveToolNames: () => this.runtime?.session.getActiveToolNames() ?? [],

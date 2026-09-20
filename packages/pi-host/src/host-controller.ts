@@ -678,6 +678,10 @@ export class HostController {
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessFollowUps", { optional: true }) === true,
         );
+        this.#sessionHost.setHarnessScheduledTasksEnabled(
+          clientCapabilities !== undefined
+          && readBoolean(clientCapabilities, "harnessScheduledTasks", { optional: true }) === true,
+        );
         this.#sessionHost.setHarnessLspNavigationEnabled(
           clientCapabilities !== undefined
           && readBoolean(clientCapabilities, "harnessLspNavigation", { optional: true }) === true,

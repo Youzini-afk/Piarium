@@ -1255,6 +1255,17 @@ export interface HarnessServiceMap {
   "followup.cancel": { params: import("./harness-followups.js").FollowUpCancelParams; result: import("./harness-followups.js").FollowUpGetResult };
   "followup.check": { params: import("./harness-followups.js").FollowUpCheckParams; result: import("./harness-followups.js").FollowUpCheckResult };
   "followup.fire": { params: import("./harness-followups.js").FollowUpFireParams; result: import("./harness-followups.js").FollowUpGetResult };
+  // Stage W (D-307): calendar task management over the scheduled-task authority
+  "schedule.list": { params: import("./harness-scheduled-tasks.js").ScheduleListParams; result: import("./harness-scheduled-tasks.js").ScheduleListResult };
+  "schedule.get": { params: import("./harness-scheduled-tasks.js").ScheduleGetParams; result: import("./harness-scheduled-tasks.js").ScheduleGetResult };
+  "schedule.upsert": { params: import("./harness-scheduled-tasks.js").ScheduleUpsertParams; result: import("./harness-scheduled-tasks.js").ScheduleUpsertResult };
+  "schedule.remove": { params: import("./harness-scheduled-tasks.js").ScheduleRemoveParams; result: import("./harness-scheduled-tasks.js").ScheduleRemoveResult };
+  "schedule.run": { params: import("./harness-scheduled-tasks.js").ScheduleRunParams; result: import("./harness-scheduled-tasks.js").ScheduleRunResult };
+  "schedule.setEnabled": { params: import("./harness-scheduled-tasks.js").ScheduleSetEnabledParams; result: import("./harness-scheduled-tasks.js").ScheduleSetEnabledResult };
+  "schedule.loop.read": { params: import("./harness-scheduled-tasks.js").ScheduleLoopReadParams; result: import("./harness-scheduled-tasks.js").ScheduleLoopReadResult };
+  "schedule.loop.update": { params: import("./harness-scheduled-tasks.js").ScheduleLoopUpdateParams; result: import("./harness-scheduled-tasks.js").ScheduleLoopUpdateResult };
+  "schedule.loop.remove": { params: import("./harness-scheduled-tasks.js").ScheduleLoopRemoveParams; result: import("./harness-scheduled-tasks.js").ScheduleLoopRemoveResult };
+  "schedule.status": { params: import("./harness-scheduled-tasks.js").ScheduleStatusParams; result: import("./harness-scheduled-tasks.js").ScheduleStatusResult };
 }
 
 export type HarnessMethod = keyof HarnessServiceMap;
@@ -1280,6 +1291,8 @@ export type HarnessCapability =
   | "control.settings"
   | "read.followup"
   | "control.followup"
+  | "read.schedule"
+  | "control.schedule"
   | "write.document";
 
 export const HARNESS_METHOD_CAPABILITY = {
@@ -1358,6 +1371,16 @@ export const HARNESS_METHOD_CAPABILITY = {
   "followup.cancel": "control.followup",
   "followup.check": "control.followup",
   "followup.fire": "control.followup",
+  "schedule.list": "read.schedule",
+  "schedule.get": "read.schedule",
+  "schedule.upsert": "control.schedule",
+  "schedule.remove": "control.schedule",
+  "schedule.run": "control.schedule",
+  "schedule.setEnabled": "control.schedule",
+  "schedule.loop.read": "read.schedule",
+  "schedule.loop.update": "control.schedule",
+  "schedule.loop.remove": "control.schedule",
+  "schedule.status": "read.schedule",
 } as const satisfies Record<HarnessMethod, HarnessCapability>;
 
 /** Identity attached by the broker after it has pinned a worker to a session. */
@@ -1454,6 +1477,16 @@ const HARNESS_METHODS: ReadonlySet<string> = new Set<string>([
   "followup.cancel",
   "followup.check",
   "followup.fire",
+  "schedule.list",
+  "schedule.get",
+  "schedule.upsert",
+  "schedule.remove",
+  "schedule.run",
+  "schedule.setEnabled",
+  "schedule.loop.read",
+  "schedule.loop.update",
+  "schedule.loop.remove",
+  "schedule.status",
 ]);
 
 export function isHarnessMethod(value: unknown): value is HarnessMethod {

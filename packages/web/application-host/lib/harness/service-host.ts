@@ -409,6 +409,8 @@ export interface HarnessServiceHost {
   settingsService: import("./settings-service.js").SettingsService | null;
   /** Durable follow-up registrations and continuation delivery (D-307). */
   followUpService: import("./followups.js").FollowUpService | null;
+  /** Project scheduled-task authority shared with GUI/CLI/Markdown (D-307). */
+  scheduledTaskService: import("../scheduled-tasks/service.js").ScheduledTaskService | null;
   managedRemoteTargets: import("./managed-remote-client.js").ManagedRemoteTargetRegistry | null;
   /** Deliver one terminal shell fact into the same 7G observer used by local PTY commands. */
   observeShellCompletion(sessionId: string, event: ShellCommandCompletedEvent): void;
@@ -507,6 +509,7 @@ export interface HarnessServiceHostOptions {
   sourceService?: HarnessServiceHost["sourceService"];
   settingsService?: HarnessServiceHost["settingsService"];
   followUpService?: HarnessServiceHost["followUpService"];
+  scheduledTaskService?: HarnessServiceHost["scheduledTaskService"];
   managedRemoteTargets?: HarnessServiceHost["managedRemoteTargets"];
 }
 
@@ -823,6 +826,7 @@ export function createHarnessServiceHost(options: HarnessServiceHostOptions): Ha
     sourceService: options.sourceService ?? null,
     settingsService: options.settingsService ?? null,
     followUpService: options.followUpService ?? null,
+    scheduledTaskService: options.scheduledTaskService ?? null,
     managedRemoteTargets: options.managedRemoteTargets ?? null,
     observeShellCompletion,
     commitAgentInputContext,

@@ -13,6 +13,7 @@ export * from "./harness-fresh-input.js";
 export * from "./harness-experiments.js";
 export * from "./harness-settings-service.js";
 export * from "./harness-followups.js";
+export * from "./harness-scheduled-tasks.js";
 export * from "./harness-history.js";
 export * from "./harness-tools.js";
 export * from "./harness-threads.js";
