@@ -643,12 +643,18 @@ describe("experiment service on the real kernel", () => {
 
   it("retries a failed terminal commitment release after the backend job is already released", async () => {
     const f = await fixture();
-    let releaseAttempts = 0;
+    let releaseUnavailable = true;
+    let markReleaseFailure!: () => void;
+    const releaseFailed = new Promise<void>((resolve) => { markReleaseFailure = resolve; });
     const flakyResources = {
       ...f.resources,
       release: async (workspaceId: string, commitmentId: string, reason: string) => {
-        releaseAttempts += 1;
-        if (releaseAttempts === 1) throw new Error("temporary commitment persistence failure");
+        // Keep the outage observable even if wait/get reconciles the terminal
+        // attempt again before the test reads its retained commitment.
+        if (releaseUnavailable) {
+          markReleaseFailure();
+          throw new Error("temporary commitment persistence failure");
+        }
         await f.resources.release(workspaceId, commitmentId, reason);
       },
     };
@@ -665,17 +671,17 @@ describe("experiment service on the real kernel", () => {
     });
     const waited = await experiments.wait(f.caller, submitted.attempt.attemptId, 15_000);
     assert.equal(waited.attempt.state, "completed");
-    const releaseDeadline = Date.now() + 5_000;
-    while (releaseAttempts < 1 && Date.now() < releaseDeadline) await pause();
-    assert.equal(releaseAttempts, 1);
+    await releaseFailed;
+    const pending = await experiments.get(f.caller, submitted.attempt.attemptId);
+    assert.equal(pending.job?.state, "released");
     assert.equal(
       (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
       1,
     );
 
+    releaseUnavailable = false;
     const reconciled = await experiments.get(f.caller, submitted.attempt.attemptId);
     assert.equal(reconciled.job?.state, "released");
-    assert.equal(releaseAttempts, 2);
     assert.equal(
       (await f.resources.list(f.caller.workspaceId)).machines.find((machine) => machine.machineId === "local")?.commitments.length,
       0,
