@@ -78,9 +78,8 @@ export interface ScheduledTaskUpsertInput {
   execution?: Partial<Omit<ScheduledTaskExecutionView, "runAsGoal">> & { runAsGoal?: boolean };
 }
 
-export interface ScheduleListParams {
-  // No fields: the project is resolved from the caller's workspace.
-}
+/** No fields: the project is resolved from the caller's workspace. */
+export type ScheduleListParams = Record<string, never>;
 
 export interface ScheduleListResult {
   projectId: string;
@@ -170,9 +169,7 @@ export interface ScheduleLoopRemoveResult {
   tasks: ScheduledTaskView[];
 }
 
-export interface ScheduleStatusParams {
-  // No fields.
-}
+export type ScheduleStatusParams = Record<string, never>;
 
 export interface ScheduleStatusResult {
   hasEnabledScheduledTasks: boolean;
