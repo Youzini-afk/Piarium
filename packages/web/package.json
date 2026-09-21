@@ -125,7 +125,7 @@
     "@types/web-push": "^3.6.4",
     "@types/ws": "^8.18.1",
     "@types/yazl": "^3.3.1",
-    "@vitejs/plugin-react": "^5.0.0",
+    "@vitejs/plugin-react": "^6.1.1",
     "eslint": "^10.10.0",
     "nodemon": "^3.1.7",
     "supertest": "^7.2.2",
