@@ -34,7 +34,7 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 - [kernel release smoke](../scripts/smoke-kernel-release.mjs) 验证新二进制的文件写入、检索、结构解析与 shell。
   一次性完整 Host 启动检查使用新建的 Varin 数据目录与独立 Pi agent 目录：内置 Pi 就绪，Web 入口、
   `/health` 和 `/api/version` 正常，随后正常停止并清理测试目录；没有触碰开发者已有数据。
-- **发行边界**：当前版本号仍为 0.9.12；未移动 tag、覆盖旧安装包或发布新 npm 包。npm 本地登录返回 E401，
+- **发行边界**：当前版本号已更新为 0.9.13；未移动 tag、覆盖旧安装包或发布新 npm 包。npm 本地登录返回 E401，
   `@varin/*` 首次公开发布仍需有效发布身份及 scope 权限；新安装包、可选语义组件和 GHCR 镜像需由新坐标的
   发行工作流生成。未声称已有新品牌下载产物，也未进行真实浏览器、macOS/iOS 或 Android 原生构建验收。
 
