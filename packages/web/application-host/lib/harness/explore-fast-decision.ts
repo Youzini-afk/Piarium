@@ -76,6 +76,8 @@ export interface ExploreFastDecisionLoopInput {
   }) => Promise<HarnessFastDecisionResultWire>;
   /** Loop lifetime: cancel/release/finish-stop. Outlives the source deadline. */
   signal: AbortSignal;
+  /** Public explore may submit a generated plan after the first quiet round. */
+  waitForLaterProgress?: boolean;
   /** Wall clock the loop must not outrun. */
   deadlineAt: number;
   /**
@@ -107,6 +109,7 @@ export async function runExploreFastDecisionLoop(
   input: ExploreFastDecisionLoopInput,
 ): Promise<ExploreFastDecisionDetails> {
   const now = input.now ?? Date.now;
+  const waitForLaterProgress = input.waitForLaterProgress === true;
   const details: ExploreFastDecisionDetails = {
     status: "used",
     providerId: input.binding.providerId,
@@ -121,11 +124,13 @@ export async function runExploreFastDecisionLoop(
     unevaluatedMaterials: 0,
   };
   const judged = new Set<string>();
+  const judgedActions = new Set<string>();
   let usage: { inputTokens?: number; outputTokens?: number } | undefined;
 
   try {
     while (input.run.terminal() === "active") {
       input.signal.throwIfAborted();
+      if (input.closing.requested()) break;
       if (now() >= input.deadlineAt) break;
       // Wait for the pipeline to produce or for finish to ask us to settle.
       await Promise.race([input.run.waitForViews(), input.closing.promise]);
@@ -139,12 +144,25 @@ export async function runExploreFastDecisionLoop(
       const fresh = views.filter((view) => !view.unevaluated && !judged.has(view.viewId));
       const pending = canAct
         ? (await input.run.actionCandidates()).filter(
-          (candidate) => !details.executed.includes(candidate.actionId),
+          (candidate) => !details.executed.includes(candidate.actionId) && !judgedActions.has(candidate.actionId),
         )
         : [];
-      if (fresh.length === 0 && pending.length === 0) break;
+      if (fresh.length === 0 && pending.length === 0) {
+        // The source side has already closed at its reserve deadline; no
+        // later plan can produce material through this query anymore.
+        if (!waitForLaterProgress || input.run.signal.aborted || input.closing.requested()) break;
+        const remaining = Math.max(1, input.deadlineAt - now());
+        await Promise.race([
+          input.run.waitForProgress(),
+          input.closing.promise,
+          new Promise<void>((resolve) => { setTimeout(resolve, remaining); }),
+        ]);
+        continue;
+      }
       details.rounds += 1;
-      details.unevaluatedMaterials += unevaluated;
+      // `unevaluated` is the current snapshot count, not a per-round delta.
+      // Keep it truthful when the loop wakes for later plans or follow-ups.
+      details.unevaluatedMaterials = unevaluated;
 
       const materials: FastDecisionMaterial[] = fresh.map((view: ExploreQueryView) => ({
         id: view.viewId,
@@ -192,6 +210,7 @@ export async function runExploreFastDecisionLoop(
         };
       }
       for (const view of fresh) judged.add(view.viewId);
+      for (const action of pending) judgedActions.add(action.actionId);
       const answered = new Map(result.answers.map((answer) => [answer.id, answer]));
 
       const include = fresh
@@ -213,12 +232,17 @@ export async function runExploreFastDecisionLoop(
         const answer = answered.get(`a:${action.actionId}`);
         return answer?.kind === "judge" && answer.value >= 0.5;
       });
-      if (chosen.length === 0) break;
+      if (chosen.length === 0) {
+        if (!waitForLaterProgress || input.run.signal.aborted || input.closing.requested()) break;
+        continue;
+      }
       const followup = await input.run.followup({ actions: chosen });
       details.executed.push(...followup.actionsExecuted);
       details.actionsExecuted += followup.actionsExecuted.length;
-      // A round that produced no new views leaves nothing more to judge.
-      if (followup.actionsExecuted.length === 0 || followup.newViews.length === 0) break;
+      if (followup.newViews.length > 0) judgedActions.clear();
+      // A quiet action round can still be followed by a later generated plan;
+      // wait for progress or the query close/deadline instead of ending early.
+      if (!waitForLaterProgress && (followup.actionsExecuted.length === 0 || followup.newViews.length === 0)) break;
     }
   } catch (error) {
     const aborted = isAbort(error) || input.signal.aborted || input.run.terminal() === "cancelled";

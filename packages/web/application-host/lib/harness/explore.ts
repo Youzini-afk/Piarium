@@ -1262,6 +1262,8 @@ export interface ExploreQueryRun {
   start(): void;
   submitPlan(plan: ExploreGroupedSearchPlan): Promise<{ launched: string[]; reused: string[] }>;
   waitForViews(): Promise<void>;
+  /** Wake a progressive consumer when a later plan/follow-up adds work. */
+  waitForProgress(): Promise<void>;
   viewsForModel(byteBudget?: number): {
     views: ExploreQueryView[];
     unevaluated: number;
@@ -1979,6 +1981,15 @@ export function createExploreQueryRun(
   let pumpPromise: Promise<void> | undefined;
   /** Serializes `waitForViews` driving passes across concurrent callers. */
   let viewsTurn: Promise<void> = Promise.resolve();
+  const progressWaiters = new Set<() => void>();
+  const notifyProgress = (): void => {
+    for (const resolve of progressWaiters) resolve();
+    progressWaiters.clear();
+  };
+  const waitForProgress = (): Promise<void> => {
+    if (terminal !== "active" || signal.aborted) return Promise.resolve();
+    return new Promise<void>((resolve) => { progressWaiters.add(resolve); });
+  };
   const pumpErrors: unknown[] = [];
   const ensurePump = (): Promise<void> => {
     if (pumpPromise) return pumpPromise;
@@ -2552,7 +2563,10 @@ export function createExploreQueryRun(
         return combineProductionStatuses(statuses);
       });
     }
-    if (launched.length > 0) kickPump();
+    if (launched.length > 0) {
+      notifyProgress();
+      kickPump();
+    }
     return { launched, reused };
   };
 
@@ -2852,6 +2866,7 @@ export function createExploreQueryRun(
         }
       });
     }
+    if (launched.length > 0) notifyProgress();
     await awaitPump();
     if (request.gaps?.length) selectionGaps = uniqueGaps([...selectionGaps, ...request.gaps]);
     freezeViews();
@@ -3073,6 +3088,7 @@ export function createExploreQueryRun(
   const cancel = (): void => {
     if (terminal !== "active") return;
     terminal = "cancelled";
+    notifyProgress();
     controller.abort();
   };
 
@@ -3094,6 +3110,7 @@ export function createExploreQueryRun(
     start,
     submitPlan,
     waitForViews,
+    waitForProgress,
     viewsForModel,
     applySelection,
     applyRerank,

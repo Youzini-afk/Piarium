@@ -72,12 +72,13 @@ const finiteNumber = (value: unknown): number | undefined => (
   typeof value === "number" && Number.isFinite(value) ? value : undefined
 );
 
-const probabilities = (value: unknown): Record<string, number> | undefined => {
-  if (!isRecord(value)) return undefined;
+const probabilities = (value: unknown): Record<string, number> | null | undefined => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
   const out: Record<string, number> = {};
   for (const [key, entry] of Object.entries(value)) {
     const n = finiteNumber(entry);
-    if (n === undefined) return undefined;
+    if (n === undefined || n < 0 || n > 1) return null;
     out[key] = n;
   }
   return out;
@@ -141,7 +142,12 @@ function readAnswer(question: FastDecisionQuestion, raw: unknown): FastDecisionA
         : question.options.some((option) => option.id === choice);
       if (!valid) return undefined;
       const probs = probabilities(raw.probabilities);
+      if (probs === null) return undefined;
+      if (probs && Object.keys(probs).some((key) => (
+        key !== NONE_OPTION && !question.options.some((option) => option.id === key)
+      ))) return undefined;
       const confidence = finiteNumber(raw.confidence);
+      if (raw.confidence !== undefined && (confidence === undefined || confidence < 0 || confidence > 1)) return undefined;
       return {
         id: question.id,
         kind: "choose",
@@ -153,9 +159,15 @@ function readAnswer(question: FastDecisionQuestion, raw: unknown): FastDecisionA
     case "score": {
       if (raw.type !== "score") return undefined;
       const score = finiteNumber(raw.score);
-      if (score === undefined) return undefined;
+      if (score === undefined || score < 0 || score > question.levels.length - 1) return undefined;
       const probs = probabilities(raw.probabilities);
+      if (probs === null) return undefined;
+      if (probs && Object.keys(probs).some((key) => {
+        const level = Number(key);
+        return !Number.isInteger(level) || level < 0 || level >= question.levels.length;
+      })) return undefined;
       const confidence = finiteNumber(raw.confidence);
+      if (raw.confidence !== undefined && (confidence === undefined || confidence < 0 || confidence > 1)) return undefined;
       return {
         id: question.id,
         kind: "score",
@@ -172,13 +184,11 @@ export async function requestSystemone(request: SystemoneRequest): Promise<Syste
   const endpoint = request.endpoint ?? SYSTEMONE_DEFAULT_ENDPOINT;
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
   const questions: Record<string, unknown> = {};
-  const byId = new Map<string, FastDecisionQuestion>();
   for (const question of request.questions) {
     if (Object.hasOwn(questions, question.id)) {
       throw new SystemoneRequestError(`duplicate question id ${question.id}`);
     }
     questions[question.id] = wireQuestion(question);
-    byId.set(question.id, question);
   }
   const response = await fetchImpl(`${request.baseUrl.replace(/\/+$/u, "")}${path}`, {
     method: "POST",

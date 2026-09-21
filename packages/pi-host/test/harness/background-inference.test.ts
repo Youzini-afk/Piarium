@@ -433,7 +433,7 @@ describe("BackgroundInferenceRuntime", () => {
     const off = await inference.describe();
     assert.equal(off.fastDecision?.purposes?.explore?.status, "disabled");
     await assert.rejects(
-      inference.fastDecision({ ...base, batchId: "fd-4", endpoint: undefined }),
+      inference.fastDecision({ ...base, batchId: "fd-4" }),
       /disabled/i,
     );
 

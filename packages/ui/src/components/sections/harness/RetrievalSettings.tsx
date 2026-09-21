@@ -242,7 +242,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
   const settings = harness.fastDecision;
   const binding = settings?.default;
   const exploreOverride = settings?.purposes?.explore;
-  const [remote, setRemote] = React.useState(Boolean(binding));
+  const [remote, setRemote] = React.useState(Boolean(binding || (exploreOverride && exploreOverride !== 'off')));
   const remoteRef = React.useRef(remote);
   const [fields, setFields] = React.useState({
     providerId: binding?.providerId ?? '',

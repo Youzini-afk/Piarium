@@ -110,6 +110,9 @@ export function createExploreTool(
           plan: complete ? "skipped" : "unconfigured",
           select: complete ? "skipped" : "unconfigured",
           followup: complete ? "skipped" : "unconfigured",
+          ...(started.fastDecision && started.fastDecision.status !== "ready"
+            ? { fastDecision: started.fastDecision.status === "invalid" || started.fastDecision.status === "unavailable" ? "failed" as const : started.fastDecision.status }
+            : {}),
         };
         if (!complete) {
           participation.note = "Explore model is not configured; excerpts are from algorithm and vector sources.";

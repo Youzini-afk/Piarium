@@ -239,14 +239,14 @@ function requireQuery(
 }
 
 export async function packExploreSearchResult(
-  host: Pick<HarnessServiceHost, "outputStore" | "fileRelations">,
+  host: Pick<HarnessServiceHost, "outputStore"> & Partial<Pick<HarnessServiceHost, "fileRelations">>,
   ctx: HarnessServiceContext,
   result: Awaited<ReturnType<StoredExploreQuery["run"]["finish"]>>,
   options?: { traceWindows?: boolean; searchPartial?: boolean },
 ): Promise<ExploreSearchResult> {
   const incomplete = (options?.searchPartial ?? false) || result.searched.incomplete;
   const relations = ctx.workspaceId && host.fileRelations
-    ? await loadSnippetRelations(host, ctx.workspaceId, result.snippets, ctx.signal)
+    ? await loadSnippetRelations({ fileRelations: host.fileRelations }, ctx.workspaceId, result.snippets, ctx.signal)
     : undefined;
   const formatted = {
     snippets: result.snippets,
@@ -446,6 +446,7 @@ export function createExploreQueryStartService(
               }),
               signal: loopSignal,
               deadlineAt: stored.deadlineAt,
+              waitForLaterProgress: true,
               closing: { promise: settlePromise, requested: () => settleRequested },
             }).then((details) => {
               stored!.run.applyFastDecision(details);
@@ -555,7 +556,8 @@ export function createExploreQueryFollowupService(
 }
 
 export function createExploreQueryFinishService(
-  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore" | "fileRelations" | "rerankExploreViews" | "harnessSettings">,
+  host: Pick<HarnessServiceHost, "exploreQueryStore" | "outputStore" | "rerankExploreViews" | "harnessSettings">
+    & Partial<Pick<HarnessServiceHost, "fileRelations">>,
   options?: { traceWindows?: boolean },
 ): HarnessService<"explore.query.finish"> {
   return {
@@ -589,6 +591,15 @@ export function createExploreQueryFinishService(
         if (model && fastDecisionActive) {
           model.fastDecision = fastDecisionStageStatus(fastDecision.details);
           if (model.rerank === undefined) model.rerank = "skipped";
+        } else if (model && fastDecision && fastDecision.status !== "ready") {
+          model.fastDecision = fastDecision.status === "disabled"
+            ? "disabled"
+            : fastDecision.status === "unconfigured"
+              ? "unconfigured"
+              : "failed";
+          if (fastDecision.status === "invalid" || fastDecision.status === "unavailable") {
+            model.note = `${model.note ? `${model.note} ` : ""}Fast decision is ${fastDecision.status}; source ranking was kept.`;
+          }
         }
         if (workspaceId && exploreShouldRerank(model) && host.rerankExploreViews && !fastDecisionActive) {
           let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
