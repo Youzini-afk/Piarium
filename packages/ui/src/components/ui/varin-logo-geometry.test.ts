@@ -3,7 +3,6 @@ import {
   LEFT_FACE_CELL_OPACITIES,
   LOGO_GRID_SIZE,
   LOGO_LEFT_FACE_CELLS,
-  LOGO_MARK_POINTS,
   LOGO_MARK_PATH,
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
@@ -58,12 +57,8 @@ describe('logo geometry', () => {
     expect(LOGO_STROKE_WIDTH).toBeLessThan(1);
   });
 
-  test('the compact V glyph closes back on itself and has one clear point', () => {
+  test('the glyph path closes back on itself', () => {
     expect(LOGO_MARK_PATH.endsWith('Z')).toBe(true);
-    expect(LOGO_MARK_POINTS).toHaveLength(7);
-    expect(LOGO_MARK_POINTS[2]).toEqual([7.071, 7.071]);
-    expect(LOGO_MARK_POINTS[5]).toEqual([15.556, 8.485]);
-    expect(LOGO_MARK_POINTS[6]).toEqual([8.485, 15.556]);
   });
 
   test('the shading tables cover the lattice exactly', () => {

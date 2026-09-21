@@ -87,7 +87,7 @@ struct OverviewProvider: TimelineProvider {
 // MARK: - Varin logo
 
 /// The Varin logo, drawn to match packages/web/public/logo-dark-512x512.svg: an
-/// isometric cube with translucent face fills, stroked edges, and the compact V mark on the
+/// isometric cube with translucent face fills, stroked edges, and the original π mark on the
 /// top face. Faces use low-opacity `.primary` so the system tint on the Lock Screen / Control
 /// Center reads as a translucent fill (no colour) rather than a flat wireframe. Coordinates are
 /// the SVG inner group (range x:-41.568…41.568, y:-48…48).
@@ -103,7 +103,7 @@ struct CubeLogoView: View {
 
             // Cube coordinate → canvas point.
             func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: cx + x * scale, y: cy + y * scale) }
-            // V-mark local coordinates match varin-logo-geometry.ts (SVG: matrix(0.866,0.5,-0.866,0.5,0,-24) · scale(0.75)).
+            // π-mark local coordinates match varin-logo-geometry.ts (SVG: matrix(0.866,0.5,-0.866,0.5,0,-24) · scale(0.75)).
             func m(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
                 let s: CGFloat = 0.75
                 let mx = 0.866 * s * x - 0.866 * s * y
@@ -124,11 +124,12 @@ struct CubeLogoView: View {
             context.stroke(right, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
             context.stroke(top, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
 
-            var v = Path()
-            v.move(to: m(-26.87, 4.243)); v.addLine(to: m(-19.799, -2.828)); v.addLine(to: m(7.071, 7.071))
-            v.addLine(to: m(-2.828, -19.799)); v.addLine(to: m(4.243, -26.87)); v.addLine(to: m(15.556, 8.485))
-            v.addLine(to: m(8.485, 15.556)); v.closeSubpath()
-            context.fill(v, with: .color(.primary))
+            var pi = Path()
+            pi.move(to: m(-18, -15)); pi.addLine(to: m(18, -15)); pi.addLine(to: m(18, -9))
+            pi.addLine(to: m(13, -9)); pi.addLine(to: m(13, 15)); pi.addLine(to: m(7, 15))
+            pi.addLine(to: m(7, -9)); pi.addLine(to: m(-7, -9)); pi.addLine(to: m(-7, 15))
+            pi.addLine(to: m(-13, 15)); pi.addLine(to: m(-13, -9)); pi.addLine(to: m(-18, -9)); pi.closeSubpath()
+            context.fill(pi, with: .color(.primary))
         }
     }
 }

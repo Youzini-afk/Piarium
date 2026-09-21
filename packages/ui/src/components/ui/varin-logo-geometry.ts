@@ -4,7 +4,7 @@ import { projectPoint } from './varin-splash-camera';
  * Varin's static mark, projected from the same cube and camera pose as the startup scene.
  *
  * The splash keeps a real CSS 3D cube because it has to move. Static surfaces do not need that runtime
- * cost, so this module projects the three visible faces, their 4×4 cells, and the V glyph once into a
+ * cost, so this module projects the three visible faces, their 4×4 cells, and the π glyph once into a
  * 100×100 SVG viewBox. App icons, README artwork, favicons, and `VarinLogo` all consume these paths.
  */
 
@@ -89,22 +89,10 @@ export const LOGO_TOP_FACE_PATH = quadPath(
   LOGO_VERTICES.right,
 );
 
-/**
- * The compact Varin V glyph in the top face's local floor coordinates.
- *
- * The camera spins the top face by 45 degrees. These points are the screen-upright V rotated back into
- * that face, so both the animated cube and the projected static mark still read as a V after the camera
- * does its work. Keeping these points here makes the React mark, splash markup, and generated assets share
- * the same authored silhouette.
- */
+/** The original π glyph in the top face's local floor coordinates. */
 export const LOGO_MARK_POINTS: ReadonlyArray<readonly [number, number]> = [
-  [-26.87, 4.243],
-  [-19.799, -2.828],
-  [7.071, 7.071],
-  [-2.828, -19.799],
-  [4.243, -26.87],
-  [15.556, 8.485],
-  [8.485, 15.556],
+  [-18, -15], [18, -15], [18, -9], [13, -9], [13, 15], [7, 15],
+  [7, -9], [-7, -9], [-7, 15], [-13, 15], [-13, -9], [-18, -9],
 ] as const;
 
 const polygonPath = (points: ReadonlyArray<readonly [number, number]>): string =>

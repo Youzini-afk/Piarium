@@ -5,7 +5,6 @@ import sharp from 'sharp';
 import {
   LOGO_LEFT_FACE_CELLS,
   LOGO_LEFT_FACE_PATH,
-  LOGO_MARK_PATH,
   LOGO_PROJECTED_MARK_PATH,
   LOGO_RIGHT_FACE_CELLS,
   LOGO_RIGHT_FACE_PATH,
@@ -95,7 +94,7 @@ ${markBody('currentColor', true)}
 </svg>
 `;
 
-/** The tray keeps the moving cube silhouette, with the same V glyph as the full mark on its top face. */
+/** The small tray retains the original cube outline and diamond on its top face. */
 const trayGlyphSvg = (): string => `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"
      stroke="#000" stroke-linejoin="round" stroke-linecap="round">
@@ -104,7 +103,7 @@ const trayGlyphSvg = (): string => `<?xml version="1.0" encoding="UTF-8"?>
     <path d="M3.5 9.5 L16 16.25 L28.5 9.5"/>
     <path d="M16 16.25 L16 30"/>
   </g>
-  <path d="${LOGO_MARK_PATH}" transform="translate(16 9.4) rotate(45) scale(0.2)" fill="#000" stroke="none"/>
+  <path stroke-width="1.5" d="M16 6.5 L21.5 9.4 L16 12.3 L10.5 9.4 Z"/>
 </svg>
 `;
 
@@ -122,7 +121,7 @@ const trayFrameSvg = (fillLevel: number): string => {
   </g>
   <path d="M9 3.25 L14.1 5.95 L9 8.65 L3.9 5.95 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
   <path d="M3.1 5.75 L9 9 L14.9 5.75 L14.9 12.7 L9 15.95 L3.1 12.7 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
-  <path d="${LOGO_MARK_PATH}" transform="translate(9 5.95) rotate(45) scale(0.12)" fill="#fff" fill-opacity="${markOpacity}"/>
+  <path d="M9 4.1 L12.2 5.95 L9 7.8 L5.8 5.95 Z" fill="none" stroke="#fff" stroke-opacity="${markOpacity}" stroke-width="0.85" stroke-linejoin="round"/>
 </svg>
 `;
 };

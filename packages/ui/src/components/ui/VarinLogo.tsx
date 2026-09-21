@@ -156,7 +156,7 @@ export const VarinLogo: React.FC<VarinLogoProps> = ({
         <path d={LOGO_TOP_FACE_PATH} />
       </g>
 
-      {/* Varin's V mark projected through the startup camera. */}
+      {/* The retained π mark projected through the startup camera. */}
       <g
         opacity={1}
         className={isAnimated ? 'varin-logo-glow' : undefined}

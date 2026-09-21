@@ -22,7 +22,8 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
 设计见 [varin-rebrand-design.md](varin-rebrand-design.md)，B0–B4 的内部切换已落地，下一实施阶段为 F。
 包命名空间、CLI、协议/事件、配置目录与 key、原生 appId、kernel、工作台 ID、当前文档和发布脚本统一为 Varin，
 没有旧名别名、回退、双写或迁移层。真实 Pi 包、`PI_CODING_AGENT_DIR`、`.pi`、AuthStorage 与原生会话仍归 Pi。
-V 标记沿原方块/相机/动效生成 Logo、Splash、桌面/托盘、Web/PWA、移动与 Widget 资源。
+按用户反馈保留原方块 π 图标与相机/动效，Logo、Splash、桌面/托盘、Web/PWA、移动与 Widget 资源同步恢复；
+Varin 名称和代码身份保留，新 Logo 留待独立设计，不以字母 V 替换旧标记作为最终方案。
 
 - GitHub 原仓库已改为 `Youzini-afk/Varin`，仓库身份、提交、tag 和历史 release 保留；本地 origin 已切换。
 - Bun、Cargo、cloud runtime 锁文件已更新；保留第三方依赖版本。全包 type-check、lint、cloud layout 9 项、
