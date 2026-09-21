@@ -39,7 +39,8 @@ Default-on 列只记当前代码，尚未完成的正式目标单独列为待实
   发行工作流生成。未声称已有新品牌下载产物，也未进行真实浏览器、macOS/iOS 或 Android 原生构建验收。
 
 **D-312 / 阶段 F：快速决策模型与渐进检索（2026-09-21），F0–F4 已交付并进入生产调用链（wired）。**
-设计见 [fast-decision-model-design.md](fast-decision-model-design.md)。
+设计见 [fast-decision-model-design.md](fast-decision-model-design.md)；执行交接用的完整 Prompt 见
+[fast-decision-model-execution-prompt.md](fast-decision-model-execution-prompt.md)。
 
 已接线：
 
