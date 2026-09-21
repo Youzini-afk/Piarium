@@ -15,8 +15,7 @@ import {
 } from './varin-logo-geometry';
 
 /**
- * The published mark is the startup cube frozen in its initial camera pose. These tests guard the shared
- * geometry so product icons cannot silently drift back to a separate logo.
+ * The splash retains its cube. The approved flat mark is projected onto its top face.
  */
 
 describe('logo geometry', () => {
@@ -50,10 +49,10 @@ describe('logo geometry', () => {
     const xCoordinates = coordinates.filter((_, index) => index % 2 === 0);
     const markWidth = Math.max(...xCoordinates) - Math.min(...xCoordinates);
     const topFaceWidth = LOGO_VERTICES.right.x - LOGO_VERTICES.left.x;
-    // The splash's 48-unit glyph viewBox is stretched over a 96px face before its authored 0.75 scale.
-    // Omitting that 2× conversion produces the visibly tiny mark this regression test was added for.
+    // The authored glyph viewBox must be converted to the face's world coordinates before projection.
+    // A missing conversion makes the preview misleadingly small or lets the mark spill off the cube.
     expect(markWidth / topFaceWidth).toBeGreaterThan(0.45);
-    expect(markWidth / topFaceWidth).toBeLessThan(0.52);
+    expect(markWidth / topFaceWidth).toBeLessThan(0.65);
     expect(LOGO_STROKE_WIDTH).toBeLessThan(1);
   });
 

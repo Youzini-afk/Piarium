@@ -26,6 +26,13 @@ Runtime API types and auth/fetch/URL/switch primitives are imported directly fro
 
 ## Theme and component system
 
+`varin-mark.ts` owns the approved fold logo as two centered polygons, including the extended tips and
+small diagonal separation. `VarinLogo` uses that flat mark in the surrounding foreground color, with
+two-tone shading at larger sizes and solid ink for small controls. The splash keeps its existing cube
+and camera; `varin-splash-cube.ts` places the same polygons on its top face. `branding:generate` emits
+desktop/Web/mobile/Widget assets, and `splash:emit` updates the pre-paint HTML. Keep shape edits at this
+shared source rather than drawing independent versions for individual surfaces.
+
 Research uses `MainLayout` for shared window controls, navigation, permissions, settings and resource
 panels. Its conversation composition shows the real research-root Thread/Run and an expandable branch
 and materials area. `HarnessThreadStateProvider` owns this read-only projection; branches remain

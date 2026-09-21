@@ -104,7 +104,7 @@ struct QuickActionsWidgetView: View {
             // Wide primary button: New Session.
             Link(destination: WidgetDeepLink.newSession()) {
                 HStack(spacing: 8) {
-                    CubeLogoView()
+                    VarinLogoView()
                         .frame(width: 26, height: 26)
                     Text("Chat")
                         .font(.title3)
@@ -178,7 +178,7 @@ struct SessionsWidgetView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            CubeLogoView()
+            VarinLogoView()
                 .frame(width: 20, height: 20)
             Text("Sessions")
                 .font(.headline)
@@ -250,7 +250,7 @@ struct LockNewSessionView: View {
     var body: some View {
         ZStack {
             AccessoryWidgetBackground()
-            CubeLogoView()
+            VarinLogoView()
                 .padding(7)
         }
         .widgetURL(WidgetDeepLink.newSession())

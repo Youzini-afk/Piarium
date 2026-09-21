@@ -15,8 +15,7 @@ struct VarinNewSessionControl: ControlWidget {
             ControlWidgetButton(action: OpenNewSessionIntent()) {
                 // Custom symbol is referenced via `image:` (the asset-catalog symbol path;
                 // `systemImage:` only finds Apple's system SF Symbols → shows a "?"). The glyph
-                // uses bold strokes so it stays visible at the control's small, tinted size —
-                // thin strokes rendered blank.
+                // uses the shared solid fold mark so both ribbons retain the system tint.
                 Label("New Session", image: "VarinLogoSymbol")
             }
         }

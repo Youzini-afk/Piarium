@@ -1,18 +1,17 @@
 import { projectPoint } from './varin-splash-camera';
+import { VARIN_MARK_PATHS, VARIN_MARK_POLYGONS, VARIN_MARK_VIEWBOX_SIZE } from './varin-mark';
 
 /**
- * Varin's static mark, projected from the same cube and camera pose as the startup scene.
+ * The startup cube projected through its shared camera, including the approved flat mark.
  *
- * The splash keeps a real CSS 3D cube because it has to move. Static surfaces do not need that runtime
- * cost, so this module projects the three visible faces, their 4×4 cells, and the π glyph once into a
- * 100×100 SVG viewBox. App icons, README artwork, favicons, and `VarinLogo` all consume these paths.
+ * The splash keeps a real CSS 3D cube because it has to move. This projection also lets previews show
+ * that same object without a CSS 3D scene. Ordinary UI and app icons use varin-mark.ts directly.
  */
 
 const LOGO_EDGE = 96;
 const LOGO_HALF_EDGE = LOGO_EDGE / 2;
 const LOGO_TOP_Z = LOGO_EDGE;
 const LOGO_VIEWBOX_PADDING = 4;
-const LOGO_MARK_VIEWBOX_EDGE = 48;
 
 export const LOGO_VIEWBOX = '0 0 100 100';
 export const LOGO_GRID_SIZE = 4;
@@ -89,25 +88,19 @@ export const LOGO_TOP_FACE_PATH = quadPath(
   LOGO_VERTICES.right,
 );
 
-/** The original π glyph in the top face's local floor coordinates. */
-export const LOGO_MARK_POINTS: ReadonlyArray<readonly [number, number]> = [
-  [-18, -15], [18, -15], [18, -9], [13, -9], [13, 15], [7, 15],
-  [7, -9], [-7, -9], [-7, 15], [-13, 15], [-13, -9], [-18, -9],
-] as const;
-
-const polygonPath = (points: ReadonlyArray<readonly [number, number]>): string =>
-  `M${points.map(([x, y]) => `${x} ${y}`).join(' L')} Z`;
-
-export const LOGO_MARK_PATH = polygonPath(LOGO_MARK_POINTS);
-export const LOGO_MARK_SCALE = 0.75;
-const logoMarkWorldScale = LOGO_MARK_SCALE * LOGO_EDGE / LOGO_MARK_VIEWBOX_EDGE;
+export const LOGO_MARK_PATH = VARIN_MARK_PATHS.join(' ');
+export const LOGO_MARK_SCALE = 0.82;
+const logoMarkWorldScale = LOGO_MARK_SCALE * LOGO_EDGE / VARIN_MARK_VIEWBOX_SIZE;
 
 /** The splash's top-face glyph after the shared camera projection. */
-export const LOGO_PROJECTED_MARK_PATH = quadPath(...LOGO_MARK_POINTS.map(([x, y]) => projectLogoPoint({
-  x: x * logoMarkWorldScale,
-  y: y * logoMarkWorldScale,
-  z: LOGO_TOP_Z,
-})));
+export const LOGO_PROJECTED_MARK_PATHS = VARIN_MARK_POLYGONS.map((points) =>
+  quadPath(...points.map(([x, y]) => projectLogoPoint({
+    x: x * logoMarkWorldScale,
+    y: y * logoMarkWorldScale,
+    z: LOGO_TOP_Z,
+  }))),
+);
+export const LOGO_PROJECTED_MARK_PATH = LOGO_PROJECTED_MARK_PATHS.join(' ');
 
 export const LEFT_FACE_CELL_OPACITIES = [
   0.2, 0.45, 0.15, 0.55,

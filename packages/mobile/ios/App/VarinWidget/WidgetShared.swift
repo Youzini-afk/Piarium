@@ -86,50 +86,13 @@ struct OverviewProvider: TimelineProvider {
 
 // MARK: - Varin logo
 
-/// The Varin logo, drawn to match packages/web/public/logo-dark-512x512.svg: an
-/// isometric cube with translucent face fills, stroked edges, and the original π mark on the
-/// top face. Faces use low-opacity `.primary` so the system tint on the Lock Screen / Control
-/// Center reads as a translucent fill (no colour) rather than a flat wireframe. Coordinates are
-/// the SVG inner group (range x:-41.568…41.568, y:-48…48).
-struct CubeLogoView: View {
+/// The shared fold mark is emitted into this symbol by `branding:generate`.
+/// Using its template rendering keeps Lock Screen and Control Center system tint intact.
+struct VarinLogoView: View {
     var body: some View {
-        Canvas { context, size in
-            let halfW: CGFloat = 41.568
-            let halfH: CGFloat = 48
-            let scale = min(size.width / (halfW * 2), size.height / (halfH * 2))
-            let cx = size.width / 2
-            let cy = size.height / 2
-            let lineWidth = max(1.5, 3 * scale)
-
-            // Cube coordinate → canvas point.
-            func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: cx + x * scale, y: cy + y * scale) }
-            // π-mark local coordinates match varin-logo-geometry.ts (SVG: matrix(0.866,0.5,-0.866,0.5,0,-24) · scale(0.75)).
-            func m(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
-                let s: CGFloat = 0.75
-                let mx = 0.866 * s * x - 0.866 * s * y
-                let my = 0.5 * s * x + 0.5 * s * y - 24
-                return p(mx, my)
-            }
-
-            var left = Path()
-            left.move(to: p(0, 0)); left.addLine(to: p(-halfW, -24)); left.addLine(to: p(-halfW, 24)); left.addLine(to: p(0, 48)); left.closeSubpath()
-            var right = Path()
-            right.move(to: p(0, 0)); right.addLine(to: p(halfW, -24)); right.addLine(to: p(halfW, 24)); right.addLine(to: p(0, 48)); right.closeSubpath()
-            var top = Path()
-            top.move(to: p(0, -48)); top.addLine(to: p(-halfW, -24)); top.addLine(to: p(0, 0)); top.addLine(to: p(halfW, -24)); top.closeSubpath()
-
-            context.fill(left, with: .color(.primary.opacity(0.2)))
-            context.fill(right, with: .color(.primary.opacity(0.35)))
-            context.stroke(left, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
-            context.stroke(right, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
-            context.stroke(top, with: .color(.primary), style: StrokeStyle(lineWidth: lineWidth, lineJoin: .round))
-
-            var pi = Path()
-            pi.move(to: m(-18, -15)); pi.addLine(to: m(18, -15)); pi.addLine(to: m(18, -9))
-            pi.addLine(to: m(13, -9)); pi.addLine(to: m(13, 15)); pi.addLine(to: m(7, 15))
-            pi.addLine(to: m(7, -9)); pi.addLine(to: m(-7, -9)); pi.addLine(to: m(-7, 15))
-            pi.addLine(to: m(-13, 15)); pi.addLine(to: m(-13, -9)); pi.addLine(to: m(-18, -9)); pi.closeSubpath()
-            context.fill(pi, with: .color(.primary))
-        }
+        Image("VarinLogoSymbol")
+            .resizable()
+            .scaledToFit()
+            .accessibilityHidden(true)
     }
 }

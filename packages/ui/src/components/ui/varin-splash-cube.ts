@@ -1,9 +1,9 @@
 import {
   LEFT_FACE_CELL_OPACITIES,
-  LOGO_MARK_PATH,
   LOGO_MARK_SCALE,
   RIGHT_FACE_CELL_OPACITIES,
 } from './varin-logo-geometry';
+import { VARIN_MARK_PATHS, VARIN_MARK_SECONDARY_OPACITY, VARIN_MARK_VIEWBOX } from './varin-mark';
 
 /**
  * Markup for the one real 3D object in the splash scene.
@@ -23,7 +23,7 @@ const faceCells = (opacities: readonly number[]): string => opacities
 
 export const splashCubeMarkup = (): string => [
   '<span class="varin-splash-cube-face varin-splash-cube-face-top">',
-  `<svg class="varin-splash-cube-glyph" viewBox="-24 -24 48 48" aria-hidden="true" focusable="false"><path d="${LOGO_MARK_PATH}" transform="scale(${LOGO_MARK_SCALE})"/></svg>`,
+  `<svg class="varin-splash-cube-glyph" viewBox="${VARIN_MARK_VIEWBOX}" aria-hidden="true" focusable="false"><g transform="scale(${LOGO_MARK_SCALE})">${VARIN_MARK_PATHS.map((path, index) => `<path d="${path}" opacity="${index === 0 ? 1 : VARIN_MARK_SECONDARY_OPACITY}"/>`).join('')}</g></svg>`,
   '</span>',
   `<span class="varin-splash-cube-face varin-splash-cube-face-x">${faceCells(RIGHT_FACE_CELL_OPACITIES)}</span>`,
   `<span class="varin-splash-cube-face varin-splash-cube-face-y">${faceCells(LEFT_FACE_CELL_OPACITIES)}</span>`,

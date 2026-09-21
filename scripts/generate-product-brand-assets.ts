@@ -1,18 +1,12 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import {
-  LOGO_LEFT_FACE_CELLS,
-  LOGO_LEFT_FACE_PATH,
-  LOGO_PROJECTED_MARK_PATH,
-  LOGO_RIGHT_FACE_CELLS,
-  LOGO_RIGHT_FACE_PATH,
-  LOGO_STROKE_WIDTH,
-  LOGO_TOP_FACE_PATH,
-  leftFaceCellOpacity,
-  rightFaceCellOpacity,
-} from '../packages/ui/src/components/ui/varin-logo-geometry';
+  VARIN_MARK_PATHS,
+  VARIN_MARK_POLYGONS,
+  VARIN_MARK_VIEWBOX,
+} from '../packages/ui/src/components/ui/varin-mark';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electronIcons = path.join(repoRoot, 'packages', 'electron', 'resources', 'icons');
@@ -20,8 +14,10 @@ const electronTray = path.join(electronIcons, 'tray');
 const webPublic = path.join(repoRoot, 'packages', 'web', 'public');
 
 const PRODUCT_BACKGROUND = '#151313';
-const PRODUCT_INK = '#f5f5f5';
-const LIGHT_SURFACE_INK = '#151313';
+const PRODUCT_INK = '#eeeee8';
+const PRODUCT_SECONDARY_INK = '#8e9694';
+const LIGHT_SURFACE_INK = '#20272a';
+const LIGHT_SECONDARY_INK = '#77837f';
 
 const save = async (target: string, bytes: string | Uint8Array): Promise<void> => {
   await mkdir(path.dirname(target), { recursive: true });
@@ -30,31 +26,10 @@ const save = async (target: string, bytes: string | Uint8Array): Promise<void> =
 
 const alpha = (value: number): string => String(Math.round(value * 1_000) / 1_000);
 
-const faceCells = (
-  cells: typeof LOGO_LEFT_FACE_CELLS,
-  opacityAt: (cell: (typeof cells)[number]) => number,
-  ink: string,
-  compact: boolean,
-): string => compact
-  ? ''
-  : cells.map((cell) => (
-    `<path d="${cell.path}" fill="${ink}" fill-opacity="${alpha(opacityAt(cell) * 0.35)}"/>`
-  )).join('');
-
-const markBody = (ink: string, compact = false): string => {
-  const strokeWidth = compact ? 3.4 : LOGO_STROKE_WIDTH;
-  return [
-    `<path d="${LOGO_LEFT_FACE_PATH}" fill="${ink}" fill-opacity="0.15"/>`,
-    faceCells(LOGO_LEFT_FACE_CELLS, leftFaceCellOpacity, ink, compact),
-    `<path d="${LOGO_RIGHT_FACE_PATH}" fill="${ink}" fill-opacity="0.15"/>`,
-    faceCells(LOGO_RIGHT_FACE_CELLS, rightFaceCellOpacity, ink, compact),
-    `<path d="${LOGO_TOP_FACE_PATH}" fill="${ink}" fill-opacity="0.1"/>`,
-    `<g fill="none" stroke="${ink}" stroke-width="${strokeWidth}" stroke-linejoin="round">`,
-    `<path d="${LOGO_LEFT_FACE_PATH}"/><path d="${LOGO_RIGHT_FACE_PATH}"/><path d="${LOGO_TOP_FACE_PATH}"/>`,
-    '</g>',
-    `<path d="${LOGO_PROJECTED_MARK_PATH}" fill="${ink}"/>`,
-  ].join('');
-};
+const markBody = (ink: string, compact = false): string => VARIN_MARK_PATHS.map((path, index) => {
+  const secondary = ink === PRODUCT_INK ? PRODUCT_SECONDARY_INK : LIGHT_SECONDARY_INK;
+  return `<path d="${path}" fill="${index === 0 || compact ? ink : secondary}"/>`;
+}).join('');
 
 const transparentMarkSvg = ({
   compact = false,
@@ -65,7 +40,7 @@ const transparentMarkSvg = ({
   ink: string;
   size?: number;
 }): string => `<?xml version="1.0" encoding="UTF-8"?>
-<svg width="${size}" height="${size}" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<svg width="${size}" height="${size}" viewBox="${VARIN_MARK_VIEWBOX}" xmlns="http://www.w3.org/2000/svg">
 ${markBody(ink, compact)}
 </svg>
 `;
@@ -74,7 +49,7 @@ const appIconSvg = (compact = false): string => `<?xml version="1.0" encoding="U
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
 <rect x="64" y="64" width="896" height="896" rx="216" fill="${PRODUCT_BACKGROUND}"/>
 <rect x="68" y="68" width="888" height="888" rx="212" fill="none" stroke="${PRODUCT_INK}" stroke-opacity="0.08" stroke-width="8"/>
-<svg x="142" y="132" width="740" height="740" viewBox="0 0 100 100">
+<svg x="${compact ? 64 : 142}" y="${compact ? 64 : 142}" width="${compact ? 896 : 740}" height="${compact ? 896 : 740}" viewBox="${VARIN_MARK_VIEWBOX}">
 ${markBody(PRODUCT_INK, compact)}
 </svg>
 </svg>
@@ -82,46 +57,32 @@ ${markBody(PRODUCT_INK, compact)}
 
 const iconComposerGlyphSvg = (ink: string): string => `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-<svg x="152" y="142" width="720" height="720" viewBox="0 0 100 100">
+<svg x="152" y="152" width="720" height="720" viewBox="${VARIN_MARK_VIEWBOX}">
 ${markBody(ink)}
 </svg>
 </svg>
 `;
 
-const themedFaviconSvg = (): string => `<svg width="32" height="32" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+const themedFaviconSvg = (): string => `<svg width="32" height="32" viewBox="${VARIN_MARK_VIEWBOX}" xmlns="http://www.w3.org/2000/svg">
 <style>:root{color:${LIGHT_SURFACE_INK}}@media(prefers-color-scheme:dark){:root{color:${PRODUCT_INK}}}</style>
 ${markBody('currentColor', true)}
 </svg>
 `;
 
-/** The small tray retains the original cube outline and diamond on its top face. */
+/** Native templates use a solid monochrome mark so tinting keeps both ribbons legible. */
 const trayGlyphSvg = (): string => `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none"
-     stroke="#000" stroke-linejoin="round" stroke-linecap="round">
-  <g stroke-width="2.3">
-    <path d="M16 2.5 L28.5 9.5 L28.5 23 L16 30 L3.5 23 L3.5 9.5 Z"/>
-    <path d="M3.5 9.5 L16 16.25 L28.5 9.5"/>
-    <path d="M16 16.25 L16 30"/>
-  </g>
-  <path stroke-width="1.5" d="M16 6.5 L21.5 9.4 L16 12.3 L10.5 9.4 Z"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VARIN_MARK_VIEWBOX}">
+${markBody('#000', true)}
 </svg>
 `;
 
-/** Small native tray frames use the cube outline and pulse only its translucent faces. */
+/** Keep the existing tray breathing state while pulsing the flat mark. */
 const trayFrameSvg = (fillLevel: number): string => {
   const clampedLevel = Math.min(1, Math.max(0, fillLevel));
-  const faceOpacity = alpha(clampedLevel * 0.58);
   const markOpacity = alpha(0.7 + clampedLevel * 0.3);
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 18 18">
-  <g fill="none" stroke="#fff" stroke-linejoin="round" stroke-linecap="round" stroke-width="1.35">
-    <path d="M9 1 L16.2 5 L16.2 13 L9 17 L1.8 13 L1.8 5 Z"/>
-    <path d="M1.8 5 L9 9 L16.2 5"/>
-    <path d="M9 9 L9 17"/>
-  </g>
-  <path d="M9 3.25 L14.1 5.95 L9 8.65 L3.9 5.95 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
-  <path d="M3.1 5.75 L9 9 L14.9 5.75 L14.9 12.7 L9 15.95 L3.1 12.7 Z" fill="#fff" fill-opacity="${faceOpacity}"/>
-  <path d="M9 4.1 L12.2 5.95 L9 7.8 L5.8 5.95 Z" fill="none" stroke="#fff" stroke-opacity="${markOpacity}" stroke-width="0.85" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="${VARIN_MARK_VIEWBOX}">
+  <g opacity="${markOpacity}">${markBody('#fff', true)}</g>
 </svg>
 `;
 };
@@ -229,4 +190,26 @@ await Promise.all([
 
 ]);
 
-console.log('[branding] Generated Varin desktop and Web assets from the splash mark.');
+// Keep the existing SF Symbols template metadata; regenerate its glyphs from the shared polygons.
+const symbolPath = path.join(repoRoot, 'packages/mobile/ios/App/VarinWidget/Assets.xcassets/VarinLogoSymbol.symbolset/varin-logo-symbol.svg');
+const symbolTemplate = await readFile(symbolPath, 'utf8');
+const markPoints = VARIN_MARK_POLYGONS.flat();
+const minX = Math.min(...markPoints.map(([x]) => x));
+const maxX = Math.max(...markPoints.map(([x]) => x));
+const minY = Math.min(...markPoints.map(([, y]) => y));
+const maxY = Math.max(...markPoints.map(([, y]) => y));
+const symbolScale = 70 / (maxY - minY);
+const coordinate = (value: number): number => Math.round(value * 1_000) / 1_000;
+const symbolGroups = ['Ultralight', 'Regular', 'Black'].map((weight, index) => {
+  const centerX = 265 + index * 200;
+  const paths = VARIN_MARK_POLYGONS.map((points) => `<path d="M${points.map(([x, y]) => `${coordinate(centerX + x * symbolScale)},${coordinate(111 + y * symbolScale)}`).join(' L')} Z"/>`).join('');
+  return `<g id="${weight}-S">${paths}</g>`;
+}).join('\n');
+const symbolHeader = symbolTemplate.slice(0, symbolTemplate.indexOf('    <g id="Symbols">'))
+  .replace(/(<path id="(left|right)-margin-(Ultralight|Regular|Black)-S" d="M)[\d.]+/g, (_match, prefix, side, weight) => {
+    const centerX = 265 + ['Ultralight', 'Regular', 'Black'].indexOf(weight) * 200;
+    return `${prefix}${coordinate(centerX + (side === 'left' ? minX : maxX) * symbolScale)}`;
+  });
+await save(symbolPath, `${symbolHeader}    <g id="Symbols">\n${symbolGroups}\n    </g>\n</svg>\n`);
+
+console.log('[branding] Generated Varin desktop, Web, and Widget assets from the approved fold mark.');
