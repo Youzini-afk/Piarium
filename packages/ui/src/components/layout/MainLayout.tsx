@@ -266,7 +266,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                 data-page-scroll-lock="true"
                 className={cn(
                     'main-content-safe-area',
-                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh]',
+                    isMobile ? 'flex h-[100dvh] flex-col' : 'relative flex h-[100dvh] flex-col',
                     'bg-background'
                 )}
             >
@@ -406,7 +406,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                 <>
                     <Header />
                     {/* Desktop navigation and work area share the row below the titlebar. */}
-                    <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
+                    <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
