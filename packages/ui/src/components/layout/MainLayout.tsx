@@ -2,8 +2,6 @@ import React, { useRef, useEffect } from 'react';
 import { animate, motion, useMotionValue } from 'motion/react';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
-import { SidebarTopBar } from './SidebarTopBar';
-import { TitlebarLeftControls } from './TitlebarLeftControls';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { ContextPanel } from './ContextPanel';
 import { ContextPanelRail } from './ContextPanelRail';
@@ -406,16 +404,13 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                 </DrawerProvider>
             ) : (
                 <>
-                    {/* Persistent top-left controls (toggle + project actions) that
-                        stay put while the sidebar/header animate beneath them. */}
-                    <TitlebarLeftControls />
-                    {/* Desktop: full-height Sidebar beside [Header above (chat | RightSidebar)] */}
+                    <Header />
+                    {/* Desktop navigation and work area share the row below the titlebar. */}
                     <div className="flex flex-1 overflow-hidden" data-page-scroll-lock="true">
                         <Sidebar
                             isOpen={isSidebarOpen}
                             isMobile={isMobile}
                             className="border-border"
-                            topBar={<SidebarTopBar />}
                         >
                             <WorkbenchReplacement
                                 target={WORKBENCH_REPLACEMENT_TARGETS.sessionNavigator}
@@ -423,7 +418,6 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation }) =>
                             />
                         </Sidebar>
                         <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden bg-background" data-page-scroll-lock="true">
-                            <Header />
                             <div className="relative flex flex-1 min-h-0 overflow-hidden bg-background" data-page-scroll-lock="true">
                                 <div className="relative flex flex-1 min-w-0 flex-col overflow-hidden border-t border-border bg-background" data-page-scroll-lock="true">
                                     <div className="flex flex-1 min-h-0 overflow-hidden" data-page-scroll-lock="true">

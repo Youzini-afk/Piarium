@@ -1,4 +1,5 @@
 import React from 'react';
+import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import type { SessionSummary } from '@piarium/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -23,11 +24,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  ContextMenu,
-  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -1049,21 +1047,21 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
               return (
                 <section key={group.id} className="group/workspace mb-2">
                 {project ? (
-                  <ContextMenu>
-                    <ContextMenuTrigger
-                      render={(
+                  <ProjectActionsButton
+                    projectRef={{ id: project.id, path: project.path }}
+                    directory={project.path}
+                    allowMobile
+                    contextMenu={{
+                      trigger: (
                         <div
                           className={cn(
                             'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
                             stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
                           )}
                           aria-label={t('sessions.sidebar.project.actions.projectMenu')}
-                        />
-                      )}
-                    >
-                      {groupHeaderContent}
-                    </ContextMenuTrigger>
-                    <ContextMenuContent className="min-w-52">
+                        >{groupHeaderContent}</div>
+                      ),
+                      children: <>
                       {canManageProject ? (
                         <>
                           <ContextMenuItem
@@ -1125,8 +1123,9 @@ export const PiSessionSidebar: React.FC<PiSessionSidebarProps> = ({
                           </ContextMenuItem>
                         </>
                       ) : null}
-                    </ContextMenuContent>
-                  </ContextMenu>
+                      </>,
+                    }}
+                  />
                 ) : (
                   <div className={cn(
                     'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',

@@ -78,10 +78,18 @@ describe('useUIStore openContextSurface', () => {
   });
 
   test('does nothing for content-driven modes without existing content', () => {
-    useUIStore.getState().openContextSurface(directory, 'preview');
     useUIStore.getState().openContextSurface(directory, 'chat');
 
     expect(useUIStore.getState().contextPanelByDirectory[directory]).toBe(undefined);
+  });
+
+  test('opens the preview launcher and replaces it when the server URL arrives', () => {
+    useUIStore.getState().openContextSurface(directory, 'preview');
+    expect(useUIStore.getState().contextPanelByDirectory[directory]?.tabs[0]?.targetPath).toBe(null);
+    useUIStore.getState().openContextPreview(directory, 'http://localhost:3000');
+    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]?.targetPath).toBe('http://localhost:3000');
   });
 
   test('opens an empty editor tab that a real file later replaces', () => {

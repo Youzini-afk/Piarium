@@ -1,4 +1,5 @@
 import React from 'react';
+import { getRuntimeKey } from '@piarium/application-client';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,6 +8,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
 import { cn } from '@/lib/utils';
@@ -47,6 +49,9 @@ interface ProjectActionsButtonProps {
   className?: string;
   compact?: boolean;
   allowMobile?: boolean;
+  contextMenu?: { trigger: React.ReactElement; children: React.ReactNode };
+  menuTrigger?: React.ReactElement;
+  previewOnly?: boolean;
 }
 
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
@@ -54,6 +59,8 @@ const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@
 const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
 const AUTO_DISCOVER_ACTION_ID = '__piarium_auto_discover_preview__';
 const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
+// The project menu and preview pane can both launch the same action.
+const startingRunKeys = new Set<string>();
 
 const stripControlChars = (value: string): string => {
   let next = '';
@@ -147,6 +154,9 @@ export const ProjectActionsButton = ({
   className,
   compact = false,
   allowMobile = false,
+  contextMenu,
+  menuTrigger,
+  previewOnly = false,
 }: ProjectActionsButtonProps) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -178,11 +188,11 @@ export const ProjectActionsButton = ({
   const [actions, setActions] = React.useState<PiariumProjectAction[]>([]);
   const [selectedActionId, setSelectedActionId] = React.useState<string | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [menuActivated, setMenuActivated] = React.useState(!contextMenu && !menuTrigger);
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
   const streamCleanupByRunKeyRef = React.useRef<Record<string, () => void>>({});
   const previewWaitTimeoutByRunKeyRef = React.useRef<Record<string, number>>({});
-  const startingRunKeysRef = React.useRef<Set<string>>(new Set());
   const loadRequestIdRef = React.useRef(0);
 
   const projectId = projectRef?.id ?? null;
@@ -196,11 +206,11 @@ export const ProjectActionsButton = ({
   }, [projectId, projectPath]);
 
   React.useEffect(() => {
-    if (!isDesktopShellApp) {
+    if (!isDesktopShellApp || !menuActivated) {
       return;
     }
     void loadDesktopSsh().catch(() => undefined);
-  }, [isDesktopShellApp, loadDesktopSsh]);
+  }, [isDesktopShellApp, loadDesktopSsh, menuActivated]);
 
   const openExternal = React.useCallback(async (url: string) => {
     await openExternalUrl(url);
@@ -256,9 +266,9 @@ export const ProjectActionsButton = ({
 
   const autoDiscoverAction = React.useMemo<PiariumProjectAction>(() => ({
     id: AUTO_DISCOVER_ACTION_ID,
-    name: t('projectActions.actions.autoDiscover'),
+    name: t('contextPanel.preview.startPreview'),
     command: '',
-    icon: 'scan-2',
+    icon: 'play',
     autoOpenUrl: true,
   }), [t]);
 
@@ -269,8 +279,9 @@ export const ProjectActionsButton = ({
   );
 
   React.useEffect(() => {
+    if (!menuActivated) return;
     void loadActions();
-  }, [loadActions]);
+  }, [loadActions, menuActivated]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -278,6 +289,7 @@ export const ProjectActionsButton = ({
     }
 
     const handler = (event: Event) => {
+      if (!menuActivated) return;
       const detail = (event as CustomEvent<{ projectId?: string }>).detail;
       if (!projectId) {
         return;
@@ -292,7 +304,7 @@ export const ProjectActionsButton = ({
     return () => {
       window.removeEventListener(PROJECT_ACTIONS_UPDATED_EVENT, handler);
     };
-  }, [loadActions, projectId]);
+  }, [loadActions, menuActivated, projectId]);
 
   React.useEffect(() => {
     if (!selectedActionId) {
@@ -307,11 +319,13 @@ export const ProjectActionsButton = ({
   }, [actions, canUseAutoDiscover, selectedActionId]);
 
   React.useEffect(() => {
+    if (!menuActivated) return;
     const monitorRuns = () => {
       const terminalStore = useTerminalStore.getState();
       const terminalSessions = terminalStore.sessions;
       const currentRuns = terminalStore.projectActionRuns;
       for (const [runKey, entry] of Object.entries(currentRuns)) {
+        if (entry.directory !== normalizedDirectory) continue;
         const directoryState = terminalSessions.get(entry.directory);
         const tab = directoryState?.tabs.find((item) => item.id === entry.tabId);
         if (!tab || tab.terminalSessionId !== entry.sessionId) {
@@ -319,11 +333,11 @@ export const ProjectActionsButton = ({
           continue;
         }
 
-        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: false, tail: '', openInPreview: false };
+        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: tab.previewAutoOpened, tail: '', openInPreview: entry.actionId === AUTO_DISCOVER_ACTION_ID };
         urlWatchByRunKeyRef.current[runKey] = watch;
         const action = displayActions.find((item) => item.id === entry.actionId);
         const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
-        if (!action || bufferChunks.length === 0) continue;
+        if (!action || bufferChunks.length === 0 || tab.previewAutoOpened) continue;
 
         const nextChunks = bufferChunks.filter((chunk) => watch.lastSeenChunkId === null || chunk.id > watch.lastSeenChunkId);
         if (nextChunks.length === 0) continue;
@@ -341,13 +355,14 @@ export const ProjectActionsButton = ({
           if (watch.openInPreview) {
             const run = currentRuns[runKey];
             if (run) {
-              setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: false });
+              setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: true });
               if (run.status === 'waiting-for-preview') updateProjectActionRunStatus(runKey, 'running');
               window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
               delete previewWaitTimeoutByRunKeyRef.current[runKey];
               openContextPreview(run.directory, maybeUrl);
             }
           } else {
+            setTabPreviewUrl(entry.directory, entry.tabId, maybeUrl, { locked: false, autoOpened: true });
             void openExternal(maybeUrl);
             toast.success(t('projectActions.toast.openedUrlFromOutput'));
           }
@@ -368,7 +383,7 @@ export const ProjectActionsButton = ({
     return useTerminalStore.subscribe((state, previousState) => {
       if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
-  }, [displayActions, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
+  }, [displayActions, menuActivated, normalizedDirectory, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
 
   const getOrCreateActionTab = React.useCallback(async (action: PiariumProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
@@ -429,8 +444,9 @@ export const ProjectActionsButton = ({
     if (existingRun && existingRun.status === 'running') {
       return;
     }
-    if (startingRunKeysRef.current.has(runKey)) return;
-    startingRunKeysRef.current.add(runKey);
+    const startingKey = JSON.stringify([getRuntimeKey(), runKey]);
+    if (startingRunKeys.has(startingKey)) return;
+    startingRunKeys.add(startingKey);
 
     try {
       const discovered = action.id === AUTO_DISCOVER_ACTION_ID
@@ -445,9 +461,9 @@ export const ProjectActionsButton = ({
           }
           return {
             id: AUTO_DISCOVER_ACTION_ID,
-            name: t('projectActions.actions.autoDiscover'),
+            name: t('contextPanel.preview.startPreview'),
             command: devServer.command,
-            icon: 'scan-2',
+            icon: 'play',
             autoOpenUrl: true,
             openUrl: devServer.previewUrlHint || '',
           };
@@ -457,6 +473,8 @@ export const ProjectActionsButton = ({
       const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
       const revealTerminal = !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID;
       const { key, tabId, sessionId } = await getOrCreateActionTab(discovered, { revealTerminal });
+      // Clear a prior run before output can arrive; never erase a URL discovered by sendInput.
+      setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false });
       let activeSessionId = sessionId;
 
       if (!activeSessionId) {
@@ -570,8 +588,6 @@ export const ProjectActionsButton = ({
       } else if (hasDesktopForwardSelection) {
         setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         toast.error(t('projectActions.error.selectedDesktopSshForwardUnavailable'));
-      } else {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false });
       }
 
     } catch (error) {
@@ -583,7 +599,7 @@ export const ProjectActionsButton = ({
       delete previewWaitTimeoutByRunKeyRef.current[runKey];
       toast.error(error instanceof Error ? error.message : t('projectActions.error.failedToRunAction'));
     } finally {
-      startingRunKeysRef.current.delete(runKey);
+      startingRunKeys.delete(startingKey);
     }
   }, [
     currentTheme.colors.surface.background,
@@ -705,7 +721,7 @@ export const ProjectActionsButton = ({
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
 
-  const previewAction = selectedAction ?? displayActions[0] ?? null;
+  const previewAction = previewOnly ? autoDiscoverAction : selectedAction ?? displayActions[0] ?? null;
   const previewRun = previewAction ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, previewAction.id)] : null;
   const selectedRunPreviewUrl = useTerminalStore((state) => {
     if (!previewRun) return null;
@@ -716,14 +732,14 @@ export const ProjectActionsButton = ({
     return null;
   }
 
-  const resolvedSelected = selectedAction ?? displayActions[0] ?? null;
+  const resolvedSelected = previewAction ?? ((contextMenu || menuTrigger) ? autoDiscoverAction : null);
   if (!resolvedSelected) {
     return null;
   }
 
   const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
   const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
-    ? 'scan-2'
+    ? 'play'
     : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
   const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
   const selectedRunning = projectActionRuns[selectedRunKey];
@@ -737,6 +753,67 @@ export const ProjectActionsButton = ({
     openContextPreview(selectedRunning.directory, selectedRunPreviewUrl);
   };
   const isAutoDiscoverSelected = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID;
+
+  const MenuItem = contextMenu ? ContextMenuItem : DropdownMenuItem;
+  const MenuSeparator = contextMenu ? ContextMenuSeparator : DropdownMenuSeparator;
+  const menuItems = (
+    <>
+      {displayActions.map((entry) => {
+        const run = projectActionRuns[toProjectActionRunKey(normalizedDirectory, entry.id)];
+        const waiting = run?.status === 'stopping' || run?.status === 'waiting-for-preview';
+        const iconName = entry.id === AUTO_DISCOVER_ACTION_ID ? 'play' : PROJECT_ACTION_ICON_MAP[(entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP] || 'play';
+        return (
+          <MenuItem key={entry.id} disabled={isLoading || run?.status === 'stopping'} onClick={() => handleSelectAction(entry, true)}>
+            <Icon name={waiting ? 'loader-4' : run ? 'stop' : iconName} className={cn('mr-2 size-4 shrink-0', waiting && 'animate-spin')} />
+            <span className="truncate">{run ? t('projectActions.actions.stopNamedAria', { name: entry.id === AUTO_DISCOVER_ACTION_ID ? t('contextPanel.preview.title') : entry.name }) : entry.name}</span>
+          </MenuItem>
+        );
+      })}
+      <MenuSeparator />
+      <MenuItem onClick={openProjectActionsSettings}>
+        <Icon name="add" className="mr-2 size-4" />
+        {t('projectActions.actions.addNewAction')}
+      </MenuItem>
+    </>
+  );
+
+  if (contextMenu) {
+    return (
+      <ContextMenu onOpenChange={(open) => { if (open) setMenuActivated(true); }}>
+        <ContextMenuTrigger render={contextMenu.trigger} />
+        <ContextMenuContent className="min-w-52 max-h-[70vh] overflow-y-auto">
+          {menuItems}
+          <ContextMenuSeparator />
+          {contextMenu.children}
+        </ContextMenuContent>
+      </ContextMenu>
+    );
+  }
+
+  if (menuTrigger) {
+    return (
+      <DropdownMenu onOpenChange={(open) => { if (open) setMenuActivated(true); }}>
+        <DropdownMenuTrigger asChild>{menuTrigger}</DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="min-w-52 max-h-[70vh] overflow-y-auto">
+          {menuItems}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  if (previewOnly) {
+    return (
+      <button
+        type="button"
+        disabled={isLoading || isStoppingSelected || isWaitingForSelectedPreview}
+        onClick={() => handleSelectAction(autoDiscoverAction, true)}
+        className="inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 typography-ui-label text-primary-foreground disabled:opacity-50"
+      >
+        <Icon name={isWaitingForSelectedPreview || isStoppingSelected ? 'loader-4' : selectedRunning ? 'stop' : 'play'} className={cn('size-4', (isWaitingForSelectedPreview || isStoppingSelected) && 'animate-spin')} />
+        {isWaitingForSelectedPreview ? t('contextPanel.preview.starting') : selectedRunning ? t('projectActions.actions.stopNamedAria', { name: t('contextPanel.preview.title') }) : t('contextPanel.preview.startPreview')}
+      </button>
+    );
+  }
 
   if (compact) {
     return (
@@ -766,7 +843,7 @@ export const ProjectActionsButton = ({
             </button>
           </TooltipTrigger>
           {isAutoDiscoverSelected ? (
-            <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+            <TooltipContent sideOffset={6}>{t('contextPanel.preview.startPreview')}</TooltipContent>
           ) : null}
         </Tooltip>
         {showSelectedPreviewButton ? (
@@ -795,39 +872,7 @@ export const ProjectActionsButton = ({
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-52 max-h-[70vh] overflow-y-auto">
-            <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
-              <Icon name="add" className="h-4 w-4" />
-              <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            {displayActions.map((entry) => {
-              const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-              const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
-                ? 'scan-2'
-                : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
-              const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
-              const runState = projectActionRuns[runKey];
-              const isRunning = Boolean(runState);
-              const isStopping = runState?.status === 'stopping';
-
-              return (
-                <DropdownMenuItem
-                  key={entry.id}
-                  className="flex items-center gap-2"
-                  onClick={() => {
-                    handleSelectAction(entry, true);
-                  }}
-                >
-                  <Icon name={iconName} className="h-4 w-4" />
-                  <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
-                  {isStopping || runState?.status === 'waiting-for-preview'
-                    ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
-                    : isRunning
-                      ? <Icon name="stop" className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
-                      : null}
-                </DropdownMenuItem>
-              );
-            })}
+            {menuItems}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -869,7 +914,7 @@ export const ProjectActionsButton = ({
           </button>
         </TooltipTrigger>
         {isAutoDiscoverSelected ? (
-          <TooltipContent sideOffset={6}>{t('projectActions.actions.autoDiscoverTooltip')}</TooltipContent>
+          <TooltipContent sideOffset={6}>{t('contextPanel.preview.startPreview')}</TooltipContent>
         ) : null}
       </Tooltip>
 
@@ -908,39 +953,7 @@ export const ProjectActionsButton = ({
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-52 max-h-[70vh] overflow-y-auto">
-          <DropdownMenuItem className="flex items-center gap-2" onClick={openProjectActionsSettings}>
-            <Icon name="add" className="h-4 w-4" />
-            <span className="typography-ui-label text-foreground">{t('projectActions.actions.addNewAction')}</span>
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {displayActions.map((entry) => {
-            const iconKey = (entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-            const iconName = entry.id === AUTO_DISCOVER_ACTION_ID
-              ? 'scan-2'
-              : PROJECT_ACTION_ICON_MAP[iconKey] || 'play';
-            const runKey = toProjectActionRunKey(normalizedDirectory, entry.id);
-            const runState = projectActionRuns[runKey];
-            const isRunning = Boolean(runState);
-            const isStopping = runState?.status === 'stopping';
-
-            return (
-              <DropdownMenuItem
-                key={entry.id}
-                className="flex items-center gap-2"
-                onClick={() => {
-                  handleSelectAction(entry, true);
-                }}
-              >
-                <Icon name={iconName} className="h-4 w-4" />
-                <span className="typography-ui-label text-foreground truncate">{entry.name}</span>
-                {isStopping || runState?.status === 'waiting-for-preview'
-                  ? <Icon name="loader-4" className="ml-auto h-4 w-4 animate-spin text-[var(--status-warning)]" />
-                  : isRunning
-                    ? <Icon name="stop" className="ml-auto h-4 w-4 text-[var(--status-warning)]" />
-                    : null}
-              </DropdownMenuItem>
-            );
-          })}
+          {menuItems}
         </DropdownMenuContent>
       </DropdownMenu>
     </div>

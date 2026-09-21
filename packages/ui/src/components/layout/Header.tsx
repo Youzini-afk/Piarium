@@ -60,6 +60,7 @@ import { DesktopHostSwitcherDialog } from '@/components/desktop/DesktopHostSwitc
 import { OpenInAppButton } from '@/components/desktop/OpenInAppButton';
 import { useTerminalStore } from '@/stores/useTerminalStore';
 import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
+import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
 import { PiSessionSwitcherDropdown } from '@/components/pi-session/PiSessionSwitcherDropdown';
 import { collectPiSessionSubtreeIds, piSessionTitle } from '@/components/pi-session/sessionPresentation';
 import { invokeDesktop, isDesktopLocalOriginActive, isDesktopShell, startDesktopWindowDrag, type UpdateInfo } from '@/lib/desktop';
@@ -1452,18 +1453,6 @@ export const Header: React.FC<HeaderProps> = ({
     document.documentElement.style.setProperty('--oc-titlebar-left-inset', titlebarLeftInset);
   }, [titlebarLeftInset]);
 
-  // Space reserved on the header's left for the persistent overlay when the
-  // sidebar is collapsed (the overlay sits over the header then). Split into two
-  // spacers so the strip stays a window drag area while the buttons stay
-  // clickable: a drag region for the window-controls inset (traffic lights) and
-  // a no-drag carve under the control cluster. Both animate so the session title
-  // slides in/out in lockstep with the sidebar. When the sidebar is open the
-  // overlay is over the sidebar, so the header only keeps normal content padding.
-  const headerInsetSpacerWidth = isSidebarOpen ? '0.75rem' : 'var(--oc-titlebar-left-inset, 0.75rem)';
-  const headerControlsSpacerWidth = isSidebarOpen
-    ? '0px'
-    : 'calc(var(--oc-titlebar-controls-width, 5.5rem) + 0.5rem)';
-
   useEffect(() => {
     if (!isDesktopApp || !isMacPlatform) {
       setIsDesktopWindowFullscreen(false);
@@ -1892,6 +1881,19 @@ export const Header: React.FC<HeaderProps> = ({
     </>
   );
 
+  const projectNameMenu = projectActionsContext && activeProjectLabel ? (
+    <ProjectActionsButton
+      projectRef={projectActionsContext.projectRef}
+      directory={projectActionsContext.directory}
+      menuTrigger={(
+        <button type="button" className="flex min-w-0 max-w-full items-center gap-1 rounded text-inherit hover:bg-interactive-hover" aria-label={`${activeProjectLabel}: ${t('projectActions.actions.chooseActionAria')}`}>
+          <span className="truncate">{activeProjectLabel}</span>
+          <Icon name="arrow-down-s" className="size-3 shrink-0 opacity-60" />
+        </button>
+      )}
+    />
+  ) : activeProjectLabel;
+
   const renderDesktop = () => (
     <div
       onMouseDown={handleDragStart}
@@ -1903,24 +1905,7 @@ export const Header: React.FC<HeaderProps> = ({
       role="tablist"
       aria-label={t('header.navigation.mainAria')}
     >
-      {/* Drag region for the window-controls inset (traffic lights) to the left
-          of the overlay buttons — stays a window drag area. */}
-      <div
-        aria-hidden
-        className="shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-        style={{ width: headerInsetSpacerWidth }}
-      />
-      {/* No-drag carve under the persistent TitlebarLeftControls overlay so its
-          buttons stay clickable. Width animates with the sidebar so the session
-          title slides in lockstep instead of snapping. */}
-      <div
-        aria-hidden
-        className="app-region-no-drag shrink-0 self-stretch transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-        style={{ width: headerControlsSpacerWidth }}
-      />
-      {/* Sidebar toggle + project actions live in the persistent
-          TitlebarLeftControls overlay; the spacers above reserve its footprint
-          while the sidebar is closed. */}
+      <TitlebarLeftControls />
       <div className="flex min-w-0 flex-1 items-center">
         {activeSurfaceHeader ? (
           <div className="mr-3 flex min-w-0 flex-col items-start px-1 py-0.5 -my-0.5 text-left">
@@ -1993,13 +1978,13 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               ) : (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
-                  {activeProjectLabel ?? t('sessions.sidebar.grouping.generalChat')}
+                  {projectNameMenu ?? t('sessions.sidebar.grouping.generalChat')}
                 </span>
               )}
               {(sessionDirectory || (currentSessionId && activeProjectLabel) || currentBranchLabel) ? (
                 <span className="flex min-w-0 max-w-full items-center gap-1.5 truncate typography-micro text-[10.5px] font-normal leading-tight text-muted-foreground/75">
                   {sessionDirectory ? <span className="truncate">{sessionDirectory}</span> : null}
-                  {currentSessionId && activeProjectLabel ? <span className="truncate">{activeProjectLabel}</span> : null}
+                  {currentSessionId && activeProjectLabel ? <span className="min-w-0 truncate">{projectNameMenu}</span> : null}
                   {currentBranchLabel ? (
                     <span className="inline-flex min-w-0 items-center gap-0.5">
                       <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
@@ -2497,7 +2482,7 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   const headerClassName = cn(
-    'header-safe-area relative z-10 bg-background',
+    'header-safe-area relative z-10 shrink-0 bg-background',
     // Mobile keeps a full-width divider. On desktop the divider lives on the chat
     // content wrapper instead, so it doesn't run between the header and the right
     // sidebar (they read as one continuous surface).

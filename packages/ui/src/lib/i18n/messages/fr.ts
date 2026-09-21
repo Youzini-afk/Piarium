@@ -2705,8 +2705,6 @@ export const dict = {
   'projectActions.actions.addActionAria': 'Ajouter une action',
   'projectActions.actions.addAction': 'Ajouter une action',
   'projectActions.actions.addNewAction': 'Ajouter une nouvelle action',
-  'projectActions.actions.autoDiscover': 'Découverte automatique',
-  'projectActions.actions.autoDiscoverTooltip': 'Détecte et lance automatiquement le serveur de développement',
   'projectActions.actions.chooseActionAria': 'Choisir l\'action du projet',
   'projectActions.actions.openPreview': 'Ouvrir l\'aperçu',
   'projectActions.actions.runNamedAria': 'Exécutez {name}',

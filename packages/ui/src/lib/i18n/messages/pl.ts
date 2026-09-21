@@ -2946,8 +2946,6 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.actions.addAction': 'Dodaj akcję',
   'projectActions.actions.addActionAria': 'Dodaj akcję',
   'projectActions.actions.addNewAction': 'Dodaj nową akcję',
-  'projectActions.actions.autoDiscover': 'Wykryj automatycznie',
-  'projectActions.actions.autoDiscoverTooltip': 'Automatycznie wykrywa i uruchamia serwer deweloperski',
   'projectActions.actions.chooseActionAria': 'Wybierz akcję projektu',
   'projectActions.actions.openPreview': 'Otwórz podgląd',
   'projectActions.actions.runNamedAria': 'Uruchom {name}',

@@ -73,6 +73,17 @@ actions share a menu; model, permission and send controls stay directly availabl
 are expandable rows rather than another enclosing card. Keep readable content spacious while making
 tool chrome compact, and let narrow composer footers wrap rather than clip their actions.
 
+Agent/Research use a full-width desktop header above the sidebar and work area. `TitlebarLeftControls`
+and the project/session title are ordinary flex siblings; opening or resizing the sidebar does not
+reposition them. There is no floating titlebar overlay, measured-width spacer, or sidebar title strip.
+Project runs live in each project's context menu and the header's project-name menu; IDE uses the same
+workspace-name menu. Header actions retain the active conversation's working directory, while the sidebar
+project menu targets that project's root.
+“Start preview” identifies the former “Auto discover” action. The preview surface can open empty with
+a launch button, then replaces its placeholder with the detected URL. Project action controllers stay
+mounted when their menus close and load configuration on first open. Output observation is directory
+scoped and claims automatic URL opening on the shared terminal tab so multiple controls do not open it twice.
+
 Common controls live under `src/components/ui`. `Button`, `dropdownTriggerVariants`, and the Settings
 primitives carry shared interaction chrome, sizes, focus behavior, and theme semantics. Extending a
 shared primitive is preferable when several callers genuinely need the same missing shape; a local

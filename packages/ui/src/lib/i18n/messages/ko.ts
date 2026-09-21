@@ -2940,8 +2940,6 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.actions.addActionAria': '작업 추가',
   'projectActions.actions.addAction': '작업 추가',
   'projectActions.actions.addNewAction': '새 작업 추가',
-  'projectActions.actions.autoDiscover': '자동 검색',
-  'projectActions.actions.autoDiscoverTooltip': '개발 서버를 자동으로 검색하고 실행합니다',
   'projectActions.actions.chooseActionAria': '프로젝트 작업 선택',
   'projectActions.actions.openPreview': '미리보기 열기',
   'projectActions.actions.runNamedAria': '실행 {name}',

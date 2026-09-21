@@ -7,6 +7,8 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { PiRecoveryPanel } from './PiRecoveryPanel';
+import { ProjectActionsButton } from './ProjectActionsButton';
+import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { openExternalUrl } from '@/lib/url';
@@ -2187,6 +2189,7 @@ const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dir
 
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
+  const projectActionsContext = useProjectActionsContext();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
   const currentSessionId = usePiSessionStore((state) => state.currentSessionId);
@@ -2672,13 +2675,16 @@ export const ContextPanel: React.FC = () => {
                 ? <ProjectContextPanel />
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
-            : activeTab?.mode === 'preview'
+            : activeTab?.mode === 'preview' && activeTab.targetPath
                 ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
                 : (
                   <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
                     <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
                     <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
                     <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
+                    {projectActionsContext ? (
+                      <ProjectActionsButton projectRef={projectActionsContext.projectRef} directory={effectiveDirectory} previewOnly />
+                    ) : null}
                   </div>
                 );
 

@@ -637,17 +637,20 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
               <Icon name="menu-2" className="size-4" />
             </Button>
           ) : null}
-          {projectActionsContext ? (
-            <div className="app-region-no-drag">
-              <ProjectActionsButton
-                projectRef={projectActionsContext.projectRef}
-                directory={projectActionsContext.directory}
-              />
-            </div>
-          ) : null}
           <WorkbenchProfileSwitcher />
-          <div className="min-w-0 truncate typography-ui-label text-foreground">{workspaceLabel}</div>
-          <div className="ml-auto flex app-region-no-drag items-center gap-1">
+          {projectActionsContext ? (
+            <ProjectActionsButton
+              projectRef={projectActionsContext.projectRef}
+              directory={projectActionsContext.directory}
+              menuTrigger={(
+                <button type="button" className="app-region-no-drag flex min-w-0 items-center gap-1 rounded px-1.5 py-1 typography-ui-label text-foreground hover:bg-interactive-hover" aria-label={`${workspaceLabel}: ${t('projectActions.actions.chooseActionAria')}`}>
+                  <span className="min-w-0 truncate">{workspaceLabel}</span>
+                  <Icon name="arrow-down-s" className="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
+              )}
+            />
+          ) : <div className="min-w-0 truncate typography-ui-label text-foreground">{workspaceLabel}</div>}
+          <div className="ml-auto flex shrink-0 app-region-no-drag items-center gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

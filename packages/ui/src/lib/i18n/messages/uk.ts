@@ -3037,8 +3037,6 @@ export const dict: Record<I18nKey, string> = {
   "projectActions.actions.addActionAria": "Додати дію",
   "projectActions.actions.addAction": "Додати дію",
   "projectActions.actions.addNewAction": "Додати нову дію",
-  "projectActions.actions.autoDiscover": "Автовиявлення",
-  "projectActions.actions.autoDiscoverTooltip": "Автоматично знаходить і запускає сервер розробки",
   "projectActions.actions.chooseActionAria": "Вибрати дію проєкту",
   "projectActions.actions.openPreview": "Відкрити Preview",
   "projectActions.actions.runNamedAria": "Запустити {name}",

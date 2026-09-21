@@ -4,8 +4,6 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
-import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
 import { invokeDesktop } from '@/lib/desktop';
@@ -16,23 +14,14 @@ const ICON_BUTTON_CLASS =
   'app-region-no-drag inline-flex h-8 w-8 items-center justify-center gap-2 rounded-md typography-ui-label font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary hover:bg-interactive-hover transition-colors';
 
 /**
- * Persistent top-left titlebar controls (sidebar toggle + project actions).
- *
- * Rendered exactly once as an absolutely-positioned overlay above both the
- * sidebar and the header, so the buttons never migrate / re-mount between the
- * two while the sidebar animates open or closed — the panels slide *underneath*
- * a fixed control cluster instead. Its height tracks `--oc-header-height` and
- * its left padding clears the OS window controls via `--oc-titlebar-left-inset`.
- * The cluster's measured width is published as `--oc-titlebar-controls-width`
- * so the header can reserve matching space when the sidebar is collapsed.
+ * In-flow controls in the full-width desktop header. The sidebar opens below
+ * this row, so controls and the adjacent title never overlap or change parents.
+ * Left padding clears native window controls where the surface needs it.
  */
 export const TitlebarLeftControls: React.FC = () => {
   const { t } = useI18n();
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
-  const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
-  const projectActionsContext = useProjectActionsContext();
-  const clusterRef = React.useRef<HTMLDivElement | null>(null);
 
   const toggleShortcut = formatShortcutForDisplay(getEffectiveShortcutCombo('toggle_sidebar', shortcutOverrides));
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
@@ -47,47 +36,14 @@ export const TitlebarLeftControls: React.FC = () => {
     });
   }, []);
 
-  React.useEffect(() => {
-    if (typeof document === 'undefined') {
-      return;
-    }
-    const node = clusterRef.current;
-    if (!node) {
-      return;
-    }
-
-    const publishWidth = () => {
-      // Prefer scrollWidth so negative child margins / overflow cannot under-report
-      // the space the overlay actually occupies over the header.
-      const width = Math.max(node.getBoundingClientRect().width, node.scrollWidth);
-      document.documentElement.style.setProperty('--oc-titlebar-controls-width', `${Math.round(width)}px`);
-    };
-
-    publishWidth();
-
-    if (typeof ResizeObserver === 'undefined') {
-      return;
-    }
-    const observer = new ResizeObserver(publishWidth);
-    observer.observe(node);
-    return () => {
-      observer.disconnect();
-    };
-  }, []);
-
   return (
-    // The overlay is a CSS no-drag zone so its buttons stay clickable. The
-    // header / sidebar strip beneath carve a matching no-drag region under it
-    // and remain drag regions everywhere else, so window dragging still works
-    // in the empty parts of the strip.
     <div
-      className="app-region-no-drag absolute left-0 top-0 z-30 flex select-none items-center pr-2"
+      className="app-region-no-drag flex shrink-0 select-none items-center pr-3"
       style={{
-        height: 'var(--oc-header-height, 3rem)',
         paddingLeft: 'var(--oc-titlebar-left-inset, 0.75rem)',
       }}
     >
-      <div ref={clusterRef} className="flex items-center gap-1">
+      <div className="flex items-center gap-1">
         {usesFramelessChrome && windowControlsSide === 'left' ? (
           <WindowsWindowControls visible position="left" />
         ) : null}
@@ -126,18 +82,7 @@ export const TitlebarLeftControls: React.FC = () => {
           </TooltipContent>
         </Tooltip>
 
-        {projectActionsContext ? (
-          <ProjectActionsButton
-            projectRef={projectActionsContext.projectRef}
-            directory={projectActionsContext.directory}
-            // While the sidebar is open the controls sit over the frosted
-            // sidebar — let the pill share its translucency instead of painting
-            // an opaque surface (handled under [data-piarium-vibrancy] in CSS).
-            className={isSidebarOpen ? 'piarium-vibrancy-pill' : undefined}
-          />
-        ) : null}
-
-        <WorkbenchProfileSwitcher className={isSidebarOpen ? 'piarium-vibrancy-pill' : undefined} />
+        <WorkbenchProfileSwitcher />
       </div>
     </div>
   );

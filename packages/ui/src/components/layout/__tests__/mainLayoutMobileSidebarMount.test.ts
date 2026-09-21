@@ -27,17 +27,6 @@ describe('MainLayout mobile PiSessionSidebar mount (issue #1695 regression guard
         expect(mainLayoutSource.slice(mobileSidebarIndex, mobileSidebarIndex + 120)).toContain('isVisible={mobileLeftDrawerVisible}');
     });
 
-    test('desktop PiSessionSidebar is rendered inside Sidebar without drawer-visibility gating', () => {
-        const desktopSidebarIndex = mainLayoutSource.indexOf('<PiSessionSidebar isVisible={isSidebarOpen} />');
-        expect(desktopSidebarIndex).toBeGreaterThan(-1);
-
-        const windowStart = Math.max(0, desktopSidebarIndex - 300);
-        const precedingWindow = mainLayoutSource.slice(windowStart, desktopSidebarIndex);
-
-        expect(precedingWindow).toContain('<Sidebar');
-        expect(/mobileLeftDrawerVisible\s*&&/.test(precedingWindow)).toBe(false);
-    });
-
     test('the Pi sidebar exposes settings, shortcut help, and About from its fixed footer', () => {
         const scrollRegionIndex = sessionSidebarSource.indexOf('min-h-0 flex-1 overflow-y-auto');
         const footerIndex = sessionSidebarSource.indexOf('shrink-0 border-t border-border/60');

@@ -2910,8 +2910,6 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.actions.addActionAria': '新增操作',
   'projectActions.actions.addAction': '新增操作',
   'projectActions.actions.addNewAction': '新增新操作',
-  'projectActions.actions.autoDiscover': '自動發現',
-  'projectActions.actions.autoDiscoverTooltip': '自動探索並執行開發伺服器',
   'projectActions.actions.chooseActionAria': '選擇專案操作',
   'projectActions.actions.openPreview': '開啟預覽',
   'projectActions.actions.runNamedAria': '執行 {name}',

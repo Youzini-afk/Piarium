@@ -26,7 +26,7 @@ export type ContextSurfaceDescriptor = {
   /**
    * 'always' surfaces can be opened empty from the icon rail.
    * 'has-content' surfaces are content-driven: they need an existing tab of
-   * their mode (a preview URL emitted, a split session) and stay hidden on
+   * their mode (such as a split session) and stay hidden on
    * the rail until one exists.
    */
   availability: 'always' | 'has-content';
@@ -146,7 +146,7 @@ export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
     mode: 'preview',
     icon: 'window',
     labelKey: 'contextPanel.mode.preview',
-    availability: 'has-content',
+    availability: 'always',
   },
   {
     id: 'chat',

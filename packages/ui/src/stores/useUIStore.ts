@@ -339,10 +339,9 @@ const upsertContextPanelTab = (
   descriptor: ContextPanelTabDescriptor,
 ): ContextPanelDirectoryState => {
   const nextTab = createContextPanelTab(descriptor);
-  // A real file tab replaces the empty editor placeholder ('file' with no
-  // target) that the rail can open before any file is picked.
-  const baseTabs = nextTab.mode === 'file' && nextTab.targetPath
-    ? current.tabs.filter((tab) => !(tab.mode === 'file' && !tab.targetPath))
+  // Replace the empty editor/preview launcher when its first resource opens.
+  const baseTabs = (nextTab.mode === 'file' || nextTab.mode === 'preview') && nextTab.targetPath
+    ? current.tabs.filter((tab) => !(tab.mode === nextTab.mode && !tab.targetPath))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
   const tabs = existingIndex === -1
@@ -1030,10 +1029,8 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Content-driven modes need a payload (a preview URL or session);
-          // the icon rail hides them until content exists. 'file' opens
-          // an empty editor whose embedded tree picks the first file.
-          if (mode === 'preview' || mode === 'chat') {
+          // Split chat needs a real session; editor and preview have empty launchers.
+          if (mode === 'chat') {
             return;
           }
 

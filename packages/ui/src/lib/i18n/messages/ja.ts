@@ -2873,8 +2873,6 @@ export const dict: Record<I18nKey, string> = {
   'projectActions.actions.addActionAria': 'アクションを追加',
   'projectActions.actions.addAction': 'アクションを追加',
   'projectActions.actions.addNewAction': '新しいアクションを追加',
-  'projectActions.actions.autoDiscover': '自動検出',
-  'projectActions.actions.autoDiscoverTooltip': '開発サーバーを自動的に検出して実行します',
   'projectActions.actions.chooseActionAria': 'プロジェクトアクションを選択',
   'projectActions.actions.openPreview': 'プレビューを開く',
   'projectActions.actions.runNamedAria': '{name}を実行',
