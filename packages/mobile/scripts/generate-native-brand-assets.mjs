@@ -5,12 +5,11 @@ import sharp from 'sharp';
 
 const mobileRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const productIconPath = resolve(mobileRoot, '..', 'electron', 'resources', 'icons', 'app-icon.png');
-const darkSurfaceMarkPath = resolve(mobileRoot, '..', 'web', 'public', 'logo-dark-512x512.svg');
 const lightSurfaceMarkPath = resolve(mobileRoot, '..', 'web', 'public', 'logo-light-512x512.svg');
 const androidRes = join(mobileRoot, 'android', 'app', 'src', 'main', 'res');
 const iosAssets = join(mobileRoot, 'ios', 'App', 'App', 'Assets.xcassets');
 const brandAssets = join(mobileRoot, 'assets');
-const background = '#151313';
+const background = '#efefe8';
 const splashBackground = '#f7f4eb';
 
 const ensureParent = async (path) => mkdir(dirname(path), { recursive: true });
@@ -20,8 +19,8 @@ const save = async (path, bytes) => {
 };
 
 const productIcon = await sharp(productIconPath).resize(1024, 1024).png().toBuffer();
-const glyph = await sharp(darkSurfaceMarkPath).resize(1024, 1024).png().toBuffer();
 const lightSurfaceMark = await sharp(lightSurfaceMarkPath).resize(1024, 1024).png().toBuffer();
+const glyph = lightSurfaceMark;
 const solidBackground = await sharp({
   create: { width: 1024, height: 1024, channels: 4, background },
 }).png().toBuffer();

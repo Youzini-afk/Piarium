@@ -13,7 +13,7 @@ const electronIcons = path.join(repoRoot, 'packages', 'electron', 'resources', '
 const electronTray = path.join(electronIcons, 'tray');
 const webPublic = path.join(repoRoot, 'packages', 'web', 'public');
 
-const PRODUCT_BACKGROUND = '#151313';
+const PRODUCT_BACKGROUND = '#efefe8';
 const PRODUCT_INK = '#eeeee8';
 const PRODUCT_SECONDARY_INK = '#8e9694';
 const LIGHT_SURFACE_INK = '#20272a';
@@ -48,9 +48,9 @@ ${markBody(ink, compact)}
 const appIconSvg = (compact = false): string => `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
 <rect x="64" y="64" width="896" height="896" rx="216" fill="${PRODUCT_BACKGROUND}"/>
-<rect x="68" y="68" width="888" height="888" rx="212" fill="none" stroke="${PRODUCT_INK}" stroke-opacity="0.08" stroke-width="8"/>
+<rect x="68" y="68" width="888" height="888" rx="212" fill="none" stroke="${LIGHT_SURFACE_INK}" stroke-opacity="0.08" stroke-width="8"/>
 <svg x="${compact ? 64 : 142}" y="${compact ? 64 : 142}" width="${compact ? 896 : 740}" height="${compact ? 896 : 740}" viewBox="${VARIN_MARK_VIEWBOX}">
-${markBody(PRODUCT_INK, compact)}
+${markBody(LIGHT_SURFACE_INK, compact)}
 </svg>
 </svg>
 `;
