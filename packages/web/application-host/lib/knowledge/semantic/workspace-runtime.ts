@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { PiRuntimeBroker, PiRuntimeBrokerEvent } from '@varin/runtime-broker';
+import { FAST_DECISION_PURPOSES } from '@varin/protocol';
 import type { HarnessInferenceBindingSnapshot, PiSettingsSnapshot } from '@varin/protocol';
 import type { DocumentAuthority, DocumentMutationObservation } from '../../documents/authority.js';
 import type { HarnessServiceHost } from '../../harness/service-host.js';
@@ -65,7 +66,16 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   const markUnavailable = (state: WorkspaceState): void => {
     state.needsRefresh = true;
     state.snapshot = null;
-    state.binding = { embedding: { status: 'unavailable' }, rerank: { status: 'unavailable' } };
+    state.binding = {
+      embedding: { status: 'unavailable' },
+      rerank: { status: 'unavailable' },
+      fastDecision: {
+        purposes: Object.fromEntries(FAST_DECISION_PURPOSES.map((purpose) => [
+          purpose,
+          { status: 'unavailable' as const },
+        ])),
+      },
+    };
     state.backend.unavailable(new Error('Pi workspace binding is unavailable'));
     state.runtime.cancelScans();
   };
@@ -167,7 +177,16 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
       const runtime = createSemanticIndexRuntime({ ...options, getEmbedder: () => backend.embedder });
       const state: WorkspaceState = {
         workspaceId, cwd, backend, runtime,
-        binding: { embedding: { status: 'unconfigured' }, rerank: { status: 'unconfigured' } },
+        binding: {
+          embedding: { status: 'unconfigured' },
+          rerank: { status: 'unconfigured' },
+          fastDecision: {
+            purposes: Object.fromEntries(FAST_DECISION_PURPOSES.map((purpose) => [
+              purpose,
+              { status: 'unconfigured' as const },
+            ])),
+          },
+        },
         snapshot: null, bindingKey: '', needsRefresh: true, refreshTail: Promise.resolve(),
         watches: [], watching: null,
       };
@@ -263,6 +282,52 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     if (seen.size === 0) throw new Error('Rerank response did not score any submitted document');
     return result;
   };
+  const fastDecisionStatus: NonNullable<HarnessServiceHost['fastDecisionStatus']> = async (
+    workspaceId,
+    purpose,
+  ) => {
+    const state = await getWorkspace(workspaceId);
+    return state.binding.fastDecision?.purposes?.[purpose] ?? { status: 'unavailable' as const };
+  };
+  const fastDecision: NonNullable<HarnessServiceHost['fastDecision']> = async (input) => {
+    input.signal?.throwIfAborted();
+    const state = await waitWithSignal(getWorkspace(input.workspaceId), input.signal);
+    const broker = options.getBroker();
+    if (!broker) throw new Error('Pi workspace binding is unavailable');
+    const purposeStatus = state.binding.fastDecision?.purposes?.[input.purpose];
+    if (!purposeStatus || purposeStatus.status !== 'ready') {
+      throw new Error(
+        `Fast decision is ${purposeStatus?.status ?? 'unavailable'} for ${input.purpose}`,
+      );
+    }
+    const configured = purposeStatus.binding;
+    // The caller's binding was frozen at query start; a mid-flight settings or
+    // provider change is a mismatch, not a silent redirect.
+    if (configured.protocol !== input.settings.protocol
+      || configured.providerId !== input.settings.providerId
+      || configured.modelId !== input.settings.modelId
+      || configured.configurationId !== input.settings.configurationId
+      || configured.endpoint !== input.settings.endpoint) {
+      throw new Error('Fast decision settings changed after the query binding was frozen');
+    }
+    const batchId = randomUUID();
+    const result = await requestWorkspaceInference(broker, state.cwd, 'harness.fastDecision', {
+      providerId: input.settings.providerId,
+      modelId: input.settings.modelId,
+      protocol: 'typesafe-systemone',
+      configurationId: input.settings.configurationId,
+      purpose: input.purpose,
+      goal: input.goal,
+      materials: input.materials,
+      questions: input.questions,
+      batchId,
+      ...(input.settings.endpoint ? { endpoint: input.settings.endpoint } : {}),
+    }, input.signal);
+    if (result.batchId !== batchId || result.providerId !== configured.providerId || result.modelId !== configured.modelId) {
+      throw new Error('Fast decision response does not match the submitted batch binding');
+    }
+    return result;
+  };
   const observeDocumentMutation = (event: PathMutation): void => {
     if (disposed) return;
     const state = states.get(event.workspaceId);
@@ -293,7 +358,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
     }
   };
   return {
-    semanticRecall, harnessSettings, rerankExploreViews, observeDocumentMutation, observeToolWrite, processEvent,
+    semanticRecall, harnessSettings, rerankExploreViews, fastDecisionStatus, fastDecision, observeDocumentMutation, observeToolWrite, processEvent,
     scanWorkspace: async (workspaceId: string) => (await getWorkspace(workspaceId, false)).runtime.scanWorkspace(workspaceId),
     refreshLocalSemantic: (next: SemanticEmbedder): void => {
       localEmbedder = next;

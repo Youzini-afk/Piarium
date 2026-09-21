@@ -19,6 +19,11 @@ import {
   rerankSettingsFromSnapshot,
   scoresFromRerankResult,
 } from "./explore-rerank.js";
+import {
+  fastDecisionStageStatus,
+  resolveExploreFastDecision,
+  runExploreFastDecisionLoop,
+} from "./explore-fast-decision.js";
 import { HARNESS_MAX_REQUEST_TIMEOUT_MS } from "@varin/protocol";
 import type { HarnessService, HarnessServiceContext } from "./router.js";
 import type { HarnessServiceHost } from "./service-host.js";
@@ -261,6 +266,7 @@ export async function packExploreSearchResult(
     ...(result.details.skippedQueries ? { skippedQueries: result.details.skippedQueries } : {}),
     ...(result.details.model ? { model: result.details.model } : {}),
     ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
+    ...(result.details.fastDecision ? { fastDecision: result.details.fastDecision } : {}),
     ...(relations ? { relations } : {}),
     ...(result.details.sources ? { sources: result.details.sources } : {}),
   };
@@ -289,6 +295,7 @@ export async function packExploreSearchResult(
       ...(result.details.semantic ? { semantic: result.details.semantic } : {}),
       ...(result.details.model ? { model: result.details.model } : {}),
       ...(result.details.rerank ? { rerank: result.details.rerank } : {}),
+      ...(result.details.fastDecision ? { fastDecision: result.details.fastDecision } : {}),
       ...(relations ? { relations } : {}),
       ...(result.details.sources ? { sources: result.details.sources } : {}),
     },
@@ -296,7 +303,7 @@ export async function packExploreSearchResult(
 }
 
 export function createExploreQueryStartService(
-  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings" | "pinWorkingBranchQuery">,
+  host: Pick<HarnessServiceHost, "searchService" | "readExploreFile" | "structureSource" | "graphRecall" | "semanticRecall" | "agentInputDraftPaths" | "exploreQueryStore" | "harnessSettings" | "pinWorkingBranchQuery" | "fastDecision" | "fastDecisionStatus">,
 ): HarnessService<"explore.query.start"> {
   return {
     handle: async (params: ExploreQueryStartParams, ctx) => {
@@ -351,13 +358,24 @@ export function createExploreQueryStartService(
                 ? ctx.authorizedPaths.map(({ resourceId }) => resourceId || ".")
                 : undefined;
         let rerankConfigured = false;
+        let fastDecision: StoredExploreQuery["fastDecision"];
         if (ctx.workspaceId) {
+          const snapshotSettings = await Promise.resolve(
+            host.harnessSettings?.(ctx.workspaceId) ?? null,
+          ).catch(() => null);
           try {
-            rerankConfigured = rerankSettingsFromSnapshot(
-              await host.harnessSettings?.(ctx.workspaceId) ?? null,
-            ) !== undefined;
+            rerankConfigured = rerankSettingsFromSnapshot(snapshotSettings) !== undefined;
           } catch {
             rerankConfigured = false;
+          }
+          // Fast Decision (D-312): freeze the resolved binding — including its
+          // credential-free configurationId — at query start. A settings edit
+          // applies to the next query, never this one.
+          if (host.fastDecision && host.fastDecisionStatus) {
+            const status = await host.fastDecisionStatus(ctx.workspaceId, "explore").catch(() => undefined);
+            fastDecision = resolveExploreFastDecision(status);
+          } else {
+            fastDecision = { status: "unavailable" };
           }
         }
         const [snapshot, graph] = await Promise.all([
@@ -391,9 +409,50 @@ export function createExploreQueryStartService(
             graph?.store ?? null,
           ),
           deadlineAt,
-          reserveForJudgeMs: params.reserveForJudge || rerankConfigured ? DEFAULT_JUDGE_RESERVE_MS : 0,
+          reserveForJudgeMs: params.reserveForJudge || rerankConfigured || fastDecision?.status === "ready"
+            ? DEFAULT_JUDGE_RESERVE_MS
+            : 0,
           controller: queryController,
         });
+        if (fastDecision) {
+          stored.fastDecision = fastDecision;
+          if (fastDecision.status === "ready" && fastDecision.binding && host.fastDecision) {
+            const binding = fastDecision.binding;
+            // The loop shares the query's lifetime: cancelController covers
+            // cancel/release/total deadline; `abort` is the finish-time stop.
+            const loopAbort = new AbortController();
+            const loopSignal = AbortSignal.any([stored.cancelController.signal, loopAbort.signal]);
+            let settleRequested = false;
+            let settle!: () => void;
+            const settlePromise = new Promise<void>((resolve) => { settle = resolve; });
+            fastDecision.requestSettle = () => {
+              settleRequested = true;
+              settle();
+            };
+            fastDecision.abort = () => {
+              if (!loopAbort.signal.aborted) loopAbort.abort();
+            };
+            fastDecision.done = runExploreFastDecisionLoop({
+              run: stored.run,
+              binding,
+              call: (batch) => host.fastDecision!({
+                workspaceId: ctx.workspaceId!,
+                purpose: "explore",
+                settings: binding,
+                goal: batch.goal,
+                materials: batch.materials,
+                questions: batch.questions,
+                signal: batch.signal,
+              }),
+              signal: loopSignal,
+              deadlineAt: stored.deadlineAt,
+              closing: { promise: settlePromise, requested: () => settleRequested },
+            }).then((details) => {
+              stored!.run.applyFastDecision(details);
+              fastDecision.details = details;
+            }).catch(() => undefined);
+          }
+        }
         await stored.run.refreshVocab();
         ctx.signal.throwIfAborted();
         ctx.deferResponseDelivery?.(
@@ -412,6 +471,7 @@ export function createExploreQueryStartService(
           vocab: stored.run.vocab(),
           sources: stored.run.sourceStates(),
           inputSource: stored.inputContext.source,
+          ...(fastDecision ? { fastDecision: { status: fastDecision.status } } : {}),
         };
       } catch (error) {
         if (stored) host.exploreQueryStore.release(ctx.actor, stored.id);
@@ -486,6 +546,8 @@ export function createExploreQueryFollowupService(
         launched: result.launched,
         reused: result.reused,
         newViews: result.newViews,
+        ...(result.actionsExecuted.length > 0 ? { actionsExecuted: result.actionsExecuted } : {}),
+        ...(result.actionsRejected.length > 0 ? { actionsRejected: result.actionsRejected } : {}),
         sources: stored.run.sourceStates(),
       };
     },
@@ -505,7 +567,30 @@ export function createExploreQueryFinishService(
         return packExploreSearchResult(host, ctx, stored.run.finish(model), options);
       }
       stored.finishing ??= (async () => {
-        if (workspaceId && exploreShouldRerank(model) && host.rerankExploreViews) {
+        // Fast Decision (D-312): the progressive loop owns material relevance
+        // and action choice while it is configured for this query — the same
+        // judgment is not re-run through rerank or another paid model (§4.4).
+        const fastDecision = stored.fastDecision;
+        const fastDecisionActive = fastDecision?.status === "ready";
+        if (fastDecisionActive) {
+          fastDecision.requestSettle?.();
+          const remaining = Math.max(0, stored.deadlineAt - Date.now());
+          await Promise.race([
+            fastDecision.done,
+            new Promise<void>((resolve) => {
+              setTimeout(resolve, Math.min(remaining, DEFAULT_JUDGE_RESERVE_MS));
+            }),
+          ]);
+          if (fastDecision.done) {
+            fastDecision.abort?.();
+            await fastDecision.done;
+          }
+        }
+        if (model && fastDecisionActive) {
+          model.fastDecision = fastDecisionStageStatus(fastDecision.details);
+          if (model.rerank === undefined) model.rerank = "skipped";
+        }
+        if (workspaceId && exploreShouldRerank(model) && host.rerankExploreViews && !fastDecisionActive) {
           let settings: ReturnType<typeof rerankSettingsFromSnapshot>;
           let settingsInvalid = false;
           try {

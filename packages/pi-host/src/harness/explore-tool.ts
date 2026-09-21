@@ -102,6 +102,10 @@ export function createExploreTool(
         const deadlineAt = started.deadlineAt;
         const modelSignal = () => boundByDeadline(signal, deadlineAt);
 
+        // D-312: a ready fast-decision binding owns material relevance and
+        // action choice inside the query; the generative model keeps only its
+        // plan stage — the same judgment is not stacked twice (design §4.4).
+        const fastDecisionActive = started.fastDecision?.status === "ready";
         const participation: ExploreModelParticipation = {
           plan: complete ? "skipped" : "unconfigured",
           select: complete ? "skipped" : "unconfigured",
@@ -137,6 +141,7 @@ export function createExploreTool(
 
         const views = await request("explore.query.views", { queryId });
         const shouldSelect = Boolean(complete)
+          && !fastDecisionActive
           && views.views.length > 0
           && exploreShouldSelectWithModel(params.question, started.parsed.objects, participation.plan === "used");
         if (complete && shouldSelect) {

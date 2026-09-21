@@ -237,6 +237,30 @@ export interface HarnessServiceHost {
     settings: import("@varin/protocol").HarnessRerankSettings;
     signal?: AbortSignal;
   }) => Promise<import("@varin/protocol").HarnessRerankResult>;
+  /**
+   * Per-purpose fast-decision binding status resolved by the Pi runtime
+   * (D-312). The `ready` binding carries the credential-free
+   * `configurationId` the caller freezes onto a query.
+   */
+  fastDecisionStatus?: (
+    workspaceId: string,
+    purpose: import("@varin/protocol").HarnessFastDecisionPurpose,
+  ) => Promise<import("@varin/protocol").HarnessFastDecisionPurposeStatus>;
+  /**
+   * Fast Decision batch (D-312): typed questions over authorized material,
+   * executed by the workspace runtime against the binding frozen at query
+   * start. `settings` is that frozen binding; the runtime rejects a request
+   * whose identity no longer matches the live one.
+   */
+  fastDecision?: (input: {
+    workspaceId: string;
+    purpose: import("@varin/protocol").HarnessFastDecisionPurpose;
+    settings: import("@varin/protocol").HarnessResolvedFastDecisionBinding;
+    goal: string;
+    materials: import("@varin/protocol").FastDecisionMaterial[];
+    questions: import("@varin/protocol").FastDecisionQuestion[];
+    signal?: AbortSignal;
+  }) => Promise<import("@varin/protocol").HarnessFastDecisionResult>;
   permissionAudit: ((record: import("@varin/protocol").PermissionAuditRecord) => void) | null;
   webFetchService: {
     fetch: (url: string, ctx: {
@@ -438,6 +462,8 @@ export interface HarnessServiceHostOptions {
   pinWorkingBranchQuery?: HarnessServiceHost["pinWorkingBranchQuery"];
   harnessSettings?: HarnessServiceHost["harnessSettings"];
   rerankExploreViews?: HarnessServiceHost["rerankExploreViews"];
+  fastDecisionStatus?: HarnessServiceHost["fastDecisionStatus"];
+  fastDecision?: HarnessServiceHost["fastDecision"];
   permissionAudit?: (record: import("@varin/protocol").PermissionAuditRecord) => void;
   shellSetting?: HarnessShellSetting;
   /**

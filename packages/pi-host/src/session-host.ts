@@ -88,6 +88,8 @@ import type {
   AgentInputContext,
   HarnessEmbedParams,
   HarnessEmbedResult,
+  HarnessFastDecisionParams,
+  HarnessFastDecisionResult,
   HarnessRerankParams,
   HarnessRerankResult,
   WorkFocusId,
@@ -176,6 +178,7 @@ import {
   normalizeFrozenHarnessPermissions,
   type PermissionPolicy,
   parseHarnessEmbeddingSettings,
+  parseHarnessFastDecisionSettings,
   parseHarnessRerankSettings,
   resolveHarnessContextSettings,
   resolvePresets,
@@ -2443,6 +2446,13 @@ export class SessionHost {
     return this.#inferenceRuntime().rerank(params, requestId);
   }
 
+  async fastDecision(
+    params: HarnessFastDecisionParams,
+    requestId?: string,
+  ): Promise<HarnessFastDecisionResult> {
+    return this.#inferenceRuntime().fastDecision(params, requestId);
+  }
+
   async describeInference() {
     return this.#inferenceRuntime().describe();
   }
@@ -2843,6 +2853,7 @@ export class SessionHost {
       mergeHarnessSettings(globalHarness, projectHarness);
       parseHarnessEmbeddingSettings(globalHarness.embedding);
       parseHarnessRerankSettings(globalHarness.rerank);
+      parseHarnessFastDecisionSettings(globalHarness.fastDecision);
       if (scope === "global") {
         const candidateContext = resolveHarnessContextSettings(
           globalHarness.context,

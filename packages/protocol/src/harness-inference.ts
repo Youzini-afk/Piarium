@@ -1,3 +1,8 @@
+import type {
+  HarnessFastDecisionPurpose,
+  HarnessFastDecisionPurposeStatus,
+} from "./harness-fast-decision.js";
+
 /**
  * Workspace-scoped embedding and rerank calls. These are not chat model slots.
  * Secrets stay in the Pi runtime; the Host only submits authorized text.
@@ -46,6 +51,13 @@ export interface HarnessInferenceBindingSnapshot {
   rerank:
     | { status: "ready"; binding: HarnessResolvedRerankBinding }
     | { status: "unconfigured" | "invalid" | "unavailable"; message?: string };
+  /**
+   * Per-purpose fast-decision resolution. Absent when the worker predates the
+   * capability — consumers must treat a missing entry as unavailable.
+   */
+  fastDecision?: {
+    purposes: Partial<Record<HarnessFastDecisionPurpose, HarnessFastDecisionPurposeStatus>>;
+  };
 }
 
 export interface HarnessVectorSpaceBinding {

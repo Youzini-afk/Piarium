@@ -46,6 +46,12 @@ import {
   type HarnessEmbedParams,
   type HarnessRerankDocument,
   type HarnessRerankParams,
+  FAST_DECISION_PURPOSES,
+  type HarnessFastDecisionPurpose,
+  type FastDecisionInstructions,
+  type FastDecisionMaterial,
+  type FastDecisionQuestion,
+  type HarnessFastDecisionParams,
   isWorkFocusId,
   isWorkFocusSource,
   type WorkFocusSelection,
@@ -381,6 +387,111 @@ function readRerankParams(params: Record<string, unknown>): HarnessRerankParams 
   };
 }
 
+function readFastDecisionInstructions(value: unknown, path: string): FastDecisionInstructions {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) || (typeof value === "object" && value !== null)) {
+    return value as FastDecisionInstructions;
+  }
+  throw new HostError("invalid_params", `${path}.instructions must be a string, object, or array`);
+}
+
+function readFastDecisionParams(params: Record<string, unknown>): HarnessFastDecisionParams {
+  if (readString(params, "protocol") !== "typesafe-systemone") {
+    throw new HostError("invalid_params", "fast decision protocol must be typesafe-systemone");
+  }
+  const purpose = readString(params, "purpose");
+  if (!FAST_DECISION_PURPOSES.includes(purpose as HarnessFastDecisionPurpose)) {
+    throw new HostError("invalid_params", "purpose is not a registered fast-decision purpose");
+  }
+  const materialsValue = params.materials;
+  if (!Array.isArray(materialsValue)) {
+    throw new HostError("invalid_params", "materials must be an array");
+  }
+  const materials: FastDecisionMaterial[] = materialsValue.map((entry, index) => {
+    const item = expectRecord(entry, `materials[${index}]`);
+    const label = optionalString(item, "label");
+    const revision = optionalString(item, "revision");
+    return {
+      id: readString(item, "id"),
+      text: readString(item, "text", { allowEmpty: true }),
+      ...(label === undefined ? {} : { label }),
+      ...(revision === undefined ? {} : { revision }),
+    };
+  });
+  const questionsValue = params.questions;
+  if (!Array.isArray(questionsValue) || questionsValue.length === 0) {
+    throw new HostError("invalid_params", "questions must be a non-empty array");
+  }
+  const seen = new Set<string>();
+  const questions: FastDecisionQuestion[] = questionsValue.map((entry, index) => {
+    const item = expectRecord(entry, `questions[${index}]`);
+    const id = readString(item, "id");
+    if (seen.has(id)) throw new HostError("invalid_params", `duplicate question id ${id}`);
+    seen.add(id);
+    const kind = readString(item, "kind");
+    if (kind === "judge") {
+      const criteria = item.criteria === undefined ? undefined : expectRecord(item.criteria, `questions[${index}].criteria`);
+      const yes = criteria ? optionalString(criteria, "yes") : undefined;
+      const no = criteria ? optionalString(criteria, "no") : undefined;
+      return {
+        id,
+        kind: "judge",
+        instructions: readFastDecisionInstructions(item.instructions, `questions[${index}]`),
+        ...(criteria ? { criteria: { ...(yes ? { yes } : {}), ...(no ? { no } : {}) } } : {}),
+      };
+    }
+    if (kind === "choose") {
+      if (!Array.isArray(item.options) || item.options.length === 0) {
+        throw new HostError("invalid_params", `questions[${index}].options must be a non-empty array`);
+      }
+      const options = item.options.map((entry, optionIndex) => {
+        const option = expectRecord(entry, `questions[${index}].options[${optionIndex}]`);
+        const detail = optionalString(option, "detail");
+        return { id: readString(option, "id"), ...(detail === undefined ? {} : { detail }) };
+      });
+      const allowNone = item.allowNone === undefined ? undefined : item.allowNone === true;
+      return {
+        id,
+        kind: "choose",
+        instructions: readFastDecisionInstructions(item.instructions, `questions[${index}]`),
+        options,
+        ...(allowNone === undefined ? {} : { allowNone }),
+      };
+    }
+    if (kind === "score") {
+      if (!Array.isArray(item.levels) || item.levels.length === 0) {
+        throw new HostError("invalid_params", `questions[${index}].levels must be a non-empty array`);
+      }
+      const levels = item.levels.map((level, levelIndex) => {
+        if (typeof level !== "string" || !level) {
+          throw new HostError("invalid_params", `questions[${index}].levels[${levelIndex}] must be a non-empty string`);
+        }
+        return level;
+      });
+      return {
+        id,
+        kind: "score",
+        instructions: readFastDecisionInstructions(item.instructions, `questions[${index}]`),
+        levels,
+      };
+    }
+    throw new HostError("invalid_params", `questions[${index}].kind must be judge, choose, or score`);
+  });
+  const endpoint = optionalString(params, "endpoint");
+  return {
+    configurationId: readString(params, "configurationId"),
+    providerId: readString(params, "providerId"),
+    modelId: readString(params, "modelId"),
+    protocol: "typesafe-systemone",
+    purpose: purpose as HarnessFastDecisionPurpose,
+    goal: readString(params, "goal", { allowEmpty: true }),
+    materials,
+    questions,
+    batchId: readString(params, "batchId"),
+    ...(endpoint === undefined ? {} : { endpoint }),
+  };
+}
+
 function readProviderConfig(value: unknown): ProviderConfigInput {
   try {
     return parseProviderConfigInput(value);
@@ -519,7 +630,11 @@ export class HostController {
       (envelope) => {
         if (
           envelope.kind === "request"
-          && (envelope.method === "harness.embed" || envelope.method === "harness.rerank")
+          && (
+            envelope.method === "harness.embed"
+            || envelope.method === "harness.rerank"
+            || envelope.method === "harness.fastDecision"
+          )
           && envelope.params
           && typeof envelope.params === "object"
           && !Array.isArray(envelope.params)
@@ -1193,6 +1308,8 @@ export class HostController {
         return this.#sessionHost.embed(readEmbedParams(params), request.id);
       case "harness.rerank":
         return this.#sessionHost.rerank(readRerankParams(params), request.id);
+      case "harness.fastDecision":
+        return this.#sessionHost.fastDecision(readFastDecisionParams(params), request.id);
       case "harness.inference.describe":
         return this.#sessionHost.describeInference();
       case "harness.inference.cancel":

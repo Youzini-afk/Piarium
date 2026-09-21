@@ -59,6 +59,10 @@ import type {
   HarnessRerankParams,
   HarnessRerankResult,
 } from "./harness-inference.js";
+import type {
+  HarnessFastDecisionParams,
+  HarnessFastDecisionResult,
+} from "./harness-fast-decision.js";
 import type { ModelSelection } from "./harness-settings.js";
 import type { PermissionPolicy } from "./permission-gate.js";
 import type { WorkFocusSelection } from "./work-focus.js";
@@ -497,6 +501,14 @@ export interface HostMethodMap {
   "harness.rerank": {
     params: HarnessRerankParams;
     result: HarnessRerankResult;
+  };
+  /**
+   * Fast Decision Model batch: typed questions against authorized material.
+   * Internal Application Host -> Pi workspace-worker inference authority (D-312).
+   */
+  "harness.fastDecision": {
+    params: HarnessFastDecisionParams;
+    result: HarnessFastDecisionResult;
   };
   /** Internal Application Host -> Pi workspace-worker inference authority. */
   "harness.inference.describe": {

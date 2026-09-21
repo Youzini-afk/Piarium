@@ -4,7 +4,7 @@ import { isStructureContainerKind, structureContainerPredicate, structureSpanLin
 import { clipRange, mergeAdjacentRanges, rangeContainsLine } from "./ranges.js";
 import type { StructureLineRange, StructureOutlineResult, StructureSymbol } from "./types.js";
 
-export type StructureFocusOrigin = "lexical-hit" | "graph-locate" | "semantic-block";
+export type StructureFocusOrigin = "lexical-hit" | "graph-locate" | "semantic-block" | "action-read";
 
 /** Current-body range the slicer should keep in view. A hit line is one origin. */
 export interface StructureFocusRange {

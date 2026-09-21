@@ -10,6 +10,10 @@ import {
   type HarnessEmbeddingSettings,
   type HarnessRerankSettings,
 } from "./harness-inference.js";
+import {
+  parseHarnessFastDecisionSettings,
+  type HarnessFastDecisionSettings,
+} from "./harness-fast-decision.js";
 import { mergePolicies, type PermissionMode, type PermissionRule } from "./permission-gate.js";
 
 /** A provider + model pair, as stored in a model slot. */
@@ -170,6 +174,11 @@ export interface HarnessSettings {
   embedding?: HarnessEmbeddingSettings;
   /** Dedicated rerank backend. Not a chat completion or embeddings alias. */
   rerank?: HarnessRerankSettings;
+  /**
+   * Fast Decision Model binding: default slot plus per-purpose override or
+   * `"off"`. User-owned; not a chat model slot (D-312).
+   */
+  fastDecision?: HarnessFastDecisionSettings;
   worktree?: HarnessWorktreeSettings;
   web?: {
     render?: boolean;
@@ -269,10 +278,18 @@ export function mergeHarnessSettings(
   user: HarnessSettingsInput,
   workspace: HarnessSettingsInput,
 ): HarnessSettings {
-  const { context: _userContext, embedding: userEmbedding, memory: _userMemory, rerank: userRerank, ...userRest } = user;
+  const {
+    context: _userContext,
+    embedding: userEmbedding,
+    fastDecision: userFastDecision,
+    memory: _userMemory,
+    rerank: userRerank,
+    ...userRest
+  } = user;
   const {
     context: _workspaceContext,
     embedding: _workspaceEmbedding,
+    fastDecision: _workspaceFastDecision,
     memory: _workspaceMemory,
     rerank: _workspaceRerank,
     ...workspaceRest
@@ -339,11 +356,14 @@ export function mergeHarnessSettings(
       // rejects writing a malformed candidate.
       let embedding: HarnessEmbeddingSettings | undefined;
       let rerank: HarnessRerankSettings | undefined;
+      let fastDecision: HarnessFastDecisionSettings | undefined;
       try { embedding = parseHarnessEmbeddingSettings(userEmbedding); } catch { embedding = undefined; }
       try { rerank = parseHarnessRerankSettings(userRerank); } catch { rerank = undefined; }
+      try { fastDecision = parseHarnessFastDecisionSettings(userFastDecision); } catch { fastDecision = undefined; }
       return {
         ...(embedding ? { embedding } : {}),
         ...(rerank ? { rerank } : {}),
+        ...(fastDecision ? { fastDecision } : {}),
       };
     })()),
     ...(user.web || workspace.web

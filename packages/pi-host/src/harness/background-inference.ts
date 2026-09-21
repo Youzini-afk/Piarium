@@ -7,14 +7,21 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 import {
+  FAST_DECISION_PURPOSES,
   HarnessInferenceSettingsValidationError,
   parseHarnessEmbeddingSettings,
+  parseHarnessFastDecisionSettings,
   parseHarnessRerankSettings,
   remoteEmbeddingSpaceParts,
+  resolveFastDecisionPurpose,
   REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS,
   type HarnessEmbedParams,
   type HarnessEmbedResult,
   type HarnessEmbeddingSettings,
+  type HarnessFastDecisionParams,
+  type HarnessFastDecisionPurposeStatus,
+  type HarnessFastDecisionResult,
+  type HarnessFastDecisionSettings,
   type HarnessInferenceBindingSnapshot,
   type HarnessRerankParams,
   type HarnessRerankResult,
@@ -26,6 +33,7 @@ import { HostError } from "../errors.js";
 import { ProviderConfigurationManager } from "../provider-configuration.js";
 import { requestOpenAICompatibleEmbeddings } from "./openai-embeddings.js";
 import { requestHttpRerank } from "./http-rerank.js";
+import { requestSystemone, SystemoneRequestError, SystemoneResponseError } from "./typesafe-systemone.js";
 
 export { REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS };
 
@@ -117,6 +125,10 @@ export class BackgroundInferenceRuntime {
     return parseHarnessRerankSettings(harnessFromSettings(this.#settings).rerank);
   }
 
+  fastDecisionSettings(): HarnessFastDecisionSettings | undefined {
+    return parseHarnessFastDecisionSettings(harnessFromSettings(this.#settings).fastDecision);
+  }
+
   async describe(): Promise<HarnessInferenceBindingSnapshot> {
     try {
       await this.reload();
@@ -124,6 +136,12 @@ export class BackgroundInferenceRuntime {
       return {
         embedding: { status: "unavailable", message: "Harness settings could not be read" },
         rerank: { status: "unavailable", message: "Harness settings could not be read" },
+        fastDecision: {
+          purposes: Object.fromEntries(FAST_DECISION_PURPOSES.map((purpose) => [
+            purpose,
+            { status: "unavailable", message: "Harness settings could not be read" },
+          ])),
+        },
       };
     }
     const embedding = await (async (): Promise<HarnessInferenceBindingSnapshot["embedding"]> => {
@@ -150,7 +168,43 @@ export class BackgroundInferenceRuntime {
         return { status: "unavailable", message: "Rerank provider binding is unavailable" };
       }
     })();
-    return { embedding, rerank };
+    const fastDecision = await (async (): Promise<NonNullable<HarnessInferenceBindingSnapshot["fastDecision"]>> => {
+      let settings: HarnessFastDecisionSettings | undefined;
+      try { settings = this.fastDecisionSettings(); }
+      catch {
+        return {
+          purposes: Object.fromEntries(FAST_DECISION_PURPOSES.map((purpose) => [
+            purpose,
+            { status: "invalid", message: "Fast decision settings are malformed" },
+          ])),
+        };
+      }
+      const purposes: Record<string, HarnessFastDecisionPurposeStatus> = {};
+      for (const purpose of FAST_DECISION_PURPOSES) {
+        const resolution = resolveFastDecisionPurpose(settings, purpose);
+        if (resolution.status === "disabled") {
+          purposes[purpose] = { status: "disabled" };
+          continue;
+        }
+        if (resolution.status === "unconfigured") {
+          purposes[purpose] = { status: "unconfigured" };
+          continue;
+        }
+        try {
+          const provider = await this.#resolveProviderBinding(
+            resolution.binding.providerId, resolution.binding.modelId, false,
+          );
+          purposes[purpose] = {
+            status: "ready",
+            binding: { ...resolution.binding, configurationId: provider.configurationId },
+          };
+        } catch {
+          purposes[purpose] = { status: "unavailable", message: "Fast decision provider binding is unavailable" };
+        }
+      }
+      return { purposes };
+    })();
+    return { embedding, rerank, fastDecision };
   }
 
   async reload(): Promise<void> {
@@ -265,6 +319,68 @@ export class BackgroundInferenceRuntime {
       });
       signal.throwIfAborted();
       return { batchId: params.batchId, providerId: configured.providerId, modelId: configured.modelId, scores };
+    } finally {
+      this.#finish(params.batchId, requestId);
+    }
+  }
+
+  async fastDecision(
+    params: HarnessFastDecisionParams & { signal?: AbortSignal },
+    requestId?: string,
+  ): Promise<HarnessFastDecisionResult> {
+    const signal = this.#begin(params.batchId, params.signal, requestId);
+    try {
+      await this.reload();
+      signal.throwIfAborted();
+      const resolution = resolveFastDecisionPurpose(this.fastDecisionSettings(), params.purpose);
+      if (resolution.status === "disabled") {
+        throw new HostError("fast_decision_disabled", `Fast decision is disabled for ${params.purpose}`);
+      }
+      if (resolution.status === "unconfigured") {
+        throw new HostError("fast_decision_unconfigured", "Fast decision is not configured");
+      }
+      const configured = resolution.binding;
+      const endpoint = await this.#resolveProviderBinding(configured.providerId, configured.modelId, true);
+      if (
+        configured.protocol !== params.protocol
+        || configured.providerId !== params.providerId
+        || configured.modelId !== params.modelId
+        || endpoint.configurationId !== params.configurationId
+        || configured.endpoint !== params.endpoint
+      ) throw new HostError("fast_decision_binding_mismatch", "Fast decision request does not match the current frozen binding");
+      signal.throwIfAborted();
+      let result;
+      try {
+        result = await requestSystemone({
+          baseUrl: endpoint.baseUrl,
+          apiKey: endpoint.apiKey!,
+          ...(endpoint.headers ? { headers: endpoint.headers } : {}),
+          ...(configured.endpoint ? { endpoint: configured.endpoint } : {}),
+          model: configured.modelId,
+          state: { goal: params.goal, materials: params.materials },
+          questions: params.questions,
+          ...(this.#fetchImpl ? { fetchImpl: this.#fetchImpl } : {}),
+          signal,
+        });
+      } catch (error) {
+        if (error instanceof SystemoneRequestError) {
+          throw new HostError("fast_decision_invalid_request", error.message);
+        }
+        if (error instanceof SystemoneResponseError) {
+          throw new HostError("fast_decision_provider_error", error.message);
+        }
+        throw error;
+      }
+      signal.throwIfAborted();
+      return {
+        batchId: params.batchId,
+        providerId: configured.providerId,
+        modelId: configured.modelId,
+        ...(result.servedModelId ? { servedModelId: result.servedModelId } : {}),
+        answers: result.answers,
+        missing: result.missing,
+        ...(result.usage ? { usage: result.usage } : {}),
+      };
     } finally {
       this.#finish(params.batchId, requestId);
     }

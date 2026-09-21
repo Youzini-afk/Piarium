@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { AgentInputContext, HarnessActorIdentity } from "@varin/protocol";
+import type {
+  AgentInputContext,
+  HarnessActorIdentity,
+  HarnessResolvedFastDecisionBinding,
+} from "@varin/protocol";
 import {
   createExploreQueryRun,
   type ExploreDeps,
@@ -25,6 +29,24 @@ export interface StoredExploreQuery {
   cancelController: AbortController;
   run: ExploreQueryRun;
   finishing?: Promise<ReturnType<ExploreQueryRun["finish"]>>;
+  /**
+   * Fast-decision binding frozen when the query started (D-312). The
+   * progressive loop launches with the query while this stays `ready`; a
+   * settings edit applies to the next query, never a live one.
+   */
+  fastDecision?: {
+    status: "ready" | "disabled" | "unconfigured" | "invalid" | "unavailable";
+    /** Frozen resolved binding — carries the credential-free configurationId. */
+    binding?: HarnessResolvedFastDecisionBinding;
+    /** `finish` asks the loop to stop offering actions and settle. */
+    requestSettle?: () => void;
+    /** Grace expired at finish: abort the loop's own signal. */
+    abort?: () => void;
+    /** Resolves after the loop applied its details onto the run. */
+    done?: Promise<void>;
+    /** The loop's final report; also applied onto the run for `finish`. */
+    details?: import("@varin/protocol").ExploreFastDecisionDetails;
+  };
 }
 
 export interface ExploreQueryStoreStart {

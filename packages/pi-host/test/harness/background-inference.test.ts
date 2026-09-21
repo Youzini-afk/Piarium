@@ -352,6 +352,99 @@ describe("BackgroundInferenceRuntime", () => {
     assert.match(urls[1] ?? "", /^https:\/\/second\.example\/v1\/embeddings$/);
   });
 
+  it("describes and executes the fast-decision binding through the System One adapter", async () => {
+    const { agentDir, cwd, runtime } = await setupBinding();
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: {
+        fastDecision: {
+          default: {
+            protocol: "typesafe-systemone",
+            providerId: "embed-provider",
+            modelId: "jev-1.13",
+            endpoint: "/systemone",
+          },
+        },
+      },
+    }));
+    const seen: Array<{ url: string; auth: string | null; body: Record<string, unknown> }> = [];
+    const inference = createBackgroundInferenceRuntime({
+      agentDir,
+      cwd,
+      modelRuntime: runtime,
+      fetchImpl: async (url, init) => {
+        seen.push({
+          url: String(url),
+          auth: authorizationFromInit(init),
+          body: JSON.parse(String(init?.body)) as Record<string, unknown>,
+        });
+        return jsonResponse({
+          model: "jev-1.13-9",
+          answers: { "m:v1": { type: "noul", noul: 0.8 } },
+          usage: { input_tokens: 10, output_tokens: 2 },
+        });
+      },
+    });
+    const described = await inference.describe();
+    const purpose = described.fastDecision?.purposes?.explore;
+    assert.equal(purpose?.status, "ready");
+    if (purpose?.status !== "ready") throw new Error("fast decision binding unavailable");
+    const base = {
+      configurationId: purpose.binding.configurationId,
+      providerId: "embed-provider",
+      modelId: "jev-1.13",
+      protocol: "typesafe-systemone" as const,
+      purpose: "explore" as const,
+      goal: "keep relevant material",
+      materials: [{ id: "v1", text: "body" }],
+      questions: [{ id: "m:v1", kind: "judge" as const, instructions: "relevant?" }],
+      batchId: "fd-1",
+      endpoint: "/systemone",
+    };
+    const result = await inference.fastDecision(base);
+    assert.equal(seen[0]?.url, "https://models.example/v1/systemone");
+    assert.equal(seen[0]?.auth, "Bearer key-one");
+    const questions = seen[0]?.body.questions as Record<string, { type: string }>;
+    assert.equal(questions["m:v1"]?.type, "noul");
+    assert.deepEqual(result.answers, [{ id: "m:v1", kind: "judge", value: 0.8 }]);
+    assert.equal(result.servedModelId, "jev-1.13-9");
+    assert.equal(result.usage?.inputTokens, 10);
+    assert.doesNotMatch(JSON.stringify(result), /key-one/);
+
+    // A caller presenting a stale frozen binding is rejected before HTTP.
+    await assert.rejects(
+      inference.fastDecision({ ...base, batchId: "fd-2", endpoint: "/other" }),
+      /frozen binding|mismatch/i,
+    );
+    await assert.rejects(
+      inference.fastDecision({ ...base, batchId: "fd-3", modelId: "jev-2" }),
+      /frozen binding|mismatch/i,
+    );
+    assert.equal(seen.length, 1);
+
+    // A purpose-level "off" wins over the default binding.
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: {
+        fastDecision: {
+          default: { protocol: "typesafe-systemone", providerId: "embed-provider", modelId: "jev-1.13" },
+          purposes: { explore: "off" },
+        },
+      },
+    }));
+    const off = await inference.describe();
+    assert.equal(off.fastDecision?.purposes?.explore?.status, "disabled");
+    await assert.rejects(
+      inference.fastDecision({ ...base, batchId: "fd-4", endpoint: undefined }),
+      /disabled/i,
+    );
+
+    // Malformed settings surface as invalid, never as ready.
+    await writeFile(join(agentDir, "settings.json"), JSON.stringify({
+      harness: { fastDecision: { default: { protocol: "chat" } } },
+    }));
+    const invalid = await inference.describe();
+    assert.equal(invalid.fastDecision?.purposes?.explore?.status, "invalid");
+  });
+
   it("uses the selected model's endpoint ahead of the provider default", async () => {
     const { agentDir, cwd, runtime } = await setupBinding();
     await writeFile(join(agentDir, "models.json"), JSON.stringify({

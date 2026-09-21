@@ -2827,6 +2827,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     semanticRecall: semanticRuntime.semanticRecall,
     harnessSettings: semanticRuntime.harnessSettings,
     rerankExploreViews: semanticRuntime.rerankExploreViews,
+    fastDecisionStatus: semanticRuntime.fastDecisionStatus,
+    fastDecision: semanticRuntime.fastDecision,
     permissionAudit: (record) => {
       broadcastGlobalUiEvent?.({
         type: 'varin:harness-permission-decision',

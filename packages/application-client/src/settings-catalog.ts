@@ -285,6 +285,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['rerank', 'ranking'] },
   },
   {
+    id: 'harness.fastDecision', category: 'retrieval', owner: 'pi-settings',
+    field: { path: 'harness.fastDecision', kind: 'json', scope: 'user',
+      note: 'Fast Decision Model {default?: {protocol:"typesafe-systemone",providerId,modelId,endpoint?}, purposes?: {explore?: binding|"off"}} — typed candidate/action judgment, not a chat slot; user-owned; applies to the next query' },
+    apply: 'next-run',
+    ui: { page: 'harness-retrieval', titleKey: 'settings.page.harness.section.fastDecision',
+      keywords: ['fast decision', 'jev', 'typesafe', 'selection'] },
+  },
+  {
     id: 'harness.web.search', category: 'web', owner: 'pi-settings',
     field: { path: 'harness.web.search', kind: 'json', scope: 'user',
       note: '{provider: brave|exa|tavily|jina|searxng, endpoint?, credentialRef?} — credentialRef names a Pi auth.json entry; secret material is never returned' },

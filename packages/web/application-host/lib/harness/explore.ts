@@ -1,4 +1,4 @@
-import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@varin/protocol";
+import { languageIdForPath, type ExploreArrival, type ExploreAssessment, type ExploreDistinctivenessDetails, type ExploreFastDecisionDetails, type ExploreGraphDetails, type ExploreGraphStatus, type ExploreGroupedSearchPlan, type ExploreIndexLifecycle, type ExploreModelParticipation, type ExplorePurpose, type ExploreQueryAction, type ExploreQueryFollowupParams, type ExploreQuerySelectResult, type ExploreQuerySelectionGroup, type ExploreQuerySourceState, type ExploreQueryView, type ExploreQueryVocab, type ExploreRerankDetails, type ExploreRerankScore, type ExploreSemanticCoverage, type ExploreSemanticDetails, type ExploreSemanticGap, type ExploreSemanticStatus, type ExploreTermCoverage, type ExploreWindowTrace, type HarnessServiceMap } from "@varin/protocol";
 import type { ExploreFileSnapshot } from "./explore-file-reader.js";
 import { SMALL_STRUCTURE_SPAN_LINES } from "../structure/constants.js";
 import { classifyLiteralCall } from "../structure/connections.js";
@@ -235,7 +235,7 @@ const searchVariantsOf = (group: TermGroup): string[] => {
   return group.variants.filter((variant) => variant === group.distinctive || variant.length > 1);
 };
 
-type GraphCandidateSource = "definition" | "connection" | "association" | "import" | "references" | "calls";
+type GraphCandidateSource = "definition" | "connection" | "association" | "import" | "references" | "calls" | "callers" | "action";
 /** Why this graph edge was walked (D-163). Same-container is ordinary supplement. */
 export type GraphArrivalReason = "object-triggered" | "statement-evidence" | "same-container";
 
@@ -257,7 +257,7 @@ interface GraphClue {
   why: string;
   locate: { text: string; kind: "identifier" | "literal" };
   arrivalReason: GraphArrivalReason;
-  edgeKind?: "connects" | "associates" | "definition" | "import" | "references" | "calls";
+  edgeKind?: "connects" | "associates" | "definition" | "import" | "references" | "calls" | "action";
   match?: "exact" | "name-contains";
   callee?: string;
   /**
@@ -276,6 +276,11 @@ interface FileEvidence {
   anchors: Set<string>;
   graphClues: GraphClue[];
   semanticClues: SemanticClue[];
+  /**
+   * Line ranges a chosen follow-up action asked to materialize (D-312). They
+   * become slice focuses exactly like hit lines and semantic blocks.
+   */
+  readFocuses: Array<{ startLine: number; endLine: number; why: string }>;
   verifiedRelation: boolean;
   verifiedCallees: Set<string>;
 }
@@ -322,6 +327,7 @@ const emptyEvidence = (): FileEvidence => ({
   anchors: new Set(),
   graphClues: [],
   semanticClues: [],
+  readFocuses: [],
   verifiedRelation: false,
   verifiedCallees: new Set(),
 });
@@ -636,7 +642,11 @@ function evidenceSignature(evidence: FileEvidence): string {
     .map((clue) => `${clue.blockId}:${clue.contentHash}:${clue.startLine}-${clue.endLine}:${clue.rank}`)
     .sort()
     .join(",");
-  return `${lines}|${groups}|${evidence.graphClues.length}|${semantic}|${evidence.verifiedRelation ? 1 : 0}`;
+  const focuses = evidence.readFocuses
+    .map((focus) => `${focus.startLine}-${focus.endLine}:${focus.why}`)
+    .sort()
+    .join(",");
+  return `${lines}|${groups}|${evidence.graphClues.length}|${semantic}|${focuses}|${evidence.verifiedRelation ? 1 : 0}`;
 }
 
 /**
@@ -696,7 +706,8 @@ function arrivalsForWindow(
           : clue.source === "association" ? "associates"
             : clue.source === "references" ? "references"
               : clue.source === "calls" ? "calls"
-                : "connects"
+                : clue.source === "action" ? "action"
+                  : "connects"
     );
     arrivals.push({
       kind: "graph",
@@ -754,6 +765,11 @@ function windowsFor(
         startLine: focus.startLine,
         endLine: focus.endLine,
         origin: "semantic-block" as const,
+      })),
+      ...evidence.readFocuses.map((focus) => ({
+        startLine: focus.startLine,
+        endLine: focus.endLine,
+        origin: "action-read" as const,
       })),
     ],
     outline: usable,
@@ -1258,7 +1274,17 @@ export interface ExploreQueryRun {
     launched: string[];
     reused: string[];
     newViews: ExploreQueryView[];
+    actionsExecuted: string[];
+    actionsRejected: Array<{ actionId: string; reason: string }>;
   }>;
+  /**
+   * Real next-step candidates generated from material this query already
+   * produced (D-312). The fast-decision caller offers these ids to the model;
+   * `followup({actions})` executes the chosen ones.
+   */
+  actionCandidates(): Promise<ExploreQueryAction[]>;
+  /** Record the fast-decision loop's provenance for `finish` (D-312). */
+  applyFastDecision(details: ExploreFastDecisionDetails): void;
   finish(model?: ExploreModelParticipation): ExploreResult;
   cancel(): void;
   readonly parsed: ExploreQueryParse;
@@ -1336,6 +1362,18 @@ export function createExploreQueryRun(
   const tasks = new Map<string, ProductionTask>();
   let fatalError: unknown;
   const launchedExpressions = new Set<string>();
+  /**
+   * Follow-up action bookkeeping (D-312): candidates the Host issued to the
+   * decision model, which the model selected and the query executed, and which
+   * graph lookups already ran so a candidate never duplicates a launched task.
+   */
+  const issuedActions = new Map<string, ExploreQueryAction>();
+  const executedActions = new Set<string>();
+  const linksRequested = new Set<string>();
+  const importersRequested = new Set<string>();
+  const relationLookupsRequested = new Set<string>();
+  const symbolsSearched = new Set<string>();
+  let fastDecisionDetails: ExploreFastDecisionDetails | undefined;
   let catalogVocab: ExploreQueryVocab["catalog"];
   let catalogPackages: string[] | undefined;
   let catalogEntries: string[] | undefined;
@@ -1520,6 +1558,7 @@ export function createExploreQueryRun(
       for (const object of parsed.objects) {
         if (!looksLikeSymbolName(object)) continue;
         signal.throwIfAborted();
+        symbolsSearched.add(object);
         const hits = await deps.graph.searchDefinitions(object, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
         signal.throwIfAborted();
         for (const hit of hits) {
@@ -1548,6 +1587,7 @@ export function createExploreQueryRun(
       for (const object of parsed.objects) {
         if (!looksLikeConnectionValue(object)) continue;
         signal.throwIfAborted();
+        linksRequested.add(object);
         const ends = await deps.graph.findLinks(object);
         signal.throwIfAborted();
         for (const end of ends) {
@@ -1587,6 +1627,8 @@ export function createExploreQueryRun(
       for (const object of parsed.objects) {
         if (!looksLikeSymbolName(object)) continue;
         signal.throwIfAborted();
+        relationLookupsRequested.add(`callers:${object}`);
+        relationLookupsRequested.add(`references:${object}`);
         const [callers, references] = await Promise.all([
           deps.graph.findCallers ? deps.graph.findCallers(object) : Promise.resolve([]),
           deps.graph.findReferences ? deps.graph.findReferences(object) : Promise.resolve([]),
@@ -1935,6 +1977,8 @@ export function createExploreQueryRun(
   };
 
   let pumpPromise: Promise<void> | undefined;
+  /** Serializes `waitForViews` driving passes across concurrent callers. */
+  let viewsTurn: Promise<void> = Promise.resolve();
   const pumpErrors: unknown[] = [];
   const ensurePump = (): Promise<void> => {
     if (pumpPromise) return pumpPromise;
@@ -2031,6 +2075,15 @@ export function createExploreQueryRun(
   };
 
   const waitForViews = async (): Promise<void> => {
+    // Both the caller's views service and the fast-decision loop wait on the
+    // same pipeline; serialize the driving pass so a second caller cannot
+    // double-run the content search / materialize stages below.
+    const turn = viewsTurn.then(() => driveViews());
+    viewsTurn = turn.catch(() => undefined);
+    return turn;
+  };
+
+  const driveViews = async (): Promise<void> => {
     if (terminal !== "active") return;
     start();
     try {
@@ -2102,6 +2155,7 @@ export function createExploreQueryRun(
         const offTopic = literalOffTopic(literal, parsed);
         if ((locatingDone || bothEndsDone) && offTopic) continue;
         const arrivalReason = arrivalForLiteral(literal, parsed, prepared);
+        linksRequested.add(literal);
         const ends = await deps.graph.findLinks(literal);
         signal.throwIfAborted();
         for (const end of ends) {
@@ -2136,6 +2190,7 @@ export function createExploreQueryRun(
       let importDropped = 0;
       for (const seed of seedPaths) {
         signal.throwIfAborted();
+        importersRequested.add(seed);
         const importers = await deps.graph.findImporters(seed);
         signal.throwIfAborted();
         const rankedImporters = rankReverseImporters(
@@ -2225,6 +2280,8 @@ export function createExploreQueryRun(
       for (const object of parsed.objects) {
         if (!looksLikeSymbolName(object)) continue;
         signal.throwIfAborted();
+        relationLookupsRequested.add(`callers:${object}`);
+        relationLookupsRequested.add(`calls:${object}`);
         const [callers, made] = await Promise.all([
           deps.graph.findCallers ? deps.graph.findCallers(object) : Promise.resolve([]),
           deps.graph.findCalls ? deps.graph.findCalls(object) : Promise.resolve([]),
@@ -2499,15 +2556,227 @@ export function createExploreQueryRun(
     return { launched, reused };
   };
 
+  /** Locate a real symbol's definitions and attach them as clues (followup/action shared). */
+  const locateSymbolTarget = async (value: string): Promise<void> => {
+    if (!deps.graph) return;
+    symbolsSearched.add(value);
+    const hits = await deps.graph.searchDefinitions(value, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
+    signal.throwIfAborted();
+    for (const hit of hits) {
+      if (!pathInRoots(hit.path, input.paths)) continue;
+      const evidence = byFile.get(hit.path) ?? emptyEvidence();
+      attachGraphClue(evidence, {
+        source: "definition",
+        why: `definition of ${hit.name} (${hit.kind})`,
+        locate: { text: hit.name, kind: "identifier" },
+        arrivalReason: "object-triggered",
+        match: hit.match === "exact" ? "exact" : "name-contains",
+      });
+      byFile.set(hit.path, evidence);
+      definitionFiles.add(hit.path);
+    }
+  };
+
+  /** Follow a connection literal to its endpoints (followup locate/action shared). */
+  const followConnectionLiteral = async (value: string): Promise<void> => {
+    if (!deps.graph) return;
+    linksRequested.add(value);
+    const ends = await deps.graph.findLinks(value);
+    signal.throwIfAborted();
+    for (const end of ends) {
+      if (!pathInRoots(end.path, input.paths)) continue;
+      const evidence = byFile.get(end.path) ?? emptyEvidence();
+      attachGraphClue(evidence, {
+        source: end.kind === "connects" ? "connection" : "association",
+        why: `other end of connection "${value}"`,
+        locate: { text: value, kind: "literal" },
+        arrivalReason: "object-triggered",
+        edgeKind: end.kind === "connects" ? "connects" : "associates",
+        ...(end.callee ? { callee: end.callee } : {}),
+      });
+      byFile.set(end.path, evidence);
+    }
+  };
+
+  /**
+   * Attach the sites a resolved relation lookup returns (followup action
+   * execution). Mirrors the seed relation loop but without its budget: the
+   * model already chose this specific expansion.
+   */
+  const attachRelationSites = async (
+    kind: "callers" | "references" | "calls",
+    name: string,
+  ): Promise<void> => {
+    if (!deps.graph) return;
+    relationLookupsRequested.add(`${kind}:${name}`);
+    const lookup = kind === "callers"
+      ? deps.graph.findCallers
+      : kind === "references"
+        ? deps.graph.findReferences
+        : deps.graph.findCalls;
+    if (!lookup) return;
+    const sites = await lookup(name);
+    signal.throwIfAborted();
+    for (const site of sites) {
+      // `calls` answers "what does name call": the follow target is the
+      // resolved callee's file; callers/references land on the site itself.
+      const targetPath = kind === "calls" ? site.targetPath : site.path;
+      const locateText = kind === "calls" ? site.targetName ?? site.callee ?? name : name;
+      if (!targetPath || !pathInRoots(targetPath, input.paths)) continue;
+      const evidence = byFile.get(targetPath) ?? emptyEvidence();
+      attachGraphClue(evidence, {
+        source: kind === "calls" ? "calls" : kind,
+        why: kind === "calls"
+          ? `${name} calls ${locateText} here`
+          : kind === "callers" ? `calls ${name}` : `references ${name}`,
+        locate: { text: locateText, kind: "identifier" },
+        arrivalReason: "object-triggered",
+        edgeKind: kind === "callers" ? "calls" : kind,
+      });
+      byFile.set(targetPath, evidence);
+      relationFiles.add(targetPath);
+    }
+  };
+
+  const attachImporterClues = async (path: string): Promise<void> => {
+    if (!deps.graph) return;
+    importersRequested.add(path);
+    const importers = await deps.graph.findImporters(path);
+    signal.throwIfAborted();
+    for (const importer of rankReverseImporters(path, importers.resolved, DEFAULT_GRAPH_IMPORT_PER_SEED, input.paths)) {
+      const evidence = byFile.get(importer.path) ?? emptyEvidence();
+      attachGraphClue(evidence, {
+        source: "import",
+        why: `imports ${path}`,
+        locate: { text: importer.specifier, kind: "literal" },
+        arrivalReason: arrivalForImport(importer.specifier, path, parsed, prepared),
+      });
+      byFile.set(importer.path, evidence);
+      importFiles.add(importer.path);
+    }
+  };
+
+  /**
+   * Materialize a path an action chose: locate hint, explicit range, or the
+   * whole file. Unlike graph-expansion actions this is itself a read
+   * instruction, so it reads through `materializeBatch` directly instead of
+   * waiting for the ranker — a chosen read must produce its material.
+   */
+  const readActionTarget = async (action: ExploreQueryAction): Promise<void> => {
+    if (!pathInRoots(action.target, input.paths)) return;
+    const evidence = byFile.get(action.target) ?? emptyEvidence();
+    if (action.locate) {
+      attachGraphClue(evidence, {
+        source: "action",
+        why: action.why,
+        locate: action.locate,
+        arrivalReason: "object-triggered",
+        edgeKind: "action",
+      });
+    }
+    const hasRange = action.startLine !== undefined && action.endLine !== undefined;
+    if (hasRange || !action.locate) {
+      const focus = {
+        startLine: hasRange ? Math.max(1, Math.trunc(action.startLine!)) : 1,
+        endLine: hasRange ? Math.max(1, Math.trunc(action.endLine!)) : Number.MAX_SAFE_INTEGER,
+        why: action.why,
+      };
+      if (!evidence.readFocuses.some((item) => (
+        item.startLine === focus.startLine && item.endLine === focus.endLine
+      ))) evidence.readFocuses.push(focus);
+    }
+    byFile.set(action.target, evidence);
+    if (readPaths.has(action.target)) {
+      await refreshReadEvidence();
+      return;
+    }
+    reads += 1;
+    await materializeBatch([{ path: action.target, evidence, roleFit: 0, rrf: 0, hasRankedSource: true }]);
+  };
+
+  /**
+   * Real next-step candidates derived from material this query already read
+   * (D-312). Identities are deterministic (`kind:target[:range]`), so issuing
+   * the same step twice dedups; executed ids never come back.
+   */
+  const actionCandidates = async (): Promise<ExploreQueryAction[]> => {
+    const candidates: ExploreQueryAction[] = [];
+    const offer = (candidate: Omit<ExploreQueryAction, "actionId">): void => {
+      const range = candidate.startLine !== undefined && candidate.endLine !== undefined
+        ? `:${candidate.startLine}-${candidate.endLine}`
+        : "";
+      const actionId = `${candidate.kind}:${candidate.target}${range}`;
+      if (executedActions.has(actionId)) return;
+      const existing = issuedActions.get(actionId);
+      if (existing) {
+        candidates.push(existing);
+        return;
+      }
+      const issued: ExploreQueryAction = { ...candidate, actionId };
+      issuedActions.set(actionId, issued);
+      candidates.push(issued);
+    };
+    if (!deps.graph) return candidates;
+    for (const path of readPaths) {
+      signal.throwIfAborted();
+      const relations = await deps.graph.fileRelations(path).catch(() => null);
+      if (!relations) continue;
+      for (const connection of relations.connections) {
+        if (linksRequested.has(connection.literal)) continue;
+        offer({
+          kind: "connect",
+          target: connection.literal,
+          why: `connection literal "${connection.literal}" used in ${path}`,
+        });
+      }
+      for (const site of [...(relations.calls ?? []), ...(relations.references ?? [])]) {
+        const name = site.targetName ?? site.callee;
+        if (site.targetPath && !readPaths.has(site.targetPath)) {
+          offer({
+            kind: "read",
+            target: site.targetPath,
+            ...(name ? { locate: { text: name, kind: "identifier" as const } } : {}),
+            why: `${site.caller ?? path} ${site.targetName ? `calls ${site.targetName}` : "references a symbol"} here`,
+          });
+        } else if (!site.targetPath && name && looksLikeSymbolName(name) && !symbolsSearched.has(name)) {
+          offer({
+            kind: "symbol",
+            target: name,
+            why: `unresolved ${name} referenced in ${path}`,
+          });
+        }
+      }
+      if (!importersRequested.has(path)) {
+        offer({ kind: "importers", target: path, why: `files importing ${path}` });
+      }
+      const evidence = byFile.get(path);
+      for (const name of evidence?.verifiedCallees ?? []) {
+        if (!looksLikeSymbolName(name)) continue;
+        if (!symbolsSearched.has(name)) {
+          offer({ kind: "symbol", target: name, why: `verified callee ${name} in ${path}` });
+        }
+        for (const kind of ["callers", "references", "calls"] as const) {
+          if (relationLookupsRequested.has(`${kind}:${name}`)) continue;
+          offer({ kind, target: name, why: `${kind} of verified callee ${name} in ${path}` });
+        }
+      }
+    }
+    return candidates;
+  };
+
   const followup = async (request: Omit<ExploreQueryFollowupParams, "queryId">): Promise<{
     launched: string[];
     reused: string[];
     newViews: ExploreQueryView[];
+    actionsExecuted: string[];
+    actionsRejected: Array<{ actionId: string; reason: string }>;
   }> => {
-    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [], newViews: [] };
+    if (terminal !== "active" || signal.aborted) return { launched: [], reused: [], newViews: [], actionsExecuted: [], actionsRejected: [] };
     const before = new Set(frozenViews.map((view) => viewLogicalKey(view)));
     const launched: string[] = [];
     const reused: string[] = [];
+    const actionsExecuted: string[] = [];
+    const actionsRejected: Array<{ actionId: string; reason: string }> = [];
     const searches = request.searches ?? [];
     const expressions = [...new Set(searches.map((item) => item.expression.trim()).filter(Boolean))];
     const fresh = expressions.filter((expression) => !launchedExpressions.has(expression));
@@ -2546,39 +2815,40 @@ export function createExploreQueryRun(
           if (!byFile.has(value)) byFile.set(value, emptyEvidence());
           return;
         }
-        if (!deps.graph) return;
-        if (locate.kind === "symbol") {
-          const hits = await deps.graph.searchDefinitions(value, DEFAULT_GRAPH_DEFINITIONS_PER_TERM);
-          signal.throwIfAborted();
-          for (const hit of hits) {
-            if (!pathInRoots(hit.path, input.paths)) continue;
-            const evidence = byFile.get(hit.path) ?? emptyEvidence();
-            attachGraphClue(evidence, {
-              source: "definition",
-              why: `definition of ${hit.name} (${hit.kind})`,
-              locate: { text: hit.name, kind: "identifier" },
-              arrivalReason: "object-triggered",
-              match: hit.match === "exact" ? "exact" : "name-contains",
-            });
-            byFile.set(hit.path, evidence);
-            definitionFiles.add(hit.path);
-          }
-          return;
-        }
-        const ends = await deps.graph.findLinks(value);
-        signal.throwIfAborted();
-        for (const end of ends) {
-          if (!pathInRoots(end.path, input.paths)) continue;
-          const evidence = byFile.get(end.path) ?? emptyEvidence();
-          attachGraphClue(evidence, {
-            source: end.kind === "connects" ? "connection" : "association",
-            why: `other end of connection "${value}"`,
-            locate: { text: value, kind: "literal" },
-            arrivalReason: "object-triggered",
-            edgeKind: end.kind === "connects" ? "connects" : "associates",
-            ...(end.callee ? { callee: end.callee } : {}),
-          });
-          byFile.set(end.path, evidence);
+        if (locate.kind === "symbol") return locateSymbolTarget(value);
+        return followConnectionLiteral(value);
+      });
+    }
+    // Fast-decision actions (D-312): the caller picks issued ids; the query
+    // owner executes the recorded candidate, not the wire payload's fields.
+    for (const requested of request.actions ?? []) {
+      const issued = issuedActions.get(requested.actionId);
+      if (!issued) {
+        actionsRejected.push({ actionId: requested.actionId, reason: "unknown or stale action candidate" });
+        continue;
+      }
+      if (executedActions.has(issued.actionId)) {
+        reused.push(issued.actionId);
+        continue;
+      }
+      executedActions.add(issued.actionId);
+      actionsExecuted.push(issued.actionId);
+      launched.push(issued.actionId);
+      launchTask(`action:${issued.actionId}`, "followup", true, async () => {
+        switch (issued.kind) {
+          case "symbol":
+            return locateSymbolTarget(issued.target);
+          case "connect":
+            return followConnectionLiteral(issued.target);
+          case "importers":
+            return attachImporterClues(issued.target);
+          case "callers":
+          case "references":
+          case "calls":
+            return attachRelationSites(issued.kind, issued.target);
+          case "path":
+          case "read":
+            return readActionTarget(issued);
         }
       });
     }
@@ -2589,6 +2859,8 @@ export function createExploreQueryRun(
       launched,
       reused,
       newViews: frozenViews.filter((view) => !before.has(viewLogicalKey(view))),
+      actionsExecuted,
+      actionsRejected,
     };
   };
 
@@ -2787,10 +3059,15 @@ export function createExploreQueryRun(
         },
         ...(model ? { model } : {}),
         ...(rerankDetails ? { rerank: rerankDetails } : {}),
+        ...(fastDecisionDetails ? { fastDecision: fastDecisionDetails } : {}),
         sources,
       },
     };
     return frozenResult;
+  };
+
+  const applyFastDecision = (details: ExploreFastDecisionDetails): void => {
+    fastDecisionDetails = details;
   };
 
   const cancel = (): void => {
@@ -2821,6 +3098,8 @@ export function createExploreQueryRun(
     applySelection,
     applyRerank,
     followup,
+    actionCandidates,
+    applyFastDecision,
     finish,
     cancel,
     refreshVocab,

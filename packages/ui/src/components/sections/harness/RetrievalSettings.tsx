@@ -236,6 +236,88 @@ function InferenceSettings({ harness, update, kind, localSemanticStatus }: Harne
   </SettingsSection>;
 }
 
+function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
+  const { t } = useI18n();
+  const providers = usePiProviderStore((state) => state.providers);
+  const settings = harness.fastDecision;
+  const binding = settings?.default;
+  const exploreOverride = settings?.purposes?.explore;
+  const [remote, setRemote] = React.useState(Boolean(binding));
+  const remoteRef = React.useRef(remote);
+  const [fields, setFields] = React.useState({
+    providerId: binding?.providerId ?? '',
+    modelId: binding?.modelId ?? '',
+    endpoint: binding?.endpoint ?? '',
+  });
+  const current = React.useRef(fields);
+  const commit = (patch: Partial<typeof fields>) => {
+    if (!remoteRef.current) return;
+    const next = { ...current.current, ...patch };
+    current.current = next;
+    setFields(next);
+    if (!next.providerId.trim() || !next.modelId.trim()) return;
+    update({ fastDecision: { default: {
+      protocol: 'typesafe-systemone',
+      providerId: next.providerId.trim(),
+      modelId: next.modelId.trim(),
+      ...(next.endpoint.trim() ? { endpoint: next.endpoint.trim() } : {}),
+    } } });
+  };
+  const overrideValue = exploreOverride === 'off' ? 'off' : exploreOverride === undefined ? 'default' : 'custom';
+  return <SettingsSection title={t('settings.page.harness.section.fastDecision')} settingsItem="harness.fastDecision" contentClassName="space-y-5">
+    <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={t('settings.page.harness.section.fastDecision.description')}>
+      <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => {
+        remoteRef.current = value === 'remote';
+        setRemote(value === 'remote');
+        if (value === 'default') update({ fastDecision: { default: undefined } });
+        else commit({});
+      }}>
+        <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}>
+          <SelectValue>{remote ? t('settings.harness.retrieval.remote') : t('settings.harness.retrieval.off')}</SelectValue>
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">{t('settings.harness.retrieval.off')}</SelectItem>
+          <SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem>
+        </SelectContent>
+      </Select>
+    </SettingsFieldRow>
+    {remote ? <>
+      <SettingsFieldRow label={t('settings.page.harness.fastDecision.provider')}>
+        <Select value={fields.providerId || '__none'} onValueChange={(providerId) => {
+          if (providerId === '__none') return;
+          const next = { ...current.current, providerId, modelId: '' };
+          current.current = next; setFields(next);
+        }}>
+          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.provider')}><SelectValue>{fields.providerId || t('settings.page.harness.models.notConfigured')}</SelectValue></SelectTrigger>
+          <SelectContent><SelectItem value="__none" disabled>{t('settings.page.harness.models.notConfigured')}</SelectItem>{providers.map((provider) => <SelectItem key={provider.id} value={provider.id}>{provider.id}</SelectItem>)}</SelectContent>
+        </Select>
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.fastDecision.model')} controlClassName="@xl:flex-1 @xl:max-w-80">
+        <AutoSaveInput key={fields.providerId} value={fields.modelId} onCommit={(modelId) => { if (current.current.providerId === fields.providerId) commit({ modelId }); }}
+          aria-label={t('settings.page.harness.fastDecision.model')} placeholder="jev-1.13" />
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.fastDecision.endpoint')} controlClassName="@xl:flex-1 @xl:max-w-80">
+        <AutoSaveInput value={fields.endpoint} onCommit={(endpoint) => commit({ endpoint })} placeholder="/v1/systemone" aria-label={t('settings.page.harness.fastDecision.endpoint')}
+          validate={(value) => !value || value.startsWith('/') ? null : t('settings.page.harness.fastDecision.endpoint.description')} />
+      </SettingsFieldRow>
+      <SettingsFieldRow label={t('settings.page.harness.fastDecision.explore')} description={t('settings.page.harness.fastDecision.explore.description')}>
+        <Select value={overrideValue} onValueChange={(value) => {
+          if (value === 'custom') return;
+          update({ fastDecision: { purposes: { explore: value === 'off' ? 'off' : undefined } } });
+        }}>
+          <SelectTrigger size="settings" className="w-64" aria-label={t('settings.page.harness.fastDecision.explore')}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="default">{t('settings.page.harness.fastDecision.explore.default')}</SelectItem>
+            <SelectItem value="off">{t('settings.harness.retrieval.off')}</SelectItem>
+            {overrideValue === 'custom' ? <SelectItem value="custom" disabled>{t('settings.page.harness.fastDecision.explore.custom')}</SelectItem> : null}
+          </SelectContent>
+        </Select>
+      </SettingsFieldRow>
+      <p className="typography-meta text-muted-foreground">{t(!fields.providerId || !fields.modelId ? 'settings.harness.completeFields' : 'settings.page.harness.fastDecision.provider.description')}</p>
+    </> : null}
+  </SettingsSection>;
+}
+
 export function RetrievalSettings(props: HarnessSettingsPageProps) {
   const cwd = useDirectoryStore((state) => state.currentDirectory);
   const load = usePiProviderStore((state) => state.load);
@@ -247,5 +329,6 @@ export function RetrievalSettings(props: HarnessSettingsPageProps) {
     <LocalSemanticSettings state={localSemantic} />
     <InferenceSettings {...props} kind="embedding" localSemanticStatus={localSemantic.status} />
     <InferenceSettings {...props} kind="rerank" localSemanticStatus={localSemantic.status} />
+    <FastDecisionSettings {...props} />
   </>;
 }
