@@ -3,10 +3,7 @@
 # Varin
 
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="../../packages/web/public/logo-dark-512x512.svg" />
-    <img src="../../packages/web/public/logo-light-512x512.svg" alt="Varin" width="128" />
-  </picture>
+  <img src="../../packages/electron/resources/icons/app-icon.svg" alt="Varin" width="128" />
 </p>
 
 [![CI](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml/badge.svg)](https://github.com/Youzini-afk/Varin/actions/workflows/ci.yml)
