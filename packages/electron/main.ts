@@ -1409,6 +1409,11 @@ const detectLanIPv4Address = async (): Promise<string | null> => {
 
 const buildLocalUrl = (port: number): string => `http://127.0.0.1:${port}`;
 
+const resolveLocalWorkspaceHome = (): string => {
+  const configuredRoot = process.env.PIARIUM_WORKSPACE_ROOT?.trim();
+  return configuredRoot ? path.resolve(configuredRoot) : (os.homedir() || '');
+};
+
 const resourceRoot = () => isDev ? path.join(__dirname, 'resources') : process.resourcesPath;
 const resolveWebDistDir = () => path.join(resourceRoot(), 'web-dist');
 const shouldUsePackagedUi = () => {
@@ -1862,7 +1867,7 @@ const buildInitScript = (
   clientToken: string | null = '',
   requestHeaders: unknown = {},
 ): string => {
-  const home = JSON.stringify(os.homedir() || '');
+  const home = JSON.stringify(resolveLocalWorkspaceHome());
   const local = JSON.stringify(localOrigin || '');
   const apiBase = JSON.stringify(apiBaseUrl || '');
   const token = JSON.stringify(clientToken || '');
@@ -5282,7 +5287,7 @@ ipcMain.on('piarium:bootstrap', (event) => {
     clientToken: runtimeConfig.clientToken,
     requestHeaders: sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders),
     relayHostId: runtimeConfig.relayHostId,
-    homeDirectory: os.homedir() || '',
+    homeDirectory: resolveLocalWorkspaceHome(),
     macosMajor: macosMajorVersion(),
     macVibrancy: process.platform !== 'darwin' || readSettingsRoot().desktopVibrancy !== false,
     trayEnabled: process.platform !== 'darwin' || readSettingsRoot().desktopMacMenuBarEnabled !== false,

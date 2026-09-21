@@ -90,6 +90,15 @@ const resolveDefaultWorkspaceRoot = ({
     return pathModule.resolve(explicit);
   }
 
+  // The desktop renderer opens at the local Host's home directory on a fresh
+  // install. Keep the server's initial document grant on that same root so the
+  // first workspace can resolve before a project or last directory has been
+  // persisted. Explicit PIARIUM_WORKSPACE_ROOT still wins for managed and
+  // smoke-test installations.
+  if (env.PIARIUM_RUNTIME === 'desktop') {
+    return pathModule.resolve(osModule.homedir());
+  }
+
   if (env.ZEABUR || env.DOCKER || env.PIARIUM_RUNTIME === 'web') {
     return pathModule.resolve('/workspace');
   }
