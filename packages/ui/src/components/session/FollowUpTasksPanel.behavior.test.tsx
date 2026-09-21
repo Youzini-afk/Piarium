@@ -58,6 +58,8 @@ describe('follow-up task overview', () => {
     ]));
     await render();
     expect(container.textContent).toContain('Inspect the result');
+    expect(container.textContent).toContain('Finished instruction');
+    await click('tasksHub.active');
     expect(container.textContent).not.toContain('Finished instruction');
     await click('My experiment');
     expect(mocks.navigate).toHaveBeenCalledWith({ sessionId: 's-1', directory: '/repo' });
@@ -80,6 +82,7 @@ describe('follow-up task overview', () => {
     });
     await render();
     await click('chat.followup.action.cancel');
+    await click('tasksHub.active');
     expect(container.textContent).toContain('tasksHub.empty');
     await click('tasksHub.history');
     expect(container.textContent).toContain('chat.followup.status.cancelled');

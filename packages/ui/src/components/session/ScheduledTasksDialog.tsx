@@ -32,6 +32,8 @@ import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
 import { ScheduledTaskLoopEditorDialog } from './ScheduledTaskLoopEditorDialog';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { FollowUpTasksPanel } from './FollowUpTasksPanel';
+import { TaskListRow, TaskSearch } from './TaskListPrimitives';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -182,6 +184,9 @@ export function ScheduledTasksDialog() {
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
   const [view, setView] = React.useState<'scheduled' | 'followups'>('scheduled');
+  const [query, setQuery] = React.useState('');
+  const [filter, setFilter] = React.useState<'all' | 'enabled' | 'paused' | 'completed'>('all');
+  const [createFollowUp, setCreateFollowUp] = React.useState(false);
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
   // not an empty/select-project flash before the fetch effect runs.
@@ -401,8 +406,7 @@ export function ScheduledTasksDialog() {
   }, [selectedProjectID, projects, reloadTasks, t]);
 
   const projectSelector = (
-    <div className="flex flex-col items-start gap-1">
-      <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.project.label')}</span>
+    <div className="ml-auto min-w-0">
       <Select
         value={selectedProjectID || '__none'}
         onValueChange={(value) => {
@@ -415,7 +419,7 @@ export function ScheduledTasksDialog() {
           }
         }}
       >
-        <SelectTrigger size="lg" className="w-full max-w-full sm:w-72">
+        <SelectTrigger className="h-8 w-auto max-w-48 border-0 bg-transparent shadow-none" aria-label={t('sessions.scheduledTasks.dialog.project.label')}>
           {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
@@ -435,9 +439,17 @@ export function ScheduledTasksDialog() {
   );
 
   const openNewTaskEditor = () => {
+    setView('scheduled');
     setEditorTask(null);
     setEditorOpen(true);
   };
+
+  const completed = (task: ScheduledTask) => task.schedule.kind === 'once' && task.state.lastStatus === 'success' && !task.state.nextRunAt;
+  const visibleTasks = tasks.filter((task) => {
+    const state = completed(task) ? 'completed' : task.enabled ? 'enabled' : 'paused';
+    return (filter === 'all' || filter === state)
+      && (!query.trim() || `${task.name} ${task.execution.prompt} ${formatSchedule(task, t)}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  });
 
   const tasksList = (
       <div className="min-h-[280px]">
@@ -447,13 +459,13 @@ export function ScheduledTasksDialog() {
         <div className="flex items-center gap-2 typography-meta text-muted-foreground">
           <Icon name="loader-4" className="h-4 w-4 animate-spin" /> {t('sessions.scheduledTasks.dialog.loading')}
         </div>
-      ) : tasks.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border p-4 typography-meta text-muted-foreground">
-          {selectedProjectID ? t('sessions.scheduledTasks.dialog.empty.noTasks') : t('sessions.scheduledTasks.dialog.empty.selectProject')}
+      ) : visibleTasks.length === 0 ? (
+        <div className="py-12 text-center typography-meta text-muted-foreground">
+          {tasks.length > 0 ? t('tasksHub.noMatches') : selectedProjectID ? t('sessions.scheduledTasks.dialog.empty.noTasks') : t('sessions.scheduledTasks.dialog.empty.selectProject')}
         </div>
       ) : (
-        <div className="space-y-2.5">
-          {tasks.map((task) => {
+        <div className="space-y-1">
+          {visibleTasks.map((task) => {
             const isBusy = mutatingTaskID === task.id;
             const status = (task.state?.lastStatus || 'idle') as ScheduledTaskStatus;
             const meta = STATUS_META[status];
@@ -468,20 +480,15 @@ export function ScheduledTasksDialog() {
             const lastAt = task.state?.lastRunAt;
 
             return (
-              <div
+              <TaskListRow
                 key={task.id}
-                className={cn(
-                  'rounded-lg border border-border p-4 transition-opacity',
-                  !task.enabled && 'opacity-60',
-                )}
+                title={task.name}
+                subtitle={formatSchedule(task, t)}
+                muted={!task.enabled}
+                icon={status === 'running' ? 'loader-4' : 'time'}
+                status={t(completed(task) ? 'tasksHub.completed' : task.enabled ? 'tasksHub.enabled' : 'tasksHub.paused')}
               >
-                <div className="min-w-0">
-                  <div className="typography-ui-header truncate font-semibold text-foreground">
-                    {task.name}
-                  </div>
-                  <div className="typography-micro truncate text-muted-foreground">
-                    {formatSchedule(task, t)}
-                  </div>
+                <p className="whitespace-pre-wrap break-words text-foreground">{task.execution.prompt}</p>
                   {task.loopFile ? (
                     <div className="typography-micro truncate text-muted-foreground/70" title={task.loopFile}>
                       {task.loopScope === 'user'
@@ -490,7 +497,6 @@ export function ScheduledTasksDialog() {
                       {' · '}{task.loopFile}
                     </div>
                   ) : null}
-                </div>
 
                 <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 typography-micro text-muted-foreground">
                   <span className="inline-flex items-center gap-1.5">
@@ -604,7 +610,7 @@ export function ScheduledTasksDialog() {
                     </Button>
                   </div>
                 </div>
-              </div>
+              </TaskListRow>
             );
           })}
         </div>
@@ -619,12 +625,29 @@ export function ScheduledTasksDialog() {
     </div>
   );
 
-  const tasksContent = (
-    <div className="space-y-4">
-      {sectionTabs}
-      {view === 'scheduled' ? <>{projectSelector}{tasksList}</> : open ? <FollowUpTasksPanel /> : null}
+  const createButton = <DropdownMenu>
+    <DropdownMenuTrigger asChild><Button size="sm" className="shrink-0 gap-1 rounded-full px-3">{t('tasksHub.create')}<Icon name="arrow-down-s" className="size-3.5" /></Button></DropdownMenuTrigger>
+    <DropdownMenuContent align="end">
+      <DropdownMenuItem disabled={projects.length === 0} onSelect={openNewTaskEditor}><Icon name="calendar-schedule" className="mr-2 size-4" />{t('tasksHub.scheduled')}</DropdownMenuItem>
+      <DropdownMenuItem onSelect={() => { setView('followups'); setCreateFollowUp(true); }}><Icon name="timer" className="mr-2 size-4" />{t('tasksHub.followUps')}</DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>;
+
+  const tasksContent = <div className="space-y-6">
+    <div className="flex items-start justify-between gap-4">
+      <div className="min-w-0 space-y-2"><h1 className="text-2xl font-semibold tracking-tight text-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduled' : 'tasksHub.followUps')}</h1><p className="typography-meta text-muted-foreground">{t(view === 'scheduled' ? 'tasksHub.scheduledDescription' : 'tasksHub.followUpsDescription')}</p></div>
+      {createButton}
     </div>
-  );
+    {sectionTabs}
+    {view === 'scheduled' ? <div className="space-y-5">
+      <TaskSearch value={query} onChange={setQuery} label={t('tasksHub.search')} />
+      <div className="flex flex-wrap items-center gap-1" role="group" aria-label={t('tasksHub.scheduled')}>
+        {(['all', 'enabled', 'paused', 'completed'] as const).map((value) => <Button key={value} size="sm" variant={filter === value ? 'secondary' : 'ghost'} className="h-7 rounded-full px-2.5 typography-meta" aria-pressed={filter === value} onClick={() => setFilter(value)}>{t(`tasksHub.${value}`)}</Button>)}
+        {projectSelector}
+      </div>
+      {tasksList}
+    </div> : open ? <FollowUpTasksPanel createOpen={createFollowUp} onCreateOpenChange={setCreateFollowUp} /> : null}
+  </div>;
 
   return (
     <>
@@ -642,32 +665,13 @@ export function ScheduledTasksDialog() {
               </div>
             </div>
           )}
-          footer={view === 'scheduled' ? (
-            <Button
-              className="w-full"
-              onClick={openNewTaskEditor}
-              disabled={!selectedProjectID}
-            >
-              <Icon name="add" className="mr-1 h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.newTask')}
-            </Button>
-          ) : undefined}
         >
           {tasksContent}
         </MobileOverlayPanel>
       ) : open ? (
         // The shared surface stays inside the existing chat-area page slot.
-        <div className="absolute inset-0 z-10 flex flex-col bg-background">
-          <div className="shrink-0 border-b border-border/50 px-4 py-3 sm:px-6">
-            <div className="mx-auto flex w-full max-w-4xl flex-wrap items-center justify-between gap-3">
-              {sectionTabs}
-              {view === 'scheduled' ? <Button size="sm" onClick={openNewTaskEditor} disabled={!selectedProjectID}><Icon name="add" className="mr-1 size-4" />{t('sessions.scheduledTasks.dialog.actions.newTask')}</Button> : null}
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6">
-            <div className="mx-auto w-full max-w-4xl space-y-5">
-              {view === 'scheduled' ? <>{projectSelector}{tasksList}</> : <FollowUpTasksPanel />}
-            </div>
-          </div>
+        <div className="absolute inset-0 z-10 overflow-y-auto bg-background">
+          <div className="mx-auto w-full max-w-3xl px-5 py-8 sm:px-8 sm:py-12">{tasksContent}</div>
         </div>
       ) : null}
 

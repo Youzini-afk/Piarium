@@ -1,5 +1,21 @@
 import { runtimeFetch } from '@piarium/application-client';
-import type { FollowUpDefinitionView } from '@piarium/protocol';
+import type { FollowUpDefinitionView, FollowUpRegisterParams, FollowUpRegisterResult, FollowUpSource } from '@piarium/protocol';
+
+export async function saveFollowUp(
+  sessionId: string,
+  input: Pick<FollowUpRegisterParams, 'instruction'> & { source?: FollowUpSource },
+  existing?: Pick<FollowUpDefinitionView, 'id' | 'revision'>,
+): Promise<{ followUp: FollowUpDefinitionView; firedImmediately?: boolean }> {
+  const base = `/api/harness/sessions/${encodeURIComponent(sessionId)}/follow-ups`;
+  const response = await runtimeFetch(existing ? `${base}/${encodeURIComponent(existing.id)}/update` : base, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...input, ...(existing ? { expectedRevision: existing.revision } : { pause: false }) }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(body?.error ?? `Follow-up save failed (${response.status})`);
+  if (!body?.followUp?.id) throw new Error('Invalid follow-up save response');
+  return body as FollowUpRegisterResult;
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)

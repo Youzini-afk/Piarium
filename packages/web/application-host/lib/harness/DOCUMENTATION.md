@@ -37,6 +37,10 @@ definitions; internal composite leaves stay hidden. This read-only management me
 as an Agent tool. The overview uses the same durable authority as per-session strips and does not reconcile
 or trigger a model merely by being opened. Mutations still resolve the target session and retain the existing
 ownership/revision checks. Temporary enumeration grants are revoked after the query.
+Manual UI creation uses `POST /api/harness/sessions/:sessionId/follow-ups`; the Host derives the caller
+from that session and ignores request-supplied ownership fields. Shared service validation checks the
+trigger and resource scope before persisting it. The update endpoint also accepts a source replacement
+with the existing revision check. Neither endpoint introduces a second scheduler or storage authority.
 
 ### Research root (`research-root-runtime.ts`, phase 7A)
 

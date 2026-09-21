@@ -45,6 +45,14 @@ cancellation and navigation back to the target conversation. Mutations reuse the
 routes and revisions. Overview reads do not invoke models or install another scheduler. The panel loads
 only while visible, follows existing follow-up events, and aborts stale reads on unmount/runtime changes;
 load failures stay distinguishable from an empty list. `followUpsApi` is shared with the conversation strip.
+Both sections use a centered page heading, rounded search field, status filters and compact expandable
+`TaskListRow` entries; full instructions and actions are disclosed on expansion. There is no suggestions
+section. The Create menu offers either task kind. `FollowUpEditorDialog` creates a continuation on an
+existing project-bound conversation through the same Host service as the Agent tool; common conditions
+are time, workspace file state, a listed experiment's completion, GitHub PR state and manual invocation.
+Creation does not pause the current conversation. Conditions already met may invoke it immediately.
+Editing only the instruction retains advanced sources, and editing a supported source retains its
+unexposed options (such as fallback deadlines). Calendar task creation keeps its existing editor.
 
 `WorkbenchProfileSwitcher` exposes two adjacent presentation controls: Agent/IDE and a General/Research
 workspace menu (plus installed custom profiles). IDE never appears as an item in that workspace menu.

@@ -35,6 +35,7 @@ const fixture = (options: { bound?: boolean; authenticated?: boolean } = {}) => 
     listThreads: vi.fn(async () => []),
   };
   const followUps = {
+    register: vi.fn(async () => ({ followUp, firedImmediately: false })),
     cancel: vi.fn(async () => ({ followUp: { ...followUp, status: "cancelled" }, occurrences: [] })),
     check: vi.fn(async () => ({ fired: false, followUp, observed: { note: "no program-evaluable condition" } })),
     fire: vi.fn(async () => ({ followUp: { ...followUp, status: "delivered" }, occurrences: [] })),
@@ -59,6 +60,34 @@ const fixture = (options: { bound?: boolean; authenticated?: boolean } = {}) => 
 };
 
 describe("harness follow-up routes", () => {
+  it("creates a follow-up for the selected session and ignores caller-supplied scope", async () => {
+    const { app, followUps } = fixture();
+    const source = { kind: "time", at: 2_000_000_000_000, timezone: "Asia/Shanghai" };
+    await request(app).post("/api/harness/sessions/session-1/follow-ups").send({
+      instruction: "  continue the experiment  ", source,
+      workspaceId: "wrong-workspace", sessionId: "wrong-session", threadId: "wrong-thread",
+    }).expect(201);
+    expect(followUps.register).toHaveBeenCalledWith(
+      expect.objectContaining({ workspaceId: "workspace-1", sessionId: "session-1", threadId: "thread-1" }),
+      { instruction: "continue the experiment", source, pause: false },
+    );
+  });
+
+  it("validates creation input and retains shared source validation errors", async () => {
+    const { app, followUps } = fixture();
+    await request(app).post("/api/harness/sessions/session-1/follow-ups").send({ instruction: 42 }).expect(400);
+    expect(followUps.register).not.toHaveBeenCalled();
+    followUps.register.mockRejectedValueOnce(new HarnessServiceError("invalid-params", "invalid source"));
+    await request(app).post("/api/harness/sessions/session-1/follow-ups").send({ instruction: "continue", source: {} }).expect(400);
+  });
+
+  it("updates a trigger through the same revision-checked service", async () => {
+    const { app, followUps } = fixture();
+    const source = { kind: "file", path: "results.json", condition: "exists" };
+    await request(app).post("/api/harness/sessions/session-1/follow-ups/fu-1/update")
+      .send({ source, expectedRevision: "3" }).expect(200);
+    expect(followUps.update).toHaveBeenCalledWith(expect.anything(), { id: "fu-1", source, expectedRevision: "3" });
+  });
   it("provides an authenticated Host overview without changing session-scoped actions", async () => {
     const { app, followUps } = fixture();
     const response = await request(app).get("/api/harness/follow-ups?includeInactive=true").expect(200);

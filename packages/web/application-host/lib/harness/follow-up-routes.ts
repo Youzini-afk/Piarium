@@ -5,6 +5,7 @@ import { ThreadRuntimeError } from "./thread-runtime.js";
 import { HarnessServiceError } from "./service-error.js";
 import type { ThreadRegistry } from "./thread-registry.js";
 import { resolveResearchCaller } from "./research-access.js";
+import type { FollowUpSource } from "@piarium/protocol";
 
 /**
  * UI-facing follow-up routes (W3, D-307): the session surface reads and steers
@@ -90,6 +91,26 @@ export function registerHarnessFollowUpRoutes(
     }
   });
 
+  app.post("/api/harness/sessions/:sessionId/follow-ups", requireAuth, async (request: Request, response: Response) => {
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      if (typeof request.body?.instruction !== "string" || !request.body.instruction.trim()) {
+        throw new HarnessServiceError("invalid-params", "instruction must be a non-empty string");
+      }
+      if (request.body.pause !== undefined && typeof request.body.pause !== "boolean") {
+        throw new HarnessServiceError("invalid-params", "pause must be a boolean");
+      }
+      response.status(201).json(await followUps.register(await callerFor(sessionIdOf(request)), {
+        instruction: request.body.instruction.trim(),
+        // The shared service validates the untrusted source and its resource scope.
+        source: request.body.source as FollowUpSource,
+        pause: request.body.pause === true,
+      }));
+    } catch (error) {
+      sendError(response, error, "Unable to create follow-up");
+    }
+  });
+
   app.get("/api/harness/sessions/:sessionId/follow-ups/:followUpId", requireAuth, async (request: Request, response: Response) => {
     response.setHeader("Cache-Control", "no-store");
     try {
@@ -145,6 +166,7 @@ export function registerHarnessFollowUpRoutes(
       response.json(await followUps.update(await callerFor(sessionIdOf(request)), {
         id: followUpIdOf(request),
         ...(typeof instruction === "string" ? { instruction: instruction.trim() } : {}),
+        ...(request.body?.source === undefined ? {} : { source: request.body.source as FollowUpSource }),
         ...(typeof request.body?.expectedRevision === "string" ? { expectedRevision: request.body.expectedRevision } : {}),
       }));
     } catch (error) {
