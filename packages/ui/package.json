@@ -67,7 +67,7 @@
     "html-to-image": "^1.11.13",
     "jsonc-parser": "^3.3.1",
     "katex": "^0.18.7",
-    "marked": "^17.0.3",
+    "marked": "^18.0.13",
     "monaco-editor": "0.56.0",
     "morphdom": "^2.7.7",
     "motion": "^12.23.24",
